@@ -7,7 +7,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const electronBin = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
-const cdpPort = String(process.env.NOVA_CDP_PORT || process.env.ARK_CDP_PORT || '').trim();
+const cdpPort = String(process.env.NOVA_CDP_PORT || '').trim();
 const args = ['.'];
 if (cdpPort) {
   args.push(`--remote-debugging-port=${cdpPort}`);
@@ -15,7 +15,7 @@ if (cdpPort) {
 }
 const child = spawn(electronBin, args, {
   cwd: root,
-  env: { ...process.env, NOVA_DEV: '1', ARK_DEV: '1' },
+  env: { ...process.env, NOVA_DEV: '1' },
   stdio: 'inherit',
   windowsHide: false,
 });

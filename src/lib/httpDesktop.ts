@@ -48,12 +48,12 @@ export async function desktopRequest(
   const body = options?.body;
   const authProviderId = options?.authProviderId;
 
-  if (window.arkDesktop?.httpRequest) {
-    return window.arkDesktop.httpRequest(url, { method, headers, body, authProviderId });
+  if (window.novaDesktop?.httpRequest) {
+    return window.novaDesktop.httpRequest(url, { method, headers, body, authProviderId });
   }
 
-  if (method === 'GET' && window.arkDesktop?.httpGet) {
-    return window.arkDesktop.httpGet(url, headers);
+  if (method === 'GET' && window.novaDesktop?.httpGet) {
+    return window.novaDesktop.httpGet(url, headers);
   }
 
   const res = await fetch(url, { method, headers, body });
@@ -76,7 +76,7 @@ export async function desktopStreamRequest(
   options: DesktopHttpOptions,
   onChunk: (text: string) => void,
 ): Promise<{ ok: boolean; status?: number; text: string; error?: string }> {
-  if (!window.arkDesktop?.httpStream) {
+  if (!window.novaDesktop?.httpStream) {
     const res = await desktopRequest(url, options);
     if (!res.ok) {
       return { ok: false, status: res.status, text: '', error: apiErrorMessage(res, 'Stream error') };
@@ -92,7 +92,7 @@ export async function desktopStreamRequest(
   const streamId = `http-${crypto.randomUUID().slice(0, 10)}`;
   let full = '';
   let err: string | undefined;
-  const stop = window.arkDesktop.onHttpStreamChunk?.((payload) => {
+  const stop = window.novaDesktop.onHttpStreamChunk?.((payload) => {
     if (payload?.streamId && payload.streamId !== streamId) return;
     if (payload?.type === 'delta' && payload.text) {
       full += payload.text;
@@ -107,7 +107,7 @@ export async function desktopStreamRequest(
   });
 
   try {
-    const result = await window.arkDesktop.httpStream(url, {
+    const result = await window.novaDesktop.httpStream(url, {
       method: options.method,
       headers: options.headers,
       body: options.body,

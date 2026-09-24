@@ -140,7 +140,7 @@ export function ComposerPlusMenu({
     ? createPortal(
       <div
         ref={menuRef}
-        className="rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/50 px-1.5 py-1.5"
+        className="rounded-xl border border-surface-border bg-nova-navy-900 shadow-2xl shadow-black/50 px-1.5 py-1.5"
         style={{
           position: 'fixed',
           left: pos.left,

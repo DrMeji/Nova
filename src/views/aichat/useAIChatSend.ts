@@ -21,8 +21,8 @@ import { buildRouterHistory } from '@/lib/chatHistory';
 import { setLocalPrefs } from '@/lib/localPrefs';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { setActiveBrainId } from '@/lib/brainRoles';
-import { setEngineModel } from '@/lib/arkEngine';
-import { saveThreadBrain, saveAutoThreadBrain } from '@/lib/threadBrain';
+import { setEngineModel } from '@/lib/novaEngine';
+import { saveAutoThreadBrain } from '@/lib/threadBrain';
 import {
   resolveConversationalEditAsk,
   rememberLastEditTopic,
@@ -200,6 +200,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       replyStartedAt: prep.replyStartedAt,
       pinnedModel,
       composerMode,
+      regenerating: Boolean(prep.regenerating),
       diskIntent,
       diskRoot: prep.diskRoot,
       diskProjectId: prep.diskProjectId,
@@ -232,20 +233,34 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       setDeleteFolderClarifyPrompt: prep.setDeleteFolderClarifyPrompt,
       onCoderPinned: (coder) => {
         try {
-          // Coder is for builds only — never steal the chat pill / sticky chat brain.
-          // Mid-chat Instruct↔Coder hops are what freeze streams and flash · switched.
           setActiveBrainId('coder', coder.id);
           setLocalPrefs({
             activeCoderId: coder.id,
             defaultCodeModelId: coder.id,
           });
           void setEngineModel(coder.id).catch(() => undefined);
-          saveThreadBrain(activeChatId, {
-            kind: 'coding',
-            modelId: coder.id,
-            modelName: coder.name,
-            pinnedSource: 'local',
-          });
+          // Keep chat locked on Nova Multimodal — only refresh status / last label.
+          try {
+            setLocalPrefs({ lastAnsweredLabel: `Local · ${coder.name}` });
+          } catch { /* ignore */ }
+          // Do not setActiveModel to the coder — that made Multimodal look like it “reverted”.
+        } catch { /* ignore */ }
+      },
+      onCreatePhaseModel: (phase) => {
+        try {
+          // Status-only: chat selection stays Multimodal; create uses role brains under Auto.
+          try {
+            setLocalPrefs({ lastAnsweredLabel: `Local · ${phase.name}` });
+          } catch { /* ignore */ }
+          if (phase.role === 'craft' || phase.role === 'verify') {
+            setActiveBrainId('coder', phase.id);
+            setLocalPrefs({
+              activeCoderId: phase.id,
+              defaultCodeModelId: phase.id,
+              lastAnsweredLabel: `Local · ${phase.name}`,
+            });
+            void setEngineModel(phase.id).catch(() => undefined);
+          }
         } catch { /* ignore */ }
       },
       pendingFileDeleteRef: prep.pendingFileDeleteRef,
@@ -271,8 +286,15 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       relPathFromDisk: prep.relPathFromDisk || (() => null),
     };
 
+    const recentUserLines = messagesRef.current
+      .filter((m) => m.role === 'user')
+      .map((m) => String(m.content || '').trim())
+      .filter(Boolean)
+      .slice(-12);
+
     const owned = await dispatchOwnedTurn({
-      content: editContent,
+      // Classify on the original ask — edit shorthand only goes to the edit host.
+      content: prep.content,
       mode,
       classifyOpts: {
         diskRoot: chatStudioDiskRootRef.current || resolvedStudio.diskRoot,
@@ -280,6 +302,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
         chatId: activeChatId,
         pendingBrief: getLastPendingGreenfield(activeChatId)?.summary || null,
+        recentUserLines,
       },
       skipCreate: diskIntent?.type === 'add_file',
       planName: createIntentEarly?.name || extractProjectName(prep.content) || 'your idea',

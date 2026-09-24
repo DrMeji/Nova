@@ -13,7 +13,7 @@ type DesktopCloudEnv = {
 function readDesktopCloudEnv(): DesktopCloudEnv | null {
   if (typeof window === 'undefined') return null;
   try {
-    const fn = (window as { arkDesktop?: { getCloudAuthEnv?: () => DesktopCloudEnv } }).arkDesktop
+    const fn = (window as { novaDesktop?: { getCloudAuthEnv?: () => DesktopCloudEnv } }).novaDesktop
       ?.getCloudAuthEnv;
     if (typeof fn !== 'function') return null;
     const v = fn();
@@ -42,7 +42,7 @@ const missingSupabase = !supabaseUrl || !supabaseAnonKey || /placeholder\.invali
  * were not baked in — show supabaseCloudWarning instead of a black screen.
  */
 export const supabaseConfigError =
-  missingSupabase && typeof window !== 'undefined' && !(window as { arkDesktop?: unknown }).arkDesktop
+  missingSupabase && typeof window !== 'undefined' && !(window as { novaDesktop?: unknown }).novaDesktop
     ? 'NOVA was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
     : null;
 
@@ -126,10 +126,10 @@ function browserLocalStorage(): Storage | null {
   }
 }
 
-function arkDesktopAuth() {
+function novaDesktopAuth() {
   if (!hasBrowserWindow) return undefined;
   try {
-    return globalThis.window.arkDesktop;
+    return globalThis.window.novaDesktop;
   } catch {
     return undefined;
   }
@@ -192,16 +192,16 @@ export async function persistHealedAuthSession(session: SessionExpiryFields): Pr
   if (!healed?.access_token || !healed.refresh_token) return healed;
   const blob = JSON.stringify(healed);
   try {
-    await arkAuthStorage.setItem('ark-auth-token', blob);
+    await novaAuthStorage.setItem('ark-auth-token', blob);
   } catch {
     /* ignore — React restore still keeps the user in-app */
   }
   return healed;
 }
 
-const arkAuthStorage: SupportedStorage = {
+const novaAuthStorage: SupportedStorage = {
   getItem: (key) => {
-    const desktop = arkDesktopAuth();
+    const desktop = novaDesktopAuth();
     const readFallback = () => {
       try {
         return browserLocalStorage()?.getItem(LOCAL_FALLBACK_PREFIX + key) ?? null;
@@ -246,7 +246,7 @@ const arkAuthStorage: SupportedStorage = {
     } catch {
       /* ignore */
     }
-    const desktop = arkDesktopAuth();
+    const desktop = novaDesktopAuth();
     if (desktop?.authStorageSet) {
       return desktop
         .authStorageSet(key, normalized)
@@ -259,7 +259,7 @@ const arkAuthStorage: SupportedStorage = {
     // Soft-delete on the Electron store only. Keep the local mirror so a
     // spurious _removeSession (token refresh / getUser race) can be recovered
     // by AuthContext. Intentional Sign out calls clearAuthLocalFallback().
-    const desktop = arkDesktopAuth();
+    const desktop = novaDesktopAuth();
     if (desktop?.authStorageRemove) {
       return desktop
         .authStorageRemove(key)
@@ -284,7 +284,7 @@ export const supabase = createClient(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
-      storage: arkAuthStorage,
+      storage: novaAuthStorage,
       storageKey: 'ark-auth-token',
     },
     global: {

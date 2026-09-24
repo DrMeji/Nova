@@ -1,5 +1,5 @@
 -- Immediate self-serve account deletion (no waiting period).
--- Run once in Supabase SQL Editor for project mjheezjqwqbhkcmwredq.
+-- Run AFTER the beta wipe / nova_id migration.
 
 CREATE OR REPLACE FUNCTION public.delete_own_account()
 RETURNS void
@@ -15,20 +15,38 @@ BEGIN
     RAISE EXCEPTION 'not authenticated';
   END IF;
 
-  SELECT ark_id INTO my_id FROM public.profiles WHERE id = uid LIMIT 1;
+  SELECT nova_id INTO my_id FROM public.profiles WHERE id = uid LIMIT 1;
 
   IF my_id IS NOT NULL THEN
-    DELETE FROM public.ark_friend_requests
-    WHERE from_ark_id = my_id OR to_ark_id = my_id;
-    DELETE FROM public.ark_direct_messages
-    WHERE sender_ark_id = my_id OR recipient_ark_id = my_id;
-    DELETE FROM public.ark_call_signals
-    WHERE from_ark_id = my_id OR to_ark_id = my_id;
-    DELETE FROM public.ark_contacts
-    WHERE peer_ark_id = my_id;
+    BEGIN
+      DELETE FROM public.nova_friend_requests
+      WHERE from_nova_id = my_id OR to_nova_id = my_id;
+    EXCEPTION WHEN undefined_table THEN NULL;
+    END;
+
+    BEGIN
+      DELETE FROM public.nova_direct_messages
+      WHERE sender_nova_id = my_id OR recipient_nova_id = my_id;
+    EXCEPTION WHEN undefined_table THEN NULL;
+    END;
+
+    BEGIN
+      DELETE FROM public.nova_contacts WHERE peer_nova_id = my_id;
+    EXCEPTION WHEN undefined_table THEN NULL;
+    END;
+
+    BEGIN
+      DELETE FROM public.nova_blocks WHERE blocked_nova_id = my_id OR owner_id = uid;
+    EXCEPTION WHEN undefined_table THEN NULL;
+    END;
+
+    BEGIN
+      DELETE FROM public.nova_call_signals
+      WHERE from_nova_id = my_id OR to_nova_id = my_id;
+    EXCEPTION WHEN undefined_table THEN NULL;
+    END;
   END IF;
 
-  -- Remaining owner-scoped rows cascade from auth.users / profiles.
   DELETE FROM auth.users WHERE id = uid;
 END;
 $$;

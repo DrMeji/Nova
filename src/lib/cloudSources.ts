@@ -77,6 +77,8 @@ export function providerNeedsKey(providerId: string) {
 
 /** True when Chat Auto may call this provider. */
 export function isCloudProviderEnabled(providerId: string): boolean {
+  // Pollinations removed from the default image path — quality too inconsistent for premium UI.
+  if (providerId === 'pollinations') return false;
   const state = readState();
   if (state.disconnected.includes(providerId)) return false;
   if (providerId === 'ollama') return isOllamaEnabled();

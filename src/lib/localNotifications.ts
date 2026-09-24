@@ -1,6 +1,6 @@
 /** Local app notifications (reports, etc.) shown on the Notifications screen. */
 
-import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
+import { formatNovaId, isNovaUserId, normalizeNovaId } from '@/lib/novaUserId';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 
 export type LocalNotification = {
@@ -11,36 +11,36 @@ export type LocalNotification = {
   createdAt: string;
   unread?: boolean;
   /** When set, only this NOVA ID should see the notification. */
-  forArkId?: string;
+  forNovaId?: string;
   /** Friend request id for Accept / Decline actions. */
   friendRequestId?: string;
-  fromArkId?: string;
+  fromNovaId?: string;
   fromName?: string;
   fromAvatarUrl?: string;
 };
 
 const KEY = 'NOVA:local-notifications';
 
-function sameArkId(a?: string, b?: string) {
+function sameNovaId(a?: string, b?: string) {
   if (!a || !b) return false;
-  return formatArkId(normalizeArkId(a)) === formatArkId(normalizeArkId(b));
+  return formatNovaId(normalizeNovaId(a)) === formatNovaId(normalizeNovaId(b));
 }
 
-export function loadLocalNotifications(forArkId?: string): LocalNotification[] {
+export function loadLocalNotifications(forNovaId?: string): LocalNotification[] {
   try {
     const raw = localStorage.getItem(KEY);
     const list = raw ? JSON.parse(raw) as LocalNotification[] : [];
     if (!Array.isArray(list)) return [];
-    const me = forArkId && isArkUserId(forArkId) ? formatArkId(normalizeArkId(forArkId)) : '';
+    const me = forNovaId && isNovaUserId(forNovaId) ? formatNovaId(normalizeNovaId(forNovaId)) : '';
     if (!me) return list;
-    return list.filter(n => !n.forArkId || sameArkId(n.forArkId, me));
+    return list.filter(n => !n.forNovaId || sameNovaId(n.forNovaId, me));
   } catch {
     return [];
   }
 }
 
-export function countUnreadLocalNotifications(forArkId?: string): number {
-  return loadLocalNotifications(forArkId).filter(n => n.unread).length;
+export function countUnreadLocalNotifications(forNovaId?: string): number {
+  return loadLocalNotifications(forNovaId).filter(n => n.unread).length;
 }
 
 export function pushLocalNotification(n: Omit<LocalNotification, 'id' | 'createdAt'> & { id?: string }) {
@@ -54,9 +54,9 @@ export function pushLocalNotification(n: Omit<LocalNotification, 'id' | 'created
     body: n.body,
     createdAt: new Date().toISOString(),
     unread: n.unread !== false,
-    forArkId: n.forArkId,
+    forNovaId: n.forNovaId,
     friendRequestId: n.friendRequestId,
-    fromArkId: n.fromArkId,
+    fromNovaId: n.fromNovaId,
     fromName: n.fromName,
     fromAvatarUrl: n.fromAvatarUrl,
   };
@@ -77,16 +77,16 @@ export function pushLocalNotification(n: Omit<LocalNotification, 'id' | 'created
   return item;
 }
 
-export function markLocalNotificationsRead(forArkId?: string) {
+export function markLocalNotificationsRead(forNovaId?: string) {
   try {
     const raw = localStorage.getItem(KEY);
     const list = raw ? JSON.parse(raw) as LocalNotification[] : [];
     if (!Array.isArray(list)) return;
     let changed = false;
-    const me = forArkId && isArkUserId(forArkId) ? formatArkId(normalizeArkId(forArkId)) : '';
+    const me = forNovaId && isNovaUserId(forNovaId) ? formatNovaId(normalizeNovaId(forNovaId)) : '';
     const next = list.map(n => {
       if (!n.unread) return n;
-      if (me && n.forArkId && !sameArkId(n.forArkId, me)) return n;
+      if (me && n.forNovaId && !sameNovaId(n.forNovaId, me)) return n;
       changed = true;
       return { ...n, unread: false };
     });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { tipAt, tipStartIndex } from '@/lib/arkTips';
+import { tipAt, tipStartIndex } from '@/lib/novaTips';
 
 /** Rotating tip line for wait surfaces — no layout chrome of its own. */
 export function RotatingTip({

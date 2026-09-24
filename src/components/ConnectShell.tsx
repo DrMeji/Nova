@@ -21,16 +21,16 @@ export function ConnectShell({
     || (railCompact ? 'w-[4.25rem]' : 'w-64');
 
   return (
-    <div className={`h-full box-border ${PAD} animate-fade-in bg-ark-navy-950`}>
-      <div className="h-full min-h-0 flex rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
+    <div className={`h-full box-border ${PAD} animate-fade-in bg-nova-navy-950`}>
+      <div className="h-full min-h-0 flex rounded-2xl border border-surface-border bg-nova-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
         {railVisible && (
           <aside
-            className={`shrink-0 flex flex-col min-h-0 border-r border-white/5 bg-ark-navy-950/25 transition-[width] duration-200 ${width}`}
+            className={`shrink-0 flex flex-col min-h-0 border-r border-white/5 bg-nova-navy-950/25 transition-[width] duration-200 ${width}`}
           >
             {rail}
           </aside>
         )}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-ark-navy-950/20">
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-nova-navy-950/20">
           {children}
         </div>
       </div>

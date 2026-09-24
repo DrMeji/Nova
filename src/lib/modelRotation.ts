@@ -5,7 +5,7 @@
  */
 
 import { getAccurateHardware, parseRamGb } from '@/lib/api';
-import { getEngineStatus } from '@/lib/arkEngine';
+import { getEngineStatus } from '@/lib/novaEngine';
 import {
   compressHistoryIfNeeded,
   flattenHistoryText,
@@ -76,7 +76,7 @@ function ensureSpeedSample() {
 
 async function warmIfPossible(id: string) {
   try {
-    await window.arkDesktop?.engineSetModel?.(id);
+    await window.novaDesktop?.engineSetModel?.(id);
   } catch {
     /* not ready yet */
   }

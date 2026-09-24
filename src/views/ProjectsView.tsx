@@ -1,9 +1,10 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { fetchProjects, createProject } from '@/lib/api';
+import { fetchProjects, createProject, deleteProject } from '@/lib/api';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { listArkProjectFolders } from '@/lib/arkProjectsHome';
+import { listNovaProjectFolders } from '@/lib/novaProjectsHome';
+import { isProjectDeleted, markProjectDeleted } from '@/lib/recentStore';
 import { requestOpenChatCode } from '@/lib/openChatCode';
 import type { Project } from '@/types';
 import { Search, Folder, Loader2, Plus, FolderOpen, Pencil, Trash2, MoreHorizontal } from 'lucide-react';
@@ -45,7 +46,7 @@ export function ProjectsView() {
   };
 
   const [remote, setRemote] = useState<ProjectRow[]>([]);
-  const [arkFolders, setArkFolders] = useState<Array<{
+  const [novaFolders, setNovaFolders] = useState<Array<{
     id: string;
     name: string;
     path: string;
@@ -71,12 +72,14 @@ export function ProjectsView() {
     setLoading(true);
     Promise.all([
       fetchProjects().then(data => setRemote(data as ProjectRow[])).catch(() => {}),
-      listArkProjectFolders().then(setArkFolders).catch(() => setArkFolders([])),
+      listNovaProjectFolders().then(setNovaFolders).catch(() => setNovaFolders([])),
     ]).finally(() => setLoading(false));
   }, []);
 
   const items = useMemo<ListItem[]>(() => {
-    const fromRemote: ListItem[] = remote.map(p => ({
+    const fromRemote: ListItem[] = remote
+      .filter(p => !isProjectDeleted(p.id, null, p.name))
+      .map(p => ({
       id: p.id,
       name: p.name,
       modified: new Date(p.updated_at),
@@ -86,7 +89,7 @@ export function ProjectsView() {
 
     const remoteIds = new Set(fromRemote.map(p => p.id));
     const fromRecent: ListItem[] = recent
-      .filter(p => !remoteIds.has(p.id))
+      .filter(p => !remoteIds.has(p.id) && !isProjectDeleted(p.id, (p as { diskPath?: string }).diskPath, p.name))
       .map(p => ({
         id: p.id,
         name: p.name,
@@ -97,8 +100,8 @@ export function ProjectsView() {
       }));
 
     const recentNames = new Set(fromRecent.map(p => p.name.toLowerCase()));
-    const fromArk: ListItem[] = arkFolders
-      .filter(f => !recentNames.has(f.name.toLowerCase()))
+    const fromArk: ListItem[] = novaFolders
+      .filter(f => !recentNames.has(f.name.toLowerCase()) && !isProjectDeleted(f.id, f.path, f.name))
       .map(f => ({
         id: f.id,
         name: f.name,
@@ -109,7 +112,7 @@ export function ProjectsView() {
       }));
 
     return [...fromRemote, ...fromRecent, ...fromArk].sort((a, b) => b.modified.getTime() - a.modified.getTime());
-  }, [remote, recent, arkFolders]);
+  }, [remote, recent, novaFolders]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -160,16 +163,20 @@ export function ProjectsView() {
   };
 
   const deleteListItem = async (item: ListItem) => {
-    if (item.diskPath && window.arkDesktop?.workspaceDeleteFolder) {
-      await window.arkDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
-    } else if (item.id.startsWith('ark-folder:')) {
-      const disk = item.id.slice('ark-folder:'.length);
-      await window.arkDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
+    markProjectDeleted(item.id, item.diskPath, item.name);
+    if (item.diskPath && window.novaDesktop?.workspaceDeleteFolder) {
+      await window.novaDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
+    } else if (item.id.startsWith('nova-folder:') || item.id.startsWith('ark-folder:')) {
+      const disk = item.id.replace(/^(?:nova|ark)-folder:/, '');
+      await window.novaDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
+      markProjectDeleted(item.id, disk, item.name);
     }
-    if (!item.id.startsWith('ark-folder:')) {
-      removeRecent(item.id);
+    if (item.source === 'remote') {
+      try { await deleteProject(item.id); } catch { /* offline / already gone */ }
+      setRemote(prev => prev.filter(p => p.id !== item.id));
     }
-    setArkFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
+    removeRecent(item.id);
+    setNovaFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
   };
 
   const handleCreate = async () => {
@@ -197,13 +204,13 @@ export function ProjectsView() {
   const openFolder = async () => {
     setOpeningFolder(true);
     try {
-      if (!window.arkDesktop?.projectImportFolder) {
+      if (!window.novaDesktop?.projectImportFolder) {
         const local = addRecent('New project');
         openProjectInChat({ projectId: local.id, name: local.name });
         return;
       }
       const project = addRecent('Opened folder');
-      const res = await window.arkDesktop.projectImportFolder({
+      const res = await window.novaDesktop.projectImportFolder({
         projectId: project.id,
         projectName: project.name,
       });
@@ -233,11 +240,11 @@ export function ProjectsView() {
   };
 
   const openListItem = async (item: ListItem) => {
-    if (item.diskPath && window.arkDesktop?.workspaceOpenRoot) {
+    if (item.diskPath && window.novaDesktop?.workspaceOpenRoot) {
       setOpeningFolder(true);
       try {
         const project = addRecent(item.name);
-        const res = await window.arkDesktop.workspaceOpenRoot({
+        const res = await window.novaDesktop.workspaceOpenRoot({
           projectId: project.id,
           projectName: item.name,
           sourceDir: item.diskPath,
@@ -496,7 +503,7 @@ export function ProjectsView() {
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
                       {menuId === item.id && (
-                        <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl py-1">
+                        <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-surface-border bg-nova-navy-900 shadow-xl py-1">
                           <button
                             type="button"
                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-content-secondary hover:bg-surface-hover"
@@ -557,11 +564,11 @@ export function ProjectsView() {
 
       {showCreate && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-nova-navy-950/70 backdrop-blur-md animate-fade-in"
           onClick={() => setShowCreate(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-surface-border bg-ark-navy-900 p-6 shadow-2xl animate-slide-up"
+            className="w-full max-w-md rounded-2xl border border-surface-border bg-nova-navy-900 p-6 shadow-2xl animate-slide-up"
             onClick={e => e.stopPropagation()}
           >
             <h2 className="text-lg font-semibold text-content-primary mb-1">New project</h2>
@@ -576,7 +583,7 @@ export function ProjectsView() {
                 if (e.key === 'Enter') void handleCreate();
               }}
               placeholder="Project name"
-              className="ark-input"
+              className="nova-input"
               autoFocus
             />
             <div className="grid grid-cols-3 gap-2 mt-3">
@@ -600,14 +607,14 @@ export function ProjectsView() {
               ))}
             </div>
             <div className="flex gap-2 mt-5">
-              <button type="button" onClick={() => setShowCreate(false)} className="ark-btn-secondary flex-1">
+              <button type="button" onClick={() => setShowCreate(false)} className="nova-btn-secondary flex-1">
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={() => void handleCreate()}
                 disabled={creating}
-                className="ark-btn-primary flex-1"
+                className="nova-btn-primary flex-1"
               >
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 Create

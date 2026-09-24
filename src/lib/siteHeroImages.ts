@@ -4,7 +4,7 @@
  * Pollinations helpers remain for the Image tab only — never injected into creates.
  */
 
-import { getEngineStatus } from '@/lib/arkEngine';
+import { getEngineStatus } from '@/lib/novaEngine';
 import { hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { createIdentityFromBrief } from '@/lib/createIdentity';
@@ -64,33 +64,25 @@ export function heroSeedForProject(projectName: string, salt = ''): number {
   return (h >>> 0) % 1_000_000_000 || 1;
 }
 
-/** Image-tab / explicit gen only — do not call from site create prompts. */
+/** Legacy helper — Pollinations disabled. Prefer cloudGenerateImage / Brand Assets. */
 export function pollinationsImageUrl(prompt: string, opts?: PollinationsImageOpts): string {
-  const w = Math.max(1280, opts?.width ?? 1920);
-  const h = Math.max(720, opts?.height ?? 1080);
-  const model = opts?.model || 'flux';
-  const q = encodeURIComponent(enrichImagePrompt(prompt));
-  const seed = opts?.seed != null ? String(opts.seed) : String(Date.now() % 1_000_000_000);
-  return `https://image.pollinations.ai/prompt/${q}?width=${w}&height=${h}&model=${model}&nologo=true&enhance=true&seed=${encodeURIComponent(seed)}`;
+  void prompt;
+  void opts;
+  return '';
 }
 
 /**
- * Unique hero URL helper (Image tab / legacy). Site creates must not inject these.
+ * Unique hero URL helper (legacy). Site creates must not inject these.
  */
 export function uniqueHeroImageUrl(
   scenePrompt: string,
   projectName: string,
   opts?: Omit<PollinationsImageOpts, 'seed'> & { salt?: string },
 ): string {
-  const brand = String(projectName || 'brand').trim() || 'brand';
-  const scene = enrichImagePrompt(scenePrompt);
-  const prompt = `${brand} branded scene: ${scene}, unique original photograph, not a stock template`;
-  return pollinationsImageUrl(prompt, {
-    width: opts?.width,
-    height: opts?.height,
-    model: opts?.model,
-    seed: heroSeedForProject(brand, opts?.salt || scene.slice(0, 48)),
-  });
+  void scenePrompt;
+  void projectName;
+  void opts;
+  return '';
 }
 
 /** @deprecated Kept only so old imports compile — prefer Brand Assets local paths. */
@@ -137,7 +129,7 @@ export function briefWantsSiteHeroImagery(brief: string, projectName = ''): bool
 
 export async function listReadyLocalImageModels(): Promise<Array<{ id: string; name: string }>> {
   try {
-    if (!window.arkDesktop?.engineStatus) return [];
+    if (!window.novaDesktop?.engineStatus) return [];
     const status = await getEngineStatus();
     if (status.phase !== 'online' && status.phase !== 'degraded') return [];
     const want = new Set<string>(RECOMMENDED_SITE_IMAGE_MODELS.map((m) => m.id));

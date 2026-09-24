@@ -48,25 +48,25 @@ const { classifyTurn } = await import(
 }
 {
   const r = classifyTurn('Put hours in the footer.', {
-    diskRoot: 'C:\\ARK\\Projects\\Ovenfold',
+    diskRoot: 'C:\\NOVA\\Projects\\Ovenfold',
     files: { 'src/App.jsx': 'x' },
   });
   check('stretch#5 follow-up bound → edit', r.kind === 'edit', `${r.kind}/${r.reason}`);
 }
 
 // --- preview :0 must not attach as ready ---
-const exec = require(path.join(root, 'electron/arkAgentExec.cjs'));
+const exec = require(path.join(root, 'electron/novaAgentExec.cjs'));
 check('getOrAttachPreview exported', typeof exec.getOrAttachPreview === 'function');
 check('attachLivePreviewSession exported', typeof exec.attachLivePreviewSession === 'function');
 
 // portFromUrl is private — probe via attach with a fake session is heavy.
 // Contract check: reading the source for the sealed reject.
 import fs from 'fs';
-const agentSrc = fs.readFileSync(path.join(root, 'electron/arkAgentExec.cjs'), 'utf8');
+const agentSrc = fs.readFileSync(path.join(root, 'electron/novaAgentExec.cjs'), 'utf8');
 check('portFromUrl rejects :0', /raw === '0'/.test(agentSrc) && /return null/.test(agentSrc));
 check('attach drops null port', /if \(!port\)/.test(agentSrc));
 
-const ggufSrc = fs.readFileSync(path.join(root, 'electron/arkGguf.cjs'), 'utf8');
+const ggufSrc = fs.readFileSync(path.join(root, 'electron/novaGguf.cjs'), 'utf8');
 check('cancelGguf chat-scoped miss no nuke', /scopedChatMiss/.test(ggufSrc));
 
 const stopSrc = fs.readFileSync(path.join(root, 'src/views/aichat/useAIChatController.ts'), 'utf8');

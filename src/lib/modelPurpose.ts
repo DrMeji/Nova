@@ -25,7 +25,13 @@ export function modelPurposeText(opts: {
   if (cat === 'chat') {
     return 'General conversation and assistant tasks.';
   }
+  if (cat === 'design') {
+    return 'UI layout and Design-brain work for Layout Contracts and premium page composition.';
+  }
   const name = String(opts.name || '').toLowerCase();
+  if (/uigen|ui[-_]?gen|layout/.test(name)) {
+    return 'UI-specialist Design brain for layout rhythm and composition.';
+  }
   if (/coder|code|starcoder|deepseek/.test(name)) {
     return 'Focused on code generation and project edits.';
   }

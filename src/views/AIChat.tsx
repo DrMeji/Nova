@@ -140,6 +140,7 @@ export function AIChat() {
       toggleComposerDictation={p.toggleComposerDictation}
       tokenRatio={p.tokenRatio}
       tryStartTurn={p.tryStartTurn}
+      regenerateReply={p.regenerateReply}
       unpickAutoSticky={p.unpickAutoSticky}
       user={p.user}
       videoDurationSec={p.videoDurationSec}

@@ -9,7 +9,7 @@ export type Route =
   | { name: 'code'; session?: string }
   | { name: 'creation'; id: string }
   | { name: 'chat'; mode?: ChatMode; creationId?: string; chatId?: string }
-  | { name: 'models'; tab?: 'for-pc' | 'local' | 'cloud' }
+  | { name: 'models'; tab?: 'for-pc' | 'local' | 'cloud' | 'build-team' }
   | { name: 'build' }
   | { name: 'local-ai' }
   | { name: 'mcp' }

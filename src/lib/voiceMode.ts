@@ -10,11 +10,11 @@
  */
 
 import type { ChatMode } from '@/context/RouterContext';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import { getLocalPrefs } from '@/lib/localPrefs';
 
 export function isVoiceTabEnabled(): boolean {
-  if (isArkDevSession()) return true;
+  if (isNovaDevSession()) return true;
   return getLocalPrefs().voiceChatEnabled === true;
 }
 

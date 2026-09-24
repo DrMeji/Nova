@@ -8,19 +8,19 @@ import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
 import {
   areMutualFriends,
-  isBlockedArkId,
+  isBlockedNovaId,
   listThread,
   loadHiddenDemoContacts,
   MSG_NEED_FRIEND,
   sendDirectMessage,
   subscribeMessages,
   threadPreview,
-  type ArkContact,
+  type NovaContact,
   type DirectMessage,
   type MessageAttachment,
-} from '@/lib/arkSocial';
-import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
-import { isArkDevEmail, isDevArkAlias } from '@/lib/arkDevAccount';
+} from '@/lib/novaSocial';
+import { formatNovaId, isNovaUserId, normalizeNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail, isDevNovaAlias } from '@/lib/novaDevAccount';
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
@@ -29,11 +29,11 @@ import {
   buildDemoContacts,
   buildDemoGroups,
   buildDemoThread,
-  DEMO_UNREAD_ARK_IDS,
+  DEMO_UNREAD_NOVA_IDS,
   type DemoGroup,
 } from '@/lib/socialDemo';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { ArkAvatar } from '@/components/ArkAvatar';
+import { NovaAvatar } from '@/components/NovaAvatar';
 import {
   demoPresenceFor,
   formatActivityAge,
@@ -123,8 +123,8 @@ function FileBubble({
 export function MessageView() {
   const { user, profile } = useAuth();
   const { route, navigate } = useRouter();
-  const { contacts, inviteByArkId, refreshContacts, removeFriend, deleteContact, blockFriend, unreadFrom } = useSocial();
-  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
+  const { contacts, inviteByNovaId, refreshContacts, removeFriend, deleteContact, blockFriend, unreadFrom } = useSocial();
+  const myNovaId = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || '');
   const peer = route.name === 'message' ? route.peer : undefined;
   const groupId = route.name === 'message' ? route.groupId : undefined;
   const [addId, setAddId] = useState('');
@@ -139,7 +139,7 @@ export function MessageView() {
   const [attachMenu, setAttachMenu] = useState(false);
   const [railCompact, setRailCompact] = useState(false);
   const [hiddenTick, setHiddenTick] = useState(0);
-  const [groups, setGroups] = useState<DemoGroup[]>(() => buildDemoGroups(myArkId || '3218815'));
+  const [groups, setGroups] = useState<DemoGroup[]>(() => buildDemoGroups(myNovaId || '3218815'));
   const [createOpen, setCreateOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [pickedMembers, setPickedMembers] = useState<string[]>([]);
@@ -154,7 +154,7 @@ export function MessageView() {
 
   const unreadPeers = useMemo(() => {
     const set = new Set(unreadFrom);
-    for (const id of DEMO_UNREAD_ARK_IDS) {
+    for (const id of DEMO_UNREAD_NOVA_IDS) {
       if (!clearedDemoUnread.includes(id)) set.add(id);
     }
     return set;
@@ -162,24 +162,24 @@ export function MessageView() {
 
   const people = useMemo(() => {
     const hidden = new Set(loadHiddenDemoContacts());
-    const demos = buildDemoContacts().filter(c => !hidden.has(c.arkId) && !isBlockedArkId(c.arkId));
-    const byId = new Map<string, ArkContact>();
-    for (const c of demos) byId.set(c.arkId, c);
+    const demos = buildDemoContacts().filter(c => !hidden.has(c.novaId) && !isBlockedNovaId(c.novaId));
+    const byId = new Map<string, NovaContact>();
+    for (const c of demos) byId.set(c.novaId, c);
     for (const c of contacts) {
-      if (!isBlockedArkId(c.arkId)) byId.set(c.arkId, c);
+      if (!isBlockedNovaId(c.novaId)) byId.set(c.novaId, c);
     }
-    const me = myArkId || '3218815';
+    const me = myNovaId || '3218815';
     const list = [...byId.values()];
     // Newest activity (message or just-added) at top; stale chats sink.
-    const activityAt = (c: ArkContact) => {
-      const last = threadPreview(me, c.arkId);
-      const demoLast = last ? null : buildDemoThread(me, c.arkId).slice(-1)[0];
+    const activityAt = (c: NovaContact) => {
+      const last = threadPreview(me, c.novaId);
+      const demoLast = last ? null : buildDemoThread(me, c.novaId).slice(-1)[0];
       const msgAt = (last || demoLast)?.createdAt || '';
       const addAt = c.addedAt || '';
       return msgAt > addAt ? msgAt : addAt;
     };
     return list.sort((a, b) => activityAt(b).localeCompare(activityAt(a)));
-  }, [contacts, hiddenTick, myArkId, thread.length, listTick]);
+  }, [contacts, hiddenTick, myNovaId, thread.length, listTick]);
 
   const sortedGroups = useMemo(() => {
     return [...groups].sort((a, b) => {
@@ -190,11 +190,11 @@ export function MessageView() {
   }, [groups]);
 
   const activeGroup = groups.find(g => g.id === groupId) || null;
-  const isDemoPeer = Boolean(peer && buildDemoContacts().some(c => c.arkId === peer));
-  const isFriend = Boolean(peer && contacts.some(c => formatArkId(c.arkId) === formatArkId(peer)));
+  const isDemoPeer = Boolean(peer && buildDemoContacts().some(c => c.novaId === peer));
+  const isFriend = Boolean(peer && contacts.some(c => formatNovaId(c.novaId) === formatNovaId(peer)));
   const active = !groupId
-    ? (people.find(c => c.arkId === peer)
-      || (peer && !isBlockedArkId(peer) ? { arkId: peer, displayName: peer, addedAt: '' } : null))
+    ? (people.find(c => c.novaId === peer)
+      || (peer && !isBlockedNovaId(peer) ? { novaId: peer, displayName: peer, addedAt: '' } : null))
     : null;
 
   useEffect(() => {
@@ -247,8 +247,8 @@ export function MessageView() {
       }
       setThread(g.messages.map(m => ({
         id: m.id,
-        senderArkId: m.senderArkId,
-        recipientArkId: groupId,
+        senderNovaId: m.senderNovaId,
+        recipientNovaId: groupId,
         body: m.body,
         createdAt: m.createdAt,
         attachment: m.attachment,
@@ -260,33 +260,33 @@ export function MessageView() {
       setThread([]);
       return;
     }
-    const demos = buildDemoThread(myArkId || '3218815', peer);
+    const demos = buildDemoThread(myNovaId || '3218815', peer);
     setLoading(true);
-    void listThread(myArkId || '3218815', peer, user?.id).then(list => {
+    void listThread(myNovaId || '3218815', peer, user?.id).then(list => {
       const real = list.filter(m => !String(m.id).startsWith('demo-dm-'));
       setThread([...demos, ...real]);
       setLoading(false);
     });
-    if (!myArkId) return;
-    const unsub = subscribeMessages(myArkId, msg => {
+    if (!myNovaId) return;
+    const unsub = subscribeMessages(myNovaId, msg => {
       if (
-        (msg.senderArkId === myArkId && msg.recipientArkId === peer)
-        || (msg.senderArkId === peer && msg.recipientArkId === myArkId)
+        (msg.senderNovaId === myNovaId && msg.recipientNovaId === peer)
+        || (msg.senderNovaId === peer && msg.recipientNovaId === myNovaId)
       ) {
         setThread(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       }
     }, user?.id);
     const poll = window.setInterval(() => {
-      void listThread(myArkId, peer, user?.id).then(list => {
+      void listThread(myNovaId, peer, user?.id).then(list => {
         const real = list.filter(m => !String(m.id).startsWith('demo-dm-'));
-        setThread([...buildDemoThread(myArkId, peer), ...real]);
+        setThread([...buildDemoThread(myNovaId, peer), ...real]);
       });
     }, 4000);
     return () => {
       unsub();
       window.clearInterval(poll);
     };
-  }, [myArkId, peer, groupId, user?.id, groups]);
+  }, [myNovaId, peer, groupId, user?.id, groups]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -295,13 +295,13 @@ export function MessageView() {
   const send = async () => {
     const body = draft.trim();
     if (!body) return;
-    const sender = myArkId || '3218815';
+    const sender = myNovaId || '3218815';
 
     if (groupId && activeGroup) {
       setDraft('');
       const msg = {
         id: crypto.randomUUID(),
-        senderArkId: sender,
+        senderNovaId: sender,
         body,
         createdAt: new Date().toISOString(),
       };
@@ -321,8 +321,8 @@ export function MessageView() {
     try {
       const msg = await sendDirectMessage({
         userId: user?.id,
-        senderArkId: sender,
-        recipientArkId: peer,
+        senderNovaId: sender,
+        recipientNovaId: peer,
         body,
         allowWithoutFriendship: isDemoPeer,
       });
@@ -340,7 +340,7 @@ export function MessageView() {
 
   const sendAttachments = async (files: FileList | null, asFolder?: boolean) => {
     if (!files?.length) return;
-    const sender = myArkId || '3218815';
+    const sender = myNovaId || '3218815';
     setAttachMenu(false);
 
     if (!groupId && peer && !isDemoPeer && !canChat) {
@@ -352,7 +352,7 @@ export function MessageView() {
       if (!groupId) return;
       const msg = {
         id: crypto.randomUUID(),
-        senderArkId: sender,
+        senderNovaId: sender,
         body: '',
         createdAt: new Date().toISOString(),
         attachment,
@@ -378,8 +378,8 @@ export function MessageView() {
       try {
         const msg = await sendDirectMessage({
           userId: user?.id,
-          senderArkId: sender,
-          recipientArkId: peer,
+          senderNovaId: sender,
+          recipientNovaId: peer,
           body: '',
           attachment,
           allowWithoutFriendship: isDemoPeer,
@@ -411,8 +411,8 @@ export function MessageView() {
       try {
         const msg = await sendDirectMessage({
           userId: user?.id,
-          senderArkId: sender,
-          recipientArkId: peer,
+          senderNovaId: sender,
+          recipientNovaId: peer,
           body: '',
           attachment,
           allowWithoutFriendship: isDemoPeer,
@@ -432,26 +432,26 @@ export function MessageView() {
 
   const add = async () => {
     const raw = addId.trim();
-    const id = normalizeArkId(raw);
+    const id = normalizeNovaId(raw);
     setAddError(null);
     setAddOk(null);
-    if (!isDevArkAlias(raw) && !isArkUserId(id)) {
+    if (!isDevNovaAlias(raw) && !isNovaUserId(id)) {
       setAddError('Enter a 7-digit NOVA ID (or DEV)');
       return;
     }
-    if (!isDevArkAlias(raw) && id === myArkId) {
+    if (!isDevNovaAlias(raw) && id === myNovaId) {
       setAddError('That’s your own NOVA ID');
       return;
     }
-    if (!isDevArkAlias(raw) && isBlockedArkId(id)) {
+    if (!isDevNovaAlias(raw) && isBlockedNovaId(id)) {
       setAddError('That user is blocked');
       return;
     }
     setAdding(true);
     try {
-      await inviteByArkId(isDevArkAlias(raw) ? 'DEV' : id);
+      await inviteByNovaId(isDevNovaAlias(raw) ? 'DEV' : id);
       setAddId('');
-      setAddOk(`Friend request was sent to ${isDevArkAlias(raw) ? 'DEV' : id}`);
+      setAddOk(`Friend request was sent to ${isDevNovaAlias(raw) ? 'DEV' : id}`);
       // Request pending. do not open a chat or show their profile.
       await refreshContacts();
     } catch (err) {
@@ -462,7 +462,7 @@ export function MessageView() {
 
   const unaddActive = () => {
     if (!active) return;
-    void removeFriend(active.arkId).then(() => {
+    void removeFriend(active.novaId).then(() => {
       setHiddenTick(t => t + 1);
       setCanChat(false);
       setSendError(MSG_NEED_FRIEND);
@@ -470,27 +470,27 @@ export function MessageView() {
     });
   };
 
-  const deleteFromList = (arkId: string, e?: MouseEvent) => {
+  const deleteFromList = (novaId: string, e?: MouseEvent) => {
     e?.stopPropagation();
     e?.preventDefault();
-    void deleteContact(arkId).then(() => {
+    void deleteContact(novaId).then(() => {
       setHiddenTick(t => t + 1);
-      if (peer === arkId) navigate({ name: 'message' });
+      if (peer === novaId) navigate({ name: 'message' });
     });
   };
 
   const createGroup = () => {
     const name = groupName.trim() || 'New group';
     if (pickedMembers.length < 1) return;
-    const me = myArkId || '3218815';
+    const me = myNovaId || '3218815';
     const id = `group-${crypto.randomUUID().slice(0, 8)}`;
     const g: DemoGroup = {
       id,
       name,
-      memberArkIds: [me, ...pickedMembers],
+      memberNovaIds: [me, ...pickedMembers],
       messages: [{
         id: `gm-${Date.now()}`,
-        senderArkId: me,
+        senderNovaId: me,
         body: `Created “${name}”`,
         createdAt: new Date().toISOString(),
       }],
@@ -508,13 +508,13 @@ export function MessageView() {
     setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, name } : g)));
   };
 
-  const kickFromGroup = (arkId: string) => {
+  const kickFromGroup = (novaId: string) => {
     if (!groupId) return;
-    const me = myArkId || '3218815';
-    if (arkId === me || arkId === myArkId) return;
+    const me = myNovaId || '3218815';
+    if (novaId === me || novaId === myNovaId) return;
     setGroups(prev => prev.map(g => (
       g.id === groupId
-        ? { ...g, memberArkIds: g.memberArkIds.filter(id => id !== arkId) }
+        ? { ...g, memberNovaIds: g.memberNovaIds.filter(id => id !== novaId) }
         : g
     )));
   };
@@ -523,9 +523,9 @@ export function MessageView() {
     if (!groupId || !ids.length) return;
     setGroups(prev => prev.map(g => {
       if (g.id !== groupId) return g;
-      const set = new Set(g.memberArkIds);
+      const set = new Set(g.memberNovaIds);
       ids.forEach(id => set.add(id));
-      return { ...g, memberArkIds: [...set] };
+      return { ...g, memberNovaIds: [...set] };
     }));
     setAddToGroupOpen(false);
     setPickedMembers([]);
@@ -538,23 +538,23 @@ export function MessageView() {
     navigate({ name: 'message' });
   };
 
-  const memberStatus = (arkId: string): PresenceStatus => {
-    const me = myArkId || '3218815';
-    if (arkId === me || arkId === myArkId) {
+  const memberStatus = (novaId: string): PresenceStatus => {
+    const me = myNovaId || '3218815';
+    if (novaId === me || novaId === myNovaId) {
       return (getLocalPrefs().presenceStatus || 'online') as PresenceStatus;
     }
-    return demoPresenceFor(arkId);
+    return demoPresenceFor(novaId);
   };
 
-  const memberName = (arkId: string) => {
-    const me = myArkId || '3218815';
-    if (arkId === me || arkId === myArkId) return 'You';
-    return people.find(p => p.arkId === arkId)?.displayName || arkId;
+  const memberName = (novaId: string) => {
+    const me = myNovaId || '3218815';
+    if (novaId === me || novaId === myNovaId) return 'You';
+    return people.find(p => p.novaId === novaId)?.displayName || novaId;
   };
 
   const blockActive = () => {
     if (!active) return;
-    void blockFriend(active.arkId, active.displayName).then(() => {
+    void blockFriend(active.novaId, active.displayName).then(() => {
       setHiddenTick(t => t + 1);
       navigate({ name: 'message' });
     });
@@ -563,7 +563,7 @@ export function MessageView() {
   if (people.length === 0) {
     return (
       <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-        <div className="h-full flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 overflow-hidden">
+        <div className="h-full flex flex-col rounded-2xl border border-surface-border bg-nova-navy-900 overflow-hidden">
           <div className="px-6 pt-5 max-w-md mx-auto w-full">
             <GuestSocialBanner feature="message" />
           </div>
@@ -575,7 +575,7 @@ export function MessageView() {
               <div>
                 <h1 className="text-2xl font-semibold text-content-primary tracking-tight">Add a friend</h1>
               </div>
-              <div className="flex items-center gap-2 rounded-full bg-ark-navy-900/80 border border-white/10 p-1.5 pl-4">
+              <div className="flex items-center gap-2 rounded-full bg-nova-navy-900/80 border border-white/10 p-1.5 pl-4">
                 <input
                   value={addId}
                   onChange={e => setAddId(e.target.value)}
@@ -613,7 +613,7 @@ export function MessageView() {
             {!railCompact && <GuestSocialBanner feature="message" />}
             <div className={`flex items-center gap-1 ${railCompact ? 'flex-col' : ''}`}>
               {!railCompact && (
-                <div className="flex-1 min-w-0 flex items-center gap-1 rounded-full bg-ark-navy-950/60 border border-white/10 p-1 pl-2.5">
+                <div className="flex-1 min-w-0 flex items-center gap-1 rounded-full bg-nova-navy-950/60 border border-white/10 p-1 pl-2.5">
                   <input
                     value={addId}
                     onChange={e => setAddId(e.target.value)}
@@ -701,7 +701,7 @@ export function MessageView() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-content-primary truncate">{g.name}</span>
                     <span className="block text-[10px] text-content-tertiary truncate mt-0.5">
-                      {g.memberArkIds.length} people
+                      {g.memberNovaIds.length} people
                     </span>
                   </span>
                   {age && <RailActivityMeta age={age} />}
@@ -709,31 +709,31 @@ export function MessageView() {
               );
             })}
             {people.map(c => {
-              const last = myArkId ? threadPreview(myArkId, c.arkId) : null;
-              const demoLast = !last ? buildDemoThread(myArkId || '3218815', c.arkId).slice(-1)[0] : null;
+              const last = myNovaId ? threadPreview(myNovaId, c.novaId) : null;
+              const demoLast = !last ? buildDemoThread(myNovaId || '3218815', c.novaId).slice(-1)[0] : null;
               const preview = last || demoLast;
               const age = formatActivityAge(preview?.createdAt || c.addedAt);
-              const hasUnread = unreadPeers.has(c.arkId) && peer !== c.arkId;
-              const status = demoPresenceFor(c.arkId);
+              const hasUnread = unreadPeers.has(c.novaId) && peer !== c.novaId;
+              const status = demoPresenceFor(c.novaId);
               if (railCompact) {
                 return (
-                  <div key={c.arkId} className="group relative w-full flex items-center justify-center">
+                  <div key={c.novaId} className="group relative w-full flex items-center justify-center">
                     <button
                       type="button"
                       title={c.displayName}
-                      onClick={() => navigate({ name: 'message', peer: c.arkId })}
+                      onClick={() => navigate({ name: 'message', peer: c.novaId })}
                       className={`w-full flex items-center justify-center rounded-xl py-2 ${
-                        !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
+                        !groupId && peer === c.novaId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
                       }`}
                     >
                       <span className="relative">
-                        <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
+                        <NovaAvatar name={c.displayName} src={c.avatarUrl} size="md" />
                         <span
-                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
+                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nova-navy-950 ${presenceDotClass(status)}`}
                           aria-hidden
                         />
                         {hasUnread && (
-                          <span className="absolute -top-0.5 -left-0.5 h-2 w-2 rounded-full bg-sky-400 border border-ark-navy-950" aria-label="Unread" />
+                          <span className="absolute -top-0.5 -left-0.5 h-2 w-2 rounded-full bg-sky-400 border border-nova-navy-950" aria-label="Unread" />
                         )}
                       </span>
                     </button>
@@ -741,8 +741,8 @@ export function MessageView() {
                       type="button"
                       title="Delete contact"
                       aria-label={`Delete ${c.displayName}`}
-                      onClick={e => deleteFromList(c.arkId, e)}
-                      className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-ark-navy-900 border border-white/15 text-content-tertiary hover:text-rose-300 hover:border-rose-400/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={e => deleteFromList(c.novaId, e)}
+                      className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-nova-navy-900 border border-white/15 text-content-tertiary hover:text-rose-300 hover:border-rose-400/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 className="w-2.5 h-2.5" />
                     </button>
@@ -751,20 +751,20 @@ export function MessageView() {
               }
               return (
                 <div
-                  key={c.arkId}
+                  key={c.novaId}
                   className={`group relative w-full rounded-xl pr-9 ${
-                    !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
+                    !groupId && peer === c.novaId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
                   }`}
                 >
                   <button
                     type="button"
-                    onClick={() => navigate({ name: 'message', peer: c.arkId })}
+                    onClick={() => navigate({ name: 'message', peer: c.novaId })}
                     className="w-full min-w-0 flex items-center gap-2.5 text-left rounded-xl px-2.5 py-2.5"
                   >
                     <span className="relative shrink-0">
-                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
+                      <NovaAvatar name={c.displayName} src={c.avatarUrl} size="md" />
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
+                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nova-navy-950 ${presenceDotClass(status)}`}
                         title={status}
                         aria-hidden
                       />
@@ -772,7 +772,7 @@ export function MessageView() {
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-content-primary truncate">{c.displayName}</span>
                       <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
-                        {formatArkId(c.arkId)}
+                        {formatNovaId(c.novaId)}
                       </span>
                     </span>
                     {age && <RailActivityMeta age={age} unread={hasUnread} />}
@@ -781,7 +781,7 @@ export function MessageView() {
                     type="button"
                     title="Delete contact"
                     aria-label={`Delete ${c.displayName}`}
-                    onClick={e => deleteFromList(c.arkId, e)}
+                    onClick={e => deleteFromList(c.novaId, e)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-7 w-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -800,7 +800,7 @@ export function MessageView() {
       ) : activeGroup ? (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-ark-navy-950/80 pl-3 pr-1.5 py-1 shadow-sm">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-nova-navy-950/80 pl-3 pr-1.5 py-1 shadow-sm">
               <button
                 type="button"
                 onClick={() => {
@@ -811,15 +811,15 @@ export function MessageView() {
               >
                 <UsersRound className="w-3.5 h-3.5 text-sky-300 shrink-0" />
                 <p className="text-sm font-medium text-content-primary truncate max-w-[10rem]">{activeGroup.name}</p>
-                <span className="text-[10px] text-content-tertiary shrink-0">{activeGroup.memberArkIds.length}</span>
+                <span className="text-[10px] text-content-tertiary shrink-0">{activeGroup.memberNovaIds.length}</span>
               </button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">
             {thread.map(m => {
-              const mine = m.senderArkId === (myArkId || '3218815') || m.senderArkId === myArkId;
-              const who = people.find(p => p.arkId === m.senderArkId)?.displayName
-                || (m.senderArkId === (myArkId || '3218815') ? 'You' : m.senderArkId);
+              const mine = m.senderNovaId === (myNovaId || '3218815') || m.senderNovaId === myNovaId;
+              const who = people.find(p => p.novaId === m.senderNovaId)?.displayName
+                || (m.senderNovaId === (myNovaId || '3218815') ? 'You' : m.senderNovaId);
               return (
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   {m.attachment ? (
@@ -847,7 +847,7 @@ export function MessageView() {
           <div className="shrink-0 px-4 pb-4 pt-2">
             <div className="relative mx-auto w-full max-w-md">
               {attachMenu && (
-                <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-white/10 bg-ark-navy-900 shadow-xl overflow-hidden z-10">
+                <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-white/10 bg-nova-navy-900 shadow-xl overflow-hidden z-10">
                   <button
                     type="button"
                     className="w-full text-left px-3 py-2 text-xs text-content-secondary hover:bg-surface-hover hover:text-content-primary"
@@ -868,7 +868,7 @@ export function MessageView() {
                   </button>
                 </div>
               )}
-              <div className="flex items-center gap-1 rounded-full bg-ark-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1">
+              <div className="flex items-center gap-1 rounded-full bg-nova-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1">
                 <button
                   type="button"
                   onClick={() => setAttachMenu(v => !v)}
@@ -928,7 +928,7 @@ export function MessageView() {
       ) : (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-ark-navy-950/80 pl-4 pr-1.5 py-1 shadow-sm">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-nova-navy-950/80 pl-4 pr-1.5 py-1 shadow-sm">
               <p className="text-sm font-medium text-content-primary truncate max-w-[11rem]">{active!.displayName}</p>
               <button type="button" onClick={unaddActive} title="Unadd" aria-label="Unadd" className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5">
                 <UserMinus className="w-3.5 h-3.5" />
@@ -942,7 +942,7 @@ export function MessageView() {
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">
             {loading && <Loader2 className="w-4 h-4 animate-spin text-content-tertiary mx-auto" />}
             {thread.map(m => {
-              const mine = m.senderArkId === (myArkId || '3218815') || m.senderArkId === myArkId;
+              const mine = m.senderNovaId === (myNovaId || '3218815') || m.senderNovaId === myNovaId;
               return (
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   {m.attachment ? (
@@ -985,8 +985,8 @@ export function MessageView() {
                       setAdding(true);
                       setAddError(null);
                       try {
-                        await inviteByArkId(peer);
-                        setAddOk(`Friend request was sent to ${formatArkId(peer)}`);
+                        await inviteByNovaId(peer);
+                        setAddOk(`Friend request was sent to ${formatNovaId(peer)}`);
                         setSendError('Friend request sent. They need to accept before you can message.');
                       } catch (err) {
                         setSendError(err instanceof Error ? err.message : 'Could not send friend request');
@@ -1003,7 +1003,7 @@ export function MessageView() {
             ) : null}
             <div className="relative mx-auto w-full max-w-md">
               {attachMenu && (
-                <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-white/10 bg-ark-navy-900 shadow-xl overflow-hidden z-10">
+                <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-white/10 bg-nova-navy-900 shadow-xl overflow-hidden z-10">
                   <button
                     type="button"
                     className="w-full text-left px-3 py-2 text-xs text-content-secondary hover:bg-surface-hover hover:text-content-primary"
@@ -1024,7 +1024,7 @@ export function MessageView() {
                   </button>
                 </div>
               )}
-              <div className={`flex items-center gap-1 rounded-full bg-ark-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1 ${!canChat && !groupId ? 'opacity-60' : ''}`}>
+              <div className={`flex items-center gap-1 rounded-full bg-nova-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1 ${!canChat && !groupId ? 'opacity-60' : ''}`}>
                 <button
                   type="button"
                   onClick={() => setAttachMenu(v => !v)}
@@ -1105,19 +1105,19 @@ export function MessageView() {
         <div className="space-y-1.5 max-h-48 overflow-y-auto">
           <p className="text-[10px] uppercase tracking-wider text-content-tertiary">Members</p>
           {people.map(c => {
-            const on = pickedMembers.includes(c.arkId);
+            const on = pickedMembers.includes(c.novaId);
             return (
               <button
-                key={c.arkId}
+                key={c.novaId}
                 type="button"
                 onClick={() => setPickedMembers(prev => (
-                  on ? prev.filter(id => id !== c.arkId) : [...prev, c.arkId]
+                  on ? prev.filter(id => id !== c.novaId) : [...prev, c.novaId]
                 ))}
                 className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm ${
                   on ? 'bg-sky-500/15 text-sky-100' : 'hover:bg-surface-hover text-content-secondary'
                 }`}
               >
-                <ArkAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
+                <NovaAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
                 {c.displayName}
               </button>
             );
@@ -1163,7 +1163,7 @@ export function MessageView() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] uppercase tracking-wider text-content-tertiary">
-                Members · {activeGroup.memberArkIds.length}
+                Members · {activeGroup.memberNovaIds.length}
               </p>
               <button
                 type="button"
@@ -1178,9 +1178,9 @@ export function MessageView() {
               </button>
             </div>
             <div className="max-h-56 overflow-y-auto space-y-1">
-              {activeGroup.memberArkIds.map(id => {
-                const me = myArkId || '3218815';
-                const isMe = id === me || id === myArkId;
+              {activeGroup.memberNovaIds.map(id => {
+                const me = myNovaId || '3218815';
+                const isMe = id === me || id === myNovaId;
                 const status = memberStatus(id);
                 return (
                   <div
@@ -1188,24 +1188,24 @@ export function MessageView() {
                     className="group flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-white/[0.04]"
                   >
                     <span className="relative shrink-0">
-                      <ArkAvatar
+                      <NovaAvatar
                         name={memberName(id)}
                         src={
                           isMe
                             ? getLocalPrefs().avatarDataUrl
-                            : contacts.find(c => c.arkId === id)?.avatarUrl
+                            : contacts.find(c => c.novaId === id)?.avatarUrl
                         }
                         size="md"
                       />
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-900 ${presenceDotClass(status)}`}
+                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nova-navy-900 ${presenceDotClass(status)}`}
                         aria-hidden
                       />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-content-primary truncate">{memberName(id)}</span>
                       <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
-                        {formatArkId(id)}
+                        {formatNovaId(id)}
                       </span>
                     </span>
                     {!isMe && (
@@ -1247,35 +1247,35 @@ export function MessageView() {
         <div className="px-5 py-4 space-y-3">
           <div className="space-y-1.5 max-h-56 overflow-y-auto">
             {people
-              .filter(c => !activeGroup.memberArkIds.includes(c.arkId))
+              .filter(c => !activeGroup.memberNovaIds.includes(c.novaId))
               .map(c => {
-                const on = pickedMembers.includes(c.arkId);
+                const on = pickedMembers.includes(c.novaId);
                 return (
                   <button
-                    key={c.arkId}
+                    key={c.novaId}
                     type="button"
                     onClick={() => setPickedMembers(prev => (
-                      on ? prev.filter(id => id !== c.arkId) : [...prev, c.arkId]
+                      on ? prev.filter(id => id !== c.novaId) : [...prev, c.novaId]
                     ))}
                     className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm ${
                       on ? 'bg-sky-500/15 text-sky-100' : 'hover:bg-surface-hover text-content-secondary'
                     }`}
                   >
                     <span className="relative shrink-0">
-                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
+                      <NovaAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-ark-navy-900 ${presenceDotClass(demoPresenceFor(c.arkId))}`}
+                        className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-nova-navy-900 ${presenceDotClass(demoPresenceFor(c.novaId))}`}
                         aria-hidden
                       />
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate">{c.displayName}</span>
-                      <span className="block text-[10px] font-mono text-content-tertiary">{formatArkId(c.arkId)}</span>
+                      <span className="block text-[10px] font-mono text-content-tertiary">{formatNovaId(c.novaId)}</span>
                     </span>
                   </button>
                 );
               })}
-            {people.every(c => activeGroup.memberArkIds.includes(c.arkId)) && (
+            {people.every(c => activeGroup.memberNovaIds.includes(c.novaId)) && (
               <p className="text-xs text-content-tertiary py-4 text-center">Everyone you know is already in this group.</p>
             )}
           </div>

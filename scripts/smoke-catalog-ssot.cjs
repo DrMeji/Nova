@@ -4,7 +4,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { CATALOG } = require('../electron/arkCatalog.cjs');
+const { CATALOG } = require('../electron/novaCatalog.cjs');
 
 const ui = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'engineCatalogUi.ts'), 'utf8');
 let failed = 0;

@@ -32,7 +32,7 @@ Expect Auth / Welcome UI, not a blank root.
 ## #29 Website + password reset origin
 
 1. Deploy `website/` (see `website/README.md`).
-2. Set `VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` and rebuild desktop.
+2. Set `VITE_NOVA_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` and rebuild desktop.
 3. Supabase Auth redirect allowlist includes `/account/reset`.
 4. Forgot password → inbox → reset page → sign in on desktop.
 

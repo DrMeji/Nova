@@ -4,7 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, ChevronDown, History, Clock3,
   MessageSquare, Trash2, Code2, Pencil, Mic,
-  Globe, Bell, Copy, Star, Download, Brain, Cable, Bot,
+  Globe, Bell, Star, Download, Brain, Cable, Bot,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -20,15 +20,16 @@ import {
   presenceRingClass,
   type PresenceStatus,
 } from '@/lib/presenceStatus';
-import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
 import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
+import { FreezeReportButton, startFreezeDiagnostics } from '@/components/FreezeReportButton';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { NovaMark } from '@/components/NovaMark';
 import { comparePinnedThenRecent, RECENT_SIDEBAR_MAX } from '@/lib/recentStore';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import {
   clearActivity,
   clearChatDone,
@@ -38,9 +39,13 @@ import {
   subscribeActivity,
   type ActivityKey,
 } from '@/lib/activityIndicators';
+import {
+  listInflightChatIds,
+  subscribeChatInflight,
+} from '@/lib/chatInflight';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
 import { countUnreadLocalNotifications } from '@/lib/localNotifications';
-import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
+import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/novaUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
   return <Brain className={className || 'w-4 h-4'} />;
@@ -128,15 +133,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [updateInfo, setUpdateInfo] = useState<ArkUpdateInfo | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
-  const [wipeProjectDisk, setWipeProjectDisk] = useState(false);
+  const [wipeProjectDisk, setWipeProjectDisk] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
   const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
+  const [inflightChats, setInflightChats] = useState(() => new Set(listInflightChatIds()));
   const [navTick, setNavTick] = useState(0);
   const [notifUnread, setNotifUnread] = useState(0);
   const { unreadFrom } = useSocial();
-  const myArkIdForNotifs = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || undefined);
+  const myNovaIdForNotifs = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || undefined);
 
   useEffect(() => {
     const onFeat = () => setNavTick(t => t + 1);
@@ -157,11 +163,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const bump = () => setNotifUnread(countUnreadLocalNotifications(myArkIdForNotifs));
+    const sync = () => setInflightChats(new Set(listInflightChatIds()));
+    sync();
+    return subscribeChatInflight(sync);
+  }, []);
+
+  useEffect(() => startFreezeDiagnostics(), []);
+
+  useEffect(() => {
+    const bump = () => setNotifUnread(countUnreadLocalNotifications(myNovaIdForNotifs));
     bump();
     window.addEventListener('NOVA:local-notifications', bump);
     return () => window.removeEventListener('NOVA:local-notifications', bump);
-  }, [myArkIdForNotifs]);
+  }, [myNovaIdForNotifs]);
 
   useEffect(() => {
     const onPrefs = () => {
@@ -169,8 +183,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       setPrefsName(next.displayName);
       setPresence(next.presenceStatus || 'online');
     };
-    window.addEventListener('ark:prefs-changed', onPrefs);
-    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+    window.addEventListener('nova:prefs-changed', onPrefs);
+    return () => window.removeEventListener('nova:prefs-changed', onPrefs);
   }, []);
 
   const clearHoverLeave = () => {
@@ -187,12 +201,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const scheduleSidebarClose = () => {
     clearHoverLeave();
+    // Short leave delay — long enough to cross nested buttons, short enough to retract.
     hoverLeaveTimer.current = window.setTimeout(() => {
       hoverLeaveTimer.current = null;
       // Keep open while the presence menu is up so the user can pick a status.
       if (statusMenuOpenRef.current) return;
       setHoverOpen(false);
-    }, 220);
+    }, 90);
   };
 
   useEffect(() => {
@@ -226,7 +241,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void window.arkDesktop?.postUpdateConsume?.().then((res) => {
+    void window.novaDesktop?.postUpdateConsume?.().then((res) => {
       if (res?.land === 'chat') {
         setSettingsOpen(false);
         navigate({ name: 'chat' });
@@ -385,11 +400,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       void probeAiModeLabel().then(l => { if (alive) setModeLabel(l); }).catch(() => undefined);
     };
     refresh();
-    window.addEventListener('ark:prefs-changed', refresh);
+    window.addEventListener('nova:prefs-changed', refresh);
     window.addEventListener('NOVA:engine-models-changed', refresh);
     return () => {
       alive = false;
-      window.removeEventListener('ark:prefs-changed', refresh);
+      window.removeEventListener('nova:prefs-changed', refresh);
       window.removeEventListener('NOVA:engine-models-changed', refresh);
     };
   }, []);
@@ -425,7 +440,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (alive) setUpdateInfo(null);
         return;
       }
-      const currentVersion = await window.arkDesktop?.appMeta?.().then((m) => m?.version).catch(() => undefined);
+      const currentVersion = await window.novaDesktop?.appMeta?.().then((m) => m?.version).catch(() => undefined);
       const cached = readCache();
       if (cached && Date.now() - cached.at < CACHE_MS && currentVersion && cached.info.currentVersion === currentVersion) {
         if (alive) setUpdateInfo(cached.info);
@@ -461,7 +476,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+    const unsub = window.novaDesktop?.onUpdateProgress?.((payload) => {
       if (payload?.status === 'downloading' || payload?.status === 'handoff' || payload?.status === 'installing') {
         setUpdateBusy(true);
       } else if (payload?.status === 'error' || payload?.status === 'idle' || payload?.status === 'available') {
@@ -512,15 +527,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const renderRecentRow = (item: RecentRow) => {
     const active = item.kind === 'chat' ? activeChatId === item.id : activeRecentId === item.id;
     const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
+    const working = item.kind === 'chat' && inflightChats.has(item.id);
     const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
     const renameKey = item.key;
     const editing = renamingId === renameKey;
     return (
       <div
         key={item.key}
-        className={`group relative rounded-none transition-colors ${
-          active ? 'bg-surface-active' : 'hover:bg-surface-hover'
-        }`}
+        className={`group relative flex items-center min-w-0 rounded-lg mx-1 transition-colors ${
+          active
+            ? 'bg-surface-active text-content-primary'
+            : 'hover:bg-surface-hover text-content-secondary'
+        } ${doneAway && !working ? 'nova-nav-attention' : ''} ${working && !active ? 'nova-nav-working-away' : ''}`}
       >
         {editing ? (
           <input
@@ -538,7 +556,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setRenameDraft('');
               }
             }}
-            className="flex-1 min-w-0 mx-2 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
+            className="flex-1 min-w-0 mx-2 my-0.5 rounded-md bg-nova-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
           />
         ) : (
           <div className="flex items-center min-w-0 w-full">
@@ -550,15 +568,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setRenamingId(renameKey);
                 setRenameDraft(item.title);
               }}
-              className={`ark-nav-item min-w-0 flex-1 !bg-transparent hover:!bg-transparent ${
-                active ? '!text-content-primary' : ''
-              } ${doneAway ? 'ark-nav-attention' : ''}`}
-              title={`${item.title} · double-click to rename`}
+              className="nova-nav-item nova-nav-item-rail min-w-0 flex-1 !bg-transparent hover:!bg-transparent !relative"
+              title={
+                working
+                  ? `${item.title} · Nova is working here`
+                  : `${item.title} · double-click to rename`
+              }
             >
-              <span className={`ark-nav-icon ${doneAway ? 'text-sky-400' : ''}`}>
+              <span className={`nova-nav-icon relative ${doneAway && !working ? 'text-sky-400' : ''}`}>
                 <Icon strokeWidth={1.75} />
               </span>
-              <span className={`min-w-0 flex-1 text-left truncate ${doneAway ? 'text-sky-300' : ''}`}>{item.title}</span>
+              <span className={`min-w-0 flex-1 text-left truncate relative ${doneAway && !working ? 'text-sky-300' : ''}`}>{item.title}</span>
             </button>
             <div
               className={`flex items-center gap-0.5 shrink-0 pr-1 transition-opacity ${
@@ -604,7 +624,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
-                  setWipeProjectDisk(false);
+                  setWipeProjectDisk(true);
                 }}
                 className="w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0"
               >
@@ -652,15 +672,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-label={`${item.label} (coming soon)`}
           title={`${item.label} · Coming Soon`}
           onClick={() => handleNavClick(item)}
-          className={`ark-nav-item w-full opacity-55 ${collapsed ? 'ark-nav-item-rail' : ''}`}
+          className={`nova-nav-item w-full opacity-55 ${collapsed ? 'nova-nav-item-rail' : ''}`}
         >
-          <span className="ark-nav-icon">
+          <span className="nova-nav-icon">
             <item.icon />
           </span>
-          <span className={`flex-1 text-left ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+          <span className={`flex-1 text-left nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             {item.label}
           </span>
-          <span className={`text-[9px] uppercase tracking-wide text-content-tertiary ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+          <span className={`text-[9px] uppercase tracking-wide text-content-tertiary nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             Soon
           </span>
         </button>
@@ -677,18 +697,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
-        className={`ark-nav-item w-full relative ${collapsed ? 'ark-nav-item-rail' : ''} ${active ? 'active' : ''} ${
-          attention && !active ? 'ark-nav-attention' : ''
+        className={`nova-nav-item w-full relative ${collapsed ? 'nova-nav-item-rail' : ''} ${active ? 'active' : ''} ${
+          attention && !active ? 'nova-nav-attention' : ''
         }`}
       >
-        <span className={`ark-nav-icon ${attention ? 'text-sky-400' : ''}`}>
+        <span className={`nova-nav-icon ${attention ? 'text-sky-400' : ''}`}>
           <item.icon />
         </span>
-        <span className={`truncate ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''} ${attention ? 'text-sky-300' : ''}`}>
+        <span className={`truncate nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''} ${attention ? 'text-sky-300' : ''}`}>
           {item.label}
         </span>
         {unreadCount > 0 ? (
-          <span className={`text-[10px] font-semibold tabular-nums text-sky-300 ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+          <span className={`text-[10px] font-semibold tabular-nums text-sky-300 nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         ) : null}
@@ -697,10 +717,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="h-full min-w-0 flex overflow-hidden relative bg-ark-navy-950">
+    <div className="h-full min-w-0 flex overflow-hidden relative bg-nova-navy-950">
       <AuthAmbientOrbs variant="app" />
       <aside
-        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ark-sidebar-panel ${
+        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border bg-nova-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] nova-sidebar-panel ${
           collapsed ? 'is-collapsed' : ''
         }`}
         onMouseEnter={openSidebarHover}
@@ -711,24 +731,24 @@ export function AppShell({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => setSearchOpen(true)}
-                className="ark-nav-item w-full ark-nav-item-rail"
+                className="nova-nav-item w-full nova-nav-item-rail"
                 title="Search (Ctrl+K)"
                 aria-label="Search"
               >
-                <span className="ark-nav-icon">
+                <span className="nova-nav-icon">
                   <Search />
                 </span>
               </button>
             ) : (
               <div className="flex items-center justify-between gap-2 min-w-0 pr-2">
-                <span className="ark-nav-icon">
+                <span className="nova-nav-icon">
                   <NovaMark className="w-7 h-7 text-content-primary" title="NOVA" />
                 </span>
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => setSearchOpen(true)}
-                    className="ark-btn-ghost !p-1.5"
+                    className="nova-btn-ghost !p-1.5"
                     title="Search (Ctrl+K)"
                     aria-label="Search"
                   >
@@ -761,8 +781,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div key={group.id} className={group.label ? 'mt-2 first:mt-0' : ''}>
                   {group.label ? (
                     <p
-                      className={`pb-1 text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 ark-nav-label ${
-                        collapsed ? 'ark-nav-label-hide' : ''
+                      className={`pb-1 text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 nova-nav-label ${
+                        collapsed ? 'nova-nav-label-hide' : ''
                       }`}
                       aria-hidden={collapsed || undefined}
                     >
@@ -781,17 +801,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onClick={() => setRecentOpen(o => !o)}
                 title={collapsed ? 'Recent' : undefined}
                 aria-label="Recent"
-                className={`ark-nav-item w-full flex-none ${collapsed ? 'ark-nav-item-rail' : ''}`}
+                className={`nova-nav-item w-full flex-none ${collapsed ? 'nova-nav-item-rail' : ''}`}
               >
-                <span className="ark-nav-icon">
+                <span className="nova-nav-icon">
                   <Clock3 />
                 </span>
-                <span className={`flex-1 text-left ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+                <span className={`flex-1 text-left nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
                   Recent
                 </span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-content-tertiary transition-transform ark-nav-label ${
-                    collapsed ? 'ark-nav-label-hide' : ''
+                  className={`w-3.5 h-3.5 text-content-tertiary transition-transform nova-nav-label ${
+                    collapsed ? 'nova-nav-label-hide' : ''
                   } ${recentOpen ? '' : '-rotate-90'}`}
                 />
               </button>
@@ -815,17 +835,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                       ? activeChatId === item.id
                       : activeRecentId === item.id;
                     const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
+                    const working = item.kind === 'chat' && inflightChats.has(item.id);
                     const Icon = chatIcon(item.mode || 'general');
                     return (
                       <button
                         key={item.key}
                         type="button"
-                        aria-label={item.title}
+                        aria-label={working ? `${item.title} — working` : item.title}
                         onClick={() => openRecent(item)}
-                        className={`ark-nav-item ark-nav-item-rail relative ${active ? 'active' : ''} ${doneAway ? 'ark-nav-attention' : ''}`}
-                        title={item.title}
+                        className={`nova-nav-item nova-nav-item-rail relative ${active ? 'active' : ''} ${doneAway && !working ? 'nova-nav-attention' : ''} ${working && !active ? 'nova-nav-working-away' : ''}`}
+                        title={working ? `${item.title} · Nova is working here` : item.title}
                       >
-                        <span className={`ark-nav-icon ${doneAway ? 'text-sky-400' : ''}`}>
+                        <span className={`nova-nav-icon relative ${doneAway && !working ? 'text-sky-400' : ''}`}>
                           <Icon strokeWidth={1.75} />
                         </span>
                       </button>
@@ -841,9 +862,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               data-status-menu
             >
             <JobsStrip variant="sidebar" collapsed={collapsed} />
+            <FreezeReportButton collapsed={collapsed} />
             {statusMenuOpen && (
               <div
-                className={`absolute z-50 rounded-xl border border-white/10 bg-ark-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
+                className={`absolute z-50 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
                   collapsed ? 'left-full bottom-2 ml-2' : 'left-3 right-3 bottom-full mb-2'
                 }`}
                 role="menu"
@@ -880,7 +902,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-label="Update now"
                     className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors ${
                       updateBusy
-                        ? 'opacity-60 border-surface-border bg-ark-navy-900/80 text-content-tertiary'
+                        ? 'opacity-60 border-surface-border bg-nova-navy-900/80 text-content-tertiary'
                         : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
                     }`}
                   >
@@ -907,7 +929,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     disabled={updateBusy}
                     className={`w-full flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
                       updateBusy
-                        ? 'opacity-70 border-surface-border bg-ark-navy-950/80 text-content-secondary'
+                        ? 'opacity-70 border-surface-border bg-nova-navy-950/80 text-content-secondary'
                         : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-400/45'
                     }`}
                     title={updateBusy ? 'Downloading update…' : `Update to ${updateInfo.latestTag}`}
@@ -924,7 +946,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </span>
                   </button>
                 ) : null}
-                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-900 px-2.5 py-2">
+                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-nova-navy-900 px-2.5 py-2">
                   <button
                     type="button"
                     onClick={() => setStatusMenuOpen(v => !v)}
@@ -944,30 +966,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <span className="block text-xs font-medium text-content-primary truncate">
                       {displayName}
                     </span>
-                    {(profile?.ark_id || isArkDevEmail(user?.email)) ? (
+                    {(profile?.nova_id || isNovaDevEmail(user?.email)) ? (
                       <span className="block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 text-content-tertiary">
-                        {isArkDevEmail(user?.email)
+                        {isNovaDevEmail(user?.email)
                           ? 'DEV'
-                          : formatArkId(profile!.ark_id!)}
+                          : formatNovaId(profile!.nova_id!)}
                       </span>
                     ) : null}
                   </button>
-                  {(profile?.ark_id || isArkDevEmail(user?.email)) ? (
-                    <button
-                      type="button"
-                      className="p-1.5 rounded-lg shrink-0 text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
-                      title="Copy your NOVA ID"
-                      aria-label="Copy your NOVA ID"
-                      onClick={() => {
-                        const arkIdText = isArkDevEmail(user?.email)
-                          ? 'DEV'
-                          : formatArkId(profile?.ark_id || '');
-                        void navigator.clipboard.writeText(arkIdText).catch(() => undefined);
-                      }}
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  ) : null}
                   <button
                     type="button"
                     onClick={() => openSettings()}
@@ -1055,10 +1061,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                     onChange={(e) => setWipeProjectDisk(e.target.checked)}
                   />
                   <span>
-                    Also delete this project’s files on disk. This cannot be undone.
+                    Permanently delete this project’s files from this PC (recommended). Uncheck to only remove it from Recent.
                   </span>
                 </label>
-              ) : null}
+              ) : (
+                <p className="mt-3 text-xs text-content-tertiary leading-relaxed">
+                  Linked project folders and media for this chat are removed from this PC when you delete forever.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 mt-7">
@@ -1076,11 +1086,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 const id = deleteTarget.id;
                 if (deleteTarget.kind === 'project') {
                   if (wipeProjectDisk) {
-                    void window.arkDesktop?.projectDeleteFiles?.(id).catch(() => undefined);
+                    void window.novaDesktop?.projectDeleteFiles?.(id).catch(() => undefined);
                   }
                   removeRecent(id);
                   setDeleteTarget(null);
-                  setWipeProjectDisk(false);
+                  setWipeProjectDisk(true);
                   if (activeRecentId === id) navigate({ name: 'chat' });
                 } else {
                   deleteChatForever(id);

@@ -37,7 +37,7 @@ type ElectronFile = File & { path?: string; webkitRelativePath?: string };
 
 function fileDiskPath(f: File): string {
   try {
-    const via = window.arkDesktop?.getPathForFile?.(f);
+    const via = window.novaDesktop?.getPathForFile?.(f);
     if (via) return String(via).trim();
   } catch {
     /* ignore */
@@ -143,7 +143,7 @@ export async function resolveChatDrop(
   // 1) Electron absolute paths (folders + files from Explorer)
   const diskPaths = [...new Set(files.map(fileDiskPath).filter(Boolean))];
   for (const disk of diskPaths) {
-    const stat = await window.arkDesktop?.pathStat?.(disk);
+    const stat = await window.novaDesktop?.pathStat?.(disk);
     if (!stat?.ok) {
       notes.push(`Could not open ${disk}`);
       continue;
@@ -155,7 +155,7 @@ export async function resolveChatDrop(
         ? lastProjectId
         : `proj-${crypto.randomUUID().slice(0, 8)}`;
       lastProjectId = pid;
-      const res = await window.arkDesktop?.projectImportFolder?.({
+      const res = await window.novaDesktop?.projectImportFolder?.({
         projectId: pid,
         projectName: stat.name,
         sourceDir: disk,
@@ -188,7 +188,7 @@ export async function resolveChatDrop(
         const filePath = String((res as { path: string }).path);
         const base = (res as { name?: string }).name || filePath.split(/[/\\]/).pop() || 'file';
         if (IMAGE_RE.test(base)) {
-          const data = await window.arkDesktop?.readDataUrl?.(filePath);
+          const data = await window.novaDesktop?.readDataUrl?.(filePath);
           if (data?.ok && data.dataUrl?.startsWith('data:image/')) {
             images.push({
               id: `attach-${crypto.randomUUID().slice(0, 10)}`,
@@ -197,7 +197,7 @@ export async function resolveChatDrop(
             });
           }
         } else {
-          const read = await window.arkDesktop?.readTextFile?.({ path: filePath });
+          const read = await window.novaDesktop?.readTextFile?.({ path: filePath });
           if (read?.ok && read.text != null) seedFiles[base] = read.text;
           else seedFiles[base] = `[Attached file: ${base}]`;
         }
@@ -235,7 +235,7 @@ export async function resolveChatDrop(
         notes.push(`Attached video ${base}`);
         continue;
       }
-      const read = await window.arkDesktop?.readTextFile?.({ path: disk });
+      const read = await window.novaDesktop?.readTextFile?.({ path: disk });
       if (read?.ok && read.text != null) {
         seedFiles[base] = read.text;
       } else {
@@ -329,7 +329,7 @@ export async function resolveChatDrop(
   if (!attaches.length && !images.length && notes.length) {
     return { ...empty, note: notes[0] };
   }
-  if (!attaches.length && !images.length && diskPaths.length === 0 && files.length > 0 && window.arkDesktop?.isElectron) {
+  if (!attaches.length && !images.length && diskPaths.length === 0 && files.length > 0 && window.novaDesktop?.isElectron) {
     return {
       ...empty,
       note: 'Could not read that drop. Close NOVA and run Open-NOVA-Build.bat again.',

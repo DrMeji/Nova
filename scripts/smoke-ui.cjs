@@ -27,7 +27,7 @@ const args = ['.', `--remote-debugging-port=${port}`, '--remote-allow-origins=*'
 log(`spawning ${electronPath} ${args.join(' ')} debug=${port}`);
 const child = spawn(electronPath, args, {
   cwd: root,
-  env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ARK_DEV: '' },
+  env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', NOVA_DEV: '' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -163,7 +163,7 @@ async function probe() {
       readyState: document.readyState,
       rootLen: htmlLen,
       text,
-      hasArkDesktop: typeof window.arkDesktop !== 'undefined',
+      hasNovaDesktop: typeof window.novaDesktop !== 'undefined',
       bodyBg: getComputedStyle(document.body).backgroundColor,
       scripts,
       css,

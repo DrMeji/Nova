@@ -176,7 +176,7 @@ for (let i = 0; i < STEPS.length; i++) {
 
 const tail = String(log.steps?.[0]?.tail || '');
 const pathFromChat = (tail.match(/Path:\s*([^\n]+)/i)?.[1] || '').trim();
-const projectsRoot = path.join(process.env.USERPROFILE || '', 'Documents', 'ARK', 'Projects');
+const projectsRoot = path.join(process.env.USERPROFILE || '', 'Documents', 'NOVA Projects');
 const diskCandidates = [
   pathFromChat,
   path.join(projectsRoot, NAME),

@@ -9,7 +9,7 @@ export type PromptChipsPayload = {
   chips: PromptChip[];
 };
 
-const CHIPS_MARKER_RE = /<!--ark-prompt-chips:([\s\S]*?)-->\n?/;
+const CHIPS_MARKER_RE = /<!--nova-prompt-chips:([\s\S]*?)-->\n?/;
 
 export function isPromptChipsMessage(content: string): boolean {
   return CHIPS_MARKER_RE.test(String(content || ''));
@@ -34,7 +34,7 @@ export function parsePromptChipsMessage(content: string): {
 export function encodePromptChipsMessage(body: string, chips: PromptChip[]): string {
   const trimmed = String(body || '').trim();
   if (!chips.length) return trimmed;
-  return `<!--ark-prompt-chips:${JSON.stringify({ chips })}-->\n${trimmed}`;
+  return `<!--nova-prompt-chips:${JSON.stringify({ chips })}-->\n${trimmed}`;
 }
 
 export function promptChipsToPlainText(chips: PromptChip[]): string {

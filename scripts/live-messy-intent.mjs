@@ -189,7 +189,7 @@ for (let i = 0; i < STEPS.length; i++) {
   await sleep(700);
 }
 
-const disk = path.join(process.env.USERPROFILE || '', 'Documents', 'ARK', 'Projects', NAME);
+const disk = path.join(process.env.USERPROFILE || '', 'Documents', 'NOVA Projects', NAME);
 try {
   const css = fs.readFileSync(path.join(disk, 'src', 'App.css'), 'utf8');
   const tsx = fs.readFileSync(path.join(disk, 'src', 'App.tsx'), 'utf8');

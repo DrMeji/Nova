@@ -84,9 +84,9 @@ async function searchGithubRepos(query: string): Promise<{
   sources: { title: string; url: string }[];
 }> {
   try {
-    if (window.arkDesktop?.webSearch) {
+    if (window.novaDesktop?.webSearch) {
       // Prefer the desktop search path; append a github-focused query.
-      const res = await window.arkDesktop.webSearch(`site:github.com ${query}`);
+      const res = await window.novaDesktop.webSearch(`site:github.com ${query}`);
       if (res?.ok && res.text) {
         return {
           ok: true,

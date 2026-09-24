@@ -14,9 +14,10 @@ export async function cloudGenerateImage(prompt: string): Promise<{
   const keys = getProviderApiKeys();
   const trimmed = String(prompt || '').slice(0, 3500);
 
-  // Free-key first: Hugging Face Inference (FLUX schnell when available)
+  // Free-key first: Hugging Face Inference (FLUX.1-dev → schnell)
   if (keys.huggingface && isCloudProviderEnabled('huggingface')) {
     const hosts = [
+      'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-dev',
       'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
       'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
     ];
@@ -34,12 +35,13 @@ export async function cloudGenerateImage(prompt: string): Promise<{
         if (!res.ok) continue;
         const dataUrl = binaryPayloadToDataUrl(res.data, 'image/png');
         if (!dataUrl) continue;
+        const via = /FLUX\.1-dev/i.test(url) ? 'FLUX.1-dev' : 'FLUX.1-schnell';
         return {
           dataUrl,
-          provider: 'Hugging Face · FLUX.1 schnell',
+          provider: `Hugging Face · ${via}`,
           tier: 'free-key',
           reply: [
-            'Cloud image · Hugging Face FLUX',
+            `Cloud image · Hugging Face ${via}`,
             '',
             `Prompt: “${trimmed.slice(0, 160)}”`,
             '',

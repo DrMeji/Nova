@@ -21,7 +21,7 @@
  * POST /api/chat
  * POST /api/generate
  *
- * Optional: set ARK_BRAIN_TOKEN and send Authorization: Bearer <token>
+ * Optional: set NOVA_BRAIN_TOKEN and send Authorization: Bearer <token>
  */
 
 export const BRAIN_CONTRACT_VERSION = '0.4.0';

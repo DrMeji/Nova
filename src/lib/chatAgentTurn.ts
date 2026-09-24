@@ -197,6 +197,17 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   ) {
     return true;
   }
+  // Bare App.jsx / main.tsx fix asks (no slash path) — still code edits.
+  if (
+    /\b(?:App|main|index)\.(?:jsx|tsx|js|ts|css)\b/i.test(t)
+    && /\b(?:fix|crash|syntax|typescript|react\.fc|error|upgrade|edit|change|remove|strip)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(?:fix|repair|heal)\b[\s\S]{0,100}\b(?:live|preview|crash(?:ing)?|syntax|babel|vite)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bremove\s+all\s+(?:ts|typescript)\s+types?\b/i.test(t)) return true;
   return false;
 }
 

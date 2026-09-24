@@ -16,7 +16,7 @@ import {
   ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone,
 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
-import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
@@ -26,7 +26,7 @@ import {
   loadPluginState,
   runPluginAction,
 } from '@/lib/plugins';
-import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel } from '@/lib/novaRouter';
 import { buildRouterHistory, looksLikePromptEcho, looksLikeUserAskEcho } from '@/lib/chatHistory';
 import {
   autoEquippedCaption,
@@ -114,8 +114,8 @@ import { estimateTokens, getTokenUsageRatio, resetTokenUsage, syncTokenUsage } f
 import { getModelHealthRatio, recordModelTurn } from '@/lib/modelHealth';
 import { applyFilesInBatches, yieldFrame } from '@/lib/chunkedImport';
 import { prepareBrainRotation } from '@/lib/modelRotation';
-import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/arkEngine';
-import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/arkCapacity';
+import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/novaEngine';
+import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/novaCapacity';
 import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
 import {
   buildInspectPrompt,
@@ -138,7 +138,7 @@ import {
   wantsNamedPatch,
   type SearchHit,
 } from '@/lib/projectInspect';
-import { gitPush, gitCommit, gitStatus, gitClone, gitPull, githubCloneUrl, parseGithubRemote, formatGitReview, type GitStatus } from '@/lib/arkGitClient';
+import { gitPush, gitCommit, gitStatus, gitClone, gitPull, githubCloneUrl, parseGithubRemote, formatGitReview, type GitStatus } from '@/lib/novaGitClient';
 import {
   githubToken,
   needGithubWrite,
@@ -216,7 +216,8 @@ const BUILD_STEP_ORDER: BuildLiveStep[] = ['understand', 'plan', 'generate', 'ap
 function packDiskFiles(files: Record<string, string>, messages?: ChatMessage[]) {
   const payloadFiles: Record<string, string> = { ...flattenProjectFiles(files) };
   delete payloadFiles[PROJECT_CHAT_FILE];
-  delete payloadFiles['ark-meta.json'];
+  delete payloadFiles['nova-meta.json'];
+  delete payloadFiles['nova-meta.json'];
   if (messages?.some(m => String(m.content || '').trim())) {
     payloadFiles[PROJECT_CHAT_FILE] = serializeProjectThread(messages);
   }
@@ -228,8 +229,8 @@ function preferredLiveEditPath(paths: string[]): string | undefined {
   const live = paths.filter(p => !skip.test(p));
   return live.find(p => /ContentView\.swift$|MainActivity\.kt$/i.test(p))
     || live.find(p => /\.(swift|kt)$/i.test(p))
-    || live.find(p => /\.(tsx|jsx|css|html|py|ts|js)$/i.test(p) && !/ark-preview/i.test(p))
-    || live.find(p => /ark-preview\.html$/i.test(p))
+    || live.find(p => /\.(tsx|jsx|css|html|py|ts|js)$/i.test(p) && !/nova-preview/i.test(p))
+    || live.find(p => /nova-preview\.html$/i.test(p))
     || live[0]
     || paths[0];
 }
@@ -479,7 +480,7 @@ export function ProjectWorkspace() {
     for (const [rel, content] of Object.entries(files)) {
       const norm = rel.replace(/\\/g, '/');
       const base = norm.includes('/') ? norm.split('/').pop()! : norm;
-      if (base === PROJECT_CHAT_FILE || base === 'ark-meta.json') continue;
+      if (base === PROJECT_CHAT_FILE || base === 'nova-meta.json' || base === 'nova-meta.json') continue;
       mapped[norm] = content;
     }
     const cleaned = prunePlaceholderJunk(mapped);
@@ -534,7 +535,7 @@ export function ProjectWorkspace() {
 
   const refreshGit = useCallback(async (id?: string) => {
     const pid = id || projectId;
-    if (!pid || !window.arkDesktop?.gitStatus) return;
+    if (!pid || !window.novaDesktop?.gitStatus) return;
     try {
       const st = await gitStatus(pid);
       setGitInfo(st);
@@ -620,7 +621,7 @@ export function ProjectWorkspace() {
     }
 
     // Prefer live Vite/npm for on-disk projects — never serve raw JSX via static previewStart.
-    if (diskRoot && window.arkDesktop?.agentStartFolderPreview) {
+    if (diskRoot && window.novaDesktop?.agentStartFolderPreview) {
       try {
         const { ensureBoundFolderPreview } = await import('@/lib/projectPreview');
         const live = await ensureBoundFolderPreview({
@@ -642,14 +643,14 @@ export function ProjectWorkspace() {
       }
     }
 
-    if (!window.arkDesktop?.previewStart) return false;
+    if (!window.novaDesktop?.previewStart) return false;
     const payloadFiles = packDiskFiles(nextFiles, messagesRef.current);
     const composed = composePreviewHtml(nextFiles);
     if (!payloadFiles['index.html'] && composed) payloadFiles['index.html'] = composed;
-    if (!payloadFiles['index.html'] && payloadFiles['ark-preview.html']) {
-      payloadFiles['index.html'] = payloadFiles['ark-preview.html'];
+    if (!payloadFiles['index.html'] && payloadFiles['nova-preview.html']) {
+      payloadFiles['index.html'] = payloadFiles['nova-preview.html'];
     }
-    const res = await window.arkDesktop.previewStart({
+    const res = await window.novaDesktop.previewStart({
       projectId: pid,
       projectName: project?.name,
       files: payloadFiles,
@@ -659,8 +660,8 @@ export function ProjectWorkspace() {
     setLivePreviewUrl(bust);
     setPreviewUrl(bust);
     setPreviewReady(true);
-    if (window.arkDesktop.previewOpenWindow) {
-      await window.arkDesktop.previewOpenWindow({
+    if (window.novaDesktop.previewOpenWindow) {
+      await window.novaDesktop.previewOpenWindow({
         projectId: pid,
         url: bust,
         title: d ? `${d.label} · ${d.width}×${d.height}` : `${project?.name || 'NOVA'} preview`,
@@ -788,14 +789,14 @@ export function ProjectWorkspace() {
   // Attach-only: if main already owns a preview for this cwd, reuse URL (no second Vite).
   useEffect(() => {
     const root = diskRoot || workspace.diskRoot;
-    if (!root || !window.arkDesktop?.previewSession) {
+    if (!root || !window.novaDesktop?.previewSession) {
       setSessionPreviewUrl(null);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const session = await window.arkDesktop?.previewSession?.(root);
+        const session = await window.novaDesktop?.previewSession?.(root);
         if (cancelled) return;
         if (session?.ok && session.url && !isPlaceholderPreviewUrl(session.url)) {
           setSessionPreviewUrl(session.url);
@@ -1049,13 +1050,13 @@ export function ProjectWorkspace() {
     }
   }, [projectId]);
 
-  // Load / persist project files on disk (NOVA userData/ark-projects)
+  // Load / persist project files on disk (NOVA userData/nova-projects)
   useEffect(() => {
-    if (!projectId || !window.arkDesktop?.projectRead) return;
+    if (!projectId || !window.novaDesktop?.projectRead) return;
     let cancelled = false;
     void (async () => {
       try {
-        const res = await window.arkDesktop!.projectRead!(projectId);
+        const res = await window.novaDesktop!.projectRead!(projectId);
         if (cancelled) return;
         if (res.root) setDiskRoot(res.root);
         setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
@@ -1068,7 +1069,7 @@ export function ProjectWorkspace() {
               diskChat = parseProjectThread(content);
               continue;
             }
-            if (base === 'ark-meta.json') continue;
+            if (base === 'nova-meta.json' || base === 'nova-meta.json') continue;
             mapped[rel.replace(/\\/g, '/')] = content;
           }
         }
@@ -1267,8 +1268,8 @@ export function ProjectWorkspace() {
       ignoreEnterUntilRef.current = Date.now() + 600;
     };
     const openApi = mode === 'import'
-      ? window.arkDesktop?.projectImportFolder
-      : window.arkDesktop?.workspaceOpenRoot;
+      ? window.novaDesktop?.projectImportFolder
+      : window.novaDesktop?.workspaceOpenRoot;
     if (!openApi) {
       codeFolderInputRef.current?.click();
       return;
@@ -1302,7 +1303,7 @@ export function ProjectWorkspace() {
           skipped: (res as { skipped?: { env?: number; large?: number; binary?: number; limit?: number } }).skipped,
         });
       } else {
-        const read = await window.arkDesktop?.projectRead?.(pid);
+        const read = await window.novaDesktop?.projectRead?.(pid);
         if (read?.files && Object.keys(read.files).length) {
           await applyOpened(read.files, {
             name: res.name,
@@ -1332,7 +1333,7 @@ export function ProjectWorkspace() {
   const enterPathAndOpen = async () => {
     const typed = window.prompt('Folder path on this PC (e.g. D:\\Projects\\MyApp):');
     if (!typed?.trim()) return;
-    const stat = await window.arkDesktop?.workspaceStatPath?.(typed.trim());
+    const stat = await window.novaDesktop?.workspaceStatPath?.(typed.trim());
     if (!stat?.ok || !stat.isDirectory) {
       window.alert(stat?.error || 'That path is not a folder.');
       return;
@@ -1365,7 +1366,7 @@ export function ProjectWorkspace() {
     };
     window.addEventListener('NOVA:project-import-progress', onProg);
     try {
-      const res = await window.arkDesktop?.gitCloneOpen?.({
+      const res = await window.novaDesktop?.gitCloneOpen?.({
         projectId: pid,
         projectName: project?.name,
         url: url.trim(),
@@ -1484,15 +1485,15 @@ export function ProjectWorkspace() {
   }, [myAccess, project?.id, projectId]);
 
   const pickCodePhotos = async () => {
-    if (!window.arkDesktop?.pickFiles) return;
-    const res = await window.arkDesktop.pickFiles({ imagesOnly: true });
+    if (!window.novaDesktop?.pickFiles) return;
+    const res = await window.novaDesktop.pickFiles({ imagesOnly: true });
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachCodeImagesFromPaths(res.paths);
   };
 
   const pickCodeFiles = async () => {
-    if (!window.arkDesktop?.pickFiles) return;
-    const res = await window.arkDesktop.pickFiles();
+    if (!window.novaDesktop?.pickFiles) return;
+    const res = await window.novaDesktop.pickFiles();
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachCodeFilesFromPaths(res.paths);
   };
@@ -1504,7 +1505,7 @@ export function ProjectWorkspace() {
   const attachCodeImagesFromPaths = async (paths: string[]) => {
     const next: { id: string; url: string; name: string }[] = [];
     for (const abs of paths.slice(0, 4)) {
-      const data = await window.arkDesktop?.readDataUrl?.(abs);
+      const data = await window.novaDesktop?.readDataUrl?.(abs);
       if (data?.ok && data.dataUrl) {
         next.push({
           id: `img-${crypto.randomUUID().slice(0, 8)}`,
@@ -1534,7 +1535,7 @@ export function ProjectWorkspace() {
         await attachCodeImagesFromPaths([abs]);
         continue;
       }
-      const read = await window.arkDesktop?.readTextFile?.({ path: abs });
+      const read = await window.novaDesktop?.readTextFile?.({ path: abs });
       files[base] = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
     }
     if (Object.keys(files).length) {
@@ -1594,7 +1595,7 @@ export function ProjectWorkspace() {
       }]);
       return;
     }
-    const read = await window.arkDesktop?.projectRead?.(pid);
+    const read = await window.novaDesktop?.projectRead?.(pid);
     if (read?.files) applyProjectFiles(read.files);
     if (read?.root) setDiskRoot(read.root);
     touchRecentProject(pid, repo.name);
@@ -1626,7 +1627,7 @@ export function ProjectWorkspace() {
         postAssistantNote(pulled.error || 'Pull failed.');
         return;
       }
-      const read = await window.arkDesktop?.projectRead?.(projectId);
+      const read = await window.novaDesktop?.projectRead?.(projectId);
       if (read?.files) applyProjectFiles(read.files);
       postAssistantNote(pulled.message || 'Pulled latest from origin.');
       await refreshGit(projectId);
@@ -1757,7 +1758,7 @@ export function ProjectWorkspace() {
     if (gitInfo?.remote && !window.confirm('This folder already has a GitHub remote. Create a new repo anyway?')) {
       return;
     }
-    const defaultName = repoNameFromProject(project?.name || 'ark-project');
+    const defaultName = repoNameFromProject(project?.name || 'nova-project');
     const name = window.prompt('Repository name on GitHub:', defaultName)?.trim();
     if (!name) return;
     const isPrivate = window.confirm('Create as private repo? (Cancel = public)');
@@ -1922,8 +1923,8 @@ export function ProjectWorkspace() {
           projectName: offlineLabel,
           files: packDiskFiles(applied.files, [...messagesRef.current, userOffline]),
         }).then(res => { if (res.root) setDiskRoot(res.root); });
-        if (window.arkDesktop?.previewStart) {
-          void window.arkDesktop.previewStart({
+        if (window.novaDesktop?.previewStart) {
+          void window.novaDesktop.previewStart({
             projectId: offlinePid,
             projectName: offlineLabel,
             files: packDiskFiles(applied.files, messagesRef.current),
@@ -2286,8 +2287,8 @@ export function ProjectWorkspace() {
         setSandboxNote(err instanceof Error ? err.message : 'Could not save project files');
         window.setTimeout(() => setSandboxNote(null), 5000);
       });
-      if (changedPaths.length && !native && window.arkDesktop?.previewStart) {
-        void window.arkDesktop.previewStart({
+      if (changedPaths.length && !native && window.novaDesktop?.previewStart) {
+        void window.novaDesktop.previewStart({
           projectId: pid,
           projectName: buildLabel,
           files: packDiskFiles(cleaned, messagesRef.current),
@@ -2436,7 +2437,7 @@ export function ProjectWorkspace() {
           replyText = studio.reply;
           provider = 'NOVA';
           if (studio.reload) {
-            const read = await window.arkDesktop?.projectRead?.(pid);
+            const read = await window.novaDesktop?.projectRead?.(pid);
             if (read?.files) applyProjectFiles(read.files);
             if (read?.root) setDiskRoot(read.root);
           }
@@ -3092,8 +3093,8 @@ export function ProjectWorkspace() {
     if (buildRunning) {
       setBuildRunning(false);
       setBuildProgress(0);
-      if (project && window.arkDesktop?.previewStop) {
-        void window.arkDesktop.previewStop(project.id);
+      if (project && window.novaDesktop?.previewStop) {
+        void window.novaDesktop.previewStop(project.id);
       }
       return;
     }
@@ -3110,7 +3111,7 @@ export function ProjectWorkspace() {
           || (native
             ? (resolveDevices(inferMobileTargetFromFiles(fileContents) || 'ios', '').ios || null)
             : null);
-        if (window.arkDesktop?.previewStart && project) {
+        if (window.novaDesktop?.previewStart && project) {
           const ok = await refreshLivePreview(fileContents, device);
           if (!ok) {
             setBuildProgress(0);
@@ -3122,7 +3123,7 @@ export function ProjectWorkspace() {
         }
         const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
         const composed = composePreviewHtml(fileContents);
-        const html = composed || payloadFiles['ark-preview.html'] || payloadFiles['index.html'] || '';
+        const html = composed || payloadFiles['nova-preview.html'] || payloadFiles['index.html'] || '';
           const blob = new Blob([html], { type: 'text/html' });
           const url = URL.createObjectURL(blob);
           setLivePreviewUrl(url);
@@ -3346,14 +3347,14 @@ export function ProjectWorkspace() {
         }`}
         aria-hidden={!dragOverCode}
       >
-        <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
+        <div className="rounded-2xl border border-sky-400/40 bg-nova-navy-900/95 px-6 py-4 text-center shadow-xl">
           <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
         </div>
       </div>
       {/* Header */}
-      <div className="shrink-0 border-b border-surface-border px-3 sm:px-4 py-2 flex items-center justify-between gap-2 sm:gap-3 bg-ark-navy-900/30 pr-24 sm:pr-28 min-w-0">
+      <div className="shrink-0 border-b border-surface-border px-3 sm:px-4 py-2 flex items-center justify-between gap-2 sm:gap-3 bg-nova-navy-900/30 pr-24 sm:pr-28 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
-          <button type="button" onClick={() => navigate({ name: 'projects' })} className="ark-btn-ghost text-xs shrink-0">
+          <button type="button" onClick={() => navigate({ name: 'projects' })} className="nova-btn-ghost text-xs shrink-0">
             Projects
           </button>
           <ChevronRight className="w-3 h-3 text-content-tertiary shrink-0" />
@@ -3393,7 +3394,7 @@ export function ProjectWorkspace() {
               {githubMenuOpen && (
                 <>
                   <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label="Close menu" onClick={() => setGithubMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl py-1">
+                  <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-lg border border-surface-border bg-nova-navy-900 shadow-xl py-1">
                     <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); void cloneFromUrl(); }}>Clone from URL…</button>
                     <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); setGithubPickerOpen(true); }}>My repositories…</button>
                     <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); void headerGitStatus(); }}>Git status</button>
@@ -3458,7 +3459,7 @@ export function ProjectWorkspace() {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {explorerOpen && (
           <>
-            <div className="shrink-0 flex flex-col bg-ark-navy-900/20 overflow-hidden min-w-0 max-w-[38vw]" style={{ width: explorerWidth }}>
+            <div className="shrink-0 flex flex-col bg-nova-navy-900/20 overflow-hidden min-w-0 max-w-[38vw]" style={{ width: explorerWidth }}>
               <div className="shrink-0 px-2 py-2 border-b border-surface-border/60">
                 {buildLive ? (
                   <div className="min-w-0">
@@ -3565,7 +3566,7 @@ export function ProjectWorkspace() {
               )}
               {creating && (
                 <div className="px-2 pb-2">
-                  <div className="rounded-lg border border-surface-border bg-ark-navy-950/80 p-2">
+                  <div className="rounded-lg border border-surface-border bg-nova-navy-950/80 p-2">
                     <p className="text-[10px] text-content-tertiary mb-1">
                       New {creating.kind} in {creating.parentPath || 'root'}
                     </p>
@@ -3611,7 +3612,7 @@ export function ProjectWorkspace() {
 
         {/* Chat center. hidden when opened from Chat Code pill (planning stays in Chat) */}
         {showWorkspaceChat && (
-        <div className="flex-1 min-w-0 flex flex-col bg-ark-navy-950">
+        <div className="flex-1 min-w-0 flex flex-col bg-nova-navy-950">
           {/* Compact toolbar. no permanent NOVA Agent header */}
           <div className="shrink-0 h-10 px-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -3662,7 +3663,7 @@ export function ProjectWorkspace() {
           </div>
 
           {changesOpen && (
-            <div className="shrink-0 border-b border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
+            <div className="shrink-0 border-b border-surface-border bg-nova-navy-900/40 px-3 py-2.5">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[11px] text-content-secondary">Uncommitted file edits</p>
                 <button
@@ -3703,7 +3704,7 @@ export function ProjectWorkspace() {
           )}
 
           {showHistory && (
-            <div className="shrink-0 border-b border-surface-border bg-ark-navy-900/40 px-3 py-2.5 max-h-40 overflow-y-auto">
+            <div className="shrink-0 border-b border-surface-border bg-nova-navy-900/40 px-3 py-2.5 max-h-40 overflow-y-auto">
               <p className="text-[11px] text-content-secondary mb-2">Build runs</p>
               {runHistory.length === 0 ? (
                 <p className="text-[11px] text-content-tertiary">
@@ -3741,7 +3742,7 @@ export function ProjectWorkspace() {
                   </div>
                 ) : null}
                 <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm text-content-primary ${
-                  msg.role === 'user' ? 'bg-surface-hover' : 'bg-ark-navy-900 border border-surface-border'
+                  msg.role === 'user' ? 'bg-surface-hover' : 'bg-nova-navy-900 border border-surface-border'
                 }`}>
                   {msg.role === 'assistant' && buildLive?.assistantId === msg.id ? (
                     <BuildProgressBubble
@@ -3793,7 +3794,7 @@ export function ProjectWorkspace() {
                   ) : (
                     <div>
                     {msg.content && isLikelyErrorMessage(msg.content)
-                      ? <ArkErrorInline message={msg.content} />
+                      ? <NovaErrorInline message={msg.content} />
                       : msg.content
                         ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />
                         : <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
@@ -3991,7 +3992,7 @@ export function ProjectWorkspace() {
               </div>
             )}
             <div className="flex gap-2 min-w-0 items-end">
-            <div className="flex-1 min-w-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/90 overflow-hidden">
+            <div className="flex-1 min-w-0 flex flex-col rounded-2xl border border-surface-border bg-nova-navy-900/90 overflow-hidden">
               {attachedImages.length > 0 && (
                 <div className="px-3 pt-2 text-[10px] text-content-tertiary">
                   {attachedImages.length} image{attachedImages.length === 1 ? '' : 's'} in chat. send a message to ask about {attachedImages.length === 1 ? 'it' : 'them'}
@@ -4217,7 +4218,7 @@ export function ProjectWorkspace() {
                   {modelMenuOpen && menuPos && createPortal(
                     <div
                       ref={modelMenuRef}
-                      className="w-64 max-h-72 overflow-y-auto rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-1.5"
+                      className="w-64 max-h-72 overflow-y-auto rounded-xl border border-surface-border bg-nova-navy-900 shadow-2xl py-1.5"
                       style={{
                         position: 'fixed',
                         left: menuPos.left,
@@ -4257,7 +4258,7 @@ export function ProjectWorkspace() {
                             <span className="block text-sm text-content-primary truncate">{model.name}</span>
                             <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
                           </span>
-                          {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
+                          {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
                   </button>
                       ))}
                     </div>,
@@ -4279,7 +4280,7 @@ export function ProjectWorkspace() {
                       onClick={() => void handleSendChat()}
                       disabled={(!chatInput.trim() && attachedImages.length === 0) || (!canEdit && !isExplainAsk(chatInput) && !wantsInspectOnly(chatInput, composerMode === 'debug'))}
                       title={!canEdit ? 'Read access. inspect/explain only' : 'Send'}
-                      className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="w-8 h-8 rounded-full bg-content-primary text-nova-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                 </button>
@@ -4310,14 +4311,14 @@ export function ProjectWorkspace() {
           <>
             {showWorkspaceChat && <ExplorerDivider />}
             <div
-              className={`flex flex-col min-h-0 min-w-0 bg-ark-navy-900/15 overflow-hidden transition-shadow ${
+              className={`flex flex-col min-h-0 min-w-0 bg-nova-navy-900/15 overflow-hidden transition-shadow ${
                 showWorkspaceChat ? 'shrink-0 max-w-[48vw]' : 'flex-1'
               } ${
                 fileFlash ? 'ring-2 ring-sky-400/50 ring-inset' : ''
               }`}
               style={showWorkspaceChat ? { width: codeWidth } : undefined}
             >
-              <div className="shrink-0 flex items-center justify-between px-2 h-9 bg-ark-navy-900/30">
+              <div className="shrink-0 flex items-center justify-between px-2 h-9 bg-nova-navy-900/30">
                 <div className="flex items-center gap-1 min-w-0">
                   <button
                     type="button"
@@ -4448,7 +4449,7 @@ export function ProjectWorkspace() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 min-h-0 bg-ark-navy-950 relative">
+                <div className="flex-1 min-h-0 bg-nova-navy-950 relative">
                   {isNativeMobileTree(fileContents) ? (
                     previewDevice && livePageHtml ? (
                       <DevicePreview device={previewDevice} html={livePageHtml} />
@@ -4545,11 +4546,11 @@ export function ProjectWorkspace() {
 
       {/* Status strip. only meaningful activity */}
       {(buildLabel || showBrowserChrome || !explorerOpen || !codeOpen) ? (
-      <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
+      <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-nova-navy-900/40">
         <div className="flex items-center gap-3 min-w-0 text-[11px]">
             {buildLabel && (
           <span className="inline-flex items-center gap-1.5 text-content-secondary">
-                <span className={`w-1.5 h-1.5 rounded-full ${buildRunning ? 'bg-amber-400' : 'bg-ark-accent-green'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${buildRunning ? 'bg-amber-400' : 'bg-nova-accent-green'}`} />
             {buildLabel}
           </span>
             )}
@@ -4595,7 +4596,7 @@ export function ProjectWorkspace() {
           Revert replaces that prompt and rebuilds the files on the right from the new message.
         </p>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="ark-btn-ghost text-xs" onClick={() => setRevertPrompt(null)}>
+          <button type="button" className="nova-btn-ghost text-xs" onClick={() => setRevertPrompt(null)}>
             Cancel
           </button>
           <button

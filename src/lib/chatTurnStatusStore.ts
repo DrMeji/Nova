@@ -2,12 +2,18 @@
  * Live turn status outside the messages array — avoids remounting chat on every status tick.
  */
 
+export type ChatTurnStatusStep = {
+  label: string;
+  /** ms since epoch when this step became current */
+  at: number;
+};
+
 export type ChatTurnStatus = {
   chatId: string;
   assistantId: string;
   label: string;
-  /** Recent status lines for the clickable dropdown (newest last). */
-  history: string[];
+  /** Recent status steps for the clickable dropdown (newest last). */
+  history: ChatTurnStatusStep[];
   /** File path currently being written (Code overlay follows this while generating). */
   writingPath?: string | null;
 };
@@ -25,20 +31,38 @@ export function getChatTurnStatus(): ChatTurnStatus | null {
   return current;
 }
 
-export function setChatTurnStatus(next: ChatTurnStatus | null): void {
+function historyLabelsEqual(a: ChatTurnStatusStep[], b: ChatTurnStatusStep[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].label !== b[i].label || a[i].at !== b[i].at) return false;
+  }
+  return true;
+}
+
+export function setChatTurnStatus(
+  next: (Omit<ChatTurnStatus, 'history'> & {
+    history?: Array<string | ChatTurnStatusStep>;
+  }) | null,
+): void {
   const prev = current;
+  const normalized: ChatTurnStatus | null = next
+    ? {
+        ...next,
+        history: normalizeStatusHistory(next.history, next.label),
+      }
+    : null;
   if (
     prev
-    && next
-    && prev.chatId === next.chatId
-    && prev.assistantId === next.assistantId
-    && prev.label === next.label
-    && (prev.writingPath || null) === (next.writingPath || null)
-    && prev.history.length === next.history.length
+    && normalized
+    && prev.chatId === normalized.chatId
+    && prev.assistantId === normalized.assistantId
+    && prev.label === normalized.label
+    && (prev.writingPath || null) === (normalized.writingPath || null)
+    && historyLabelsEqual(prev.history, normalized.history)
   ) {
     return;
   }
-  current = next;
+  current = normalized;
   emit();
 }
 
@@ -49,8 +73,10 @@ export function inferWritingPathFromLabel(label: string): string | null {
   if (/App\.css|styles?\b.*App\.css|Linking App\.css|Writing src\/App\.css|Coding src\/App\.css/i.test(t)) {
     return 'src/App.css';
   }
-  if (/App\.(tsx|jsx)\b|Coding the product|Writing src\/App\.(tsx|jsx)|layout, sections/i.test(t)) {
-    return 'src/App.tsx';
+  const named = t.match(/\b(src\/App\.(?:jsx|tsx))\b/i);
+  if (named?.[1]) return named[1];
+  if (/Coding the product|Writing src\/App\.(?:tsx|jsx)|layout, sections/i.test(t)) {
+    return null;
   }
   if (/index\.html/i.test(t)) return 'index.html';
   if (/package\.json/i.test(t)) return 'package.json';
@@ -65,6 +91,36 @@ export function inferWritingPathFromLabel(label: string): string | null {
   return null;
 }
 
+/** Normalize legacy string[] history from older call sites. */
+export function normalizeStatusHistory(
+  history: Array<string | ChatTurnStatusStep> | undefined,
+  fallbackLabel?: string,
+): ChatTurnStatusStep[] {
+  const now = Date.now();
+  if (!history?.length) {
+    const label = String(fallbackLabel || '').trim();
+    return label ? [{ label, at: now }] : [];
+  }
+  return history.map((h, i) => {
+    if (typeof h === 'string') {
+      return { label: h.replace(/\u2014/g, ':'), at: now - (history.length - 1 - i) * 1000 };
+    }
+    return {
+      label: String(h.label || '').replace(/\u2014/g, ':'),
+      at: typeof h.at === 'number' ? h.at : now,
+    };
+  });
+}
+
+/** Strip markdown stars and name each hop in plain language. */
+export function plainStatusLabel(label: string): string {
+  let t = String(label || '').replace(/\*\*/g, '').replace(/\u2014/g, ':').replace(/\s+/g, ' ').trim();
+  t = t.replace(/^Using\s+(.+?)\s+for this build…?$/i, 'Craft · $1');
+  t = t.replace(/^(Plan|Style|Verify)\s+hop\s*·\s*/i, '$1 · ');
+  t = t.replace(/…+$/g, '');
+  return t || 'Thinking…';
+}
+
 /** Push a status label, appending to history (dedupe consecutive). */
 export function pushChatTurnStatus(opts: {
   chatId: string;
@@ -72,16 +128,21 @@ export function pushChatTurnStatus(opts: {
   label: string;
   writingPath?: string | null;
 }): void {
-  const clean = String(opts.label || '').trim().replace(/\u2014/g, ':') || 'Thinking…';
+  const clean = plainStatusLabel(opts.label);
   const prev = current;
   const sameTurn = prev
     && prev.chatId === opts.chatId
     && prev.assistantId === opts.assistantId;
   const history = sameTurn ? [...prev.history] : [];
-  if (!history.length || history[history.length - 1] !== clean) {
-    history.push(clean);
+  const last = history[history.length - 1];
+  const now = Date.now();
+  if (!last || last.label !== clean) {
+    // Keep wall-clock gaps honest: never stamp two steps at the exact same ms.
+    const at = last && now <= last.at ? last.at + 1 : now;
+    history.push({ label: clean, at });
   }
-  while (history.length > 28) history.shift();
+  // Keep the full turn — do not drop early "3m" steps mid-build.
+  while (history.length > 240) history.shift();
   const inferred = inferWritingPathFromLabel(clean);
   setChatTurnStatus({
     chatId: opts.chatId,
@@ -97,11 +158,55 @@ export function pushChatTurnStatus(opts: {
 export function clearChatTurnStatus(assistantId?: string): void {
   if (!current) return;
   if (assistantId && current.assistantId !== assistantId) return;
+  // Keep a finished snapshot so the step list + timers remain after the bubble settles.
+  // Always end on "Done" — never freeze a mid-flight label like "Final pass…" as the live step.
+  if (current.history?.length) {
+    const history = [...current.history];
+    const last = history[history.length - 1];
+    if (!last || !/^done$/i.test(String(last.label || ''))) {
+      history.push({ label: 'Done', at: Date.now() });
+    }
+    finishedByAssistant.set(current.assistantId, {
+      ...current,
+      label: 'Done',
+      history,
+      writingPath: null,
+    });
+  }
   current = null;
   emit();
 }
 
-export function subscribeChatTurnStatus(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
+/** Drop a settled step snapshot (e.g. Try again) so Done does not stick on plain chat. */
+export function forgetFinishedChatTurnStatus(assistantId?: string): void {
+  if (!assistantId) {
+    finishedByAssistant.clear();
+  } else {
+    finishedByAssistant.delete(assistantId);
+  }
+  emit();
+}
+
+const finishedByAssistant = new Map<string, ChatTurnStatus>();
+
+/** Steps from a completed turn (survives clear so the dropdown history does not vanish). */
+export function getFinishedChatTurnStatus(assistantId?: string | null): ChatTurnStatus | null {
+  if (!assistantId) return null;
+  return finishedByAssistant.get(assistantId) || null;
+}
+
+export function subscribeChatTurnStatus(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
+/** Format a step duration for the progress dropdown (e.g. &lt;1s, 12s, 1m 05s). */
+export function formatStepDurationMs(ms: number): string {
+  const safe = Math.max(0, ms);
+  if (safe > 0 && safe < 1000) return '<1s';
+  const n = Math.floor(safe / 1000);
+  if (n < 60) return `${n}s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
 }

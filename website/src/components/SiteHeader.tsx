@@ -1,7 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
-import { ArkMark } from './ArkMark';
+import { NovaMark } from './NovaMark';
 import { ProfileMenu } from './ProfileMenu';
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -17,7 +17,7 @@ export function SiteHeader() {
     <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--header-bg)] backdrop-blur-xl">
       <div className="mx-auto max-w-6xl px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2.5 min-w-0 text-[var(--fg)]">
-          <ArkMark size={30} className="shrink-0" />
+          <NovaMark size={30} className="shrink-0" />
           <span className="display text-lg font-semibold tracking-tight">NOVA</span>
         </Link>
 

@@ -138,7 +138,7 @@ if (!reply) throw new Error('create timed out');
 
 const roots = [
   path.join(os.homedir(), 'Documents', 'NOVA Projects', SLUG),
-  path.join(os.homedir(), 'Documents', 'ARK', 'Projects', SLUG),
+  path.join(os.homedir(), 'Documents', 'NOVA Projects', SLUG),
 ];
 const disk = roots.find((p) => fs.existsSync(p));
 if (!disk) {

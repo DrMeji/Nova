@@ -19,7 +19,7 @@ import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { skillPromptAppendix } from '@/lib/novaSkills';
 import { detectProjectKind } from '@/lib/projectKind';
 import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
-import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
+import { applyAgentPatches, parseAgentPatches } from '@/lib/novaAgentPatch';
 import { isSandboxBlockedPath } from '@/lib/agentSandbox';
 
 export type ChatApplyResult = {
@@ -59,7 +59,7 @@ async function writeViaDiskRoot(
   diskRoot: string,
   files: Record<string, string>,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!window.arkDesktop?.workspaceWriteFile) {
+  if (!window.novaDesktop?.workspaceWriteFile) {
     return { ok: false, error: 'Project write unavailable' };
   }
   for (const [rel, content] of Object.entries(files)) {
@@ -70,7 +70,7 @@ async function writeViaDiskRoot(
     if (!isUnderDiskRoot(diskRoot, targetPath)) {
       return { ok: false, error: `Path escapes project folder: ${rel}` };
     }
-    const written = await window.arkDesktop.workspaceWriteFile({
+    const written = await window.novaDesktop.workspaceWriteFile({
       targetPath,
       content,
     });
@@ -79,9 +79,9 @@ async function writeViaDiskRoot(
     }
     // Confirm bytes landed (dotted folder names / grant paths can silently miss).
     // IPC returns `{ ok, text }` — NOT `content` (that always failed verify and blocked edits).
-    if (window.arkDesktop.readTextFile && /\.(?:jsx?|tsx?|css|html|json)$/i.test(rel)) {
+    if (window.novaDesktop.readTextFile && /\.(?:jsx?|tsx?|css|html|json)$/i.test(rel)) {
       try {
-        const check = await window.arkDesktop.readTextFile({ path: targetPath });
+        const check = await window.novaDesktop.readTextFile({ path: targetPath });
         const got = typeof check?.text === 'string' ? check.text : '';
         if (!check?.ok) {
           return { ok: false, error: `Write verify failed for ${rel}` };
@@ -103,7 +103,7 @@ async function writeViaDiskRoot(
 
 async function listDirItems(abs: string): Promise<{ name: string; isDirectory?: boolean; isFile?: boolean }[]> {
   try {
-    const listing = await window.arkDesktop?.listDir?.(abs);
+    const listing = await window.novaDesktop?.listDir?.(abs);
     const raw = listing as {
       items?: { name?: string; kind?: string; isDirectory?: boolean; isFile?: boolean }[];
       entries?: { name?: string; kind?: string; isDirectory?: boolean; isFile?: boolean }[];
@@ -129,7 +129,7 @@ async function listDirItems(abs: string): Promise<{ name: string; isDirectory?: 
 
 /** Walk src/ (and a few roots) so follow-up edits see more than a fixed App.jsx list. */
 async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
-  if (!window.arkDesktop?.readTextFile) return {};
+  if (!window.novaDesktop?.readTextFile) return {};
   const out: ProjectFileMap = {};
   const maxFiles = 80;
   const codeRe = /\.(jsx?|tsx?|css|html|json|md)$/i;
@@ -138,7 +138,7 @@ async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMa
   const readRel = async (rel: string) => {
     if (Object.keys(out).length >= maxFiles) return;
     try {
-      const read = await window.arkDesktop!.readTextFile!({ path: joinDisk(diskRoot, rel) });
+      const read = await window.novaDesktop!.readTextFile!({ path: joinDisk(diskRoot, rel) });
       if (read?.ok && typeof read.text === 'string' && read.text.length < 400_000) {
         out[rel] = read.text;
       }
@@ -213,7 +213,7 @@ export async function applyChatReplyEdits(opts: {
   const appendix = skillPromptAppendix(rawUser, kind, {
     isEdit: Object.keys(opts.files || {}).length > 0,
     forCreateBuild: Object.keys(opts.files || {}).length === 0,
-    hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(rawUser),
+    hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|nova-media:/i.test(rawUser),
   });
   // Keep the original ask for micro-patches. the skills appendix is only for model scaffolding.
   const userMessageForParse = appendix && !/NOVA skills/i.test(rawUser)
@@ -454,12 +454,12 @@ export async function applyChatReplyEdits(opts: {
   }
 
   // Guarantee disk bytes for every claimed update (apply can report ok with a thinned map).
-  if (autoSave && opts.diskRoot && changed.length && window.arkDesktop?.workspaceWriteFile) {
+  if (autoSave && opts.diskRoot && changed.length && window.novaDesktop?.workspaceWriteFile) {
     for (const rel of changed) {
       const body = next[rel];
       if (typeof body !== 'string') continue;
       try {
-        await window.arkDesktop.workspaceWriteFile({
+        await window.novaDesktop.workspaceWriteFile({
           targetPath: joinDisk(opts.diskRoot, rel),
           content: body,
         });
@@ -514,10 +514,10 @@ export async function deleteChatWorkspacePath(opts: {
   projectId: string;
   relPath: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  if (!window.arkDesktop?.workspaceDeletePath) {
+  if (!window.novaDesktop?.workspaceDeletePath) {
     return { ok: false, error: 'Delete is only available in the desktop app.' };
   }
-  return window.arkDesktop.workspaceDeletePath({
+  return window.novaDesktop.workspaceDeletePath({
     projectId: opts.projectId,
     relPath: opts.relPath,
   });

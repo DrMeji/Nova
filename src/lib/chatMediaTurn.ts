@@ -6,7 +6,7 @@
 import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, getProviderApiKeys, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -28,11 +28,11 @@ import {
   needsImageBrief,
   parseImageRequest,
 } from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import { isVideoTabEnabled } from '@/lib/featurePark';
 import { runPluginAction } from '@/lib/plugins';
-import { engineGenerateCancel } from '@/lib/arkEngine';
+import { engineGenerateCancel } from '@/lib/novaEngine';
 import { getChatJobId } from '@/lib/chatInflight';
 import { classifyErrorMessage } from '@/lib/errors';
 import {
@@ -696,7 +696,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
           });
         }
         if (sideQuest) {
-          chatTurnCtlRef.current.pushStatus(looksLikeLyricsAsk(content) ? 'Checking lyrics…' : 'Looking that up…');
+          chatTurnCtlRef.current.pushStatus(looksLikeLyricsAsk(content) ? 'Checking lyrics…' : 'Thinking…');
           // Copyrighted lyrics: never let the local model invent a full paste.
           if (looksLikeLyricsAsk(content)) {
             response = honestLyricsUnavailableReply(content);
@@ -730,7 +730,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
         }
         let preferPerplexityForTurn = false;
         if (looksLikeWebGroundedAsk(content) && !looksLikeLyricsAsk(content)) {
-          chatTurnCtlRef.current.pushStatus('Looking that up…');
+          chatTurnCtlRef.current.pushStatus('Thinking…');
           try {
             const hit = await webSearchForChat(content);
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;

@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { pushLocalNotification, loadLocalNotifications } from '@/lib/localNotifications';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 
 const DISMISS_KEY = 'NOVA:post-login-safety-tip';
 const NOTICE_ID = 'post-login-safety';
@@ -22,11 +22,11 @@ export function PostLoginSafetyTip() {
       return;
     }
 
-    const forArkId = isArkDevEmail(user.email)
+    const forNovaId = isNovaDevEmail(user.email)
       ? 'DEV'
-      : (profile?.ark_id ? formatArkId(profile.ark_id) : undefined);
+      : (profile?.nova_id ? formatNovaId(profile.nova_id) : undefined);
 
-    const existing = loadLocalNotifications(forArkId).some(n => n.id === NOTICE_ID);
+    const existing = loadLocalNotifications(forNovaId).some(n => n.id === NOTICE_ID);
     if (existing) {
       try {
         localStorage.setItem(DISMISS_KEY, '1');
@@ -42,7 +42,7 @@ export function PostLoginSafetyTip() {
       title: "You're signed in",
       body:
         'If Windows shows a firewall, SmartScreen, or similar warning for NOVA or the local brain, you can minimize that window and keep using the app. Those prompts are normal on first run. They are not a failed login.',
-      forArkId,
+      forNovaId,
       unread: true,
     });
 
@@ -51,7 +51,7 @@ export function PostLoginSafetyTip() {
     } catch {
       /* ignore */
     }
-  }, [loading, bypass, user, profile?.ark_id]);
+  }, [loading, bypass, user, profile?.nova_id]);
 
   return null;
 }

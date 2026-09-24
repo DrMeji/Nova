@@ -4,7 +4,7 @@
  */
 
 import { loadHardwareSnapshot, parseRamGb, detectHardware } from '@/lib/api';
-import { engineGenerate, getEngineStatus } from '@/lib/arkEngine';
+import { engineGenerate, getEngineStatus } from '@/lib/novaEngine';
 import { packHistoryPrompt, usableAssistantText, type RouterChatTurn } from '@/lib/chatHistory';
 import {
   cloudChatFreeKeys,
@@ -80,7 +80,7 @@ async function tryLocalVoiceRoute(
   message: string,
   history: RouterChatTurn[],
 ): Promise<string | null> {
-  if (!window.arkDesktop?.engineGenerate) return null;
+  if (!window.novaDesktop?.engineGenerate) return null;
 
   let ranked: string[] = [];
   try {

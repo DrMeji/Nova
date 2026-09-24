@@ -9,7 +9,7 @@ import {
   engineDownloadError,
   engineDownloadProgress,
   getEngineStatus,
-} from '@/lib/arkEngine';
+} from '@/lib/novaEngine';
 import { notifyWorkDone, type ActivityKey } from '@/lib/activityIndicators';
 import { pushLocalNotification } from '@/lib/localNotifications';
 
@@ -86,7 +86,7 @@ async function tick(id: string) {
         body: 'Your local model finished downloading and is ready to use.',
       });
       try {
-        void window.arkDesktop?.engineSetModel?.(id);
+        void window.novaDesktop?.engineSetModel?.(id);
       } catch {
         /* warmup is best-effort */
       }
@@ -151,12 +151,12 @@ export async function startEngineDownload(opts: {
   id: string;
   name: string;
   source: 'models' | 'local-ai';
-  hunt?: { url: string; sizeGb: number; detail?: string; category?: 'coding' | 'chat' };
+  hunt?: { url: string; sizeGb: number; detail?: string; category?: 'coding' | 'chat' | 'design' | 'vision' | 'reasoning' };
   forceUnknownDisk?: boolean;
 }) {
-  if (!opts.forceUnknownDisk && window.arkDesktop?.engineDiskSpace) {
+  if (!opts.forceUnknownDisk && window.novaDesktop?.engineDiskSpace) {
     try {
-      const disk = await window.arkDesktop.engineDiskSpace();
+      const disk = await window.novaDesktop.engineDiskSpace();
       if (disk && disk.ok === false) {
         const ok = window.confirm(
           'Couldn\'t read free disk space on this PC. Continue download anyway? Large models need several GB.',
@@ -185,7 +185,7 @@ export async function startEngineDownload(opts: {
 
   try {
     if (opts.hunt) {
-      const registered = await window.arkDesktop?.engineRegisterHunt?.({
+      const registered = await window.novaDesktop?.engineRegisterHunt?.({
         id: opts.id,
         name: opts.name,
         url: opts.hunt.url,

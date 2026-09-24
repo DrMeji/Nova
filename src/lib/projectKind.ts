@@ -54,8 +54,8 @@ export function detectProjectKind(text: string): ProjectKind {
     return 'static-web';
   }
   if (/\b(node\s+cli|command\s+line\s+tool|cli\s+tool)\b/.test(lower)) return 'node-cli';
-  // Interactive product / game apps (including spatial / WebGL / canvas runners) → Vite React.
-  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app|3d|webgl|three\.?js|babylon|modeler|dinosaur|dino\s+runner|chrome\s+dino|habit|streak|tracker|netflix|twitch|streaming\s+app|billboard)\b/.test(lower)) {
+  // Interactive product / game / 3D / canvas apps → Vite React.
+  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app|3d|webgl|three\.?js|babylon|modeler|dinosaur|dino\s+runner|chrome\s+dino|habit|streak|tracker|netflix|twitch|streaming\s+app|billboard|game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man)\b/.test(lower)) {
     return 'vite-react';
   }
   if (/\b(website|site)\b/.test(lower) && /\b(react|vite|spa|dashboard|app)\b/.test(lower)) return 'vite-react';

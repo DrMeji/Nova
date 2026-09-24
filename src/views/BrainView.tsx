@@ -3,9 +3,9 @@
  * Models catalog lives in Models. Local engine tools live in Local AI.
  */
 import { useEffect, useState } from 'react';
-import { getEngineStatus, type ArkEngineStatus } from '@/lib/arkEngine';
+import { getEngineStatus, type ArkEngineStatus } from '@/lib/novaEngine';
 import { BrainApiCard } from '@/components/BrainApiCard';
-import { ArkMark } from '@/components/ArkMark';
+import { NovaMark } from '@/components/NovaMark';
 import { getBrainProfile, type BrainProfile } from '@/lib/brainProfile';
 import { useRouter } from '@/context/RouterContext';
 
@@ -31,7 +31,7 @@ export function BrainView() {
         });
       })
       .catch(() => setEngineSnap(null));
-    void window.arkDesktop?.appMeta?.()
+    void window.novaDesktop?.appMeta?.()
       .then((meta) => {
         if (meta?.userDataProfile) setUserDataProfile(String(meta.userDataProfile));
       })
@@ -49,7 +49,7 @@ export function BrainView() {
       <div className="min-h-full flex items-start justify-center px-4 sm:px-6 py-6 pt-[min(10vh,5rem)]">
         <div className="w-full max-w-xl space-y-4">
           <div className="flex items-center gap-3 mb-2">
-            <ArkMark className="w-9 h-9" title="NOVA Brain" />
+            <NovaMark className="w-9 h-9" title="NOVA Brain" />
             <div>
               <h1 className="text-xl font-semibold text-content-primary">NOVA Brain</h1>
               <p className="text-[12px] text-content-tertiary">

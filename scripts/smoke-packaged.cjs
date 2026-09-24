@@ -145,7 +145,7 @@ child.stdout.on('data', (d) => log('OUT ' + d.toString().trim()));
           url: location.href,
           rootLen: (root?.innerHTML || '').length,
           text: (root?.innerText || '').slice(0, 400),
-          hasArkDesktop: typeof window.arkDesktop !== 'undefined',
+          hasNovaDesktop: typeof window.novaDesktop !== 'undefined',
           readyState: document.readyState,
           title: document.title,
         };
@@ -158,7 +158,7 @@ child.stdout.on('data', (d) => log('OUT ' + d.toString().trim()));
     const ok =
       value &&
       value.readyState === 'complete' &&
-      value.hasArkDesktop === true &&
+      value.hasNovaDesktop === true &&
       value.rootLen > 50 &&
       !fatal &&
       /Sign in|Welcome|NOVA|BUILD/i.test(text);

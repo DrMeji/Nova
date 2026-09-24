@@ -53,6 +53,7 @@ export function sortModelsByCategoryThenSizeDesc<T extends {
 export const LOCAL_CATEGORY_ORDER = [
   'general',
   'coding',
+  'design',
   'reasoning',
   'fast',
   'vision',
@@ -62,6 +63,7 @@ export function categoryDisplayLabel(category: string | undefined, modelId?: str
   if (modelId === DEFAULT_ENGINE_MODEL_ID) return 'Default';
   const map: Record<string, string> = {
     coding: 'Coding',
+    design: 'Design',
     general: 'General',
     reasoning: 'Reasoning',
     vision: 'Vision',

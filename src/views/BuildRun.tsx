@@ -206,14 +206,14 @@ export function BuildRun() {
   };
 
   const startBrowserOAuth = async () => {
-    if (!selected || !window.arkDesktop?.pluginOAuthStart) {
+    if (!selected || !window.novaDesktop?.pluginOAuthStart) {
       setAuthError('Browser OAuth needs the desktop app.');
       return;
     }
     setAuthBusy(true);
     setAuthError('');
     try {
-      const result = await window.arkDesktop.pluginOAuthStart(selected.id);
+      const result = await window.novaDesktop.pluginOAuthStart(selected.id);
       if (result?.ok && result.accessToken) {
         setTokenDraft(result.accessToken);
         setVerifiedLogin(result.accountLabel || selected.name);
@@ -266,7 +266,7 @@ export function BuildRun() {
                     type="button"
                     onClick={() => setPluginShelf(id)}
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors ${
-                      pluginShelf === id ? 'bg-ark-navy-900 text-content-primary' : 'text-content-tertiary hover:text-content-secondary'
+                      pluginShelf === id ? 'bg-nova-navy-900 text-content-primary' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
                     {id === 'catalog' ? <Globe className="w-4 h-4 shrink-0" /> : <Download className="w-4 h-4 shrink-0" />}
@@ -324,7 +324,7 @@ export function BuildRun() {
                           </span>
                           <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                             runtime.installed
-                              ? 'bg-surface-hover text-ark-accent-green'
+                              ? 'bg-surface-hover text-nova-accent-green'
                               : 'text-content-secondary'
                           }`}>
                             {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -357,7 +357,7 @@ export function BuildRun() {
                         >
                           <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
                           {runtime.connected && (
-                            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-ark-navy-950" />
+                            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-nova-navy-950" />
                           )}
                         </button>
                       );
@@ -400,7 +400,7 @@ export function BuildRun() {
                         </span>
                         <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                           runtime.installed
-                            ? 'bg-surface-hover text-ark-accent-green'
+                            ? 'bg-surface-hover text-nova-accent-green'
                             : 'text-content-secondary'
                         }`}>
                           {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -452,11 +452,11 @@ export function BuildRun() {
 
       {selected && selectedRuntime && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-nova-navy-950/70 backdrop-blur-md"
           onClick={closePanel}
         >
           <div
-            className="w-full max-w-md max-h-[min(92vh,720px)] overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl flex flex-col animate-fade-in"
+            className="w-full max-w-md max-h-[min(92vh,720px)] overflow-hidden rounded-2xl border border-surface-border bg-nova-navy-900 shadow-2xl flex flex-col animate-fade-in"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -521,12 +521,12 @@ export function BuildRun() {
 
                   <div className="flex flex-col gap-2 pt-1">
                     {!isPluginWired(selected.id) ? null : !selectedRuntime.installed ? (
-                      <button type="button" className="ark-btn-primary w-full" onClick={() => install(selected.id)}>
+                      <button type="button" className="nova-btn-primary w-full" onClick={() => install(selected.id)}>
                         <Plus className="w-4 h-4" />
                         Add to NOVA
                       </button>
                     ) : !selectedRuntime.connected ? (
-                      <button type="button" className="ark-btn-primary w-full" onClick={startConnect}>
+                      <button type="button" className="nova-btn-primary w-full" onClick={startConnect}>
                         <Link2 className="w-4 h-4" />
                         Connect {selected.name} account
                       </button>
@@ -534,19 +534,19 @@ export function BuildRun() {
                       <>
                         <button
                           type="button"
-                          className="ark-btn-secondary w-full"
+                          className="nova-btn-secondary w-full"
                           onClick={() => patch(selected.id, { enabledInChat: !selectedRuntime.enabledInChat })}
                         >
                           <MessageSquare className="w-4 h-4" />
                           {selectedRuntime.enabledInChat ? 'Disable in chat' : 'Enable in chat'}
                         </button>
-                        <button type="button" className="ark-btn-secondary w-full" onClick={disconnect}>
+                        <button type="button" className="nova-btn-secondary w-full" onClick={disconnect}>
                           <Unplug className="w-4 h-4" />
                           Disconnect account
                         </button>
                         <button
                           type="button"
-                          className="ark-btn-secondary w-full"
+                          className="nova-btn-secondary w-full"
                           disabled={testBusy}
                           onClick={() => {
                             setTestBusy(true);
@@ -579,14 +579,14 @@ export function BuildRun() {
                     {selectedRuntime.installed && isPluginWired(selected.id) && (
                       <button
                         type="button"
-                        className="ark-btn-secondary w-full !text-ark-accent-red"
+                        className="nova-btn-secondary w-full !text-nova-accent-red"
                         onClick={() => uninstall(selected.id)}
                       >
                         Remove from NOVA
                       </button>
                     )}
                     {authError && connectStep === 'idle' && (
-                      <p className="text-xs text-ark-accent-red">{authError}</p>
+                      <p className="text-xs text-nova-accent-red">{authError}</p>
                     )}
                   </div>
                 </>
@@ -612,10 +612,10 @@ export function BuildRun() {
                               <ExternalLink className="w-3.5 h-3.5" />
                               {selected.authKind === 'oauth' ? `Open ${selected.name}` : link.label}
                             </button>
-                            {(selected.id === 'github' || selected.id === 'gmail' || selected.authKind === 'oauth') && window.arkDesktop?.pluginOAuthStart && (
+                            {(selected.id === 'github' || selected.id === 'gmail' || selected.authKind === 'oauth') && window.novaDesktop?.pluginOAuthStart && (
                               <button
                                 type="button"
-                                className="ark-btn-secondary w-full"
+                                className="nova-btn-secondary w-full"
                                 disabled={authBusy}
                                 onClick={() => void startBrowserOAuth()}
                               >
@@ -653,11 +653,11 @@ export function BuildRun() {
                                               ? 'access token from browser'
                                               : 'figd_…'
                             }
-                            className="ark-input"
+                            className="nova-input"
                             autoFocus
                           />
                           {authError && (
-                            <p className="text-xs text-ark-accent-red leading-relaxed">{authError}</p>
+                            <p className="text-xs text-nova-accent-red leading-relaxed">{authError}</p>
                           )}
                           {verifiedLogin && !authError && (
                             <p className="text-xs text-emerald-400">
@@ -666,7 +666,7 @@ export function BuildRun() {
                           )}
                           <button
                             type="button"
-                            className="ark-btn-primary w-full"
+                            className="nova-btn-primary w-full"
                             disabled={authBusy || !tokenDraft.trim()}
                             onClick={() => void continueFromAuth()}
                           >
@@ -685,12 +685,12 @@ export function BuildRun() {
                             value={tokenDraft}
                             onChange={e => setTokenDraft(e.target.value)}
                             placeholder={selected.authKind === 'oauth' ? 'access token from browser' : 'token'}
-                            className="ark-input"
+                            className="nova-input"
                             autoFocus
                           />
                           <button
                             type="button"
-                            className="ark-btn-primary w-full"
+                            className="nova-btn-primary w-full"
                             disabled={!tokenDraft.trim()}
                             onClick={() => void continueFromAuth()}
                           >
@@ -701,12 +701,12 @@ export function BuildRun() {
                       )}
                     </>
                   ) : (
-                    <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
+                    <button type="button" className="nova-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
                       Continue
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   )}
-                  <button type="button" className="ark-btn-secondary w-full" onClick={() => setConnectStep('idle')}>
+                  <button type="button" className="nova-btn-secondary w-full" onClick={() => setConnectStep('idle')}>
                     Back
                   </button>
                 </div>
@@ -748,7 +748,7 @@ export function BuildRun() {
                   </div>
                   <button
                     type="button"
-                    className="ark-btn-primary w-full"
+                    className="nova-btn-primary w-full"
                     onClick={() => void finishConnect()}
                     disabled={authBusy}
                   >
@@ -757,7 +757,7 @@ export function BuildRun() {
                       ? 'Saving…'
                       : 'Save and enable in chat'}
                   </button>
-                  <button type="button" className="ark-btn-secondary w-full" onClick={() => setConnectStep(selected.authKind === 'none' ? 'idle' : 'auth')}>
+                  <button type="button" className="nova-btn-secondary w-full" onClick={() => setConnectStep(selected.authKind === 'none' ? 'idle' : 'auth')}>
                     Back
                   </button>
                 </div>

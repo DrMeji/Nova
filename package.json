@@ -48,6 +48,7 @@
     "smoke:no-brain-nudge": "tsx --tsconfig tsconfig.app.json scripts/smoke-no-brain-nudge.mjs",
     "smoke:ready-gates": "tsx --tsconfig tsconfig.app.json scripts/smoke-ready-gates.mjs",
     "smoke:create-quality": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-quality.mjs",
+    "smoke:permanent-create": "tsx --tsconfig tsconfig.app.json scripts/smoke-permanent-create.mjs",
     "smoke:create-identity": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-identity.mjs",
     "smoke:create-intent": "tsx --tsconfig tsconfig.app.json scripts/check-create-intent.mjs",
     "smoke:classify-turn": "tsx --tsconfig tsconfig.app.json scripts/check-classify-turn.mjs",

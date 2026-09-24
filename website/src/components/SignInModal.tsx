@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
-import { ArkMark } from './ArkMark';
+import { NovaMark } from './NovaMark';
 
 export function SignInModal() {
   const { signInOpen, closeSignIn, openProfile, configured } = useAuth();
@@ -60,7 +60,7 @@ export function SignInModal() {
       <div className="auth-panel">
         <div className="flex items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-2.5 text-[var(--fg)]">
-            <ArkMark size={28} />
+            <NovaMark size={28} />
             <h2 id="auth-title" className="display text-xl font-semibold tracking-tight">
               Sign in
             </h2>

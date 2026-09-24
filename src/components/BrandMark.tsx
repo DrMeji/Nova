@@ -304,7 +304,7 @@ function resolveBrand(id: string, name?: string): string | null {
   if (bare === 'outlook-mail' || bare === 'outlook-cal') return 'outlook';
   if (bare === 'product-design') return 'productdesign';
   if (bare === 'gguf-local') return 'gguf';
-  if (bare.startsWith('ark-engine') || bare === 'nova-core' || bare === 'nova-image-core' || bare === 'nova-video-core') {
+  if (bare.startsWith('nova-engine') || bare === 'nova-core' || bare === 'nova-image-core' || bare === 'nova-video-core') {
     return 'nova';
   }
 

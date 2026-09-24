@@ -21,9 +21,7 @@ export interface Profile {
   display_name: string | null;
   avatar_url: string | null;
   /** Unique 7-digit NOVA ID for adding this account (not email). */
-  ark_id?: string | null;
-  /** ISO time when the account will be permanently removed (24h grace). */
-  delete_scheduled_at?: string | null;
+  nova_id?: string | null;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;

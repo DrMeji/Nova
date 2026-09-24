@@ -14,9 +14,9 @@ export function handlePlanTurnReply(opts: PlanTurnHost): string {
   const lines = [
     `I’ve saved a plan for **${title}**.`,
     '',
-    brief ? brief.slice(0, 1200) : 'Describe what you want on the page, then say **lets build this** when you want files on disk.',
-    '',
-    'Say **lets build this** to create the folder, or keep asking questions (plan only).',
+    'Ask another question if you want to change it.',
+    'Say **lets build this** when you want the folder created.',
   ];
+  void brief;
   return lines.join('\n');
 }

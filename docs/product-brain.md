@@ -44,4 +44,4 @@ NOVA should feel like a modern AI studio: the user types what they want, and the
 
 - External clients talk to **NOVA’s** brain API / engine on loopback (port from Settings → AI → Brain API).
 - Ollama-shaped `/api/*` and OpenAI-shaped `/v1/chat/completions` exist so external apps can point at NOVA instead.
-- Cookbook: `docs/ark-brain-api.md` · sample: `examples/external-brain-client/`.
+- Cookbook: `docs/nova-brain-api.md` · sample: `examples/external-brain-client/`.

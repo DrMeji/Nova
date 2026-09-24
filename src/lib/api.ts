@@ -16,7 +16,7 @@ export interface HardwareInfo {
   scannedAt?: string;
 }
 
-/** Models NOVA Engine can actually download today (keep in sync with electron/arkEngine.cjs). */
+/** Models NOVA Engine can actually download today (keep in sync with electron/novaEngine.cjs). */
 export const ENGINE_DOWNLOADABLE_IDS = [
   'qwen25-15b',
   'llama32-3b',
@@ -25,6 +25,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'qwen25-coder-32b',
   'deepseek-coder-v2-lite',
   'starcoder2-7b',
+  'uigen-fx-4b',
   'qwen25-7b',
   'llama31-8b',
   'mistral-7b',
@@ -103,7 +104,7 @@ export function detectHardware(): HardwareInfo {
 export async function detectHardwareAsync(): Promise<HardwareInfo> {
   const base = detectHardware();
   try {
-    const info = await window.arkDesktop?.systemInfo?.();
+    const info = await window.novaDesktop?.systemInfo?.();
     if (!info?.ok) return base;
 
     const corePart = info.cpuPhysicalCores && info.cpuCores

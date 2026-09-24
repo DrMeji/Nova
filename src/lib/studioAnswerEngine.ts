@@ -4,8 +4,8 @@
  * Never show system scaffolding in user-visible text. Never reuse prior prose as the next answer.
  */
 
-import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
-import { engineGenerateCancel } from '@/lib/arkEngine';
+import { arkRoute, routerProviderLabel } from '@/lib/novaRouter';
+import { engineGenerateCancel } from '@/lib/novaEngine';
 import { buildRouterHistory, looksLikePromptEcho } from '@/lib/chatHistory';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import {
@@ -30,6 +30,11 @@ import {
 } from '@/lib/projectInspect';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 import { looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
+import {
+  looksLikeGreenfieldKeepPlanning,
+  looksLikeRequirementsAsk,
+  looksLikeTalkBeforeCreateAsk,
+} from '@/lib/chatIdeaIntent';
 import { shouldPreferCloudForCoding, countSourceFiles } from '@/lib/codingCloudPolicy';
 import { estimateTokens } from '@/lib/tokenUsage';
 import { hasRealStudioFiles, looksLikePlainChatAsk, scrubFalseProjectChatPreamble } from '@/lib/plainChatAsk';
@@ -93,14 +98,16 @@ const PACK_MAX_FILES_CODE = 12;
 const MODEL_TIMEOUT_MS = 90_000;
 /** Debug/fix coding turns — keep snappy (under ~30–60s feel for small edits). */
 const MODEL_TIMEOUT_CODE_MS = 120_000;
-/** Full website / app / game creates — allow up to ~8 minutes per model pass. */
-const MODEL_TIMEOUT_BUILD_MS = 480_000;
+/** Full website / app / game creates — allow up to ~12 minutes per model pass (quality over speed). */
+const MODEL_TIMEOUT_BUILD_MS = 720_000;
 /** Micro follow-ups after surgical miss — never 300s. */
 const MODEL_TIMEOUT_MICRO_MS = 45_000;
 
 /** Create polish / full App+CSS builds — must not use the 45s micro timeout. */
 export function looksLikeFullUiBuildCodingAsk(message: string): boolean {
   const t = String(message || '');
+  // Agent tool-loop steps only need a short TOOL: line — never the 8-minute create budget.
+  if (looksLikeAgentToolLoopPrompt(t)) return false;
   if (/@@@FILE\b/i.test(t)) return true;
   if (/\brebuild\s+(?:the\s+)?ui\b/i.test(t)) return true;
   if (/\b(?:scrap|rebuild|redo|replace)\b[\s\S]{0,60}\b(?:ui|layout|app\.css|jsx|tsx)\b/i.test(t)) return true;
@@ -109,10 +116,21 @@ export function looksLikeFullUiBuildCodingAsk(message: string): boolean {
   return /\b(?:Build the first real|first real multi-section|from (?:your |this )?brief|Emit COMPLETE @@@FILE|product UI matching|fully built)\b/i.test(t);
 }
 
+/** True for Level-B agent loop prompts (expect TOOL: … not a full App dump). */
+export function looksLikeAgentToolLoopPrompt(message: string): boolean {
+  const t = String(message || '');
+  if (/^\s*TOOL:\s*(?:list|read|grep|patch|write|run|ready|assets|mcp|done)\b/im.test(t)) return true;
+  if (/\bRespond with the next tool only\b/i.test(t)) return true;
+  if (/\bPrefer TOOL:\s*patch over full-file write\b/i.test(t)) return true;
+  return /\bTOOL:\s*list\b[\s\S]{0,400}\bTOOL:\s*done\b/i.test(t)
+    && /\b(?:Prefer grep\/read|next tool only|agent steps)\b/i.test(t);
+}
+
 function looksLikeMicroCodingAsk(message: string): boolean {
   const t = String(message || '');
   // Create polish prompts mention footer/copy/hero — those are full builds, not micro edits.
   if (looksLikeFullUiBuildCodingAsk(t)) return false;
+  if (looksLikeAgentToolLoopPrompt(t)) return false;
   if (/\b(?:scrap|rebuild|from scratch|make it richer|redesign|entire)\b/i.test(t)) return false;
   if (t.length > 400) return false;
   return /\b(?:title|heading|h1|center|footer|color|background|button|text|label|copy|logo)\b/i.test(t)
@@ -121,6 +139,8 @@ function looksLikeMicroCodingAsk(message: string): boolean {
 
 /** Timeout used by answerStudio for coding/file-edit turns (exported for smoke). */
 export function codingFileEditTimeoutMs(userMessage: string): number {
+  // Tool-loop steps must stay snappy — hanging on "Thinking (step N/24)" for 8 minutes each froze creates.
+  if (looksLikeAgentToolLoopPrompt(userMessage)) return MODEL_TIMEOUT_CODE_MS;
   if (looksLikeFullUiBuildCodingAsk(userMessage)) return MODEL_TIMEOUT_BUILD_MS;
   if (looksLikeMicroCodingAsk(userMessage)) return MODEL_TIMEOUT_MICRO_MS;
   return MODEL_TIMEOUT_CODE_MS;
@@ -128,8 +148,8 @@ export function codingFileEditTimeoutMs(userMessage: string): number {
 
 function cleanAsk(message: string): string {
   return String(message || '')
-    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
-    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
@@ -154,6 +174,18 @@ export function classifyStudioIntent(
 
   // Product corrections must rebuild files — never become a Local scan.
   if (looksLikeProductCorrectionAsk(String(message || ''))) return 'freeform';
+
+  // Planning / fold-into-plan / extras talk — never Local scan (even if they say "button" or "wrong stall").
+  if (
+    looksLikeGreenfieldKeepPlanning(String(message || ''))
+    || looksLikeTalkBeforeCreateAsk(String(message || ''))
+    || looksLikeRequirementsAsk(String(message || ''))
+    || /\bfold\s+(?:those|these|them|it|that)\s+into\s+the\s+plan\b/i.test(ask)
+    || /\b(?:add|want)\s+(?:three|3|two|2|more)\s+extras?\b/i.test(ask)
+    || /\b(?:soft\s+sage|save-?a-?bag|terracotta|cream\s+colors?)\b/i.test(ask)
+  ) {
+    return 'freeform';
+  }
 
   if (looksLikeProjectDebugAsk(String(message || ''))) return 'debug';
   if (STUDIO_WIDER_RE.test(ask)) return 'wider';
@@ -546,7 +578,16 @@ export async function answerStudio(
   let findings = packed.findings;
   const packedTokens = packed.packedTokens;
 
-  if (!input.allowFileEdits && usesLocalScan(intent) && !prefersModel(intent)) {
+  // Empty folder + planning language must never dump "I scanned 0 source files".
+  const planningTalk = !input.allowFileEdits && (
+    looksLikePlainChatAsk(input.userMessage)
+    || looksLikeGreenfieldKeepPlanning(input.userMessage)
+    || looksLikeTalkBeforeCreateAsk(input.userMessage)
+    || !hasRealStudioFiles(input.files)
+  );
+  if (planningTalk && !hasRealStudioFiles(input.files) && usesLocalScan(intent)) {
+    // Fall through to the model as freeform instead of Local scan.
+  } else if (!input.allowFileEdits && usesLocalScan(intent) && !prefersModel(intent)) {
     const text = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text,

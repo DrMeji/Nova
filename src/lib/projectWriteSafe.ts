@@ -17,7 +17,7 @@ export type ProjectWriteResult = {
 };
 
 export async function safeProjectWrite(payload: ProjectWritePayload): Promise<ProjectWriteResult> {
-  if (!window.arkDesktop?.projectWrite) {
+  if (!window.novaDesktop?.projectWrite) {
     return { ok: false, error: 'Project write unavailable' };
   }
 
@@ -39,7 +39,7 @@ export async function safeProjectWrite(payload: ProjectWritePayload): Promise<Pr
     };
   }
 
-  const result = await window.arkDesktop.projectWrite({
+  const result = await window.novaDesktop.projectWrite({
     ...payload,
     files,
     sandbox,

@@ -10,7 +10,7 @@ Module._load = function mockElectron(request, parent, isMain) {
     return {
       app: {
         getPath: (name) => {
-          if (name === 'userData') return path.join(os.homedir(), 'AppData/Roaming/ARK');
+          if (name === 'userData') return path.join(os.homedir(), 'AppData/Roaming/NOVA');
           return os.tmpdir();
         },
       },
@@ -19,7 +19,7 @@ Module._load = function mockElectron(request, parent, isMain) {
   return origLoad(request, parent, isMain);
 };
 
-const { stripLlamaCliNoise, ensureLlamaBinary, findLlamaBinary } = require('../electron/arkGguf.cjs');
+const { stripLlamaCliNoise, ensureLlamaBinary, findLlamaBinary } = require('../electron/novaGguf.cjs');
 
 const sample = [
   'available commands',
@@ -54,7 +54,7 @@ if (/You are NOVA/.test(cleaned) || /<\|im_start\|>/.test(cleaned)) {
   const exe = findLlamaBinary();
   if (!exe) throw new Error('llama-cli binary not found after ensureLlamaBinary()');
 
-  const model = path.join(os.homedir(), 'AppData/Roaming/ARK/ark-engine/models/qwen25-7b.gguf');
+  const model = path.join(os.homedir(), 'AppData/Roaming/NOVA/nova-engine/models/qwen25-7b.gguf');
   if (!fs.existsSync(model)) {
     console.log(JSON.stringify({
       skip: true,

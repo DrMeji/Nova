@@ -20,7 +20,7 @@ export type FreeSource = {
 /** What NOVA already wires or is actively locking in. */
 export const FREE_SOURCES: FreeSource[] = [
   {
-    id: 'ark-engine-core',
+    id: 'nova-engine-core',
     name: 'NOVA Engine Core',
     kind: 'local-weights',
     use: 'chat',
@@ -34,10 +34,21 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Pollinations (images)',
     kind: 'no-key',
     use: 'image',
-    detail: 'Free no-key image host. NOVA Router image path via NOVA Image Core.',
-    wired: true,
-    tone: 'from-pink-500 to-rose-700',
+    detail: 'Retired from NOVA image path. Use Hugging Face FLUX (keyed) or a local SD/FLUX model instead.',
+    wired: false,
+    notes: 'Disabled — too inconsistent for premium site heroes.',
+    tone: 'from-zinc-500 to-zinc-800',
     initial: 'Po',
+  },
+  {
+    id: 'huggingface-flux-image',
+    name: 'Hugging Face FLUX',
+    kind: 'free-key',
+    use: 'image',
+    detail: 'Primary cloud image path when your HF key is Saved in Models → Cloud.',
+    wired: true,
+    tone: 'from-yellow-400 to-orange-700',
+    initial: 'HF',
   },
   {
     id: 'pollinations-video-still',

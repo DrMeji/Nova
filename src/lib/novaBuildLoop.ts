@@ -5,7 +5,7 @@
  * Flow: pack context → agent tools → Preview Ready / assets check → fix rounds → heal.
  */
 
-import { runArkAgentLoop, type AgentLoopResult, type AgentLoopStep } from '@/lib/arkAgentLoop';
+import { runNovaAgentLoop, type AgentLoopResult, type AgentLoopStep } from '@/lib/novaAgentLoop';
 import { packNovaBuildContext, novaCreateWriteTargets } from '@/lib/novaBuildContext';
 import { modeStatusLabel } from '@/lib/novaStudioModes';
 import { getLocalPrefs } from '@/lib/localPrefs';
@@ -45,14 +45,41 @@ export type NovaBuildLoopResult = {
 function buildCreateBrief(opts: NovaBuildLoopOpts): string {
   const targets = novaCreateWriteTargets(opts.files).join(', ');
   const must = (opts.mustHaves || []).slice(0, 10).map((m, i) => `${i + 1}. ${m}`).join('\n');
+  const briefLower = String(opts.brief || '').toLowerCase();
+  const isGame = /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino|runner)\b/.test(briefLower);
+  const is3d = /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor|babylon)\b/.test(briefLower);
+  const craftRules = isGame
+    ? [
+        '## Kind: PLAYABLE GAME (not a marketing site)',
+        '- Ship a real <canvas> (or WebGL) with requestAnimationFrame, keyboard/pointer controls, score/HUD, and a game loop.',
+        '- Implement movement, collision, and win/lose — not a centered brand splash or feature-card landing.',
+        '- Take as long as needed. Prefer thorough playable mechanics over a fast stub.',
+      ]
+    : is3d
+      ? [
+          '## Kind: 3D / VIEWPORT APP',
+          '- Import three (or WebGL). Show a real interactive scene with orbit/pan controls.',
+          '- At least one editable mesh or tool. Add three to package.json if missing.',
+          '- Not a marketing hero — a working viewport.',
+        ]
+      : [
+          '## Kind: PRODUCT / WEB APP',
+          '- Invent a unique visual language for THIS brand. Premium depth: layered background, strong type, real flows.',
+          '- Implement the REAL flows from the brief (browse, cart, chat, dashboard, etc.).',
+          '- Atmosphere: CSS gradients + @keyframes motion — never a flat solid fill as the whole look.',
+          '- Logo/wordmark, icons or SVG marks, primary CTA with hover. Scrollable multi-section page when marketing.',
+        ];
   return [
-    `Build the full product UI for **${opts.productName}** on this Vite + React project.`,
+    `Build the full product for **${opts.productName}** on this Vite + React project.`,
     'Nova is free — ship a real usable first screen. No paywalls, no “upgrade to Pro”, no placeholder stock sites.',
+    'Quality over speed: take the time to implement and verify. Do not speedrun a thin stub.',
     '',
     '## Product brief',
     opts.brief.slice(0, 3500),
     '',
     must ? `## Must-haves\n${must}` : '',
+    '',
+    ...craftRules,
     '',
     '## Rules',
     `- Prefer TOOL: write or TOOL: patch on: ${targets}`,
@@ -62,7 +89,7 @@ function buildCreateBrief(opts: NovaBuildLoopOpts): string {
     '- After substantial UI is written, call TOOL: ready then TOOL: assets. Fix failures before TOOL: done.',
     '- Prefer patch for small fixes; full write only when rewriting App.',
     '',
-    'Start by TOOL: list or TOOL: read on src/App.tsx (or App.jsx), then write the product UI.',
+    'Start by TOOL: list or TOOL: read on src/App.tsx (or App.jsx), then write the product.',
   ].filter(Boolean).join('\n');
 }
 
@@ -73,21 +100,15 @@ async function runReadyAndAssetsCheck(
   mustHaves: string[],
 ): Promise<{ ok: boolean; reasons: string[] }> {
   const {
-    isPreviewReady,
+    previewReadyForBrief,
     looksLikeFillerStubAppSource,
-    briefRequiresInteractiveApp,
-    briefLooksLikeChatApp,
   } = await import('@/lib/createBuildQuality');
   const { briefCreateMisses, createBriefSpecFromAsk } = await import('@/lib/createIdentity');
   const appBody = files['src/App.tsx'] || files['src/App.jsx'] || '';
   const spec = createBriefSpecFromAsk(productName, brief);
-  const needsInteractive = briefLooksLikeChatApp(brief)
-    || briefRequiresInteractiveApp(brief)
-    || (mustHaves.length ? mustHaves : spec.mustHave).some((m) => /book|slot|confirm|cart|checkout|search|messag|lend/i.test(m));
-  const ready = isPreviewReady(files, {
+  const ready = previewReadyForBrief(files, {
     productName,
     brief,
-    requireInteractive: needsInteractive,
   });
   const misses = briefCreateMisses(spec, files);
   const filler = looksLikeFillerStubAppSource(appBody);
@@ -111,7 +132,7 @@ async function healCreateFiles(
 ): Promise<Record<string, string>> {
   const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
   const { ensureStylesLinked, createBriefSpecFromAsk } = await import('@/lib/createIdentity');
-  const { ensureReactImportForNamespace } = await import('@/lib/createBuildQuality');
+  const { ensureReactImportForNamespace, ensureJsxHasNoTypeScript } = await import('@/lib/createBuildQuality');
   let next = { ...files };
   const linked = ensureStylesLinked(next);
   if (linked.changed.length) {
@@ -137,14 +158,53 @@ async function healCreateFiles(
     body = body.replace(/\/heroes\/hero\.jpg/gi, briefSpec.heroHref);
     next = { ...next, [appKey]: body };
   }
-  const healed = ensureReactImportForNamespace(next[appKey] || '');
+  let healed = next[appKey] || '';
+  {
+    const { stripEntrypointBleedFromApp, stripModelProseFromSource } = await import('@/lib/createBuildQuality');
+    healed = stripEntrypointBleedFromApp(healed);
+    healed = stripModelProseFromSource(appKey, healed);
+  }
+  if (/\.jsx$/i.test(appKey)) {
+    const stripped = ensureJsxHasNoTypeScript(healed);
+    if (stripped !== healed) {
+      opts.pushStatus(modeStatusLabel('fix', 'Stripping TS from App.jsx'));
+      healed = stripped;
+    }
+  }
+  healed = ensureReactImportForNamespace(healed);
   if (healed !== (next[appKey] || '')) {
     opts.pushStatus(modeStatusLabel('fix', 'React import for Live'));
     next = { ...next, [appKey]: healed };
   }
-  if (next[appKey] !== files[appKey]) {
+  {
+    const { wireCreatePublicAssets, cssBlobIsThin, buildMarketingCompanionCss } = await import('@/lib/createBuildQuality');
+    const { createIdentityFromBrief } = await import('@/lib/createIdentity');
+    const wired = wireCreatePublicAssets(next, opts.productName);
+    if (wired.changed.length) {
+      opts.pushStatus(modeStatusLabel('fix', 'Wiring assets + atmosphere'));
+      next = wired.files;
+    }
+    if (cssBlobIsThin(next, 1600) && !next['src/App.css']?.includes('novaCompanionSweep') && !next['src/App.css']?.includes('novaAtmosSweep')) {
+      const appBody = String(next[appKey] || '');
+      const isStubSplash = appBody.replace(/\s+/g, '').length < 1800
+        && !/<(?:section|main|footer|form)\b/i.test(appBody);
+      // Never paint a cream "luxury companion" over a title stub — that is the AppleHome failure mode.
+      if (!isStubSplash) {
+        const identity = createIdentityFromBrief(opts.productName, opts.brief);
+        const companion = buildMarketingCompanionCss(opts.productName, opts.brief, identity);
+        const prev = String(next['src/App.css'] || '');
+        next = { ...next, 'src/App.css': `${prev}\n${companion}`.trim() };
+        opts.pushStatus(modeStatusLabel('fix', 'Injecting brief companion CSS'));
+      }
+    }
+  }
+  if (next[appKey] !== files[appKey] || next['src/App.css'] !== files['src/App.css']) {
+    const blocks = [
+      next[appKey] !== files[appKey] ? `@@@FILE ${appKey}\n${next[appKey]}` : '',
+      next['src/App.css'] !== files['src/App.css'] ? `@@@FILE src/App.css\n${next['src/App.css']}` : '',
+    ].filter(Boolean).join('\n');
     await applyChatReplyEdits({
-      reply: `@@@FILE ${appKey}\n${next[appKey]}`,
+      reply: blocks,
       projectId: opts.projectId,
       projectName: opts.productName,
       files: next,
@@ -160,7 +220,7 @@ async function healCreateFiles(
  */
 export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<NovaBuildLoopResult> {
   const prefs = getLocalPrefs();
-  const maxFix = Math.max(0, Math.min(4, opts.maxFixRounds ?? 2));
+  const maxFix = Math.max(0, Math.min(5, opts.maxFixRounds ?? 2));
   const packed = packNovaBuildContext(opts.files);
   const allSteps: AgentLoopStep[] = [];
   let files = { ...opts.files, ...packed };
@@ -168,35 +228,46 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
   let lastLoop: AgentLoopResult | null = null;
   let reasons: string[] = [];
 
-  const { answerStudio } = await import('@/lib/studioAnswerEngine');
+  const { briefNeedsCreateUiPolish, briefLooksLikeMarketingLanding } = await import('@/lib/createBuildQuality');
+  const { looksLikePlayableCanvasGame, looksLikeSpatialApp } = await import('@/lib/freshSpaFromBrief');
+  const richBrief = briefNeedsCreateUiPolish(opts.brief)
+    || briefLooksLikeMarketingLanding(opts.brief)
+    || looksLikePlayableCanvasGame(opts.brief)
+    || looksLikeSpatialApp(opts.brief)
+    || (opts.mustHaves || []).length >= 3;
+
+  const { arkRoute, routerProviderLabel } = await import('@/lib/novaRouter');
 
   const callModel = async (modelOpts: {
     prompt: string;
     onChunk?: (chunk: string) => void;
   }) => {
-    const result = await answerStudio(
-      {
-        userMessage: modelOpts.prompt,
-        files: packNovaBuildContext(files),
-        projectName: opts.productName,
-        mode: 'code',
-        preferredModelId: opts.coderId,
-        preferredModelName: opts.coderName,
-        preferredSource: (opts.coderSource as 'local' | 'cloud' | 'auto' | undefined) || 'local',
-        stickyModelId: opts.stickyModelId || undefined,
-        stickyModelName: opts.stickyModelName || undefined,
-        stickyPinnedSource: opts.stickyModelId ? 'local' : undefined,
-        allowFileEdits: true,
-        shouldAbort: () => Boolean(opts.host.shouldAbort?.()),
+    // Direct coding route — never answerStudio packing (that buries TOOL: lines and stalls on Thinking).
+    let streamed = '';
+    const routed = await arkRoute({
+      message: modelOpts.prompt,
+      kind: 'coding',
+      preferCloudCoding: false,
+      preferredModelId: opts.coderId,
+      preferredModelName: opts.coderName,
+      preferredSource: (opts.coderSource as 'local' | 'cloud' | 'auto' | undefined) || 'local',
+      stickyModelId: undefined,
+      stickyModelName: undefined,
+      stickyPinnedSource: undefined,
+      onChunk: (piece) => {
+        if (opts.host.shouldAbort?.()) return;
+        const delta = String(piece || '');
+        if (!delta) return;
+        if (streamed.length === 0 && delta.length >= 40) streamed = delta;
+        else if (delta.length > streamed.length + 20 && delta.length >= 40) streamed = delta;
+        else streamed += delta;
+        modelOpts.onChunk?.(streamed);
       },
-      (delta) => {
-        modelOpts.onChunk?.(String(delta || ''));
-      },
-    );
+    });
     return {
-      reply: String(result.text || ''),
-      modelName: opts.coderName,
-      providerLabel: String(result.meta || 'NOVA'),
+      reply: String(routed.reply || streamed || ''),
+      modelName: opts.coderName || routed.modelName,
+      providerLabel: routerProviderLabel(routed, 'NOVA'),
     };
   };
 
@@ -228,16 +299,22 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       opts.host.pushStatus(modeStatusLabel('fix', reasons[0]?.slice(0, 72) || 'Ready issues'));
     }
 
-    lastLoop = await runArkAgentLoop({
+    lastLoop = await runNovaAgentLoop({
       brief,
       files: packNovaBuildContext(files),
       projectId: opts.projectId,
       projectName: opts.productName,
       diskRoot: opts.diskRoot,
-      maxSteps: Math.min(28, Math.max(8, Number(prefs.agentLoopMaxSteps) || 20)),
+      maxSteps: Math.min(
+        richBrief ? 22 : 12,
+        Math.max(richBrief ? 12 : 6, Number(prefs.agentLoopMaxSteps) || (richBrief ? 16 : 8)),
+      ),
       shouldAbort: () => Boolean(opts.host.shouldAbort?.()),
       priorObservations: observations,
       autoRunAllowlisted: true,
+      createCraftMode: true,
+      maxIdleListRead: 2,
+      thinAppBytes: 2000,
       callModel,
       onStep: (step) => {
         allSteps.push(step);
@@ -246,7 +323,17 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
         );
         const label = step.tool === 'thought' || step.tool === 'status'
           ? modeStatusLabel(round > 0 ? 'fix' : 'build', step.label)
-          : `${step.ok === false ? '⚠ ' : ''}${step.label}`;
+          : step.ok === false
+            ? String(step.label || '').replace(/^⚠\s*/, '')
+            : step.label;
+        // Hide internal parser noise from the user-facing timeline.
+        if (/unparsed|nudging model/i.test(label)) {
+          opts.host.pushStatus(
+            modeStatusLabel(round > 0 ? 'fix' : 'build', 'Refining the next edit step…'),
+            pathMatch?.[1] || null,
+          );
+          return;
+        }
         opts.host.pushStatus(label, pathMatch?.[1] || null);
       },
     });
@@ -260,7 +347,7 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
 
     if (lastLoop.hitStepCap || lastLoop.stopped) {
       try {
-        const { saveAgentContinue } = await import('@/lib/arkAgentContinue');
+        const { saveAgentContinue } = await import('@/lib/novaAgentContinue');
         saveAgentContinue({
           chatKey: opts.projectId,
           brief: opts.brief,
@@ -274,7 +361,7 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       } catch { /* ignore */ }
     } else {
       try {
-        const { clearAgentContinue } = await import('@/lib/arkAgentContinue');
+        const { clearAgentContinue } = await import('@/lib/novaAgentContinue');
         clearAgentContinue(opts.projectId);
       } catch { /* ignore */ }
     }
@@ -321,8 +408,6 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
 /** Whether create should use the Nova build loop (default on; free, no paywall). */
 export function shouldUseNovaCreateBuildLoop(): boolean {
   const prefs = getLocalPrefs();
-  if (prefs.agentLoopOnCreate === false) return false;
-  // Create path opts into the loop even if the older workspace-only toggle is off.
   return prefs.agentLoopOnCreate !== false;
 }
 

@@ -19,7 +19,7 @@ if (typeof globalThis.localStorage === 'undefined') {
 if (typeof globalThis.window === 'undefined') {
   globalThis.window = globalThis;
 }
-globalThis.window.arkDesktop = {
+globalThis.window.novaDesktop = {
   projectWrite: async ({ files }) => ({
     ok: true,
     root: 'C:\\smoke\\project',
@@ -36,7 +36,7 @@ const {
   parseAgentToolReply,
   shouldRunAgentLoop,
   agentLoopMaxSteps,
-  runArkAgentLoop,
+  runNovaAgentLoop,
 } = await import('../src/lib/arkAgentLoop.ts');
 const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
 // Pref defaults off (S008); enable for gate + loop assertions in this smoke.
@@ -101,7 +101,7 @@ assert.ok(agentLoopMaxSteps() >= 4 && agentLoopMaxSteps() <= 60);
 
 // --- full mock loop ---
 let calls = 0;
-const loop = await runArkAgentLoop({
+const loop = await runNovaAgentLoop({
   brief: 'Add a hello constant to App',
   files: { 'src/App.tsx': 'export default function App(){ return null }\n' },
   projectId: 'smoke-project',

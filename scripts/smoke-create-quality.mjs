@@ -117,11 +117,12 @@ const picked14 = pickReadyCreatePolishCoder(modelsBoth, {
   ramGb: 32,
   maxParamsB: 32,
 });
-if (picked14?.id !== 'qwen25-coder-14b') {
-  console.error('FAIL: already-selected 14B must win for create polish', picked14);
+// Create craft always upgrades to the strongest ready coder (32B here) — a weaker pin must not stick.
+if (picked14?.id !== 'qwen25-coder-32b') {
+  console.error('FAIL: create polish must upgrade weak pin to best ready coder', picked14);
   process.exit(2);
 }
-console.log('polishCoderAdaptive', { mid: picked7.id, strong: pickedStrong.id, pinned: picked14.id });
+console.log('polishCoderAdaptive', { mid: picked7.id, strong: pickedStrong.id, upgraded: picked14.id });
 
 const css = stripModelProseFromSource(
   'src/App.css',

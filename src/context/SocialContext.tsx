@@ -2,40 +2,40 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import {
-  blockArkId,
+  blockNovaId,
   hideDemoContact,
   listContacts,
   subscribeMessages,
   syncBlockedFromCloud,
   unfriendPeer,
-  unblockArkId,
+  unblockNovaId,
   loadBlockedUsers,
-  type ArkContact,
+  type NovaContact,
   type BlockedUser,
   type DirectMessage,
-} from '@/lib/arkSocial';
+} from '@/lib/novaSocial';
 import { sendFriendRequest, respondFriendRequest, subscribeFriendRequests, syncFriendRequests } from '@/lib/friendRequests';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { isRevealed } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { pushLocalNotification } from '@/lib/localNotifications';
-import { formatArkId } from '@/lib/arkUserId';
+import { formatNovaId } from '@/lib/novaUserId';
 
 type SocialContextValue = {
-  contacts: ArkContact[];
+  contacts: NovaContact[];
   unreadFrom: string[];
   blockedUsers: BlockedUser[];
   refreshContacts: () => Promise<void>;
   refreshBlocked: () => Promise<void>;
-  inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
-  acceptFriendRequest: (requestId: string) => Promise<ArkContact | null>;
+  inviteByNovaId: (novaId: string, displayName?: string) => Promise<NovaContact | null>;
+  acceptFriendRequest: (requestId: string) => Promise<NovaContact | null>;
   declineFriendRequest: (requestId: string) => Promise<void>;
-  removeFriend: (arkId: string) => Promise<void>;
-  deleteContact: (arkId: string) => Promise<void>;
-  blockFriend: (arkId: string, displayName?: string) => Promise<void>;
-  unblockFriend: (arkId: string) => Promise<void>;
+  removeFriend: (novaId: string) => Promise<void>;
+  deleteContact: (novaId: string) => Promise<void>;
+  blockFriend: (novaId: string, displayName?: string) => Promise<void>;
+  unblockFriend: (novaId: string) => Promise<void>;
 };
 
 const SocialContext = createContext<SocialContextValue | undefined>(undefined);
@@ -43,10 +43,10 @@ const SocialContext = createContext<SocialContextValue | undefined>(undefined);
 export function SocialProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
   const { route } = useRouter();
-  const [contacts, setContacts] = useState<ArkContact[]>([]);
+  const [contacts, setContacts] = useState<NovaContact[]>([]);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>(() => loadBlockedUsers());
-  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
+  const myNovaId = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || '');
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
 
@@ -77,38 +77,38 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   }, [route.name, user?.id]);
 
   useEffect(() => {
-    if (!myArkId) return;
-    void syncFriendRequests(myArkId, user?.id);
-    const unsub = subscribeFriendRequests(myArkId, user?.id, {
+    if (!myNovaId) return;
+    void syncFriendRequests(myNovaId, user?.id);
+    const unsub = subscribeFriendRequests(myNovaId, user?.id, {
       onAccepted: () => {
         void refreshContacts();
         pushSidebarToast('Friend request accepted. you’re connected', { ttlMs: 8_000, id: 'fr-accepted' });
       },
     });
     return unsub;
-  }, [myArkId, user?.id]);
+  }, [myNovaId, user?.id]);
 
   useEffect(() => {
-    if (!myArkId) return;
-    const unsub = subscribeMessages(myArkId, (msg: DirectMessage) => {
-      if (msg.recipientArkId !== myArkId) return;
+    if (!myNovaId) return;
+    const unsub = subscribeMessages(myNovaId, (msg: DirectMessage) => {
+      if (msg.recipientNovaId !== myNovaId) return;
       const viewingMessage = route.name === 'message';
-      const viewingThisPeer = viewingMessage && route.peer === msg.senderArkId;
+      const viewingThisPeer = viewingMessage && route.peer === msg.senderNovaId;
       if (!viewingThisPeer) {
-        setUnreadFrom(prev => (prev.includes(msg.senderArkId) ? prev : [...prev, msg.senderArkId]));
+        setUnreadFrom(prev => (prev.includes(msg.senderNovaId) ? prev : [...prev, msg.senderNovaId]));
       }
       const who =
-        contactsRef.current.find(c => c.arkId === msg.senderArkId || formatArkId(c.arkId) === formatArkId(msg.senderArkId))?.displayName
-        || formatArkId(msg.senderArkId);
+        contactsRef.current.find(c => c.novaId === msg.senderNovaId || formatNovaId(c.novaId) === formatNovaId(msg.senderNovaId))?.displayName
+        || formatNovaId(msg.senderNovaId);
       if (!viewingMessage && isRevealed('message')) {
-        pushSidebarToast(`New message from ${who}`, { ttlMs: 10_000, id: `dm-${msg.senderArkId}` });
+        pushSidebarToast(`New message from ${who}`, { ttlMs: 10_000, id: `dm-${msg.senderNovaId}` });
         notifyWorkDone('message');
         pushLocalNotification({
           id: `dm-${msg.id}`,
           kind: 'system',
           title: `Message from ${who}`,
           body: (msg.body || '').trim().slice(0, 160) || 'New direct message',
-          forArkId: myArkId,
+          forNovaId: myNovaId,
         });
       } else if (isRevealed('message') && !viewingThisPeer) {
         notifyWorkDone('message');
@@ -116,7 +116,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       }
     }, user?.id);
     return unsub;
-  }, [myArkId, route, user?.id]);
+  }, [myNovaId, route, user?.id]);
 
   useEffect(() => {
     if (route.name === 'message' && route.peer) {
@@ -124,16 +124,16 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     }
   }, [route]);
 
-  const inviteByArkId = async (arkId: string, _displayName?: string) => {
+  const inviteByNovaId = async (novaId: string, _displayName?: string) => {
     const prefs = getLocalPrefs();
     const fromName = prefs.displayName?.trim() && prefs.displayName.trim() !== 'Guest'
       ? prefs.displayName.trim()
-      : (profile?.display_name?.trim() || (isArkDevEmail(user?.email) ? 'DEV' : 'NOVA user'));
+      : (profile?.display_name?.trim() || (isNovaDevEmail(user?.email) ? 'DEV' : 'NOVA user'));
     const result = await sendFriendRequest({
-      fromArkId: myArkId,
+      fromNovaId: myNovaId,
       fromName,
       fromAvatarUrl: profile?.avatar_url || undefined,
-      toArkIdRaw: arkId,
+      toNovaIdRaw: novaId,
       userId: user?.id,
     });
     if (!result.ok) throw new Error(result.error);
@@ -141,37 +141,37 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptFriendRequest = async (requestId: string) => {
-    const req = await respondFriendRequest(requestId, 'accepted', { userId: user?.id, myArkId });
+    const req = await respondFriendRequest(requestId, 'accepted', { userId: user?.id, myNovaId });
     if (!req) throw new Error('Could not accept that friend request.');
     const list = await listContacts(user?.id);
     setContacts(list);
-    return list.find(c => c.arkId === req.fromArkId) || null;
+    return list.find(c => c.novaId === req.fromNovaId) || null;
   };
 
   const declineFriendRequest = async (requestId: string) => {
-    await respondFriendRequest(requestId, 'declined', { userId: user?.id, myArkId });
+    await respondFriendRequest(requestId, 'declined', { userId: user?.id, myNovaId });
   };
 
-  const removeFriend = async (arkId: string) => {
-    await unfriendPeer(user?.id, arkId);
-    hideDemoContact(arkId);
+  const removeFriend = async (novaId: string) => {
+    await unfriendPeer(user?.id, novaId);
+    hideDemoContact(novaId);
     await refreshContacts();
   };
 
-  const deleteContact = async (arkId: string) => {
-    await unfriendPeer(user?.id, arkId);
-    hideDemoContact(arkId);
+  const deleteContact = async (novaId: string) => {
+    await unfriendPeer(user?.id, novaId);
+    hideDemoContact(novaId);
     await refreshContacts();
   };
 
-  const blockFriend = async (arkId: string, displayName?: string) => {
-    await blockArkId(arkId, { userId: user?.id, displayName });
+  const blockFriend = async (novaId: string, displayName?: string) => {
+    await blockNovaId(novaId, { userId: user?.id, displayName });
     await refreshContacts();
     await refreshBlocked();
   };
 
-  const unblockFriend = async (arkId: string) => {
-    await unblockArkId(arkId, user?.id);
+  const unblockFriend = async (novaId: string) => {
+    await unblockNovaId(novaId, user?.id);
     await refreshBlocked();
   };
 
@@ -182,7 +182,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       blockedUsers,
       refreshContacts,
       refreshBlocked,
-      inviteByArkId,
+      inviteByNovaId,
       acceptFriendRequest,
       declineFriendRequest,
       removeFriend,
@@ -190,7 +190,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       blockFriend,
       unblockFriend,
     }),
-    [contacts, unreadFrom, blockedUsers, myArkId, profile?.display_name, user?.id],
+    [contacts, unreadFrom, blockedUsers, myNovaId, profile?.display_name, user?.id],
   );
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;

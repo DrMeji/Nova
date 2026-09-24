@@ -156,7 +156,10 @@ function queueSetupBrainDownloads(opts: {
   chatName?: string;
   hw: HardwareInfo | null;
 }) {
-  void import('@/lib/engineDownloads').then(({ startEngineDownload }) => {
+  void Promise.all([
+    import('@/lib/engineDownloads'),
+    import('@/lib/localPrefs'),
+  ]).then(([{ startEngineDownload }, { setLocalPrefs }]) => {
     // Chat brain first so Enter NOVA unlocks conversation ASAP.
     void startEngineDownload({
       id: opts.chatId,
@@ -166,18 +169,31 @@ function queueSetupBrainDownloads(opts: {
     }).catch(() => undefined);
     if (!opts.hw) return;
     const coder = getRecommendedCoderModel(opts.hw);
-    // Coding (+ any extra recommended) continue in the background Jobs strip.
+    // Coding (+ Design) continue in the background Jobs strip — never pin chat as coder.
     if (coder && coder.id !== opts.chatId) {
       void startEngineDownload({
         id: coder.id,
         name: coder.name,
         source: 'local-ai',
         forceUnknownDisk: true,
+      }).then(() => {
+        setLocalPrefs({ activeCoderId: coder.id, defaultCodeModelId: coder.id });
+      }).catch(() => undefined);
+    }
+    const ram = opts.hw.ramGb ?? 8;
+    if (ram >= 8) {
+      void startEngineDownload({
+        id: 'uigen-fx-4b',
+        name: 'UIGEN-FX 4B',
+        source: 'local-ai',
+        forceUnknownDisk: true,
+      }).then(() => {
+        setLocalPrefs({ activeDesignId: 'uigen-fx-4b' });
       }).catch(() => undefined);
     }
     const extras = recommendationsFor(opts.hw)
       .map(m => m.id)
-      .filter(id => id !== opts.chatId && id !== coder?.id);
+      .filter(id => id !== opts.chatId && id !== coder?.id && id !== 'uigen-fx-4b');
     for (const id of extras.slice(0, 1)) {
       const hit = recommendationsFor(opts.hw).find(m => m.id === id);
       void startEngineDownload({
@@ -317,7 +333,7 @@ export function OnboardingScreen() {
     let downloadStarted = false;
     let downloadError: string | null = null;
     try {
-      const { downloadEngineModel, engineDownloadProgress, engineDownloadError, getEngineStatus } = await import('@/lib/arkEngine');
+      const { downloadEngineModel, engineDownloadProgress, engineDownloadError, getEngineStatus } = await import('@/lib/novaEngine');
       const status = await getEngineStatus().catch(() => null);
       const listed = status?.models || [];
       const haveBrain = listed.some((m) => m.id === brainId && m.status === 'ready');
@@ -397,7 +413,7 @@ export function OnboardingScreen() {
 
     if (downloadError) {
       try {
-        localStorage.setItem('ark:setup-brain-note', downloadError);
+        localStorage.setItem('NOVA:setup-brain-note', downloadError);
       } catch {
         /* ignore */
       }
@@ -409,7 +425,7 @@ export function OnboardingScreen() {
     }
 
     try {
-      localStorage.removeItem('ark:setup-brain-note');
+      localStorage.removeItem('NOVA:setup-brain-note');
     } catch {
       /* ignore */
     }
@@ -467,7 +483,7 @@ export function OnboardingScreen() {
   };
 
   return (
-    <div className="h-full bg-ark-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="h-full bg-nova-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
       <AuthAmbientOrbs />
 
       <div className="relative z-10 w-full max-w-xl animate-fade-in">
@@ -484,7 +500,7 @@ export function OnboardingScreen() {
           </h1>
         </div>
 
-        <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 backdrop-blur-sm p-6 sm:p-7 shadow-2xl animate-slide-up">
+        <div className="rounded-2xl border border-surface-border bg-nova-navy-900/90 backdrop-blur-sm p-6 sm:p-7 shadow-2xl animate-slide-up">
           <div className="flex items-center gap-2 mb-7">
             {stepLabels.map((label, i) => {
               const active =
@@ -525,7 +541,7 @@ export function OnboardingScreen() {
                   }).catch(() => { /* optional */ });
                   setPhase('access');
                 }}
-                className="ark-btn-primary w-full h-11 rounded-xl"
+                className="nova-btn-primary w-full h-11 rounded-xl"
               >
                 Continue
               </button>
@@ -539,7 +555,7 @@ export function OnboardingScreen() {
                   {hwScanning ? (
                     <Loader2 className="w-5 h-5 text-content-secondary animate-spin" />
                   ) : (
-                    <CheckCircle2 className="w-5 h-5 text-ark-accent-green" />
+                    <CheckCircle2 className="w-5 h-5 text-nova-accent-green" />
                   )}
                 </span>
                 <div>
@@ -559,7 +575,7 @@ export function OnboardingScreen() {
                   {hwSteps.map((label, i) => (
                     <div key={label} className="flex items-center gap-2.5">
                       {i < hwStep ? (
-                        <CheckCircle2 className="w-4 h-4 text-ark-accent-green shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-nova-accent-green shrink-0" />
                       ) : i === hwStep ? (
                         <Loader2 className="w-4 h-4 text-content-secondary animate-spin shrink-0" />
                       ) : (
@@ -583,7 +599,7 @@ export function OnboardingScreen() {
                     <Spec icon={Zap} label="Accel" value={hw.acceleration} />
                     <Spec icon={HardDrive} label="Storage" value={hw.storage} />
                   </div>
-                  <button type="button" onClick={() => { setPhase('speed'); void runSpeed(); }} className="ark-btn-primary w-full h-11 rounded-xl">
+                  <button type="button" onClick={() => { setPhase('speed'); void runSpeed(); }} className="nova-btn-primary w-full h-11 rounded-xl">
                     Measure download speed
                   </button>
                 </>
@@ -669,7 +685,7 @@ export function OnboardingScreen() {
                   type="button"
                   onClick={() => setPhase('models')}
                   disabled={speedTesting || (!speedPlan && !speedSkipped)}
-                  className="ark-btn-primary flex-1 h-11 rounded-xl disabled:opacity-50"
+                  className="nova-btn-primary flex-1 h-11 rounded-xl disabled:opacity-50"
                 >
                   Continue
                 </button>
@@ -714,7 +730,7 @@ export function OnboardingScreen() {
                         </span>
                       </span>
                       <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                        on ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
+                        on ? 'bg-surface-hover text-nova-accent-green' : 'text-content-tertiary'
                       }`}>
                         {on ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4 opacity-50" />}
                       </span>
@@ -730,10 +746,9 @@ export function OnboardingScreen() {
                   const chatId = selectedId || selected?.id;
                   if (chatId) {
                     setLocalPrefs({
-                      activeCoderId: chatId,
-                      defaultCodeModelId: chatId,
                       activeChatId: chatId,
                       defaultModelId: chatId,
+                      lastChatModelId: chatId,
                     });
                     queueSetupBrainDownloads({
                       chatId,
@@ -743,7 +758,7 @@ export function OnboardingScreen() {
                   }
                   setPhase('finishing');
                 }}
-                className="ark-btn-primary w-full h-11 rounded-xl"
+                className="nova-btn-primary w-full h-11 rounded-xl"
               >
                 Start building
               </button>
@@ -865,7 +880,7 @@ export function OnboardingScreen() {
                     }
                     setPhase('models');
                   }}
-                  className="ark-btn-primary flex-[2] h-11 rounded-xl"
+                  className="nova-btn-primary flex-[2] h-11 rounded-xl"
                 >
                   {accessEnabledCount > 0 ? 'Continue to coder' : 'Skip — use sandbox'}
                 </button>
@@ -924,7 +939,7 @@ export function OnboardingScreen() {
                             value={keyDrafts[p.id] || ''}
                             onChange={e => setKeyDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                             placeholder="Paste API key"
-                            className="ark-input h-10"
+                            className="nova-input h-10"
                             autoComplete="off"
                             spellCheck={false}
                             autoFocus
@@ -933,7 +948,7 @@ export function OnboardingScreen() {
                             {saved && (
                               <button
                                 type="button"
-                                className="ark-btn-secondary flex-1 h-9"
+                                className="nova-btn-secondary flex-1 h-9"
                                 onClick={() => removeProviderKey(p.id)}
                               >
                                 Remove
@@ -941,7 +956,7 @@ export function OnboardingScreen() {
                             )}
                             <button
                               type="button"
-                              className="ark-btn-primary flex-1 h-9"
+                              className="nova-btn-primary flex-1 h-9"
                               disabled={!(keyDrafts[p.id] || '').trim()}
                               onClick={() => saveProviderKey(p.id)}
                             >
@@ -955,7 +970,7 @@ export function OnboardingScreen() {
                 })}
               </div>
 
-              <button type="button" onClick={finish} className="ark-btn-primary w-full h-11 rounded-xl">
+              <button type="button" onClick={finish} className="nova-btn-primary w-full h-11 rounded-xl">
                 {connectedCount > 0 ? 'Enter NOVA' : 'Continue without connecting'}
               </button>
             </div>
@@ -1002,7 +1017,7 @@ export function OnboardingScreen() {
                 <button
                   type="button"
                   onClick={() => void enterApp()}
-                  className="ark-btn-primary w-full h-11 rounded-xl"
+                  className="nova-btn-primary w-full h-11 rounded-xl"
                 >
                   Enter NOVA
                 </button>
@@ -1015,7 +1030,7 @@ export function OnboardingScreen() {
                     onClick={() => {
                       void finish();
                     }}
-                    className="ark-btn-primary w-full h-11 rounded-xl"
+                    className="nova-btn-primary w-full h-11 rounded-xl"
                   >
                     Retry download
                   </button>
@@ -1024,7 +1039,7 @@ export function OnboardingScreen() {
                     onClick={() => {
                       void enterApp();
                     }}
-                    className="ark-btn-secondary w-full h-11 rounded-xl"
+                    className="nova-btn-secondary w-full h-11 rounded-xl"
                   >
                     {connectedCount > 0 ? 'Continue with cloud keys' : 'Skip to chat anyway'}
                   </button>

@@ -34,7 +34,7 @@ export function GitHubRepoPicker({ open, onClose, onPick }: Props) {
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-surface-border bg-ark-navy-950 shadow-xl max-h-[80vh] flex flex-col">
+      <div className="w-full max-w-md rounded-2xl border border-surface-border bg-nova-navy-950 shadow-xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
           <p className="text-sm font-medium text-content-primary">Open a GitHub repo</p>
           <button type="button" onClick={onClose} className="text-content-tertiary hover:text-content-primary">

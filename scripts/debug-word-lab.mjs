@@ -2,7 +2,7 @@ import fs from 'fs';
 import { finalizeWebEdits } from '../src/lib/webProjectCanon.ts';
 import { verifyAsk } from '../src/lib/verifyAsk.ts';
 
-const root = 'C:/Users/thoma/Documents/ARK/Projects/word-lab-vava/src';
+const root = 'C:/Users/thoma/Documents/NOVA Projects/word-lab-vava/src';
 const files = {
   'src/App.tsx': fs.readFileSync(`${root}/App.tsx`, 'utf8'),
   'src/App.css': fs.readFileSync(`${root}/App.css`, 'utf8'),

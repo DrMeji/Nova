@@ -1,6 +1,6 @@
 /**
  * Explicit turn kind from composer chips — wins over regex classify.
- * Example: <!--ark-kind:create-->Build a site
+ * Example: <!--nova-kind:create-->Build a site
  */
 
 import type { TurnKind } from '@/lib/classifyTurn';
@@ -19,7 +19,7 @@ export function stripExplicitTurnKind(message: string): string {
 
 export function withExplicitTurnKind(kind: TurnKind, prompt: string): string {
   const body = String(prompt || '').trim();
-  return `<!--ark-kind:${kind}-->${body}`;
+  return `<!--nova-kind:${kind}-->${body}`;
 }
 
 /** Three first-run chips — match classify kinds explicitly. */

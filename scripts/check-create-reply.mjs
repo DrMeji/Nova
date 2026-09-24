@@ -120,11 +120,11 @@ check(
   typeof resolveCreateUiPolishCoder === 'function',
 );
 check(
-  'pickReadyCreatePolishCoder prefers 7B',
+  'pickReadyCreatePolishCoder prefers best (14B over 7B)',
   pickReadyCreatePolishCoder([
     { id: 'qwen25-coder-14b', status: 'ready' },
     { id: 'qwen25-coder-7b', status: 'ready' },
-  ])?.id === 'qwen25-coder-7b',
+  ])?.id === 'qwen25-coder-14b',
 );
 {
   const polishAsk = 'Build the first real multi-section UI\n@@@FILE src/App.jsx\nfooter and product copy';

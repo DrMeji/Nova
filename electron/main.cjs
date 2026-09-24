@@ -1,102 +1,60 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const path = require('path');
-const arkEngine = require('./arkEngine.cjs');
-const arkPreview = require('./arkPreview.cjs');
-const arkMedia = require('./arkMedia.cjs');
-const arkProjects = require('./arkProjects.cjs');
-const arkGit = require('./arkGit.cjs');
-const arkSecrets = require('./arkSecrets.cjs');
-const arkOpenExternal = require('./arkOpenExternal.cjs');
-const arkBrainToken = require('./arkBrainToken.cjs');
-const arkSystem = require('./arkSystem.cjs');
-const arkSetup = require('./arkSetup.cjs');
-const arkUpdater = require('./arkUpdater.cjs');
-const arkAuthStore = require('./arkAuthStore.cjs');
-const arkPaths = require('./arkPaths.cjs');
-const arkOAuth = require('./arkOAuth.cjs');
-const arkCrashLog = require('./arkCrashLog.cjs');
-const arkGguf = require('./arkGguf.cjs');
-const arkBrainApi = require('./arkBrainApi.cjs');
-const arkConfig = require('./arkConfig.cjs');
-const arkPcInventory = require('./arkPcInventory.cjs');
-const arkWebSearch = require('./arkWebSearch.cjs');
-const arkSelfGuard = require('./arkSelfGuard.cjs');
-const arkEdgeTts = require('./arkEdgeTts.cjs');
-const arkCloudEnv = require('./arkCloudEnv.cjs');
+const novaEngine = require('./novaEngine.cjs');
+const novaPreview = require('./novaPreview.cjs');
+const novaMedia = require('./novaMedia.cjs');
+const novaProjects = require('./novaProjects.cjs');
+const novaGit = require('./novaGit.cjs');
+const novaSecrets = require('./novaSecrets.cjs');
+const novaOpenExternal = require('./novaOpenExternal.cjs');
+const novaBrainToken = require('./novaBrainToken.cjs');
+const novaSystem = require('./novaSystem.cjs');
+const novaSetup = require('./novaSetup.cjs');
+const novaUpdater = require('./novaUpdater.cjs');
+const novaAuthStore = require('./novaAuthStore.cjs');
+const novaPaths = require('./novaPaths.cjs');
+const novaOAuth = require('./novaOAuth.cjs');
+const novaCrashLog = require('./novaCrashLog.cjs');
+const novaGguf = require('./novaGguf.cjs');
+const novaBrainApi = require('./novaBrainApi.cjs');
+const novaConfig = require('./novaConfig.cjs');
+const novaPcInventory = require('./novaPcInventory.cjs');
+const novaWebSearch = require('./novaWebSearch.cjs');
+const novaSelfGuard = require('./novaSelfGuard.cjs');
+const novaEdgeTts = require('./novaEdgeTts.cjs');
+const novaCloudEnv = require('./novaCloudEnv.cjs');
 
 function refreshArkSelfGuard() {
-  arkSelfGuard.init({
+  novaSelfGuard.init({
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     execPath: process.execPath,
     isPackaged: app.isPackaged,
-    allowDevSelfAccess: !app.isPackaged && process.env.ARK_DEV === '1',
+    allowDevSelfAccess: !app.isPackaged && process.env.NOVA_DEV === '1',
   });
 }
 refreshArkSelfGuard();
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 /** True only when Vite dev server is running (`npm run electron:dev`). Bat builds use dist/ instead. */
-const isDev = process.env.ARK_DEV === '1';
-const isUpdaterMode = process.argv.includes('--ark-updater');
-const BRAIN_PORT = arkConfig.BRAIN_PORT_BASE;
+const isDev = process.env.NOVA_DEV === '1';
+const isUpdaterMode = process.argv.includes('--nova-updater');
+const BRAIN_PORT = novaConfig.BRAIN_PORT_BASE;
 let brainPort = BRAIN_PORT;
 
-/**
- * Pin AppData under NOVA / NOVA-Dev. One-time migrate from legacy ARK / ARK-Dev
- * so models + auth survive the rename without a fresh-install feel.
- */
+/** Pin AppData under NOVA / NOVA-Dev only. */
 (function pinStableUserData() {
   const fs = require('fs');
   const appData = app.getPath('appData');
-
-  function migrateFolder(from, to) {
-    if (!fs.existsSync(from)) return;
-    if (!fs.existsSync(to)) {
-      try {
-        fs.renameSync(from, to);
-        return;
-      } catch {
-        /* fall through to copy */
-      }
-    }
-    try {
-      fs.mkdirSync(to, { recursive: true });
-      for (const name of fs.readdirSync(from)) {
-        const src = path.join(from, name);
-        const dest = path.join(to, name);
-        if (!fs.existsSync(dest)) {
-          fs.cpSync(src, dest, { recursive: true, force: false });
-        }
-      }
-    } catch {
-      /* best-effort */
-    }
-  }
-
   if (!app.isPackaged) {
-    const novaDev = path.join(appData, 'NOVA-Dev');
-    const arkDev = path.join(appData, 'ARK-Dev');
-    migrateFolder(arkDev, novaDev);
-    app.setPath('userData', fs.existsSync(novaDev) ? novaDev : arkDev);
+    const dir = path.join(appData, 'NOVA-Dev');
+    fs.mkdirSync(dir, { recursive: true });
+    app.setPath('userData', dir);
     return;
   }
-  const novaFolder = path.join(appData, 'NOVA');
-  const legacyArk = path.join(appData, 'ARK');
-  try {
-    migrateFolder(legacyArk, novaFolder);
-    if (fs.existsSync(novaFolder)) {
-      app.setPath('userData', novaFolder);
-      return;
-    }
-    if (fs.existsSync(legacyArk)) {
-      app.setPath('userData', legacyArk);
-      return;
-    }
-    app.setPath('userData', novaFolder);
-  } catch {
-    app.setPath('userData', novaFolder);
-  }
+  const dir = path.join(appData, 'NOVA');
+  fs.mkdirSync(dir, { recursive: true });
+  app.setPath('userData', dir);
 })();
 
 
@@ -174,7 +132,7 @@ function hasUserSelectedImageGrant(targetPath) {
 function resolveAppIcon() {
   const candidates = [
     path.join(__dirname, '..', 'build', 'icon.png'),
-    path.join(__dirname, '..', 'dist', 'ark-icon.png'),
+    path.join(__dirname, '..', 'dist', 'nova-icon.png'),
     path.join(process.resourcesPath || '', 'app.asar.unpacked', 'build', 'icon.png'),
   ];
   for (const p of candidates) {
@@ -190,8 +148,8 @@ function resolveAppIcon() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  const engine = arkEngine.getStatus();
-  const token = arkBrainToken.loadToken();
+  const engine = novaEngine.getStatus();
+  const token = novaBrainToken.loadToken();
   const brainUrl = `http://127.0.0.1:${brainPort}`;
   const authLabel = app.isPackaged
     ? (token ? 'Auth: on' : 'Auth: on (no token file)')
@@ -428,7 +386,7 @@ function createWindow() {
     }
     if (!win.isVisible()) win.show();
     try {
-      arkUpdater.markUiShown();
+      novaUpdater.markUiShown();
     } catch {
       /* ignore */
     }
@@ -478,7 +436,7 @@ function createWindow() {
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
-      void arkOpenExternal.openExternal(url).catch(err => {
+      void novaOpenExternal.openExternal(url).catch(err => {
         console.warn('[NOVA] blocked external link:', err instanceof Error ? err.message : String(err));
       });
     }
@@ -550,7 +508,7 @@ function assertAllowedUrl(url) {
       Number(brainPort) || 8787,
       // NOVA UI Vite
       5173, 5174,
-      // Project preview Vite range (see arkAgentExec DEV_PORT_CANDIDATES)
+      // Project preview Vite range (see novaAgentExec DEV_PORT_CANDIDATES)
       ...Array.from({ length: 151 }, (_, i) => 5200 + i),
     ]);
     if (!allowed.has(port)) {
@@ -574,7 +532,7 @@ async function handleHttpRequest(_event, payload) {
     delete headers.authorization;
     delete headers['x-api-key'];
     try {
-      const map = arkSecrets.loadMap();
+      const map = novaSecrets.loadMap();
       const key = map[authProviderId];
       if (typeof key === 'string' && key.trim()) {
         if (authProviderId === 'anthropic') headers['x-api-key'] = key.trim();
@@ -639,7 +597,7 @@ async function handleHttpStream(event, payload) {
     delete headers.authorization;
     delete headers['x-api-key'];
     try {
-      const map = arkSecrets.loadMap();
+      const map = novaSecrets.loadMap();
       const key = map[authProviderId];
       if (typeof key === 'string' && key.trim()) {
         if (authProviderId === 'anthropic') headers['x-api-key'] = key.trim();
@@ -737,64 +695,64 @@ async function handleHttpStream(event, payload) {
   }
 }
 
-ipcMain.handle('NOVA:system-info', async () => arkSystem.probeSystemInfo());
+ipcMain.handle('NOVA:system-info', async () => novaSystem.probeSystemInfo());
 
-ipcMain.handle('NOVA:speed-test', async () => arkSystem.probeSpeedTest());
+ipcMain.handle('NOVA:speed-test', async () => novaSystem.probeSpeedTest());
 
-ipcMain.handle('NOVA:update-check', async () => arkUpdater.checkForUpdate());
+ipcMain.handle('NOVA:update-check', async () => novaUpdater.checkForUpdate());
 ipcMain.handle('NOVA:update-download', async (_event, payload) =>
-  arkUpdater.downloadAndInstall(payload?.setupAssetUrl, payload?.latestTag),
+  novaUpdater.downloadAndInstall(payload?.setupAssetUrl, payload?.latestTag),
 );
-ipcMain.handle('NOVA:update-state', async () => arkUpdater.getState());
+ipcMain.handle('NOVA:update-state', async () => novaUpdater.getState());
 ipcMain.handle('NOVA:update-splash-preview', async (_event, payload) => {
   // Dev/bat only — packaged installs no longer expose Preview splash in Settings.
   if (app.isPackaged) {
     return { ok: false, error: 'Splash preview is only available in bat/dev builds.' };
   }
-  return arkUpdater.previewSplashDev(payload?.durationMs ?? 4500);
+  return novaUpdater.previewSplashDev(payload?.durationMs ?? 4500);
 });
-ipcMain.handle('NOVA:post-update-consume', async () => arkUpdater.consumePostUpdate());
+ipcMain.handle('NOVA:post-update-consume', async () => novaUpdater.consumePostUpdate());
 
 ipcMain.handle('NOVA:auth-recovery-save', async (_e, payload) => {
   try {
-    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
-    return arkAuthRecovery.saveLoginNote(payload || {});
+    const novaAuthRecovery = require('./novaAuthRecovery.cjs');
+    return novaAuthRecovery.saveLoginNote(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'recovery save failed' };
   }
 });
 ipcMain.handle('NOVA:auth-recovery-info', async () => {
   try {
-    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
-    return arkAuthRecovery.getRecoveryInfo();
+    const novaAuthRecovery = require('./novaAuthRecovery.cjs');
+    return novaAuthRecovery.getRecoveryInfo();
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'recovery info failed' };
   }
 });
 ipcMain.handle('NOVA:auth-recovery-reveal', async () => {
   try {
-    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
-    return await arkAuthRecovery.revealRecoveryFolder();
+    const novaAuthRecovery = require('./novaAuthRecovery.cjs');
+    return await novaAuthRecovery.revealRecoveryFolder();
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'recovery reveal failed' };
   }
 });
 
-ipcMain.handle('NOVA:auth-storage-get', async (_event, key) => arkAuthStore.getItem(key));
-ipcMain.handle('NOVA:auth-storage-set', async (_event, key, value) => arkAuthStore.setItem(key, value));
-ipcMain.handle('NOVA:auth-storage-remove', async (_event, key) => arkAuthStore.removeItem(key));
+ipcMain.handle('NOVA:auth-storage-get', async (_event, key) => novaAuthStore.getItem(key));
+ipcMain.handle('NOVA:auth-storage-set', async (_event, key, value) => novaAuthStore.setItem(key, value));
+ipcMain.handle('NOVA:auth-storage-remove', async (_event, key) => novaAuthStore.removeItem(key));
 
 // Sync so renderer supabase.ts can resolve cloud keys at module load (guest-local builds).
 ipcMain.on('NOVA:cloud-env-get', (event) => {
   try {
-    event.returnValue = arkCloudEnv.getCloudAuthEnv();
+    event.returnValue = novaCloudEnv.getCloudAuthEnv();
   } catch {
     event.returnValue = { url: '', anonKey: '', source: null, configured: false };
   }
 });
 ipcMain.handle('NOVA:cloud-env-get', async () => {
   try {
-    return arkCloudEnv.getCloudAuthEnv();
+    return novaCloudEnv.getCloudAuthEnv();
   } catch {
     return { url: '', anonKey: '', source: null, configured: false };
   }
@@ -823,14 +781,14 @@ ipcMain.handle('NOVA:app-meta', async () => ({
   userDataProfile: app.isPackaged ? 'NOVA' : 'NOVA-Dev',
   version: app.getVersion(),
   name: app.getName(),
-  updateFeed: arkUpdater.UPDATE_REPO,
+  updateFeed: novaUpdater.UPDATE_REPO,
 }));
 
-ipcMain.handle('NOVA:setup-get', async () => arkSetup.readSetup());
+ipcMain.handle('NOVA:setup-get', async () => novaSetup.readSetup());
 
 ipcMain.handle('NOVA:setup-set', async (_event, payload) => {
   const completed = Boolean(payload?.completed);
-  return arkSetup.writeSetup(completed);
+  return novaSetup.writeSetup(completed);
 });
 
 ipcMain.handle('NOVA:window-minimize', async () => {
@@ -864,8 +822,8 @@ ipcMain.handle('NOVA:open-path', async (_event, targetPath) => {
   }
   const resolved = path.resolve(targetPath);
   const userData = path.resolve(app.getPath('userData'));
-  const allowed = arkProjects.isPathUnderRoot(resolved, userData)
-    || arkProjects.isAllowedExternalPath(resolved);
+  const allowed = novaProjects.isPathUnderRoot(resolved, userData)
+    || novaProjects.isAllowedExternalPath(resolved);
   if (!allowed) {
     return { ok: false, error: 'Path is not in an allowed folder. Re-open it with + → Open folder first.' };
   }
@@ -878,22 +836,22 @@ ipcMain.handle('NOVA:open-path', async (_event, targetPath) => {
 });
 
 ipcMain.handle('NOVA:open-external', async (_event, url) => {
-  return arkOpenExternal.openExternal(url);
+  return novaOpenExternal.openExternal(url);
 });
 
 ipcMain.handle('NOVA:secrets-status', async () => ({
   ok: true,
-  encrypted: arkSecrets.encryptionAvailable(),
+  encrypted: novaSecrets.encryptionAvailable(),
 }));
 
 ipcMain.handle('NOVA:secrets-load', async () => {
   try {
-    const map = arkSecrets.loadMap();
+    const map = novaSecrets.loadMap();
     const keyStatus = {};
     for (const [id, value] of Object.entries(map)) {
       keyStatus[id] = Boolean(typeof value === 'string' && value.trim());
     }
-    return { ok: true, keyStatus, encrypted: arkSecrets.encryptionAvailable() };
+    return { ok: true, keyStatus, encrypted: novaSecrets.encryptionAvailable() };
   } catch (err) {
     return { ok: false, keyStatus: {}, error: err instanceof Error ? err.message : 'Load failed' };
   }
@@ -903,7 +861,7 @@ ipcMain.handle('NOVA:secrets-get-key', async (_event, providerId) => {
   try {
     const id = String(providerId || '').trim();
     if (!id) return { ok: false, key: '' };
-    const map = arkSecrets.loadMap();
+    const map = novaSecrets.loadMap();
     const key = map[id];
     return { ok: true, key: typeof key === 'string' ? key : '' };
   } catch (err) {
@@ -913,7 +871,7 @@ ipcMain.handle('NOVA:secrets-get-key', async (_event, providerId) => {
 
 ipcMain.handle('NOVA:secrets-save', async (_event, payload) => {
   try {
-    if (!arkSecrets.encryptionAvailable()) {
+    if (!novaSecrets.encryptionAvailable()) {
       return {
         ok: false,
         error: 'Secure storage unavailable on this PC — API keys cannot be saved safely',
@@ -926,8 +884,8 @@ ipcMain.handle('NOVA:secrets-save', async (_event, payload) => {
     for (const [id, value] of Object.entries(keys)) {
       if (typeof value === 'string' && value.trim()) clean[id] = value.trim();
     }
-    arkSecrets.saveMap(clean);
-    return { ok: true, encrypted: arkSecrets.encryptionAvailable() };
+    novaSecrets.saveMap(clean);
+    return { ok: true, encrypted: novaSecrets.encryptionAvailable() };
   } catch (err) {
     return {
       ok: false,
@@ -943,47 +901,47 @@ ipcMain.handle('NOVA:http-get', async (event, payload) =>
 ipcMain.handle('NOVA:http-request', handleHttpRequest);
 ipcMain.handle('NOVA:http-stream', handleHttpStream);
 
-ipcMain.handle('NOVA:voice-neural-voices', async () => arkEdgeTts.listNeuralVoices());
+ipcMain.handle('NOVA:voice-neural-voices', async () => novaEdgeTts.listNeuralVoices());
 ipcMain.handle('NOVA:voice-neural-speak', async (_e, payload) =>
-  arkEdgeTts.synthesize(payload?.text, payload?.voice),
+  novaEdgeTts.synthesize(payload?.text, payload?.voice),
 );
 
-ipcMain.handle('NOVA:engine-status', async () => arkEngine.getStatus());
-ipcMain.handle('NOVA:engine-start', async () => arkEngine.start());
-ipcMain.handle('NOVA:engine-stop', async () => arkEngine.stop());
+ipcMain.handle('NOVA:engine-status', async () => novaEngine.getStatus());
+ipcMain.handle('NOVA:engine-start', async () => novaEngine.start());
+ipcMain.handle('NOVA:engine-stop', async () => novaEngine.stop());
 ipcMain.handle('NOVA:engine-set-model', async (_e, id) => {
   try {
     if (!id || typeof id !== 'string') throw new Error('Missing model id');
-    return arkEngine.setActiveModel(id);
+    return novaEngine.setActiveModel(id);
   } catch (err) {
     console.warn('[NOVA] engine-set-model', err instanceof Error ? err.message : err);
-    try { return arkEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
+    try { return novaEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
   }
 });
 ipcMain.handle('NOVA:engine-download', async (_e, id) => {
   try {
     if (!id || typeof id !== 'string') throw new Error('Missing model id');
-    return arkEngine.beginDownload(id);
+    return novaEngine.beginDownload(id);
   } catch (err) {
     console.warn('[NOVA] engine-download', err instanceof Error ? err.message : err);
-    try { return arkEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
+    try { return novaEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
   }
 });
 ipcMain.handle('NOVA:engine-register-hunt', async (_e, meta) => {
   try {
-    const model = arkEngine.registerHunt(meta);
+    const model = novaEngine.registerHunt(meta);
     return { ok: true, model };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
-ipcMain.handle('NOVA:engine-download-progress', async (_e, id) => arkEngine.downloadProgress(id));
-ipcMain.handle('NOVA:engine-download-error', async (_e, id) => arkEngine.downloadError?.(id) ?? null);
-ipcMain.handle('NOVA:engine-download-cancel', async (_e, id) => arkEngine.cancelDownload?.(id) ?? { ok: false });
-ipcMain.handle('NOVA:engine-import-gguf', async (_e, filePath) => arkEngine.importGgufFile?.(filePath));
+ipcMain.handle('NOVA:engine-download-progress', async (_e, id) => novaEngine.downloadProgress(id));
+ipcMain.handle('NOVA:engine-download-error', async (_e, id) => novaEngine.downloadError?.(id) ?? null);
+ipcMain.handle('NOVA:engine-download-cancel', async (_e, id) => novaEngine.cancelDownload?.(id) ?? { ok: false });
+ipcMain.handle('NOVA:engine-import-gguf', async (_e, filePath) => novaEngine.importGgufFile?.(filePath));
 ipcMain.handle('NOVA:engine-delete-model', async (_e, id) => {
   try {
-    return arkEngine.deleteInstalledModel?.(id) ?? { ok: false, error: 'Delete not available' };
+    return novaEngine.deleteInstalledModel?.(id) ?? { ok: false, error: 'Delete not available' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -994,25 +952,25 @@ ipcMain.handle('NOVA:engine-import-gguf-pick', async () => {
     title: 'Import GGUF into NOVA Engine',
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'GGUF models', extensions: ['gguf'] }],
-    defaultPath: arkPaths.modelsDir(),
+    defaultPath: novaPaths.modelsDir(),
   });
   if (result.canceled || !result.filePaths?.length) {
     return { ok: false, canceled: true };
   }
   const imported = [];
   for (const fp of result.filePaths) {
-    imported.push(arkEngine.importGgufFile(fp));
+    imported.push(novaEngine.importGgufFile(fp));
   }
   return { ok: true, count: imported.length, status: imported[imported.length - 1] };
 });
-ipcMain.handle('NOVA:engine-disk-space', async () => arkEngine.diskSpaceForModels?.());
-ipcMain.handle('NOVA:engine-ensure-runtime', async () => arkEngine.ensureRuntime());
+ipcMain.handle('NOVA:engine-disk-space', async () => novaEngine.diskSpaceForModels?.());
+ipcMain.handle('NOVA:engine-ensure-runtime', async () => novaEngine.ensureRuntime());
 ipcMain.handle('NOVA:engine-generate', async (_e, payload) => {
-  const arkJobs = require('./arkJobs.cjs');
-  return arkJobs.enqueue({
+  const novaJobs = require('./novaJobs.cjs');
+  return novaJobs.enqueue({
     kind: 'gguf',
     label: 'engine-generate',
-    run: () => arkEngine.generate(payload?.message ?? '', {
+    run: () => novaEngine.generate(payload?.message ?? '', {
       modelId: payload?.modelId,
       kind: payload?.kind,
       temperature: payload?.temperature,
@@ -1028,8 +986,8 @@ ipcMain.handle('NOVA:engine-generate', async (_e, payload) => {
 
 ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
   const webContentsId = event.sender.id;
-  const arkJobs = require('./arkJobs.cjs');
-  return arkJobs.enqueue({
+  const novaJobs = require('./novaJobs.cjs');
+  return novaJobs.enqueue({
     kind: 'gguf',
     label: 'engine-generate-stream',
     run: () => {
@@ -1049,7 +1007,7 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
           /* ignore */
         }
       };
-      return arkEngine.generate(payload?.message ?? '', {
+      return novaEngine.generate(payload?.message ?? '', {
         modelId: payload?.modelId,
         kind: payload?.kind,
         temperature: payload?.temperature,
@@ -1072,7 +1030,7 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
 
 ipcMain.handle('NOVA:engine-generate-cancel', async (_e, payload) => {
   try {
-    return arkGguf.cancelGguf?.({
+    return novaGguf.cancelGguf?.({
       jobId: payload?.jobId,
       chatId: payload?.chatId,
     }) || { ok: true };
@@ -1083,62 +1041,65 @@ ipcMain.handle('NOVA:engine-generate-cancel', async (_e, payload) => {
 
 ipcMain.handle('NOVA:web-search', async (_e, payload) => {
   try {
-    return await arkWebSearch.searchWeb(payload?.query || payload?.q || '');
+    return await novaWebSearch.searchWeb(payload?.query || payload?.q || '');
   } catch (err) {
     return { ok: false, text: '', sources: [], error: err instanceof Error ? err.message : 'Web search failed' };
   }
 });
 
-ipcMain.handle('NOVA:models-dir-info', async () => arkPaths.modelsDirInfo());
+ipcMain.handle('NOVA:models-dir-info', async () => novaPaths.modelsDirInfo());
 ipcMain.handle('NOVA:models-dir-pick', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showOpenDialog(win || undefined, {
     title: 'Choose NOVA models folder',
     properties: ['openDirectory', 'createDirectory'],
-    defaultPath: arkPaths.modelsDir(),
+    defaultPath: novaPaths.modelsDir(),
   });
   if (result.canceled || !result.filePaths?.[0]) {
-    return { ok: false, canceled: true, ...arkPaths.modelsDirInfo() };
+    return { ok: false, canceled: true, ...novaPaths.modelsDirInfo() };
   }
-  return { ...arkPaths.setModelsDir(result.filePaths[0]), canceled: false };
+  return { ...novaPaths.setModelsDir(result.filePaths[0]), canceled: false };
 });
 ipcMain.handle('NOVA:models-dir-set', async (_e, folderPath) => {
   try {
-    return arkPaths.setModelsDir(folderPath);
+    return novaPaths.setModelsDir(folderPath);
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Could not set folder',
-      ...arkPaths.modelsDirInfo(),
+      ...novaPaths.modelsDirInfo(),
     };
   }
 });
-ipcMain.handle('NOVA:models-dir-reset', async () => arkPaths.resetModelsDir());
+ipcMain.handle('NOVA:models-dir-reset', async () => novaPaths.resetModelsDir());
 
 ipcMain.handle('NOVA:preview-start', async (_e, payload) =>
-  arkPreview.startPreview(payload || {}),
+  novaPreview.startPreview(payload || {}),
 );
 ipcMain.handle('NOVA:preview-stop', async (_e, projectId) =>
-  arkPreview.stopPreview(projectId),
+  novaPreview.stopPreview(projectId),
 );
 ipcMain.handle('NOVA:preview-open-window', async (_e, payload) =>
-  arkPreview.openPreviewWindow(payload || {}),
+  novaPreview.openPreviewWindow(payload || {}),
 );
 ipcMain.handle('NOVA:preview-close-live', async () =>
-  arkPreview.closeLivePreviewWindow(),
+  novaPreview.closeLivePreviewWindow(),
 );
 ipcMain.handle('NOVA:preview-update', async (_e, payload) =>
-  arkPreview.updatePreview(payload || {}),
+  novaPreview.updatePreview(payload || {}),
 );
 ipcMain.handle('NOVA:preview-reload', async (_e, projectId) =>
-  arkPreview.reloadPreviewWindow(projectId),
+  novaPreview.reloadPreviewWindow(projectId),
+);
+ipcMain.handle('NOVA:preview-capture-live', async () =>
+  novaPreview.captureLivePreview(),
 );
 ipcMain.handle('NOVA:preview-status', async (_e, projectId) =>
-  arkPreview.previewStatus(projectId),
+  novaPreview.previewStatus(projectId),
 );
 ipcMain.handle('NOVA:media-library', async () => {
   try {
-    return { ok: true, items: arkMedia.listLibrary() };
+    return { ok: true, items: novaMedia.listLibrary() };
   } catch (err) {
     return { ok: false, items: [], error: err instanceof Error ? err.message : 'library error' };
   }
@@ -1146,7 +1107,7 @@ ipcMain.handle('NOVA:media-library', async () => {
 
 ipcMain.handle('NOVA:media-clear', async () => {
   try {
-    return arkMedia.clearLibrary();
+    return novaMedia.clearLibrary();
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'clear failed' };
   }
@@ -1154,7 +1115,7 @@ ipcMain.handle('NOVA:media-clear', async () => {
 
 ipcMain.handle('NOVA:media-get', async (_e, id) => {
   try {
-    const item = arkMedia.getLibraryItem(id);
+    const item = novaMedia.getLibraryItem(id);
     if (!item) return { ok: false, error: 'not found' };
     return { ok: true, item };
   } catch (err) {
@@ -1164,7 +1125,7 @@ ipcMain.handle('NOVA:media-get', async (_e, id) => {
 
 ipcMain.handle('NOVA:media-remove', async (_e, id) => {
   try {
-    return arkMedia.removeLibraryItem(id);
+    return novaMedia.removeLibraryItem(id);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'media remove error' };
   }
@@ -1172,7 +1133,7 @@ ipcMain.handle('NOVA:media-remove', async (_e, id) => {
 
 ipcMain.handle('NOVA:project-write', async (_e, payload) => {
   try {
-    return arkProjects.writeProjectFiles(
+    return novaProjects.writeProjectFiles(
       payload?.projectId,
       payload?.projectName,
       payload?.files || {},
@@ -1185,7 +1146,7 @@ ipcMain.handle('NOVA:project-write', async (_e, payload) => {
 
 ipcMain.handle('NOVA:project-read', async (_e, projectId) => {
   try {
-    return arkProjects.readProjectFiles(projectId);
+    return novaProjects.readProjectFiles(projectId);
   } catch (err) {
     return { ok: false, files: {}, error: err instanceof Error ? err.message : 'read failed' };
   }
@@ -1193,7 +1154,7 @@ ipcMain.handle('NOVA:project-read', async (_e, projectId) => {
 
 ipcMain.handle('NOVA:project-path', async (_e, projectId) => {
   try {
-    return arkProjects.getProjectPath(projectId);
+    return novaProjects.getProjectPath(projectId);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'path failed' };
   }
@@ -1223,7 +1184,7 @@ ipcMain.handle('NOVA:project-import-folder', async (event, payload) => {
         /* ignore */
       }
     };
-    return await arkProjects.importFolder(
+    return await novaProjects.importFolder(
       payload?.projectId,
       payload?.projectName,
       sourceDir,
@@ -1240,7 +1201,7 @@ ipcMain.handle('NOVA:project-import-folder', async (event, payload) => {
 
 ipcMain.handle('NOVA:workspace-mkdir', async (_e, payload) => {
   try {
-    return arkProjects.workspaceMkdir(payload || {});
+    return novaProjects.workspaceMkdir(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'mkdir failed' };
   }
@@ -1248,7 +1209,7 @@ ipcMain.handle('NOVA:workspace-mkdir', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-sandbox-root', async () => {
   try {
-    return arkProjects.workspaceSandboxRoot();
+    return novaProjects.workspaceSandboxRoot();
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'sandbox failed' };
   }
@@ -1279,7 +1240,7 @@ ipcMain.handle('NOVA:workspace-open-root', async (event, payload) => {
         /* ignore */
       }
     };
-    return await arkProjects.openWorkspaceRoot(
+    return await novaProjects.openWorkspaceRoot(
       payload?.projectId,
       payload?.projectName,
       sourceDir,
@@ -1294,7 +1255,7 @@ ipcMain.handle('NOVA:workspace-open-root', async (event, payload) => {
 /** Validate a typed path before opening in-place. */
 ipcMain.handle('NOVA:workspace-stat-path', async (_e, targetPath) => {
   try {
-    return arkProjects.pathStat(targetPath);
+    return novaProjects.pathStat(targetPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'stat failed' };
   }
@@ -1302,7 +1263,7 @@ ipcMain.handle('NOVA:workspace-stat-path', async (_e, targetPath) => {
 
 ipcMain.handle('NOVA:workspace-set-grants', async (_e, grants) => {
   try {
-    return { ok: true, grants: arkProjects.setWorkspaceGrants(grants || {}) };
+    return { ok: true, grants: novaProjects.setWorkspaceGrants(grants || {}) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'grants failed' };
   }
@@ -1310,7 +1271,7 @@ ipcMain.handle('NOVA:workspace-set-grants', async (_e, grants) => {
 
 ipcMain.handle('NOVA:workspace-get-grants', async () => {
   try {
-    return { ok: true, grants: arkProjects.loadWorkspaceGrants() };
+    return { ok: true, grants: novaProjects.loadWorkspaceGrants() };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'grants failed' };
   }
@@ -1318,18 +1279,18 @@ ipcMain.handle('NOVA:workspace-get-grants', async () => {
 
 ipcMain.handle('NOVA:agent-run', async (_e, payload) => {
   try {
-    const arkAgentExec = require('./arkAgentExec.cjs');
-    const arkJobs = require('./arkJobs.cjs');
+    const novaAgentExec = require('./novaAgentExec.cjs');
+    const novaJobs = require('./novaJobs.cjs');
     const command = String(payload?.command || '').trim();
-    // Serialize heavy npm installs through arkJobs so Defender/disk storms don't stack.
+    // Serialize heavy npm installs through novaJobs so Defender/disk storms don't stack.
     if (/^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(command)) {
-      return await arkJobs.enqueue({
+      return await novaJobs.enqueue({
         kind: 'npm',
         label: command.slice(0, 80),
-        run: () => arkAgentExec.agentRun(payload || {}),
+        run: () => novaAgentExec.agentRun(payload || {}),
       });
     }
-    return await arkAgentExec.agentRun(payload || {});
+    return await novaAgentExec.agentRun(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'agent run failed' };
   }
@@ -1337,12 +1298,12 @@ ipcMain.handle('NOVA:agent-run', async (_e, payload) => {
 
 ipcMain.handle('NOVA:agent-start-dev-server', async (_e, payload) => {
   try {
-    const arkAgentExec = require('./arkAgentExec.cjs');
-    const arkJobs = require('./arkJobs.cjs');
-    return await arkJobs.enqueue({
+    const novaAgentExec = require('./novaAgentExec.cjs');
+    const novaJobs = require('./novaJobs.cjs');
+    return await novaJobs.enqueue({
       kind: 'vite',
       label: 'agent-start-dev-server',
-      run: () => arkAgentExec.agentStartDevServer(payload || {}),
+      run: () => novaAgentExec.agentStartDevServer(payload || {}),
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'dev server failed' };
@@ -1351,8 +1312,8 @@ ipcMain.handle('NOVA:agent-start-dev-server', async (_e, payload) => {
 
 ipcMain.handle('NOVA:agent-start-folder-preview', async (_e, payload) => {
   try {
-    const arkAgentExec = require('./arkAgentExec.cjs');
-    return await arkAgentExec.agentStartFolderPreview(payload || {});
+    const novaAgentExec = require('./novaAgentExec.cjs');
+    return await novaAgentExec.agentStartFolderPreview(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'folder preview failed' };
   }
@@ -1360,8 +1321,8 @@ ipcMain.handle('NOVA:agent-start-folder-preview', async (_e, payload) => {
 
 ipcMain.handle('NOVA:preview-session', async (_e, cwd) => {
   try {
-    const arkAgentExec = require('./arkAgentExec.cjs');
-    const session = arkAgentExec.getPreviewSession(cwd || '');
+    const novaAgentExec = require('./novaAgentExec.cjs');
+    const session = novaAgentExec.getPreviewSession(cwd || '');
     return session?.url
       ? { ok: true, url: session.url, cwd: session.cwd }
       : { ok: false, running: false };
@@ -1373,12 +1334,12 @@ ipcMain.handle('NOVA:preview-session', async (_e, cwd) => {
 /** Preview SSOT — attach live cwd session or start one (never a second Vite for same cwd). */
 ipcMain.handle('NOVA:preview-get-or-attach', async (_e, cwd) => {
   try {
-    const arkAgentExec = require('./arkAgentExec.cjs');
-    const arkJobs = require('./arkJobs.cjs');
-    return await arkJobs.enqueue({
+    const novaAgentExec = require('./novaAgentExec.cjs');
+    const novaJobs = require('./novaJobs.cjs');
+    return await novaJobs.enqueue({
       kind: 'vite',
       label: 'preview-get-or-attach',
-      run: () => arkAgentExec.getOrAttachPreview(cwd || ''),
+      run: () => novaAgentExec.getOrAttachPreview(cwd || ''),
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'preview get-or-attach failed' };
@@ -1387,15 +1348,15 @@ ipcMain.handle('NOVA:preview-get-or-attach', async (_e, cwd) => {
 
 ipcMain.handle('NOVA:jobs-enqueue', async (_e, payload) => {
   try {
-    const arkJobs = require('./arkJobs.cjs');
+    const novaJobs = require('./novaJobs.cjs');
     const kind = String(payload?.kind || '');
     if (kind !== 'gguf' && kind !== 'npm' && kind !== 'vite') {
       return { ok: false, error: 'kind must be gguf|npm|vite' };
     }
     // Renderer cannot pass run(); this IPC is a status/ack stub for future wiring.
     // Real enqueue with run() is main-process only — see NOVA:agent-run (npm) and
-    // NOVA:agent-start-dev-server (vite) which call arkJobs.enqueue({ kind, run }).
-    return { ok: true, queued: false, status: arkJobs.status(), note: 'Pass run() from main only' };
+    // NOVA:agent-start-dev-server (vite) which call novaJobs.enqueue({ kind, run }).
+    return { ok: true, queued: false, status: novaJobs.status(), note: 'Pass run() from main only' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'jobs enqueue failed' };
   }
@@ -1403,8 +1364,8 @@ ipcMain.handle('NOVA:jobs-enqueue', async (_e, payload) => {
 
 ipcMain.handle('NOVA:jobs-status', async () => {
   try {
-    const arkJobs = require('./arkJobs.cjs');
-    return { ok: true, ...arkJobs.status() };
+    const novaJobs = require('./novaJobs.cjs');
+    return { ok: true, ...novaJobs.status() };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'jobs status failed' };
   }
@@ -1412,8 +1373,8 @@ ipcMain.handle('NOVA:jobs-status', async () => {
 
 ipcMain.handle('NOVA:mcp-list-tools', async (_e, payload) => {
   try {
-    const arkMcpHost = require('./arkMcpHost.cjs');
-    return await arkMcpHost.listTools(payload || {});
+    const novaMcpHost = require('./novaMcpHost.cjs');
+    return await novaMcpHost.listTools(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'MCP list failed', tools: [] };
   }
@@ -1421,9 +1382,9 @@ ipcMain.handle('NOVA:mcp-list-tools', async (_e, payload) => {
 
 ipcMain.handle('NOVA:mcp-call-tool', async (_e, payload) => {
   try {
-    const arkMcpHost = require('./arkMcpHost.cjs');
+    const novaMcpHost = require('./novaMcpHost.cjs');
     const server = payload?.server || payload || {};
-    return await arkMcpHost.callTool(server, payload?.name, payload?.arguments);
+    return await novaMcpHost.callTool(server, payload?.name, payload?.arguments);
   } catch (err) {
     return {
       ok: false,
@@ -1435,8 +1396,8 @@ ipcMain.handle('NOVA:mcp-call-tool', async (_e, payload) => {
 
 ipcMain.handle('NOVA:mcp-stop', async (_e, payload) => {
   try {
-    const arkMcpHost = require('./arkMcpHost.cjs');
-    return arkMcpHost.stopServer(payload?.id);
+    const novaMcpHost = require('./novaMcpHost.cjs');
+    return novaMcpHost.stopServer(payload?.id);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'MCP stop failed' };
   }
@@ -1444,7 +1405,7 @@ ipcMain.handle('NOVA:mcp-stop', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-delete-path', async (_e, payload) => {
   try {
-    return arkProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);
+    return novaProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
@@ -1452,7 +1413,7 @@ ipcMain.handle('NOVA:workspace-delete-path', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-delete-root', async (_e, payload) => {
   try {
-    return arkProjects.deleteWorkspaceRoot(payload?.projectId);
+    return novaProjects.deleteWorkspaceRoot(payload?.projectId);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
@@ -1460,7 +1421,7 @@ ipcMain.handle('NOVA:workspace-delete-root', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-delete-folder', async (_e, payload) => {
   try {
-    return arkProjects.deleteGrantedFolder(payload?.targetPath);
+    return novaProjects.deleteGrantedFolder(payload?.targetPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
@@ -1468,7 +1429,7 @@ ipcMain.handle('NOVA:workspace-delete-folder', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-write-file', async (_e, payload) => {
   try {
-    return arkProjects.writeGrantedFile(payload?.targetPath, payload?.content ?? '');
+    return novaProjects.writeGrantedFile(payload?.targetPath, payload?.content ?? '');
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'write failed' };
   }
@@ -1476,7 +1437,7 @@ ipcMain.handle('NOVA:workspace-write-file', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-save-asset', async (_e, payload) => {
   try {
-    return await arkProjects.saveAssetToGrantedPath(payload || {});
+    return await novaProjects.saveAssetToGrantedPath(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'asset save failed' };
   }
@@ -1484,7 +1445,7 @@ ipcMain.handle('NOVA:workspace-save-asset', async (_e, payload) => {
 
 ipcMain.handle('NOVA:brand-search-images', async (_e, payload) => {
   try {
-    return await arkProjects.searchOpenverseImages(payload?.query, payload || {});
+    return await novaProjects.searchOpenverseImages(payload?.query, payload || {});
   } catch (err) {
     return { ok: false, results: [], error: err instanceof Error ? err.message : 'search failed' };
   }
@@ -1492,7 +1453,7 @@ ipcMain.handle('NOVA:brand-search-images', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-rename-path', async (_e, payload) => {
   try {
-    return arkProjects.renameGrantedPath(payload?.fromPath, payload?.toPath);
+    return novaProjects.renameGrantedPath(payload?.fromPath, payload?.toPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'rename failed' };
   }
@@ -1525,8 +1486,8 @@ ipcMain.handle('NOVA:git-clone-open', async (event, payload) => {
       const resolvedDest = path.resolve(String(dest));
       const parent = path.dirname(resolvedDest);
       if (
-        !arkProjects.isAllowedExternalPath(resolvedDest)
-        && !arkProjects.isAllowedExternalPath(parent)
+        !novaProjects.isAllowedExternalPath(resolvedDest)
+        && !novaProjects.isAllowedExternalPath(parent)
       ) {
         return {
           ok: false,
@@ -1534,7 +1495,7 @@ ipcMain.handle('NOVA:git-clone-open', async (event, payload) => {
         };
       }
     }
-    const cloned = await arkGit.cloneToPath(url, dest, payload?.token);
+    const cloned = await novaGit.cloneToPath(url, dest, payload?.token);
     if (!cloned.ok) return cloned;
     const sendProgress = (p) => {
       try {
@@ -1543,7 +1504,7 @@ ipcMain.handle('NOVA:git-clone-open', async (event, payload) => {
         /* ignore */
       }
     };
-    const opened = await arkProjects.openWorkspaceRoot(
+    const opened = await novaProjects.openWorkspaceRoot(
       payload?.projectId,
       payload?.projectName || path.basename(dest),
       dest,
@@ -1597,7 +1558,7 @@ ipcMain.handle('NOVA:pick-files', async (_e, payload) => {
 
 ipcMain.handle('NOVA:path-stat', async (_e, targetPath) => {
   try {
-    return arkProjects.pathStat(targetPath);
+    return novaProjects.pathStat(targetPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'stat failed' };
   }
@@ -1605,7 +1566,7 @@ ipcMain.handle('NOVA:path-stat', async (_e, targetPath) => {
 
 ipcMain.handle('NOVA:list-dir', async (_e, dirPath) => {
   try {
-    return arkProjects.listDir(dirPath);
+    return novaProjects.listDir(dirPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'list failed', items: [] };
   }
@@ -1613,7 +1574,7 @@ ipcMain.handle('NOVA:list-dir', async (_e, dirPath) => {
 
 ipcMain.handle('NOVA:browse-roots', async () => {
   try {
-    return arkProjects.browseRoots();
+    return novaProjects.browseRoots();
   } catch (err) {
     return { ok: false, roots: [], error: err instanceof Error ? err.message : 'roots failed' };
   }
@@ -1621,8 +1582,8 @@ ipcMain.handle('NOVA:browse-roots', async () => {
 
 ipcMain.handle('NOVA:pc-installed-apps', async (_e, payload) => {
   try {
-    const grants = arkProjects.loadWorkspaceGrants();
-    return await arkPcInventory.listInstalledApps(grants, payload || {});
+    const grants = novaProjects.loadWorkspaceGrants();
+    return await novaPcInventory.listInstalledApps(grants, payload || {});
   } catch (err) {
     return {
       ok: false,
@@ -1655,7 +1616,7 @@ ipcMain.handle('NOVA:read-text-file', async (_e, payload) => {
     refreshArkSelfGuard();
     const target = typeof payload === 'string' ? payload : payload?.path;
     const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 2_000_000;
-    return arkProjects.readTextFile(target, maxBytes);
+    return novaProjects.readTextFile(target, maxBytes);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'read failed' };
   }
@@ -1665,7 +1626,7 @@ ipcMain.handle('NOVA:is-protected-path', async (_e, targetPath) => {
   try {
     refreshArkSelfGuard();
     const p = String(targetPath || '');
-    return { ok: true, protected: arkSelfGuard.isArkProtectedPath(p) };
+    return { ok: true, protected: novaSelfGuard.isArkProtectedPath(p) };
   } catch (err) {
     return { ok: false, protected: false, error: err instanceof Error ? err.message : 'check failed' };
   }
@@ -1675,7 +1636,7 @@ ipcMain.handle('NOVA:read-data-url', async (_e, payload) => {
   try {
     const target = typeof payload === 'string' ? payload : payload?.path;
     const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 6_000_000;
-    return arkProjects.readDataUrl(target, maxBytes, {
+    return novaProjects.readDataUrl(target, maxBytes, {
       allowUserSelectedImage: hasUserSelectedImageGrant(target),
     });
   } catch (err) {
@@ -1685,7 +1646,7 @@ ipcMain.handle('NOVA:read-data-url', async (_e, payload) => {
 
 ipcMain.handle('NOVA:project-search', async (_e, payload) => {
   try {
-    return arkProjects.searchProjectFiles(payload?.projectId, payload?.query, payload?.limit);
+    return novaProjects.searchProjectFiles(payload?.projectId, payload?.query, payload?.limit);
   } catch (err) {
     return { ok: false, hits: [], error: err instanceof Error ? err.message : 'search failed' };
   }
@@ -1693,19 +1654,19 @@ ipcMain.handle('NOVA:project-search', async (_e, payload) => {
 
 ipcMain.handle('NOVA:project-delete-files', async (_e, projectId) => {
   try {
-    return arkProjects.deleteProjectFiles(projectId);
+    return novaProjects.deleteProjectFiles(projectId);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
 });
 
 function projectCwd(projectId) {
-  return arkProjects.getProjectPath(projectId).root;
+  return novaProjects.getProjectPath(projectId).root;
 }
 
 ipcMain.handle('NOVA:git-status', async (_e, projectId) => {
   try {
-    return await arkGit.status(projectCwd(projectId));
+    return await novaGit.status(projectCwd(projectId));
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'git status failed' };
   }
@@ -1713,7 +1674,7 @@ ipcMain.handle('NOVA:git-status', async (_e, projectId) => {
 
 ipcMain.handle('NOVA:git-clone', async (_e, payload) => {
   try {
-    return await arkGit.cloneRepo(projectCwd(payload?.projectId), payload?.url, payload?.token);
+    return await novaGit.cloneRepo(projectCwd(payload?.projectId), payload?.url, payload?.token);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'clone failed' };
   }
@@ -1721,7 +1682,7 @@ ipcMain.handle('NOVA:git-clone', async (_e, payload) => {
 
 ipcMain.handle('NOVA:git-commit', async (_e, payload) => {
   try {
-    return await arkGit.commitAll(projectCwd(payload?.projectId), payload?.message);
+    return await novaGit.commitAll(projectCwd(payload?.projectId), payload?.message);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'commit failed' };
   }
@@ -1729,7 +1690,7 @@ ipcMain.handle('NOVA:git-commit', async (_e, payload) => {
 
 ipcMain.handle('NOVA:git-push', async (_e, payload) => {
   try {
-    return await arkGit.push(projectCwd(payload?.projectId), payload?.token);
+    return await novaGit.push(projectCwd(payload?.projectId), payload?.token);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'push failed' };
   }
@@ -1737,7 +1698,7 @@ ipcMain.handle('NOVA:git-push', async (_e, payload) => {
 
 ipcMain.handle('NOVA:git-pull', async (_e, payload) => {
   try {
-    return await arkGit.pull(projectCwd(payload?.projectId), payload?.token);
+    return await novaGit.pull(projectCwd(payload?.projectId), payload?.token);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'pull failed' };
   }
@@ -1745,7 +1706,7 @@ ipcMain.handle('NOVA:git-pull', async (_e, payload) => {
 
 ipcMain.handle('NOVA:git-diff', async (_e, projectId) => {
   try {
-    return await arkGit.diffSummary(projectCwd(projectId));
+    return await novaGit.diffSummary(projectCwd(projectId));
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'diff failed' };
   }
@@ -1754,30 +1715,36 @@ ipcMain.handle('NOVA:git-diff', async (_e, projectId) => {
 ipcMain.handle('NOVA:git-set-origin', async (_e, payload) => {
   try {
     const cwd = projectCwd(payload?.projectId);
-    await arkGit.initIfNeeded(cwd);
-    const set = await arkGit.setOrigin(cwd, payload?.remoteUrl);
+    await novaGit.initIfNeeded(cwd);
+    const set = await novaGit.setOrigin(cwd, payload?.remoteUrl);
     if (!set.ok) return set;
-    const st = await arkGit.status(cwd);
+    const st = await novaGit.status(cwd);
     return { ok: true, ...st };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'remote failed' };
   }
 });
 
-ipcMain.handle('NOVA:plugin-oauth-start', async (_e, pluginId) => arkOAuth.startPluginOAuth(pluginId));
-ipcMain.handle('NOVA:plugin-oauth-status', async () => ({ ok: true, ...arkOAuth.oauthConfigStatus() }));
+ipcMain.handle('NOVA:plugin-oauth-start', async (_e, pluginId) => novaOAuth.startPluginOAuth(pluginId));
+ipcMain.handle('NOVA:plugin-oauth-status', async () => ({ ok: true, ...novaOAuth.oauthConfigStatus() }));
 ipcMain.handle('NOVA:plugin-oauth-set-client', async (_e, payload) => {
   const id = payload?.pluginId;
   const clientId = payload?.clientId;
   if (!id) return { ok: false, error: 'Missing pluginId' };
-  const stored = arkOAuth.setClientId(String(id), clientId == null ? '' : String(clientId));
-  return { ok: true, stored, ...arkOAuth.oauthConfigStatus() };
+  const stored = novaOAuth.setClientId(String(id), clientId == null ? '' : String(clientId));
+  return { ok: true, stored, ...novaOAuth.oauthConfigStatus() };
 });
 
-ipcMain.handle('NOVA:local-reports-list', async () => arkCrashLog.listReports());
-ipcMain.handle('NOVA:local-reports-clear', async () => arkCrashLog.clearReports());
+ipcMain.handle('NOVA:local-reports-list', async () => novaCrashLog.listReports());
+ipcMain.handle('NOVA:local-reports-clear', async () => novaCrashLog.clearReports());
+ipcMain.handle('NOVA:local-reports-append', async (_e, payload) => {
+  const kind = payload?.kind || 'note';
+  const rest = payload && typeof payload === 'object' ? { ...payload } : {};
+  delete rest.kind;
+  return novaCrashLog.appendReport(kind, rest);
+});
 ipcMain.handle('NOVA:local-reports-open', async () => {
-  const dir = arkCrashLog.logDir();
+  const dir = novaCrashLog.logDir();
   await shell.openPath(dir);
   return { ok: true, path: dir };
 });
@@ -1819,14 +1786,14 @@ ipcMain.handle('NOVA:signing-status', async () => {
 ipcMain.handle('NOVA:brain-status', async () => ({
   ok: Boolean(brainApi?.isListening?.()),
   url: `http://127.0.0.1:${brainPort}`,
-  contractVersion: arkBrainApi.CONTRACT_VERSION,
-  engine: arkEngine.getStatus(),
-  auth: app.isPackaged || Boolean(arkBrainToken.loadToken()) ? 'bearer' : 'none (localhost dev)',
-  hasToken: Boolean(arkBrainToken.loadToken()),
+  contractVersion: novaBrainApi.CONTRACT_VERSION,
+  engine: novaEngine.getStatus(),
+  auth: app.isPackaged || Boolean(novaBrainToken.loadToken()) ? 'bearer' : 'none (localhost dev)',
+  hasToken: Boolean(novaBrainToken.loadToken()),
 }));
 
 ipcMain.handle('NOVA:brain-token-get', async () => {
-  const token = arkBrainToken.loadToken();
+  const token = novaBrainToken.loadToken();
   return {
     ok: true,
     token,
@@ -1837,7 +1804,7 @@ ipcMain.handle('NOVA:brain-token-get', async () => {
 });
 
 ipcMain.handle('NOVA:brain-token-rotate', async () => {
-  const token = arkBrainToken.rotateToken();
+  const token = novaBrainToken.rotateToken();
   return { ok: true, token, url: `http://127.0.0.1:${brainPort}` };
 });
 
@@ -1845,9 +1812,9 @@ let brainApi = null;
 
 function startBrainApi() {
   if (brainApi) return;
-  const token = arkBrainToken.ensureToken(app.isPackaged) || process.env.ARK_BRAIN_TOKEN || '';
-  brainApi = arkBrainApi.createBrainServer({
-    arkEngine,
+  const token = novaBrainToken.ensureToken(app.isPackaged) || process.env.NOVA_BRAIN_TOKEN || '';
+  brainApi = novaBrainApi.createBrainServer({
+    novaEngine,
     port: BRAIN_PORT,
     token,
     requireAuth: app.isPackaged || Boolean(token),
@@ -1856,8 +1823,8 @@ function startBrainApi() {
     brainPort = port;
     refreshTrayMenu();
     if (!app.isPackaged) {
-      console.log(`[NOVA-brain] http://127.0.0.1:${brainPort} (contract ${arkBrainApi.CONTRACT_VERSION})`);
-      console.log('[ark-engine] ready (NOVA-owned local runtime)');
+      console.log(`[NOVA-brain] http://127.0.0.1:${brainPort} (contract ${novaBrainApi.CONTRACT_VERSION})`);
+      console.log('[nova-engine] ready (NOVA-owned local runtime)');
     }
   }).catch((err) => {
     if (!app.isPackaged) {
@@ -1867,12 +1834,12 @@ function startBrainApi() {
 }
 
 // Updater must NOT take/contend for the single-instance lock. The main app still
-// holds the lock when it breakaway-launches `NOVA.exe --ark-updater`, so requesting
+// holds the lock when it breakaway-launches `NOVA.exe --nova-updater`, so requesting
 // the lock here used to make the updater exit immediately (no Updating window,
 // no install, same update still available after reopen).
 if (isUpdaterMode) {
   app.whenReady().then(() =>
-    arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
+    novaUpdater.runStandaloneSplash(process.argv).catch((err) => {
       console.error('[NOVA-updater] fatal', err);
       app.quit();
     }),
@@ -1895,11 +1862,11 @@ if (isUpdaterMode) {
       if (!app.isPackaged) {
         applyLoginItem(false);
       }
-      arkUpdater.setForceExitHook(() => {
+      novaUpdater.setForceExitHook(() => {
         quitting = true;
-        try { arkEngine.stop(); } catch { /* ignore */ }
-        try { arkGguf.stopServer(); } catch { /* ignore */ }
-        try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }
+        try { novaEngine.stop(); } catch { /* ignore */ }
+        try { novaGguf.stopServer(); } catch { /* ignore */ }
+        try { novaGguf.cancelGguf?.(); } catch { /* ignore */ }
         if (tray) {
           try {
             tray.destroy();
@@ -1917,7 +1884,7 @@ if (isUpdaterMode) {
           brainApi = null;
         }
       });
-      arkEngine.start();
+      novaEngine.start();
       startBrainApi();
       createWindow();
       createTray();
@@ -1933,11 +1900,11 @@ if (isUpdaterMode) {
 
     app.on('before-quit', () => {
       quitting = true;
-      try { require('./arkMcpHost.cjs').stopAll(); } catch { /* ignore */ }
-      try { require('./arkAgentExec.cjs').stopAllPreviews(); } catch { /* ignore */ }
-      try { arkEngine.stop(); } catch { /* ignore */ }
-      try { arkGguf.stopServer(); } catch { /* ignore */ }
-      try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }
+      try { require('./novaMcpHost.cjs').stopAll(); } catch { /* ignore */ }
+      try { require('./novaAgentExec.cjs').stopAllPreviews(); } catch { /* ignore */ }
+      try { novaEngine.stop(); } catch { /* ignore */ }
+      try { novaGguf.stopServer(); } catch { /* ignore */ }
+      try { novaGguf.cancelGguf?.(); } catch { /* ignore */ }
       if (brainApi) {
         try { void brainApi.close(); } catch { /* ignore */ }
         brainApi = null;

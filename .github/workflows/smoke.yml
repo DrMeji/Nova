@@ -67,5 +67,5 @@ jobs:
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:
-          ARK_BRAIN_SMOKE_OPTIONAL: '1'
+          NOVA_BRAIN_SMOKE_OPTIONAL: '1'
         run: node scripts/smoke-brain-check.cjs

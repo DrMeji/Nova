@@ -15,7 +15,7 @@ export function AttachCard({ meta }: { meta: ChatAttachMeta }) {
       ? ImageIcon
       : FileIcon;
   return (
-    <span className="inline-flex items-center gap-1.5 max-w-[14rem] rounded-lg border border-surface-border bg-ark-navy-950/90 pl-1.5 pr-2 py-1">
+    <span className="inline-flex items-center gap-1.5 max-w-[14rem] rounded-lg border border-surface-border bg-nova-navy-950/90 pl-1.5 pr-2 py-1">
       <span className="w-5 h-5 rounded-md bg-surface-hover border border-surface-border flex items-center justify-center shrink-0">
         <Icon className="w-3 h-3 text-content-secondary" />
       </span>
@@ -27,7 +27,7 @@ export function AttachCard({ meta }: { meta: ChatAttachMeta }) {
   );
 }
 
-const AUTO_READ_RE = /<!--ark-auto-read-->/g;
+const AUTO_READ_RE = /<!--nova-auto-read-->/g;
 
 /** Card(s) + optional trailing plain text (hides internal auto-read marker). */
 export function AttachMessageBody({

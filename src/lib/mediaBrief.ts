@@ -93,7 +93,7 @@ export function buildImageBriefMessage(raw: string): string {
 export function parseImageRequest(content: string): { text: string; referenceId?: string } {
   let text = String(content || '');
   let referenceId: string | undefined;
-  text = text.replace(/!\[[^\]]*]\(ark-media:([^)]+)\)/g, (_m, id: string) => {
+  text = text.replace(/!\[[^\]]*]\(nova-media:([^)]+)\)/g, (_m, id: string) => {
     if (!referenceId) referenceId = id.trim();
     return '';
   });

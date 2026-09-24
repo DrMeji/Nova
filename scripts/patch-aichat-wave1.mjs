@@ -717,8 +717,8 @@ if (!/deleteHost:\s*\{/.test(src) || !/openFolderHost:\s*\{/.test(src) || !/runC
   console.error('FAIL: early dispatch missing hosts');
   process.exit(1);
 }
-if (/\banswerStudio\s*\(/.test(src) || /\brunArkAgentLoop\s*\(/.test(src)) {
-  console.error('FAIL: answerStudio/runArkAgentLoop reintroduced');
+if (/\banswerStudio\s*\(/.test(src) || /\brunNovaAgentLoop\s*\(/.test(src)) {
+  console.error('FAIL: answerStudio/runNovaAgentLoop reintroduced');
   process.exit(1);
 }
 

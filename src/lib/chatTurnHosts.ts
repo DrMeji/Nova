@@ -9,7 +9,7 @@ import type { OpenFolderTurnHost } from '@/lib/chatTurnHandlers/openFolder';
 import type { RunCmdTurnHost } from '@/lib/chatTurnHandlers/runCmd';
 import type { RunEditTurnHost } from '@/lib/chatTurnHandlers/edit';
 import type { ChatTurnHost } from '@/lib/chatTurnHandlers/chat';
-import { setChatTurnStatus } from '@/lib/chatTurnStatusStore';
+import { pushChatTurnStatus } from '@/lib/chatTurnStatusStore';
 import {
   setChatCodePill,
   setLastDiskTarget,
@@ -22,6 +22,7 @@ import { resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrant
 import { countLineDiff } from '@/lib/agentTrace';
 import { buildStudioTraceMessage } from '@/lib/chatCodeReply';
 import { getActiveBrainId, isWeakCoderId } from '@/lib/brainRoles';
+import { isCoderEngineId } from '@/lib/enginePick';
 import { inferEditTopicFromAsk, rememberLastEditTopic } from '@/lib/editAskResolve';
 import { pushApplySnapshot } from '@/lib/chatApplySnapshotStore';
 
@@ -42,6 +43,8 @@ export type HostBag = {
   stopRequestedByChatRef?: { current: Record<string, boolean> };
   pinnedModel: { id?: string; name?: string; source?: string };
   composerMode: string | null;
+  /** Try-again: deepen the same ask without a new user bubble. */
+  regenerating?: boolean;
   diskIntent: unknown;
   diskRoot: string | null;
   diskProjectId: string | null;
@@ -79,6 +82,7 @@ export type HostBag = {
   setDeleteFolderClarifyPrompt: (p: unknown) => void;
   /** Pin a ready coder in the chat UI before create scaffolds. */
   onCoderPinned?: (coder: { id: string; name: string }) => void;
+  onCreatePhaseModel?: (phase: { id: string; name: string; role: string }) => void;
   pendingFileDeleteRef: { current: unknown };
   pendingProjectDeleteRef: { current: unknown };
   pendingFolderClarifyRef: { current: unknown };
@@ -115,13 +119,19 @@ function turnStillActive(bag: HostBag): boolean {
 
 export function makeCreateHost(bag: HostBag): CreateTurnHost {
   const { content, mode, activeChatId, createIntentEarly, workspaceActiveForCreate, pinnedModel } = bag;
-  const sticky = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  const stickyRaw = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  const sticky = stickyRaw && isCoderEngineId(stickyRaw.modelId) ? stickyRaw : null;
   // Prefer active coder prefs when the menu is on Auto — create polish needs a real GGUF id.
   let preferredId = pinnedModel.id;
   let preferredName = pinnedModel.name;
   if (pinnedModel.id === 'NOVA-auto' || pinnedModel.source === 'auto') {
     const coderPref = getActiveBrainId('coder');
-    if (coderPref && coderPref !== 'NOVA-auto' && !isWeakCoderId(coderPref)) {
+    if (
+      coderPref
+      && coderPref !== 'NOVA-auto'
+      && !isWeakCoderId(coderPref)
+      && isCoderEngineId(coderPref)
+    ) {
       preferredId = coderPref;
       preferredName = coderPref;
     }
@@ -159,6 +169,7 @@ export function makeCreateHost(bag: HostBag): CreateTurnHost {
     preferredModelId: preferredId,
     preferredModelName: preferredName,
     onCoderPinned: bag.onCoderPinned,
+    onCreatePhaseModel: bag.onCreatePhaseModel,
   };
 }
 
@@ -247,7 +258,7 @@ export function makeRunCmdHost(bag: HostBag): RunCmdTurnHost {
     },
     confirm: (message) => window.confirm(message),
     setRunningStatus: (label) => {
-      setChatTurnStatus({ chatId: bag.activeChatId, assistantId: bag.assistantId, label, history: [label] });
+      pushChatTurnStatus({ chatId: bag.activeChatId, assistantId: bag.assistantId, label });
     },
   };
 }
@@ -272,6 +283,8 @@ export function makeEditHost(bag: HostBag): RunEditTurnHost {
     stickyModelName: sticky?.modelName,
     preferredModelId: pinnedModel.id,
     preferredModelName: pinnedModel.name,
+    onCoderPinned: bag.onCoderPinned,
+    onCreatePhaseModel: bag.onCreatePhaseModel,
     pushStatus: bag.pushAssistantStatus,
     countLineDiff,
     buildStudioTraceMessage,
@@ -374,6 +387,7 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
     stickyModelName: stickyChat?.modelName || null,
     stickyPinnedSource: stickyChat?.pinnedSource || null,
     priorHistory,
+    regenerate: Boolean(bag.regenerating),
     shouldAbort: () => !turnStillActive(bag),
     onDelta: (live: string) => {
       if (!turnStillActive(bag)) return;

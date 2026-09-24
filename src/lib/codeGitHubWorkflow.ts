@@ -9,7 +9,7 @@ import {
   gitSetOrigin,
   gitStatus,
   parseGithubRemote,
-} from '@/lib/arkGitClient';
+} from '@/lib/novaGitClient';
 import { createGitHubPullRequest, createGitHubRepo } from '@/lib/github';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginRuntime, loadPluginState } from '@/lib/plugins';

@@ -53,7 +53,7 @@ export function clearArkSessionHistory() {
     /* ignore */
   }
   try {
-    localStorage.setItem('ark:skip-library-sync', '1');
+    localStorage.setItem('NOVA:skip-library-sync', '1');
   } catch {
     /* ignore */
   }
@@ -65,7 +65,7 @@ export function clearArkSessionHistory() {
 export function clearLocalChatCache() {
   clearArkSessionHistory();
   try {
-    localStorage.removeItem('ark:skip-library-sync');
+    localStorage.removeItem('NOVA:skip-library-sync');
   } catch {
     /* ignore */
   }
@@ -75,7 +75,7 @@ export function clearLocalChatCache() {
 export async function clearLocalAppCaches() {
   clearLocalChatCache();
   try {
-    await window.arkDesktop?.localReportsClear?.();
+    await window.novaDesktop?.localReportsClear?.();
   } catch {
     /* ignore */
   }
@@ -85,13 +85,13 @@ export async function clearLocalAppCaches() {
 /** Run once per token so reopen is empty for testing. Skip in packaged installs. */
 export function runCleanBootIfNeeded() {
   try {
-    if (window.arkDesktop?.isPackaged) return false;
+    if (window.novaDesktop?.isPackaged) return false;
     if (localStorage.getItem('ark:clean-boot-token') === CLEAN_BOOT_TOKEN) return false;
     clearArkSessionHistory();
     localStorage.setItem('ark:clean-boot-token', CLEAN_BOOT_TOKEN);
     return true;
   } catch {
-    if (window.arkDesktop?.isPackaged) return false;
+    if (window.novaDesktop?.isPackaged) return false;
     clearArkSessionHistory();
     return true;
   }

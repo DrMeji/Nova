@@ -7,7 +7,7 @@ import { needsFirstRunSetup } from '@/lib/setup';
 
 /** Overlay window chrome. does not push layout down (even sidebar padding). */
 export function TitleBar() {
-  const desktop = typeof window !== 'undefined' ? window.arkDesktop : undefined;
+  const desktop = typeof window !== 'undefined' ? window.novaDesktop : undefined;
   const [visible, setVisible] = useState(Boolean(desktop?.windowControls));
   const [maximized, setMaximized] = useState(false);
   const { route } = useRouter();

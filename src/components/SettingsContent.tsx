@@ -21,8 +21,8 @@ import {
 import { NOVA_CHANGELOG } from '@/lib/changelog';
 import { clearSetupCompleted } from '@/lib/setup';
 import { hydratePrefsFromWorkspaceGrants, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import {
   detectHardware,
   getAccurateHardware,
@@ -38,7 +38,7 @@ import {
   Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, Mic,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
-import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
+import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/novaEngine';
 import { NovaMark } from '@/components/NovaMark';
 import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
@@ -50,7 +50,7 @@ import {
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
@@ -74,7 +74,7 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
 ];
 
 export function SettingsContent({ onClose, initialSection }: { onClose?: () => void; initialSection?: string } = {}) {
-  const { user, profile, settings, updateSettings, signOut, scheduleAccountDeletion, cancelAccountDeletion, refreshProfile } = useAuth();
+  const { user, profile, settings, updateSettings, signOut, deleteAccountPermanently, refreshProfile } = useAuth();
   const { blockedUsers, unblockFriend, refreshBlocked } = useSocial();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
@@ -149,7 +149,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   useEffect(() => {
     if (activeSection !== 'privacy') return;
-    void window.arkDesktop?.localReportsList?.()
+    void window.novaDesktop?.localReportsList?.()
       .then(list => setLocalReports(Array.isArray(list) ? list : []))
       .catch(() => setLocalReports([]));
   }, [activeSection]);
@@ -162,8 +162,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   useEffect(() => {
     void Promise.all([
-      window.arkDesktop?.brainStatus?.(),
-      window.arkDesktop?.secretsStatus?.(),
+      window.novaDesktop?.brainStatus?.(),
+      window.novaDesktop?.secretsStatus?.(),
     ]).then(([status, secrets]) => {
       if (status?.url) setBrainUrl(status.url);
       if (status?.contractVersion) setBrainContractVersion(status.contractVersion);
@@ -192,13 +192,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, []);
 
   useEffect(() => {
-    void window.arkDesktop?.appMeta?.()
+    void window.novaDesktop?.appMeta?.()
       .then(meta => {
         if (meta?.version) setAppVersion(meta.version);
         if (meta?.userDataProfile) setUserDataProfile(String(meta.userDataProfile));
       })
       .catch(() => {});
-    void window.arkDesktop?.signingStatus?.()
+    void window.novaDesktop?.signingStatus?.()
       .then((row) => {
         // Only surface signing when it helps (valid signature). Hide unsigned / NotSigned noise.
         if (row?.packaged && row.signed) {
@@ -235,7 +235,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, [activeSection]);
 
   useEffect(() => {
-    void window.arkDesktop?.loginItemGet?.()
+    void window.novaDesktop?.loginItemGet?.()
       .then((s) => {
         if (typeof s?.openAtLogin === 'boolean') {
           setPrefs(prev => {
@@ -243,8 +243,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             return setLocalPrefs({ launchOnStartup: s.openAtLogin });
           });
         } else if (getLocalPrefs().launchOnStartup && s?.canSetLoginItem !== false) {
-          void window.arkDesktop?.appMeta?.().then((meta) => {
-            if (meta?.isPackaged) void window.arkDesktop?.loginItemSet?.(true);
+          void window.novaDesktop?.appMeta?.().then((meta) => {
+            if (meta?.isPackaged) void window.novaDesktop?.loginItemSet?.(true);
           });
         }
       })
@@ -252,7 +252,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, []);
 
   useEffect(() => {
-    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+    const unsub = window.novaDesktop?.onUpdateProgress?.((payload) => {
       if (typeof payload?.percent === 'number') setUpdatePercent(payload.percent);
       // The updater sends a noisy "checking" message that can appear in dev tooling/status
       // surfaces. Keep the message for meaningful phases only.
@@ -344,7 +344,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     setUpdateInfo(null);
     void (async () => {
       try {
-        const { checkArkGitHubUpdate } = await import('@/lib/arkUpdates');
+        const { checkArkGitHubUpdate } = await import('@/lib/novaUpdates');
         const info = await checkArkGitHubUpdate();
         const cleanMsg = String(info.message || '')
           .replace(/\s*\(delta-ready\)/ig, '')
@@ -379,7 +379,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     setUpdatePercent(0);
     setUpdateMsg('Updating…');
     void (async () => {
-      const { clearUpdateIndicatorCache, downloadAndInstallArkUpdate } = await import('@/lib/arkUpdates');
+      const { clearUpdateIndicatorCache, downloadAndInstallArkUpdate } = await import('@/lib/novaUpdates');
       const result = await downloadAndInstallArkUpdate({
         setupAssetUrl: updateInfo.setupAssetUrl,
         latestTag: updateInfo.latestTag,
@@ -490,7 +490,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     user, profile, setArkCopied, arkCopied,
     flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
     deleteConfirmOpen, setDeleteConfirmOpen,
-    scheduleAccountDeletion, cancelAccountDeletion, signOut,
+    deleteAccountPermanently, signOut,
     theme, setTheme, prefs, patchPrefs,
     enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted,
@@ -512,8 +512,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
 
   return (
-    <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-ark-navy-900">
-      <div className={`${navCompact ? 'w-14' : 'w-60'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-900`}>
+    <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-nova-navy-900">
+      <div className={`${navCompact ? 'w-14' : 'w-60'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-nova-navy-900`}>
         <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3 flex flex-col gap-1 ${navCompact ? 'items-center' : ''}`}>
           {navSections.map(section => (
             <button
@@ -548,7 +548,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
           <button
             type="button"
-            className={`ark-btn-primary w-full justify-center ${navCompact ? '!px-2' : ''}`}
+            className={`nova-btn-primary w-full justify-center ${navCompact ? '!px-2' : ''}`}
             onClick={saveAllVisible}
             title="Save"
           >
@@ -558,7 +558,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 bg-ark-navy-900">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 bg-nova-navy-900">
         <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {(['account','appearance','ai','voice'].includes(activeSection)) && (
             <SettingsGeneral ctx={settingsCtx} />

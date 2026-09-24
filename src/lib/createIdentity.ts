@@ -3,6 +3,17 @@
  * No category lookbook (bakery/Discord/Veopx). Every create invents from THIS ask.
  */
 
+import { premiumWebCraftRules } from '@/lib/createEnsemble';
+import { detectLayoutReference, layoutReferencePromptLines } from '@/lib/layoutReference';
+
+function premiumWebCraftRulesSafe(brief: string): string[] {
+  try {
+    return premiumWebCraftRules(brief);
+  } catch {
+    return [];
+  }
+}
+
 export type CreateBriefSpec = {
   name: string;
   slug: string;
@@ -51,18 +62,75 @@ function slugify(name: string): string {
     .slice(0, 32) || 'brand';
 }
 
-/** Neutral palette — model invents the real look from the brief. Not a lookbook. */
+/**
+ * Fallback when the brief has no color cues — cool slate, NOT cream/sage/gold
+ * (cream was leaking AppleHome-class pages onto unrelated products).
+ */
 const NEUTRAL: CreatePalette = {
-  bg: '#f7f7f5',
-  panel: '#ffffff',
-  text: '#171717',
-  muted: '#737373',
-  accent: '#2563eb',
-  glow: '#e5e5e5',
-  btnInk: '#ffffff',
-  font: 'Georgia, "Times New Roman", serif',
-  line: 'rgba(23,23,23,0.12)',
+  bg: '#0f1419',
+  panel: '#1a222c',
+  text: '#e8eef4',
+  muted: '#8b98a8',
+  accent: '#5b9fd4',
+  glow: 'rgba(91, 159, 212, 0.28)',
+  btnInk: '#0f1419',
+  font: '"Segoe UI", "Helvetica Neue", system-ui, sans-serif',
+  line: 'rgba(232, 238, 244, 0.14)',
 };
+
+/** Brief-aware starter palette — explicit vibe words beat cream/bakery defaults. */
+function paletteFromBrief(brief: string): CreatePalette {
+  const t = String(brief || '').toLowerCase();
+  // Maritime / dark vibes FIRST — ensemble plans often say "avoid cream" and the
+  // word "cream" alone used to steal the palette from navy/seafoam briefs.
+  if (/\b(?:navy|harbor|seafoam|ocean|maritime|dock|boat|clipper)\b/.test(t)) {
+    return {
+      bg: '#0a1628',
+      panel: '#12233a',
+      text: '#f4f8fc',
+      muted: '#8fa3b8',
+      accent: '#6ec8b8',
+      glow: 'rgba(110, 200, 184, 0.32)',
+      btnInk: '#0a1628',
+      font: '"Segoe UI", "Helvetica Neue", system-ui, sans-serif',
+      line: 'rgba(244, 248, 252, 0.14)',
+    };
+  }
+  if (/\b(?:charcoal|amber|workshop|makerspace|forge|metal)\b/.test(t)) {
+    return {
+      bg: '#121417',
+      panel: '#1c2026',
+      text: '#f0ebe3',
+      muted: '#9a948a',
+      accent: '#d4893a',
+      glow: 'rgba(212, 137, 58, 0.3)',
+      btnInk: '#121417',
+      font: '"Segoe UI", "Helvetica Neue", system-ui, sans-serif',
+      line: 'rgba(240, 235, 227, 0.12)',
+    };
+  }
+  const wantsCream = (
+    (/\b(?:cream|parchment|bakery|terracotta)\b/.test(t)
+      && !/\b(?:not\s+cream|no\s+cream|avoid\s+cream|never\s+cream|don'?t\s+.*?cream)\b/.test(t))
+    || (/\bsage\b/.test(t)
+      && /\b(?:bakery|cafe|pastry|bread)\b/.test(t)
+      && !/\b(?:not\s+(?:cafe\s+)?sage|avoid\s+sage)\b/.test(t))
+  );
+  if (wantsCream) {
+    return {
+      bg: '#f3eee4',
+      panel: '#faf7f0',
+      text: '#1a1f1c',
+      muted: '#5c665e',
+      accent: '#8a6b2f',
+      glow: 'rgba(198, 230, 192, 0.42)',
+      btnInk: '#faf7f0',
+      font: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
+      line: 'rgba(26, 31, 28, 0.12)',
+    };
+  }
+  return { ...NEUTRAL };
+}
 
 /** Local URL scan — avoid importing brandAssets (circular). */
 function extractReferenceSiteUrlLocal(text: string): string | null {
@@ -79,15 +147,12 @@ function extractReferenceSiteUrlLocal(text: string): string | null {
 }
 
 function explicitReferenceAsk(brief: string): { url: string | null; wantsInspiration: boolean } {
-  const t = String(brief || '');
-  const url = extractReferenceSiteUrlLocal(t);
-  const wantsInspiration = Boolean(
-    url
-    || /\b(?:use|as)\s+(?:a\s+)?(?:layout\s+)?(?:reference|inspiration)\b/i.test(t)
-    || /\binspired\s+by\b/i.test(t)
-    || /\blayout\s+(?:like|from)\b/i.test(t),
-  );
-  return { url, wantsInspiration };
+  const det = detectLayoutReference(brief);
+  const url = det.url || extractReferenceSiteUrlLocal(brief);
+  return {
+    url,
+    wantsInspiration: det.wantsInspiration || Boolean(url),
+  };
 }
 
 /** Extract concrete product requirements from the brief — never map to a genre template. */
@@ -170,7 +235,7 @@ export function createIdentityFromBrief(name: string, brief = ''): CreateIdentit
     category: 'brief',
     mood: 'brief',
     layout: 'brief',
-    palette: { ...NEUTRAL },
+    palette: paletteFromBrief(brief),
     heroQueries: [
       { id: `${spec.slug}-hero`, q: `${q} unique original photograph` },
       { id: `${spec.slug}-story`, q: `${spec.name} lifestyle editorial photography unique` },
@@ -198,18 +263,10 @@ export function polishPromptLinesFromBrief(
     : '1. Implement the product the user described — invent a unique IA and visual language for THIS brief only.';
 
   const refLines = spec.referenceMode === 'layout-inspiration'
-    ? [
-        '',
-        'Layout inspiration (NOT a clone):',
-        spec.referenceSite
-          ? `- User pointed at ${spec.referenceSite} for hierarchy/clarity/spacing only.`
-          : '- User asked for layout inspiration from a known site — match clarity and hierarchy only.',
-        '- Rebuild an ORIGINAL product UI for THIS brief. Do not copy brand marks, copy, or proprietary assets.',
-        '- Do not ship a lookalike homepage of that reference.',
-      ]
+    ? layoutReferencePromptLines(String(brief || spec.brief || ''))
     : [
         '',
-        'No external lookbook. Do not imitate Discord, Slack, Apple.com, Veopx, bakery shop templates, or any prior Nova demo.',
+        'No external lookbook. Do not imitate Discord, Slack, Apple.com, Veopx, bakery shop templates, or any prior Nova demo — unless this brief explicitly asks for that reference.',
       ];
 
   return [
@@ -219,16 +276,38 @@ export function polishPromptLinesFromBrief(
     'Do NOT create ./components/* — one App file with the full UI inline.',
     `MUST import './App.css' at the top of ${appPath}.`,
     'Invent a unique visual language for THIS brand (palette, type, layout). Never reuse a prior shell.',
-    'PREMIUM depth required: layered background (gradient/atmosphere), strong type hierarchy, generous spacing, polished cards — not a flat title + two buttons on charcoal.',
-    'Implement the REAL flows from the brief (borrow/return, browse, booking, cart, etc.). Do not invent a generic time-slot booking flow unless the brief asks for appointments/reservations.',
-    'Images: NEVER use via.placeholder.com, placehold.co, picsum, or other remote placeholder hosts (they break offline). Prefer inline SVG, data-URI icons, or /heroes/*.jpg /logo.svg paths that will be filled locally.',
-    'Item / product rows: each row is a horizontal flex with a fixed-size image (no overlapping alt text), title, short blurb, and action button. Do not stack broken <img> on top of the label.',
-    'NEVER set background: url(/logo.svg) cover on the page — logo.svg is a small nav mark only. Atmosphere comes from gradients or /heroes/*.jpg.',
-    'If public/logo.svg or /icons/*.svg will exist, reference them in the nav (<img src="/logo.svg" />, search, bag). Do not leave those files unused.',
-    'If the brief needs search, messaging, carts, borrow/return, etc. — implement those with useState and real UI states.',
+    'QUALITY OVER SPEED: take your time. Prefer a complete, polished App over a fast stub. Multi-section, working interactions, real copy.',
+    'If public/logo.svg or public/icons/*.svg exist (or will), put them IN the sticky nav as <img> tags — never leave icon files unused on disk.',
+    ...(
+      /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino)\b/i.test(String(brief || ''))
+        ? [
+            'This is a PLAYABLE GAME — not a marketing landing page.',
+            'Ship a real <canvas> (or WebGL) with requestAnimationFrame, keyboard/pointer controls, score/HUD, and a game loop.',
+            'Do NOT ship a centered brand splash, feature cards, or static CSS mock of a game.',
+            'Take the time to implement movement, collision, and win/lose — not a thin stub.',
+          ]
+        : /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor)\b/i.test(String(brief || ''))
+          ? [
+              'This is a 3D / viewport app — import three (or WebGL) and show a real interactive scene.',
+              'Include orbit/pan controls and at least one editable mesh or tool. Not a marketing hero.',
+              'Add three to package.json dependencies if missing.',
+            ]
+          : [
+              'PREMIUM depth required: layered background (gradient/atmosphere), strong type hierarchy, generous spacing, polished cards — not a flat title + two buttons on charcoal.',
+              'Implement the REAL flows from the brief (borrow/return, browse, booking, cart, etc.). Do not invent a generic time-slot booking flow unless the brief asks for appointments/reservations.',
+              'Images: NEVER use via.placeholder.com, placehold.co, picsum, or other remote placeholder hosts (they break offline). Prefer inline SVG, data-URI icons, or /heroes/*.jpg /logo.svg paths that will be filled locally.',
+              'Item / product rows: each row is a horizontal flex with a fixed-size image (no overlapping alt text), title, short blurb, and action button. Do not stack broken <img> on top of the label.',
+              'NEVER set background: url(/logo.svg) cover on the page — logo.svg is a small nav mark only. Atmosphere comes from gradients or /heroes/*.jpg.',
+              'If the brief needs search, messaging, carts, borrow/return, etc. — implement those with useState and real UI states.',
+              'ASCII-safe copy only in source (use hyphen - not em/en dashes) so Windows file writes never mojibake.',
+            ]
+    ),
     'Do NOT ship a centered brand-name splash, Vite title shell, or filler placeholder text.',
     'Do NOT use filler labels like "Book Title 1" or "A brief description of the book" — invent real product names from the brief.',
-    'Nova is free forever — never add paywalls, upgrade CTAs, license gates, or “Pro unlock” screens in the generated UI.',
+    'Never reuse stock Nova demo copy ("Light, distilled.", "Quiet by design", "Presence without the noise", "Meet … One") unless the brief literally asks for that wording — invent fresh copy for THIS brand.',
+    'Take as long as needed — thorough and correct beats a fast stub. There is no rush.',
+    ...premiumWebCraftRulesSafe(String(brief || '')),
+    'Nova is free forever — never add paywalls, upgrade CTAs, license gates, or "Pro unlock" screens in the generated UI.',
     '',
     `Product: ${spec.name}`,
     'Must-haves from the brief (implement ALL as working UI):',
@@ -287,18 +366,97 @@ export function stylesAreLinked(files: Record<string, string>): boolean {
   return /import\s+['"]\.\/App\.css['"]/.test(app) || /import\s+['"]\.\/App\.css['"]/.test(main);
 }
 
-/** SVG hero in neutral colors — only when photo search fails; not a category poster. */
-export function svgHeroDataUrl(identity: { name: string; palette?: CreatePalette; category?: string }): string {
+/** Product stage when photo search and image models both miss. Not a reused landscape photo.
+ *  Never draws a toy tablet / home-button bezel — that shipped as “Apple Live” and looked like a stub.
+ */
+export function svgHeroDataUrl(
+  identity: { name: string; palette?: CreatePalette; category?: string },
+  label = '',
+): string {
   const p = identity.palette || NEUTRAL;
   const name = identity.name || 'Brand';
+  const tag = String(label || name).replace(/[-_]+/g, ' ').slice(0, 28);
+  const cat = String(identity.category || tag || '').toLowerCase();
+  const appleish = /\b(?:apple|iphone|ipad|mac|watch|airpods|product[- ]?home)\b/i.test(`${name} ${tag} ${cat}`);
+  if (appleish || /product|device|phone|laptop|watch|earbuds/i.test(cat)) {
+    return svgPremiumProductStageDataUrl({ name, tag, palette: p });
+  }
+  // Soft abstract stage — gradient field + brand type. No fake device chrome.
+  const hue = [...tag].reduce((n, c) => n + c.charCodeAt(0), 40) % 360;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-<stop offset="0%" stop-color="${p.glow}"/><stop offset="55%" stop-color="${p.bg}"/>
-<stop offset="100%" stop-color="${p.panel}"/></linearGradient></defs>
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0%" stop-color="${p.bg}"/><stop offset="100%" stop-color="${p.panel}"/>
+</linearGradient>
+<radialGradient id="glow" cx="50%" cy="42%" r="45%">
+<stop offset="0%" stop-color="hsl(${hue},35%,55%)" stop-opacity="0.35"/>
+<stop offset="100%" stop-color="${p.bg}" stop-opacity="0"/>
+</radialGradient>
+</defs>
 <rect width="1600" height="900" fill="url(#g)"/>
-<circle cx="1280" cy="180" r="220" fill="${p.accent}" opacity="0.18"/>
-<circle cx="320" cy="720" r="280" fill="${p.accent}" opacity="0.12"/>
-<text x="80" y="120" fill="${p.text}" font-family="Georgia,serif" font-size="64" font-weight="700">${escapeXml(name)}</text>
+<rect width="1600" height="900" fill="url(#glow)"/>
+<rect x="560" y="220" width="480" height="420" rx="36" fill="${p.panel}" opacity="0.55"/>
+<rect x="600" y="260" width="400" height="300" rx="20" fill="#0a0a0c" opacity="0.85"/>
+<text x="800" y="780" text-anchor="middle" fill="${p.text}" font-family="SF Pro Display, Helvetica Neue, system-ui, sans-serif" font-size="42" font-weight="650">${escapeXml(name)}</text>
+<text x="800" y="830" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="20" opacity="0.65">${escapeXml(tag)}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** Full-bleed product stage for apple.com-class heroes — no bezel / home-button toy. */
+export function svgPremiumProductStageDataUrl(opts: {
+  name: string;
+  tag?: string;
+  palette?: CreatePalette;
+  kind?: 'phone' | 'laptop' | 'tablet' | 'watch' | 'buds' | 'stage';
+}): string {
+  const p = opts.palette || NEUTRAL;
+  const name = opts.name || 'Brand';
+  const tag = String(opts.tag || name).slice(0, 32);
+  const kind = opts.kind
+    || (/mac|laptop/i.test(tag) ? 'laptop'
+      : /ipad|tablet/i.test(tag) ? 'tablet'
+      : /watch/i.test(tag) ? 'watch'
+      : /airpods|buds|ear/i.test(tag) ? 'buds'
+      : /iphone|phone/i.test(tag) ? 'phone'
+      : 'stage');
+  let product = '';
+  if (kind === 'laptop') {
+    product = `<rect x="420" y="210" width="760" height="460" rx="18" fill="#1d1d1f"/>
+<rect x="448" y="236" width="704" height="400" rx="8" fill="#000"/>
+<rect x="380" y="670" width="840" height="28" rx="6" fill="#2c2c2e"/>
+<rect x="560" y="698" width="480" height="14" rx="4" fill="#3a3a3c"/>`;
+  } else if (kind === 'tablet') {
+    product = `<rect x="520" y="140" width="560" height="640" rx="36" fill="#1d1d1f"/>
+<rect x="548" y="168" width="504" height="584" rx="18" fill="#000"/>`;
+  } else if (kind === 'watch') {
+    product = `<rect x="720" y="200" width="160" height="280" rx="36" fill="#1d1d1f"/>
+<rect x="736" y="220" width="128" height="200" rx="24" fill="#0a0a0a"/>
+<rect x="760" y="160" width="80" height="40" rx="8" fill="#2c2c2e"/>
+<rect x="760" y="480" width="80" height="60" rx="8" fill="#2c2c2e"/>`;
+  } else if (kind === 'buds') {
+    product = `<rect x="680" y="280" width="240" height="300" rx="48" fill="#f5f5f7"/>
+<circle cx="740" cy="400" r="36" fill="#1d1d1f"/>
+<circle cx="860" cy="400" r="36" fill="#1d1d1f"/>
+<rect x="760" y="520" width="80" height="24" rx="12" fill="#d2d2d7"/>`;
+  } else {
+    // phone / generic stage — thin silhouette, soft screen glow, no home button
+    product = `<rect x="640" y="160" width="320" height="600" rx="44" fill="#1d1d1f"/>
+<rect x="658" y="186" width="284" height="548" rx="28" fill="#000"/>
+<rect x="760" y="176" width="80" height="8" rx="4" fill="#2c2c2e"/>
+<rect x="678" y="220" width="244" height="480" rx="8" fill="#111827" opacity="0.9"/>
+<circle cx="800" cy="280" r="70" fill="#2997ff" opacity="0.12"/>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#000000"/><stop offset="100%" stop-color="#1d1d1f"/>
+</linearGradient>
+</defs>
+<rect width="1600" height="900" fill="url(#bg)"/>
+${product}
+<text x="800" y="820" text-anchor="middle" fill="#f5f5f7" font-family="SF Pro Display, Helvetica Neue, system-ui, sans-serif" font-size="48" font-weight="650">${escapeXml(name)}</text>
+<text x="800" y="868" text-anchor="middle" fill="#a1a1a6" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="22">${escapeXml(tag)}</text>
 </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

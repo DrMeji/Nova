@@ -2,40 +2,84 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
+import {
+  formatStepDurationMs,
+  normalizeStatusHistory,
+  type ChatTurnStatusStep,
+} from '@/lib/chatTurnStatusStore';
+
+const NOISE = /thinking \(step|listed project files|^read src\/|verify passed|checking preview ready|preview ready fail|re-editing the ui|model timed out|step time reached|fix: thinking|build: thinking|almost done: finishing|final pass: checking|premium floor: another|keeping prior app/i;
+
+/** Show the passes that stuck. Collapse retries into one line. */
+function compressStatusSteps(steps: ChatTurnStatusStep[]): ChatTurnStatusStep[] {
+  const out: ChatTurnStatusStep[] = [];
+  let sawFail = false;
+  for (const step of steps) {
+    const label = step.label.replace(/\*\*/g, '').trim();
+    if (!label || /^done$/i.test(label)) continue;
+    if (NOISE.test(label)) {
+      sawFail = true;
+      continue;
+    }
+    if (sawFail) {
+      const redo = 'Redoing this pass — the last one failed';
+      const prev = out[out.length - 1];
+      if (!prev || prev.label !== redo) out.push({ label: redo, at: step.at });
+      sawFail = false;
+    }
+    const prev = out[out.length - 1];
+    if (prev && prev.label === label) {
+      prev.at = step.at;
+      continue;
+    }
+    out.push({ label, at: step.at });
+  }
+  if (sawFail) {
+    const redo = 'Redoing this pass — the last one failed';
+    const prev = out[out.length - 1];
+    if (!prev || prev.label !== redo) out.push({ label: redo, at: steps[steps.length - 1]?.at || Date.now() });
+  }
+  return out.slice(-8);
+}
 
 /** Dots stay mounted — label updates must not remount them or the ripple resets / syncs. */
 const StatusDots = memo(function StatusDots() {
   return (
-    <span className="ark-status-dots inline-flex items-center gap-1.5 shrink-0" aria-hidden>
-      <span className="ark-status-dot ark-status-dot-1" />
-      <span className="ark-status-dot ark-status-dot-2" />
-      <span className="ark-status-dot ark-status-dot-3" />
+    <span className="nova-status-dots inline-flex items-center gap-1.5 shrink-0" aria-hidden>
+      <span className="nova-status-dot nova-status-dot-1" />
+      <span className="nova-status-dot nova-status-dot-2" />
+      <span className="nova-status-dot nova-status-dot-3" />
     </span>
   );
 });
 
 /**
- * Current work line + optional downward expand of recent steps.
- * No portal, no bordered “card” — just the pill line opening a plain list below.
+ * Current work line + optional expand of every step this turn.
+ * No inner scroll — the chat page scrolls. Current row = purple pulse + live duration.
  */
 export function AgentProgressStatus({
   label,
   history = [],
 }: {
   label: string;
-  /** Recent work lines for the expandable list. */
-  history?: string[];
+  /** Work lines (strings or {label,at}) for the expandable list. */
+  history?: Array<string | ChatTurnStatusStep>;
 }) {
-  const shown = (label?.trim() || 'Working…').replace(/\u2014/g, ':');
-  const steps = (history.length ? history : [shown])
-    .map((s) => String(s || '').trim().replace(/\u2014/g, ':'))
-    .filter(Boolean)
-    .filter((s) => !/^Thinking…?$/i.test(s));
-  const displaySteps = steps.length ? steps : [shown];
+  const shown = (label?.trim() || 'Working…').replace(/\u2014/g, ':').replace(/\*\*/g, '');
+  const finished = /^done$/i.test(shown);
+  const steps = compressStatusSteps(normalizeStatusHistory(history, shown)
+    .filter((s) => s.label && !/^Thinking…?$/i.test(s.label)));
+  const displaySteps = steps.length ? steps : [{ label: shown, at: Date.now() }];
   const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const listRef = useRef<HTMLUListElement | null>(null);
-  const currentRef = useRef<HTMLLIElement | null>(null);
+
+  // Tick whenever the pill is visible so durations stay accurate (even before expand).
+  useEffect(() => {
+    if (finished) return;
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [displaySteps.length, finished]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,20 +90,13 @@ export function AgentProgressStatus({
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  // Always land on the step Nova is working on (newest), not the top of the list.
+  // When newly expanded, bring the whole block into the chat scroll — never an inner scroller.
   useEffect(() => {
     if (!open) return;
-    const scrollToCurrent = () => {
-      const current = currentRef.current;
-      const list = listRef.current;
-      if (current) {
-        current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      } else if (list) {
-        list.scrollTop = list.scrollHeight;
-      }
-    };
-    requestAnimationFrame(scrollToCurrent);
-  }, [open, displaySteps.length, shown]);
+    requestAnimationFrame(() => {
+      rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, [open, displaySteps.length]);
 
   const canExpand = displaySteps.length > 1;
 
@@ -71,12 +108,12 @@ export function AgentProgressStatus({
         aria-live="polite"
         aria-label={shown}
         aria-expanded={open}
-        title={canExpand ? 'Show steps Nova is working through' : shown}
+        title={canExpand ? 'Show every step Nova worked through' : shown}
         onClick={() => canExpand && setOpen((v) => !v)}
         disabled={!canExpand}
       >
-        <StatusDots />
-        <span className="min-w-0 flex-1 text-[13px] font-medium text-content-secondary tracking-wide break-words [overflow-wrap:anywhere]">
+        {finished ? null : <StatusDots />}
+        <span className={`min-w-0 flex-1 text-[13px] font-medium tracking-wide break-words [overflow-wrap:anywhere] ${finished ? 'text-content-tertiary' : 'text-content-secondary'}`}>
           {shown}
         </span>
         {canExpand ? (
@@ -87,31 +124,42 @@ export function AgentProgressStatus({
       </button>
       {open && canExpand ? (
         <ul
-          ref={listRef}
-          className="mt-1.5 ml-6 space-y-1 max-h-48 overflow-y-auto scroll-smooth"
+          className="mt-1.5 ml-6 space-y-0.5"
           role="list"
         >
           {displaySteps.map((step, i) => {
             const isCurrent = i === displaySteps.length - 1;
+            const nextAt = isCurrent ? now : (displaySteps[i + 1]?.at ?? now);
+            const durMs = Math.max(0, nextAt - step.at);
+            const dur = formatStepDurationMs(durMs);
             return (
               <li
-                key={`${i}-${step.slice(0, 40)}`}
-                ref={isCurrent ? currentRef : undefined}
+                key={`${i}-${step.label.slice(0, 40)}-${step.at}`}
                 role="listitem"
-                className={`text-[12px] leading-snug rounded-md px-1.5 py-0.5 ${
+                className={`flex items-start gap-2 text-[12px] leading-snug py-0.5 ${
                   isCurrent
-                    ? 'text-content-primary font-medium bg-white/[0.06] ring-1 ring-white/10'
+                    ? 'text-white font-medium'
                     : 'text-content-tertiary'
                 }`}
               >
-                {isCurrent ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse" aria-hidden />
-                    {step}
-                  </span>
-                ) : (
-                  step
-                )}
+                <span className="w-2 shrink-0 flex justify-center pt-1" aria-hidden>
+                  {isCurrent && !finished ? (
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                  ) : (
+                    <span className="w-1 h-1 rounded-full bg-content-tertiary/50 mt-0.5" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+                  {step.label.replace(/\*\*/g, '')}
+                </span>
+                <span
+                  className={`shrink-0 tabular-nums text-[10px] ${
+                    isCurrent && !finished ? 'text-violet-300/90' : 'text-content-tertiary/80'
+                  }`}
+                  title={isCurrent && !finished ? 'Time on this step so far' : 'Time spent on this step'}
+                >
+                  {dur}
+                </span>
               </li>
             );
           })}

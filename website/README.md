@@ -34,7 +34,7 @@ Without env keys, the site still runs; forgot-password shows a clear “not conf
    - `https://YOUR-SITE/**`
 4. In the **desktop** repo `.env.production`, set:
    ```
-   VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE
+   VITE_NOVA_WEBSITE_ORIGIN=https://YOUR-SITE
    ```
    then `npm run build` so Forgot password can email a real reset link.
 5. Test: Auth screen → Forgot password → inbox → set new password → desktop sign-in.
@@ -42,7 +42,7 @@ Without env keys, the site still runs; forgot-password shows a clear “not conf
 Full ship checklist (signing, packaged smoke, updates): **`docs/SHIP-OPS.md`**.
 
 
-Without `VITE_ARK_WEBSITE_ORIGIN`, the desktop app shows a clear “not configured” error and offers local recovery on this PC.
+Without `VITE_NOVA_WEBSITE_ORIGIN`, the desktop app shows a clear “not configured” error and offers local recovery on this PC.
 
 ## Download CTA
 

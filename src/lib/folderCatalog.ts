@@ -264,7 +264,7 @@ function hintFromReadme(text: string): string | null {
 async function peekSubfolderHint(dirPath: string): Promise<string | null> {
   const candidates = ['README.md', 'readme.md', 'Readme.md', 'package.json', 'pyproject.toml'];
   for (const file of candidates) {
-    const read = await window.arkDesktop?.readTextFile?.({
+    const read = await window.novaDesktop?.readTextFile?.({
       path: joinPath(dirPath, file),
       maxBytes: 12_000,
     });
@@ -286,7 +286,7 @@ async function summarizeSubfolder(dirPath: string, dirName: string): Promise<{
   keyFiles: string[];
 }> {
   const description = await peekSubfolderHint(dirPath);
-  const listing = await window.arkDesktop?.listDir?.(dirPath);
+  const listing = await window.novaDesktop?.listDir?.(dirPath);
   const items = listing?.items || [];
   const subdirs = items
     .filter(i => i.kind === 'dir')
@@ -327,7 +327,7 @@ export type FolderCatalogData = {
   desktopSiblings: CatalogItem[];
 };
 
-const CATALOG_MARKER_RE = /<!--ark-catalog:([\s\S]*?)-->/;
+const CATALOG_MARKER_RE = /<!--nova-catalog:([\s\S]*?)-->/;
 
 export function isCatalogMessage(content: string): boolean {
   return CATALOG_MARKER_RE.test(String(content || ''));
@@ -344,7 +344,7 @@ export function parseCatalogMessage(content: string): FolderCatalogData | null {
 }
 
 export function encodeCatalogMessage(data: FolderCatalogData): string {
-  return `<!--ark-catalog:${JSON.stringify(data)}-->`;
+  return `<!--nova-catalog:${JSON.stringify(data)}-->`;
 }
 
 export function catalogToPlainText(data: FolderCatalogData): string {
@@ -373,7 +373,7 @@ export async function buildFolderCatalogData(
     showDesktopSiblings?: boolean;
   },
 ): Promise<FolderCatalogResult> {
-  const listing = await window.arkDesktop?.listDir?.(dirPath);
+  const listing = await window.novaDesktop?.listDir?.(dirPath);
   const folderName = displayName || listing?.name || dirPath.split(/[/\\]/).pop() || 'folder';
   if (!listing?.ok) {
     return {
@@ -417,7 +417,7 @@ export async function buildFolderCatalogData(
 
   const desktopSiblings: CatalogItem[] = [];
   if (opts?.showDesktopSiblings && desktopPath) {
-    const desktopList = await window.arkDesktop?.listDir?.(desktopPath);
+    const desktopList = await window.novaDesktop?.listDir?.(desktopPath);
     for (const item of (desktopList?.items || []).filter(i => i.name.toLowerCase() !== folderName.toLowerCase()).slice(0, 14)) {
       if (item.kind === 'dir') {
         desktopSiblings.push({

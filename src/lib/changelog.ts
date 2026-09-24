@@ -124,7 +124,7 @@ export const NOVA_CHANGELOG = [
       'Create polish resolves local coder prefs / qwen*coder* GGUF (prefer 7B) with a 5m build budget',
       'Empty polish replies surface engine timeout/error detail instead of a blank reason',
       'Keyboard / gaming / Logitech / product-site briefs always require UI polish',
-      'Dev AppData profile is NOVA-Dev (migrates from legacy ARK-Dev)',
+      'Dev AppData profile is NOVA-Dev ((NOVA-Dev profile))',
     ],
   },
   {
@@ -1049,7 +1049,7 @@ export const NOVA_CHANGELOG = [
     notes: [
       'Build hint is a short centered pill above the chat box; composer is slightly taller',
       'Code workspace auto-sends when you click Yes, streams into Explorer, and scaffolds calculator if the brain times out',
-      'Projects save under ark-projects/code/ on disk for easy access',
+      'Projects save under nova-projects/code/ on disk for easy access',
     ],
   },
   {

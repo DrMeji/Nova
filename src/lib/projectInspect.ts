@@ -933,7 +933,7 @@ export function describeProjectFromFiles(files: ProjectFileMap, projectName?: st
   const swift = keys.some(k => k.endsWith('.swift'));
   const kotlin = keys.some(k => k.endsWith('.kt'));
   const py = keys.filter(k => k.endsWith('.py')).length;
-  const html = keys.some(k => /\.html?$/i.test(k) && !/ark-preview/i.test(k));
+  const html = keys.some(k => /\.html?$/i.test(k) && !/nova-preview/i.test(k));
   const trading = keys.some(k => /(crypto|stock|trade|engine\.py|paper\.py|risk\.py|ingame)/i.test(k));
   const paper = keys.some(k => /paper/i.test(k));
   const risk = keys.some(k => /risk/i.test(k));

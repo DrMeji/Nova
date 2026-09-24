@@ -2,12 +2,10 @@
  * Pure helpers / constants for AIChat — extracted to shrink the view.
  */
 import { useRouter, type ChatMode } from '@/context/RouterContext';
-import { getLocalPrefs, hasProviderApiKey } from '@/lib/localPrefs';
-import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import { stopSpeaking } from '@/lib/voiceSession';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
-import type { ArkRouterResult } from '@/lib/arkRouter';
+import type { ArkRouterResult } from '@/lib/novaRouter';
 import {
   chatThreadKey,
   slimChatContent,
@@ -181,11 +179,19 @@ export function kindForMode(mode: ChatMode): ModelKind {
 }
 
 export function defaultModelForKind(kind: ModelKind): ChatModelOption {
+  // Chat always runs Nova Multimodal (Auto). Users install brains in Models;
+  // Auto picks chat vs coder vs vision per turn — no manual chat picker.
+  if (kind === 'chat') {
+    return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
+      id: 'NOVA-auto',
+      name: 'Nova Multimodal',
+      source: 'auto',
+      detail: '',
+      kind: 'chat',
+    };
+  }
   const prefs = getLocalPrefs();
-  // Prefer role brain (activeChatId / activeCoderId), then legacy defaults.
-  const roleId = kind === 'chat'
-    ? (prefs.activeChatId || prefs.lastChatModelId || prefs.defaultModelId)
-    : (prefs.activeCoderId || prefs.defaultCodeModelId || prefs.defaultModelId);
+  const roleId = prefs.activeCoderId || prefs.defaultCodeModelId || prefs.defaultModelId;
   const prefId =
     roleId && roleId !== 'NOVA-auto'
       ? roleId
@@ -193,56 +199,12 @@ export function defaultModelForKind(kind: ModelKind): ChatModelOption {
         ? prefs.defaultModelId
         : (prefs.lastChatModelId || prefs.defaultModelId));
 
-  if (kind === 'chat' && prefId && prefId !== 'NOVA-auto') {
-    // Never restore a coder GGUF as the chat pill — coders are build-only.
-    if (/coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(prefId)) {
-      return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
-        id: 'NOVA-auto',
-        name: 'Nova Multimodal',
-        source: 'auto',
-        detail: '',
-        kind: 'chat',
-      };
-    }
-    const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId);
-    if (cloud && hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
-    const resolved = resolvePreferredCloudProvider(prefId, prefId);
-    if (resolved && hasProviderApiKey(resolved.providerId) && isCloudProviderEnabled(resolved.providerId)) {
-      return {
-        id: prefId,
-        name: cloud?.name || prefId,
-        source: 'cloud',
-        detail: `Cloud · ${resolved.label}`,
-        kind: 'chat',
-      };
-    }
-    if (prefId.startsWith('ollama:')) {
-      return { id: prefId, name: prefId.replace(/^ollama:/, ''), source: 'local', detail: 'Ollama', kind: 'chat' };
-    }
-    // Unknown ids that look like cloud (but key missing) must not be labeled local.
-    if (resolved) {
-      // A provider can be disconnected or its key can be removed between
-      // sessions. Do not restore a pinned cloud model that is not usable:
-      // it disappears from the picker and leaves Chat showing a dead model.
-      return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
-        id: prefId,
-        name: prefId,
-        source: 'cloud',
-        detail: `Cloud · ${resolved.label} · add key`,
-        kind: 'chat',
-      };
-    }
-    return { id: prefId, name: prefId, source: 'local', detail: 'Local · Settings default', kind: 'chat' };
-  }
   if (prefId && prefId !== 'NOVA-auto') {
     const hit = CHAT_MODELS.find(m => m.id === prefId && m.kind === kind);
     if (hit) return hit;
   }
   const auto = CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === kind);
   if (auto) return auto;
-  if (kind === 'chat') {
-    return CHAT_MODELS.find(m => m.id === 'NOVA-auto') ?? CHAT_MODELS[0];
-  }
   const local = CHAT_MODELS.find(m => m.kind === kind && m.source === 'local');
   return local ?? CHAT_MODELS.find(m => m.kind === kind) ?? CHAT_MODELS[0];
 }
@@ -460,10 +422,10 @@ export async function resolveStudioFiles(opts: {
     } catch {
       /* ignore */
     }
-    if (window.arkDesktop?.projectRead) {
+    if (window.novaDesktop?.projectRead) {
       try {
         const read = await Promise.race([
-          window.arkDesktop.projectRead(pid),
+          window.novaDesktop.projectRead(pid),
           new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 3_000); }),
         ]);
         if (read?.ok && read.files && Object.keys(read.files || {}).length) {

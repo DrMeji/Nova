@@ -6,6 +6,7 @@
  */
 
 import { getAccurateHardware, parseRamGb, type HardwareInfo } from '@/lib/api';
+import { isCoderEngineId } from '@/lib/enginePick';
 import {
   allowTwoLocalModels,
   assertVramFits,
@@ -59,8 +60,8 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
   const gpuUsable = (vramGB || 0) >= 4
     && (hw.acceleration === 'CUDA' || hw.acceleration === 'Vulkan' || hw.acceleration === 'Metal');
   // VRAM band for full-GPU load; high RAM still allows larger Q4 coders via CPU/partial offload.
-  // 16GB+ RAM can run 7B Q4 offload; 24GB → 14B; 48GB+ → 32B. Never recommend Instruct as coder.
-  const ramCoderCap = ramGB >= 64 ? 32 : ramGB >= 48 ? 32 : ramGB >= 24 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0;
+  // 16GB+ RAM can run 7B Q4; 20GB+ → try 14B offload; 24GB → solid 14B; 48GB+ → 32B.
+  const ramCoderCap = ramGB >= 64 ? 32 : ramGB >= 48 ? 32 : ramGB >= 24 ? 14 : ramGB >= 20 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0;
   const gpuCoderCap = gpuUsable ? maxCoderParamsBForVram(vramGB) : 0;
   const maxCoderParamsB = Math.max(ramCoderCap, gpuCoderCap);
   const maxChatParamsB = ramGB >= 16 ? 7 : ramGB >= 8 ? 3 : 1.5;
@@ -150,6 +151,14 @@ export function assertCoderAllowed(
   const label = `${modelId || ''} ${modelName || ''}`;
   if (isWeakCoderId(label)) {
     return { ok: false, reason: '1.5B / tiny models cannot be the coder. Pin a larger coder or use surgical/scaffold only.' };
+  }
+  // Chat Instruct / multimodal brains are not create polish brains.
+  const id = String(modelId || '').trim();
+  if (id && id !== 'NOVA-auto' && !isCoderEngineId(id) && !isCoderEngineId(modelName)) {
+    return {
+      ok: false,
+      reason: 'Create/build needs a coder GGUF (for example Qwen Coder 7B/14B). Chat Instruct cannot polish UI.',
+    };
   }
   if (profile.maxCoderParamsB <= 0) {
     return { ok: false, reason: profile.reason };

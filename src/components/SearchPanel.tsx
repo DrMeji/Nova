@@ -7,7 +7,7 @@ import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { CLOUD_MODELS } from '@/views/ModelsView';
 import { isRevealed, isVoiceTabEnabled } from '@/lib/featurePark';
-import { getEngineStatus } from '@/lib/arkEngine';
+import { getEngineStatus } from '@/lib/novaEngine';
 
 type SearchItem = {
   id: string;
@@ -251,7 +251,7 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="flex flex-1 items-center gap-3 rounded-xl border border-surface-border bg-ark-navy-950/80 px-3.5 py-2.5">
+          <div className="flex flex-1 items-center gap-3 rounded-xl border border-surface-border bg-nova-navy-950/80 px-3.5 py-2.5">
             <Search className="w-4 h-4 text-content-tertiary shrink-0" />
             <input
               ref={inputRef}

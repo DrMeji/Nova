@@ -190,12 +190,18 @@ export function startProgressHeartbeat(
   intervalMs = 5200,
 ): () => void {
   let tick = 0;
+  let stopped = false;
   push(createProgressLabel(phase, tick));
   const lines = PHASE_LINES[phase] || PHASE_LINES.edit;
   const id = window.setInterval(() => {
+    if (stopped) return;
     tick += 1;
     try {
       const cur = getChatTurnStatus()?.label || '';
+      // Never overwrite a terminal Done / Final-pass gate label.
+      if (/^done$/i.test(cur) || /final pass:/i.test(cur) || /almost done:/i.test(cur)) {
+        return;
+      }
       if (/\b(?:Coding|Writing|Building|Updating|Still waiting on the coder)\b/i.test(cur)
         && /\.(?:tsx?|jsx?|css|html|json)\b/i.test(cur)) {
         return;
@@ -204,5 +210,8 @@ export function startProgressHeartbeat(
     // Cap at last mid-line so "almost done" is never heartbeat-driven.
     push(createProgressLabel(phase, Math.min(tick, lines.length - 1)));
   }, intervalMs);
-  return () => window.clearInterval(id);
+  return () => {
+    stopped = true;
+    window.clearInterval(id);
+  };
 }

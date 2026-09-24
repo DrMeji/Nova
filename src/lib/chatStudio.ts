@@ -14,7 +14,7 @@ import { looksLikeCodeAsk } from '@/lib/chatIntent';
 import { looksLikeConversationalPlanningAsk } from '@/lib/chatIdeaIntent';
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { listGitHubRepos, type GitHubRepo } from '@/lib/github';
-import { parseGithubRepoRef } from '@/lib/arkGitClient';
+import { parseGithubRepoRef } from '@/lib/novaGitClient';
 
 export type ChatStudioFiles = Record<string, string>;
 
@@ -84,8 +84,8 @@ const STUDIO_CONTINUE_RE = /^(fix|how|yes|go on|go deeper|continue|ok|okay)\b/i;
 
 function cleanStudioAsk(message: string): string {
   return String(message || '')
-    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
-    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
@@ -235,7 +235,7 @@ export function shouldInspectInChat(
   composerDebug = false,
 ): boolean {
   const t = String(message || '');
-  if (t.includes('<!--ark-attach:') || t.includes('<!--ark-auto-read-->')) return true;
+  if (t.includes('<!--nova-attach:') || t.includes('<!--nova-auto-read-->')) return true;
   // Soft planning / “give me more details” about an idea is normal chat. not folder inspect.
   if (
     /\b(?:more\s+details?|give\s+me\s+more|go\s+deeper|tell\s+me\s+more|expand\s+on\s+(?:that|this|it))\b/i.test(t)

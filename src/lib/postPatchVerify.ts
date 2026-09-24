@@ -19,7 +19,7 @@ function looksLikeMissingModules(out: string): boolean {
 }
 
 async function runCmd(command: string, cwd: string): Promise<{ ok: boolean; output: string }> {
-  const ran = await window.arkDesktop!.agentRun!({
+  const ran = await window.novaDesktop!.agentRun!({
     command,
     cwd,
     userConfirmed: true,
@@ -42,7 +42,7 @@ export async function verifyProjectAfterPatch(opts: {
   if (!diskRoot || !changedPaths.length) {
     return { ran: false, ok: true, summary: '' };
   }
-  if (!window.arkDesktop?.agentRun) {
+  if (!window.novaDesktop?.agentRun) {
     return { ran: false, ok: true, summary: '' };
   }
 
@@ -67,6 +67,9 @@ export async function verifyProjectAfterPatch(opts: {
       const issues: string[] = [];
       if (app.length < 80) issues.push('App too thin after edit');
       if (!/export\s+default/i.test(app)) issues.push('App missing default export');
+      if (files['src/App.jsx'] && /:\s*React\.FC\b|(?:const|let|var)\s+\w+\s*:\s*React\.FC\b/.test(files['src/App.jsx'])) {
+        issues.push('App.jsx has TypeScript syntax (Vite Live crash)');
+      }
       if (/image\.pollinations\.ai/i.test(`${app}\n${css}`)
         && /\/(?:logo|icons?|heroes?|hero)\//i.test(`${app}\n${css}`)) {
         issues.push('Pollinations URL left beside local brand assets');

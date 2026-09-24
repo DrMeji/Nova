@@ -118,7 +118,7 @@ export type PcExploreData = {
   limited?: boolean;
 };
 
-const PC_EXPLORE_MARKER = /<!--ark-pc-explore:([\s\S]*?)-->/;
+const PC_EXPLORE_MARKER = /<!--nova-pc-explore:([\s\S]*?)-->/;
 
 export function isPcExploreMessage(content: string): boolean {
   return PC_EXPLORE_MARKER.test(String(content || ''));
@@ -141,7 +141,7 @@ export function parsePcExploreMessage(content: string): PcExploreData | null {
 }
 
 export function encodePcExploreMessage(data: PcExploreData): string {
-  return `<!--ark-pc-explore:${JSON.stringify(data)}-->`;
+  return `<!--nova-pc-explore:${JSON.stringify(data)}-->`;
 }
 
 export function pcExploreToPlainText(data: PcExploreData): string {
@@ -198,7 +198,7 @@ async function tryListSection(
   filter?: (name: string, kind: 'dir' | 'file') => boolean,
   limit = 24,
 ): Promise<PcExploreSection | null> {
-  const list = await window.arkDesktop?.listDir?.(path);
+  const list = await window.novaDesktop?.listDir?.(path);
   if (!list?.ok || !list.items?.length) return null;
   const items = list.items
     .filter(i => !filter || filter(i.name, i.kind))
@@ -210,7 +210,7 @@ async function tryListSection(
 
 async function buildGamesExplore(sections: PcExploreSection[], grants: WorkspaceGrants, desktopPath: string | null) {
   if (!desktopPath) return;
-  const desktop = await window.arkDesktop?.listDir?.(desktopPath);
+  const desktop = await window.novaDesktop?.listDir?.(desktopPath);
   const items = desktop?.items || [];
 
   const gamesFolder = items.find(i => i.kind === 'dir' && /^games?$/i.test(i.name));
@@ -263,7 +263,7 @@ async function buildGamesExplore(sections: PcExploreSection[], grants: Workspace
 }
 
 async function buildInstalledAppsExplore(sections: PcExploreSection[], grants: WorkspaceGrants, desktopPath: string | null) {
-  const result = await window.arkDesktop?.pcInstalledApps?.({ limit: 70 });
+  const result = await window.novaDesktop?.pcInstalledApps?.({ limit: 70 });
   const apps = result?.apps || [];
 
   if (apps.length) {
@@ -343,7 +343,7 @@ export async function buildPcExploreData(userMessage: string, modeHint?: PcExplo
   const sections: PcExploreSection[] = [];
   const grants = grantsFromPrefs();
 
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path || null;
 
   let limited = false;

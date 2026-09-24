@@ -19,8 +19,8 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
 import { getHardwareClass, getAccurateHardware } from '@/lib/api';
 import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
@@ -35,7 +35,7 @@ import {
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import {
   Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
@@ -45,7 +45,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
   const {
     activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
     flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, scheduleAccountDeletion, cancelAccountDeletion,
+    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
@@ -109,7 +109,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     <p className="text-sm font-medium text-content-primary">Blocked users</p>
                     <button
                       type="button"
-                      className="ark-btn-secondary text-xs shrink-0"
+                      className="nova-btn-secondary text-xs shrink-0"
                       onClick={() => void refreshBlocked()}
                     >
                       Refresh
@@ -121,19 +121,19 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     <ul className="space-y-2">
                       {blockedUsers.map((b: any) => (
                         <li
-                          key={b.arkId}
-                          className="flex items-center gap-2 rounded-xl border border-white/10 bg-ark-navy-950/40 px-3 py-2"
+                          key={b.novaId}
+                          className="flex items-center gap-2 rounded-xl border border-white/10 bg-nova-navy-950/40 px-3 py-2"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm text-content-primary truncate">{b.displayName}</span>
                             <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
-                              {formatArkId(b.arkId)}
+                              {formatNovaId(b.novaId)}
                             </span>
                           </span>
                           <button
                             type="button"
                             className="shrink-0 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-content-secondary hover:text-content-primary"
-                            onClick={() => void unblockFriend(b.arkId)}
+                            onClick={() => void unblockFriend(b.novaId)}
                           >
                             Unblock
                           </button>
@@ -144,7 +144,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                 </div>
                 <button
                   type="button"
-                  className="ark-btn-secondary w-full !text-ark-accent-red mt-2"
+                  className="nova-btn-secondary w-full !text-nova-accent-red mt-2"
                   disabled={cacheBusy}
                   onClick={() => void runClearChatCache()}
                 >
@@ -163,13 +163,13 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     </ul>
                   )}
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <button type="button" className="ark-btn-secondary text-xs" onClick={() => void window.arkDesktop?.localReportsOpen?.()}>
+                    <button type="button" className="nova-btn-secondary text-xs" onClick={() => void window.novaDesktop?.localReportsOpen?.()}>
                       Open reports folder
                     </button>
                     <button
                       type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => void window.arkDesktop?.localReportsClear?.().then(() => setLocalReports([]))}
+                      className="nova-btn-secondary text-xs"
+                      onClick={() => void window.novaDesktop?.localReportsClear?.().then(() => setLocalReports([]))}
                     >
                       Clear reports
                     </button>
@@ -177,7 +177,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                 </div>
                 <button
                   type="button"
-                  className="ark-btn-secondary w-full"
+                  className="nova-btn-secondary w-full"
                   onClick={() => {
                     const prefsOnly = { ...getLocalPrefs() };
                     const blob = new Blob([JSON.stringify({
@@ -213,7 +213,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                       placeholder="New PIN"
                       value={pinNew}
                       onChange={e => setPinNew(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                      className="rounded-lg border border-surface-border bg-nova-navy-950 px-3 py-2 text-sm text-content-primary"
                     />
                     <input
                       type="password"
@@ -222,13 +222,13 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                       placeholder="Confirm PIN"
                       value={pinConfirm}
                       onChange={e => setPinConfirm(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                      className="rounded-lg border border-surface-border bg-nova-navy-950 px-3 py-2 text-sm text-content-primary"
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="ark-btn-secondary text-xs"
+                      className="nova-btn-secondary text-xs"
                       onClick={() => {
                         void (async () => {
                           setPinMsg('');
@@ -252,7 +252,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     {hasPinSet() ? (
                       <button
                         type="button"
-                        className="ark-btn-secondary text-xs"
+                        className="nova-btn-secondary text-xs"
                         onClick={() => {
                           void clearPin();
                           patchPrefs({ requirePinOnLaunch: false });
@@ -308,7 +308,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     value={String(prefs.autoLockMinutes)}
                     disabled={!prefs.requirePinOnLaunch || !hasPinSet()}
                     onChange={e => patchPrefs({ autoLockMinutes: Number(e.target.value) })}
-                    className="rounded-lg border border-surface-border bg-ark-navy-950 px-2 py-1.5 text-xs text-content-primary disabled:opacity-45"
+                    className="rounded-lg border border-surface-border bg-nova-navy-950 px-2 py-1.5 text-xs text-content-primary disabled:opacity-45"
                   >
                     {AUTO_LOCK_OPTIONS.map((opt: any) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -336,7 +336,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                       placeholder="Security code"
                       value={twoFaNew}
                       onChange={e => setTwoFaNew(e.target.value.slice(0, 32))}
-                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                      className="rounded-lg border border-surface-border bg-nova-navy-950 px-3 py-2 text-sm text-content-primary"
                     />
                     <input
                       type="password"
@@ -344,13 +344,13 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                       placeholder="Confirm code"
                       value={twoFaConfirm}
                       onChange={e => setTwoFaConfirm(e.target.value.slice(0, 32))}
-                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                      className="rounded-lg border border-surface-border bg-nova-navy-950 px-3 py-2 text-sm text-content-primary"
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="ark-btn-secondary text-xs"
+                      className="nova-btn-secondary text-xs"
                       onClick={() => {
                         void (async () => {
                           setTwoFaMsg('');
@@ -374,7 +374,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     {hasSecondFactorSet() ? (
                       <button
                         type="button"
-                        className="ark-btn-secondary text-xs"
+                        className="nova-btn-secondary text-xs"
                         onClick={() => {
                           void clearSecondFactor();
                           patchPrefs({ twoFactorEnabled: false });
@@ -494,13 +494,13 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                 />
 
                 <div className="flex items-center gap-3 p-4 ark-card min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
-                    <LockIcon className="w-4 h-4 text-ark-accent-green" />
+                  <div className="w-9 h-9 rounded-lg bg-nova-accent-green/10 flex items-center justify-center shrink-0">
+                    <LockIcon className="w-4 h-4 text-nova-accent-green" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Credential storage</p>
                   </div>
-                  <span className="text-xs text-ark-accent-green shrink-0">Active</span>
+                  <span className="text-xs text-nova-accent-green shrink-0">Active</span>
                 </div>
               </div>
             </SettingsSection>

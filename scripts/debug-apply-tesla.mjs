@@ -2,7 +2,7 @@ import fs from 'fs';
 import { applyChatReplyEdits } from '../src/lib/chatAgentApply.ts';
 import { finalizeWebEdits } from '../src/lib/webProjectCanon.ts';
 
-const root = 'C:/Users/thoma/Documents/ARK/Projects/word-lab-zxju';
+const root = 'C:/Users/thoma/Documents/NOVA Projects/word-lab-zxju';
 const files = {
   'src/App.tsx': fs.readFileSync(`${root}/src/App.tsx`, 'utf8'),
   'src/App.css': fs.readFileSync(`${root}/src/App.css`, 'utf8'),

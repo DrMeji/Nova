@@ -882,16 +882,16 @@ enum Devices {
       });
     }
     const previewName = iosDir.split('/')[1] || 'App';
-    const existingPreview = files['ark-preview.html'];
+    const existingPreview = files['nova-preview.html'];
     if (existingPreview) {
       const kicker = htmlEscape(deviceLine(d));
       const next = existingPreview
         .replace(/<div class="kicker">[^<]*<\/div>/, `<div class="kicker">${kicker}</div>`)
         .replace(/IPHONE\s*1[0-9](?:\s+PRO\s+MAX)?[^<]*/i, kicker);
-      out.push({ path: 'ark-preview.html', content: next });
+      out.push({ path: 'nova-preview.html', content: next });
     } else {
       out.push({
-        path: 'ark-preview.html',
+        path: 'nova-preview.html',
         content: previewHtml(previewName, ideaFromMessage(message, previewName), d),
       });
     }
@@ -1069,10 +1069,10 @@ export function simpleVisualPatchEdits(files: Record<string, string>, message: s
       : wantsTextColor && /\bblack\b/i.test(t) && !wantsBg
         ? '#111827'
         : contrastTextForBg(htmlColor);
-    if (files['ark-preview.html']) {
+    if (files['nova-preview.html']) {
       out.push({
-        path: 'ark-preview.html',
-        content: files['ark-preview.html']
+        path: 'nova-preview.html',
+        content: files['nova-preview.html']
           .replace(/background(?:-color)?:\s*#[0-9a-fA-F]{3,8}/gi, `background:${htmlColor}`)
           .replace(/\bcolor\s*:\s*#[0-9a-fA-F]{3,8}/gi, `color:${fg}`),
       });

@@ -27,8 +27,8 @@ export function SettingsSystemHealth(props: {
       </div>
       <button
         type="button"
-        className="ark-btn-secondary text-xs mt-1"
-        onClick={() => void window.arkDesktop?.localReportsOpen?.()}
+        className="nova-btn-secondary text-xs mt-1"
+        onClick={() => void window.novaDesktop?.localReportsOpen?.()}
       >
         Open local reports
       </button>

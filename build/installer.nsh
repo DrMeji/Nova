@@ -1,33 +1,21 @@
 ; Custom NSIS hooks for NOVA
 ; Only wipe user data on a real uninstall — NEVER during an in-app upgrade.
-; (${isUpdated} is set by electron-builder when the installer replaces an existing build.)
 
 !macro customInstall
-  ; Fresh install (not an in-place upgrade): drop setup completion + saved
-  ; sign-in so the user always sees Auth → then Hardware → Models → Connect.
-  ; Keeps models/keys unless uninstall already removed AppData.
-  ; Profile folder stays %APPDATA%\ARK for upgrade continuity (NOVA product name).
   ${ifNot} ${isUpdated}
-    CreateDirectory "$APPDATA\ARK"
-    Delete "$APPDATA\ARK\ark-setup.json"
-    Delete "$APPDATA\ARK\ark-install-id"
-    Delete "$APPDATA\ARK\ark-auth-storage.dat"
-    ; If a short-lived NOVA AppData profile was created by mistake, clear setup flags there too.
-    Delete "$APPDATA\NOVA\ark-setup.json"
-    Delete "$APPDATA\NOVA\ark-install-id"
-    Delete "$APPDATA\NOVA\ark-auth-storage.dat"
+    CreateDirectory "$APPDATA\NOVA"
+    Delete "$APPDATA\NOVA\nova-setup.json"
+    Delete "$APPDATA\NOVA\nova-install-id"
+    Delete "$APPDATA\NOVA\nova-auth-storage.dat"
   ${endIf}
-
-  ; Force Windows to re-read NOVA.exe / shortcut icons after upgrades
-  ; (Start menu + taskbar otherwise keep a cached older mark).
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 !macroend
 
 !macro customUnInstall
   ${ifNot} ${isUpdated}
-    RMDir /r "$APPDATA\ARK"
-    RMDir /r "$LOCALAPPDATA\ARK"
     RMDir /r "$APPDATA\NOVA"
     RMDir /r "$LOCALAPPDATA\NOVA"
+    RMDir /r "$APPDATA\NOVA-Dev"
+    RMDir /r "$LOCALAPPDATA\NOVA-Dev"
   ${endIf}
 !macroend

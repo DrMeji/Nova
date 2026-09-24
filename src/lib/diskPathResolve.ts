@@ -131,7 +131,7 @@ export function extractDiskParentHintFromText(text: string): string | undefined 
 async function ensureGrantsSynced() {
   try {
     const p = getLocalPrefs();
-    await window.arkDesktop?.workspaceSetGrants?.({
+    await window.novaDesktop?.workspaceSetGrants?.({
       desktop: Boolean(p.allowDesktopFolderAccess),
       documents: Boolean(p.allowDocumentsFolderAccess),
       fullPc: Boolean(p.allowFullPcAccess),
@@ -143,13 +143,13 @@ async function ensureGrantsSynced() {
 }
 
 async function browseRootPath(rootId: string): Promise<string | null> {
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const hit = roots?.roots?.find(r => r.id === rootId);
   return hit?.path || null;
 }
 
 async function pathStat(targetPath: string) {
-  return window.arkDesktop?.pathStat?.(targetPath);
+  return window.novaDesktop?.pathStat?.(targetPath);
 }
 
 async function findNamedFolderAnywhere(wantName: string): Promise<string | null> {
@@ -163,7 +163,7 @@ async function findNamedFolderAnywhere(wantName: string): Promise<string | null>
       const stat = await pathStat(rootPath);
       if (stat?.ok && stat.isDirectory) return stat.path || rootPath;
     }
-    const listing = await window.arkDesktop?.listDir?.(rootPath);
+    const listing = await window.novaDesktop?.listDir?.(rootPath);
     if (!listing?.ok) continue;
     for (const item of listing.items || []) {
       if (item.kind !== 'dir') continue;

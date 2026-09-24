@@ -111,7 +111,7 @@ import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
 import { stopSpeaking } from '@/lib/voiceSession';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
-import type { ArkRouterResult } from '@/lib/arkRouter';
+import type { ArkRouterResult } from '@/lib/novaRouter';
 import {
   chatThreadKey,
   slimChatContent,

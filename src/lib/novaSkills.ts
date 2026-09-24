@@ -233,11 +233,11 @@ export function parseNovaSkillMarkdown(raw: string, fallbackId: string): NovaSki
 /** Load optional packs from project .nova/skills/packName/SKILL.md */
 export async function loadProjectSkills(diskRoot?: string | null): Promise<NovaSkillPack[]> {
   const root = String(diskRoot || '').trim();
-  if (!root || !window.arkDesktop?.listDir || !window.arkDesktop?.readTextFile) return [];
+  if (!root || !window.novaDesktop?.listDir || !window.novaDesktop?.readTextFile) return [];
 
   try {
     const skillsDir = joinDisk(root, '.nova/skills');
-    const listing = await window.arkDesktop.listDir(skillsDir);
+    const listing = await window.novaDesktop.listDir(skillsDir);
     if (!listing?.ok || !listing.items?.length) return [];
 
     const packs: NovaSkillPack[] = [];
@@ -257,7 +257,7 @@ export async function loadProjectSkills(diskRoot?: string | null): Promise<NovaS
       }
 
       try {
-        const read = await window.arkDesktop.readTextFile({ path: skillPath, maxBytes: 80_000 });
+        const read = await window.novaDesktop.readTextFile({ path: skillPath, maxBytes: 80_000 });
         const content = read?.ok ? String(read.text || '') : '';
         if (!content) continue;
         const pack = parseNovaSkillMarkdown(content, fallbackId);

@@ -14,7 +14,7 @@ export type LocalRecoveryInfo = {
 };
 
 export async function saveLocalLoginRecovery(email: string, password: string): Promise<LocalRecoveryInfo> {
-  const api = window.arkDesktop?.authRecoverySave;
+  const api = window.novaDesktop?.authRecoverySave;
   if (!api) {
     return { ok: false, error: 'Desktop only' };
   }
@@ -26,7 +26,7 @@ export async function saveLocalLoginRecovery(email: string, password: string): P
 }
 
 export async function saveLocalPinRecovery(pin: string): Promise<LocalRecoveryInfo> {
-  const api = window.arkDesktop?.authRecoverySave;
+  const api = window.novaDesktop?.authRecoverySave;
   if (!api) return { ok: false, error: 'Desktop only' };
   try {
     return await api({ pin: String(pin || '').replace(/\D/g, '') });
@@ -36,7 +36,7 @@ export async function saveLocalPinRecovery(pin: string): Promise<LocalRecoveryIn
 }
 
 export async function clearLocalPinRecovery(): Promise<LocalRecoveryInfo> {
-  const api = window.arkDesktop?.authRecoverySave;
+  const api = window.novaDesktop?.authRecoverySave;
   if (!api) return { ok: false, error: 'Desktop only' };
   try {
     return await api({ pin: '' });
@@ -46,7 +46,7 @@ export async function clearLocalPinRecovery(): Promise<LocalRecoveryInfo> {
 }
 
 export async function getLocalLoginRecoveryInfo(): Promise<LocalRecoveryInfo> {
-  const api = window.arkDesktop?.authRecoveryInfo;
+  const api = window.novaDesktop?.authRecoveryInfo;
   if (!api) return { ok: false, error: 'Desktop only' };
   try {
     return await api();
@@ -56,7 +56,7 @@ export async function getLocalLoginRecoveryInfo(): Promise<LocalRecoveryInfo> {
 }
 
 export async function revealLocalLoginRecovery(): Promise<LocalRecoveryInfo> {
-  const api = window.arkDesktop?.authRecoveryReveal;
+  const api = window.novaDesktop?.authRecoveryReveal;
   if (!api) return { ok: false, error: 'Desktop only' };
   try {
     return await api();

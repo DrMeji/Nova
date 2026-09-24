@@ -7,7 +7,7 @@
  */
 
 import type { ChatMode } from '@/context/RouterContext';
-import type { ArkRouterResult, RouterKind, RouterTier } from '@/lib/arkRouter';
+import type { ArkRouterResult, RouterKind, RouterTier } from '@/lib/novaRouter';
 import { assertCoderAllowed, getBrainProfile, getBrainProfileSync } from '@/lib/brainProfile';
 
 export type ThreadBrainKind = 'chat' | 'coding' | 'image' | 'video' | 'voice';
@@ -133,7 +133,7 @@ export function clearAllThreadBrains() {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith('NOVA:chat-thread:brain:') || k.startsWith('ARK:chat-thread:brain:'))) {
+      if (k && (k.startsWith('NOVA:chat-thread:brain:'))) {
         keys.push(k);
       }
     }
@@ -171,8 +171,15 @@ export function threadBrainFromResult(
   };
 }
 
-/** Compact pill label when Nova Multimodal is selected. */
-export function autoPillLabel(_brain?: ThreadBrain | null): string {
+/** Compact pill label when Nova Multimodal is selected — show the live brain while building. */
+export function autoPillLabel(brain?: ThreadBrain | null): string {
+  if (brain?.kind === 'coding' && brain.modelName) {
+    const short = brain.modelName
+      .replace(/^Local · /i, '')
+      .replace(/\s+Instruct$/i, '')
+      .trim();
+    if (short) return short.length > 22 ? `${short.slice(0, 20).trim()}…` : short;
+  }
   return 'Multimodal';
 }
 

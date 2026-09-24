@@ -114,7 +114,7 @@ export function looksLikeImageAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   // Attached chat media with recreate / improve intent.
-  if (/ark-media:/i.test(t) && /\b(recreate|improve|enhance|upscale|4k|higher\s+res)\b/i.test(t)) {
+  if (/nova-media:/i.test(t) && /\b(recreate|improve|enhance|upscale|4k|higher\s+res)\b/i.test(t)) {
     return true;
   }
   if (looksLikeCodeAsk(t)) return false;

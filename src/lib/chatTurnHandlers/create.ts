@@ -29,6 +29,14 @@ import {
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { clearChatStudio, clearLastDiskTarget } from '@/lib/chatStudioStore';
 import type { CreateSuccess } from '@/lib/productContract';
+import {
+  resetBuildDiagnostics,
+  pushBuildDiag,
+  noteBuildContext,
+  noteBuildGateResult,
+  noteBuildFail,
+  getBuildDiagnostics,
+} from '@/lib/buildDiagnostics';
 
 export { pendingCreateBootstrap };
 
@@ -52,6 +60,8 @@ function unbindCreateChat(
 }
 
 /** Soft-bind folder + code pills without Live (previewUrl stays null; job not Ready). */
+const softBindLastAt = new Map<string, number>();
+const softBindCount = new Map<string, number>();
 function softBindCreateStudio(
   host: CreateTurnHost,
   opts: {
@@ -59,8 +69,28 @@ function softBindCreateStudio(
     projectId: string;
     name: string;
     diskRoot: string | null;
+    /** Force paint even if throttled (final bind / ready / fail). */
+    force?: boolean;
   },
 ): void {
+  // Throttle React file-tree + editor paints during scaffold/polish streams.
+  // Early scaffolds have ≤4 files — never force every write (that freezes the desktop).
+  const key = String(host.chatId || opts.projectId || 'create');
+  const now = Date.now();
+  const last = softBindLastAt.get(key) || 0;
+  const count = softBindCount.get(key) || 0;
+  // Hard cap: at most ~1 paint / 900ms; after first bind require 1.6s unless force.
+  if (!opts.force && now - last < 900) return;
+  if (!opts.force && count >= 1 && now - last < 1600) return;
+  if (!opts.force && count > 24) return;
+  softBindLastAt.set(key, now);
+  softBindCount.set(key, count + 1);
+  try {
+    pushBuildDiag({
+      kind: 'soft-bind',
+      detail: `Studio paint #${count + 1} (${Object.keys(opts.files).length} files)`,
+    });
+  } catch { /* ignore */ }
   try {
     host.commitStudio({
       files: opts.files,
@@ -94,16 +124,13 @@ function softBindCreateStudio(
 export type { CreateSuccess };
 
 /**
- * Stage-2 multi-model polish only when pref is on AND this PC can hold two locals.
- * Call before any multi-model create path; scaffold create itself never needs this.
+ * Sequential multi-model create (plan→craft→verify) — one GGUF at a time.
+ * Always allowed when a coder is ready; does NOT require dual-load 32GB RAM.
+ * Legacy `multiModelCreate` pref still gates the older parallel-style path only.
  */
 export async function assertCreateMultiModelOk(): Promise<{ ok: boolean; reason?: string }> {
-  if (!getLocalPrefs().multiModelCreate) {
-    return { ok: false, reason: 'multiModelCreate pref is off' };
-  }
-  const { getBrainProfile, assertMultiModelAllowed } = await import('@/lib/brainProfile');
-  const gate = assertMultiModelAllowed(await getBrainProfile());
-  return gate.ok ? { ok: true } : { ok: false, reason: gate.reason };
+  // Sequential ensemble is the default path — hardware dual-load gate is separate.
+  return { ok: true };
 }
 
 export type CreateTurnOutcome =
@@ -169,6 +196,12 @@ export type CreateTurnHost = {
    * Wire UI + engine + prefs so the Select-model pill matches the build brain.
    */
   onCoderPinned?: (coder: { id: string; name: string }) => void;
+  /** Active create hop model — pill shows this while building (restored after). */
+  onCreatePhaseModel?: (phase: {
+    id: string;
+    name: string;
+    role: string;
+  }) => void;
 };
 
 /** One cause → one next click. */
@@ -196,7 +229,7 @@ export function teachableCreateError(err: string | undefined | null, name?: stri
       'Install Node.js LTS, then say **install npm dependencies** or click **Live**.',
     ].join('\n');
   }
-  if (/IPC|arkDesktop|is not a function|undefined/i.test(e)) {
+  if (/IPC|novaDesktop|is not a function|undefined/i.test(e)) {
     return [
       `Could not create ${title} — **desktop bridge missing** (IPC).`,
       '',
@@ -232,13 +265,14 @@ export async function resolveCreateUiPolishCoder(host: {
 }> {
   const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
   const { getActiveBrainId, isWeakCoderId } = await import('@/lib/brainRoles');
-  const { getEngineStatus } = await import('@/lib/arkEngine');
+  const { getEngineStatus } = await import('@/lib/novaEngine');
   const { pickReadyCreatePolishCoder, isCoderEngineId } = await import('@/lib/enginePick');
   const { getLocalPrefs } = await import('@/lib/localPrefs');
 
   const profile = await getBrainProfile();
   const prefs = getLocalPrefs();
-  const nameHint = host.stickyModelName || host.preferredModelName || host.modelName || undefined;
+  // Never use chat sticky "Instruct" as the display name for a coder id.
+  const nameHint = undefined;
 
   const explicitIds = [
     host.stickyModelId,
@@ -383,9 +417,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   }
   if (thinBrief) {
     const pendingBrief = String(pending?.summary || '').trim();
-    if (pendingBrief.length >= 40) {
-      buildIntent.summary = pendingBrief;
-      buildIntent.name = safeName || pending?.name || buildIntent.name;
+    const { resolveGreenfieldFromThread } = await import('@/lib/chatIdeaIntent');
+    const fromThread = resolveGreenfieldFromThread(host.content, userLines, null);
+    const threadBrief = String(
+      findBestProductBrief(userLines)
+      || fromThread?.summary
+      || userBrief
+      || '',
+    ).trim();
+    const rescued = pendingBrief.length >= 40
+      ? pendingBrief
+      : (threadBrief.length >= 40 ? threadBrief : '');
+    if (rescued) {
+      buildIntent.summary = rescued;
+      buildIntent.name = safeName
+        || fromThread?.name
+        || pending?.name
+        || extractProjectName(rescued)
+        || buildIntent.name;
       buildIntent.slug = slugifyProjectName(buildIntent.name) || buildIntent.slug || 'app';
     } else {
       await host.finishPlainReply(
@@ -398,6 +447,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       );
       return { status: 'handled' };
     }
+  }
+
+  // Build diagnostics — survives after turn status clears so Copy freeze/build report works.
+  softBindCount.set(String(host.chatId || 'create'), 0);
+  resetBuildDiagnostics({ chatId: host.chatId, productName: lockedProductName });
+  noteBuildContext({ productName: lockedProductName, chatId: host.chatId });
+  {
+    const origPush = host.pushStatus;
+    host.pushStatus = (label: string, writingPath?: string | null) => {
+      const text = String(label || '').slice(0, 220);
+      pushBuildDiag({ kind: 'status', detail: text, path: writingPath ?? null });
+      if (/hop|ensemble|Spec|Design|Copy|Craft|Critic|Verify|Contract floor|Build team/i.test(text)) {
+        const hops = getBuildDiagnostics().snap.ensembleHops;
+        noteBuildContext({ ensembleHops: [...hops, text].slice(-12) });
+      }
+      noteBuildContext({ lastStatus: text, writingPath: writingPath ?? null, phase: text.slice(0, 80) });
+      return origPush(label, writingPath);
+    };
   }
 
   // Optional Plan → approve gate (Settings). Default off — one-shot create stays free & fast.
@@ -455,12 +522,210 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   try {
     host.onCoderPinned?.({ id: coderGate.id, name: coderGate.name });
   } catch { /* ignore */ }
-  host.pushStatus(`Using **${coderGate.name}** for this build…`);
-  // Create must not auto-open Code — keep overlay closed until the user clicks the pill.
-  try { window.dispatchEvent(new Event('NOVA:close-code-overlay')); } catch { /* ignore */ }
+  try {
+    const { announceCreatePhase } = await import('@/lib/createStatus');
+    await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
+  } catch {
+    host.pushStatus(`Craft · **${coderGate.name}**…`);
+  }
+
+  // Team readiness — warn when Chat/Design missing before scaffold (coder-only = lower quality).
+  try {
+    const { getEngineStatus } = await import('@/lib/novaEngine');
+    const { getBrainProfile } = await import('@/lib/brainProfile');
+    const {
+      assessEnsembleReadiness,
+      formatTeamReadinessMarkdown,
+      userAcceptedCoderOnlyCreate,
+      setUserAcceptedCoderOnlyCreate,
+      looksLikeBuildAnywayAsk,
+    } = await import('@/lib/ensembleReadiness');
+    const profile = await getBrainProfile();
+    const status = await getEngineStatus();
+    const teamReady = assessEnsembleReadiness(status.models, {
+      ramGb: profile.ramGB,
+      maxCoderParamsB: profile.maxCoderParamsB,
+    });
+    if (looksLikeBuildAnywayAsk(host.content)) {
+      setUserAcceptedCoderOnlyCreate(true);
+    }
+    if (teamReady.warnBeforeCreate && !userAcceptedCoderOnlyCreate()) {
+      await host.finishPlainReply(
+        [
+          formatTeamReadinessMarkdown(teamReady),
+          '',
+          `When ready, say **build anyway** to create **${lockedProductName}** with the coder only, or install the missing brains and say **ok start building** again.`,
+        ].join('\n'),
+        'NOVA · team',
+      );
+      return { status: 'handled' };
+    }
+    if (teamReady.teamScore === 'craft-only') {
+      host.pushStatus('Coder-only team — Layout Contract uses genre defaults…');
+    } else {
+      host.pushStatus(`Build team: ${teamReady.teamScore}…`);
+    }
+  } catch { /* readiness best-effort */ }
+
+  host.pushStatus(`Build uses **${coderGate.name}** for craft (plan/copy may use Instruct)…`);
+
+  // Sequential ensemble: floors first, LLM refine only when distinct brains exist.
+  let ensemblePlanText = '';
+  let ensembleAttribution = coderGate.name;
+  let ensembleSpec: import('@/lib/createLayoutContract').ProductSpec | null = null;
+  let ensembleContract: import('@/lib/createLayoutContract').LayoutContract | null = null;
+  let ensembleCopy: import('@/lib/createLayoutContract').CopyPack | null = null;
+  let ensembleContractBlock = '';
+  try {
+    const { getEngineStatus, setEngineModel } = await import('@/lib/novaEngine');
+    const { getBrainProfile } = await import('@/lib/brainProfile');
+    const {
+      resolveCreateEnsembleTeam,
+      ensembleMember,
+      runCreateDesignHop,
+      runCreateCopyHop,
+      assertSequentialEnsembleOk,
+    } = await import('@/lib/createEnsemble');
+    const {
+      formatEnsembleBriefBlock,
+      buildProductSpec,
+      genreFloor,
+      defaultCopyPack,
+    } = await import('@/lib/createLayoutContract');
+    const { saveChatBuildMemory } = await import('@/lib/chatBuildMemory');
+    const profile = await getBrainProfile();
+    const status = await getEngineStatus();
+    const briefSeed = buildIntent.summary || host.content;
+    // Deterministic floors immediately — never wait on LLM for Spec/Contract.
+    ensembleSpec = buildProductSpec({ brief: briefSeed, productName: lockedProductName });
+    ensembleContract = genreFloor(ensembleSpec.genre);
+    try {
+      const { applyLayoutReference } = await import('@/lib/createLayoutContract');
+      ensembleContract = applyLayoutReference(
+        `${buildIntent.summary || ''}\n${host.content || ''}`,
+        ensembleContract,
+      );
+    } catch { /* keep floor */ }
+    ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
+    ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
+    host.pushStatus(`Contract floor · ${ensembleSpec.genre}…`);
+
+    const team = resolveCreateEnsembleTeam(status.models, {
+      ramGb: profile.ramGB,
+      maxCoderParamsB: profile.maxCoderParamsB,
+      craftId: coderGate.id,
+    });
+    const ensGate = assertSequentialEnsembleOk(team);
+    if (ensGate.ok && team.multiHop) {
+      ensembleAttribution = team.attribution;
+      const designer = ensembleMember(team, 'design');
+      const copyBrain = ensembleMember(team, 'copy') || ensembleMember(team, 'plan');
+      // LLM refine only when Design is a distinct brain (not the coder).
+      if (designer && designer.id !== coderGate.id && ensembleSpec) {
+        try {
+          const { announceCreatePhase } = await import('@/lib/createStatus');
+          await announceCreatePhase(host, 'design', { id: designer.id, name: designer.name });
+        } catch {
+          host.pushStatus(`Design · **${designer.name}**…`);
+        }
+        const designed = await runCreateDesignHop({
+          brief: briefSeed,
+          productName: lockedProductName,
+          spec: ensembleSpec,
+          modelId: designer.id,
+          modelName: designer.name,
+          shouldAbort: () => Boolean(host.shouldAbort?.()),
+        });
+        ensembleContract = designed.contract;
+        // Warm craft GGUF while we still hold design results.
+        try {
+          const { announceCreatePhase } = await import('@/lib/createStatus');
+          await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
+        } catch {
+          void setEngineModel?.(coderGate.id);
+        }
+      }
+      if (
+        copyBrain
+        && copyBrain.id !== coderGate.id
+        && ensembleSpec
+        && ensembleContract
+        && copyBrain.id !== designer?.id
+      ) {
+        try {
+          const { announceCreatePhase } = await import('@/lib/createStatus');
+          await announceCreatePhase(host, 'copy', { id: copyBrain.id, name: copyBrain.name });
+        } catch {
+          host.pushStatus(`Copy · **${copyBrain.name}** (words, not code)…`);
+        }
+        const copied = await runCreateCopyHop({
+          brief: briefSeed,
+          productName: lockedProductName,
+          spec: ensembleSpec,
+          contract: ensembleContract,
+          modelId: copyBrain.id,
+          modelName: copyBrain.name,
+          shouldAbort: () => Boolean(host.shouldAbort?.()),
+        });
+        ensembleCopy = copied.copy;
+        try {
+          const { announceCreatePhase } = await import('@/lib/createStatus');
+          await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
+        } catch {
+          void setEngineModel?.(coderGate.id);
+        }
+      } else if (ensembleSpec && ensembleContract) {
+        ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
+      }
+      if (ensembleSpec && ensembleContract && ensembleCopy) {
+        ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
+        host.pushStatus(`Contract locked · ${ensembleSpec.genre}…`);
+      }
+    }
+    if (ensembleSpec && ensembleContract && ensembleCopy) {
+      saveChatBuildMemory({
+        chatId: host.chatId,
+        spec: ensembleSpec,
+        contract: ensembleContract,
+        copy: ensembleCopy,
+        lastPhase: 'contract',
+        projectId: null,
+        updatedAt: Date.now(),
+      });
+    }
+  } catch {
+    /* ensemble is best-effort — never block create */
+  }
+  if (!ensembleSpec) {
+    try {
+      const { buildProductSpec, genreFloor, defaultCopyPack, formatEnsembleBriefBlock } = await import('@/lib/createLayoutContract');
+      ensembleSpec = buildProductSpec({
+        brief: buildIntent.summary || host.content,
+        productName: lockedProductName,
+      });
+      ensembleContract = genreFloor(ensembleSpec.genre);
+      try {
+        const { applyLayoutReference } = await import('@/lib/createLayoutContract');
+        ensembleContract = applyLayoutReference(
+          `${buildIntent.summary || ''}\n${host.content || ''}`,
+          ensembleContract,
+        );
+      } catch { /* keep floor */ }
+      ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
+      ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
+    } catch { /* ignore */ }
+  }
+  // Create: auto-open Code so the user can watch files write live (follow path).
+  try {
+    window.dispatchEvent(new CustomEvent('NOVA:open-code-overlay', {
+      detail: { openOverlay: true, name: lockedProductName },
+    }));
+  } catch { /* ignore */ }
 
   const jobId = `create-${crypto.randomUUID().slice(0, 8)}`;
   host.pushStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
+  pushBuildDiag({ kind: 'phase', detail: `Scaffold ${lockedProductName} (${buildIntent.slug})` });
+  noteBuildContext({ productName: lockedProductName, phase: 'scaffold' });
   try {
     await host.syncGrants();
     host.pushStatus('Writing project files one by one…');
@@ -513,6 +778,45 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const originDiskRoot = created.projectPath || null;
     const originProjectId = created.projectId || newProjectId;
     let createFilesAcc: Record<string, string> = { ...created.files };
+    try {
+      const { mergeBriefNpmDependencies } = await import('@/lib/projectScaffolds');
+      createFilesAcc = mergeBriefNpmDependencies(
+        createFilesAcc,
+        [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
+      );
+    } catch { /* optional */ }
+    // Apple.com / arcade briefs: seed a real floor BEFORE craft so Live never
+    // shows Band-N stubs or title-only shells while the coder is still thrashing.
+    try {
+      const { briefLooksLikeAppleStyleHomepage } = await import('@/lib/createBuildQuality');
+      const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
+      const briefForSeed = [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n');
+      const seedArcade = looksLikePlayableCanvasGame(briefForSeed) || looksLikeFpsGame(briefForSeed);
+      if (briefLooksLikeAppleStyleHomepage(briefForSeed) || seedArcade) {
+        const { realizeBriefUi } = await import('@/lib/createRealize');
+        const seeded = realizeBriefUi(createFilesAcc, lockedProductName, briefForSeed);
+        if (seeded.changed) {
+          createFilesAcc = seeded.files;
+          host.pushStatus(seedArcade
+            ? 'Seeded playable canvas game loop…'
+            : 'Seeded apple.com-style product bands…');
+          if (originDiskRoot) {
+            const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+            await applyChatReplyEdits({
+              reply: [
+                createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
+                createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+              ].filter(Boolean).join('\n'),
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: briefForSeed,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+        }
+      }
+    } catch { /* seed best-effort */ }
     updateCreateJob(jobId, {
       path: originDiskRoot || '',
       projectId: originProjectId,
@@ -538,10 +842,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     });
 
     // Prefer the longest brief: thin intent.summary must not hide host.content / thread brief.
-    const briefForUi = [buildIntent.summary, richestBrief, host.content]
+    const briefBase = [buildIntent.summary, richestBrief, host.content]
       .map((s) => String(s || '').trim())
       .filter(Boolean)
       .sort((a, b) => b.length - a.length)[0] || String(host.content || '');
+    const briefForUi = [
+      briefBase,
+      ensemblePlanText ? `## Ensemble plan (must implement)\n${ensemblePlanText}` : '',
+      ensembleContractBlock,
+    ].filter(Boolean).join('\n\n').slice(0, 12_000);
     const {
       briefNeedsCreateUiPolish,
       briefLooksLikeMarketingLanding,
@@ -575,7 +884,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         if (surgicalApplied.ok && surgicalApplied.updated.length) {
           createFilesAcc = surgicalApplied.files;
         }
-      } else if (blankSolidColor) {
+      } else if (blankSolidColor && !briefNeedsCreateUiPolish(briefForUi) && !briefLooksLikeMarketingLanding(briefForUi)) {
         host.pushStatus(`Painting solid ${blankSolidColor} shell…`);
         const blankApplied = await applyChatReplyEdits({
           reply: '',
@@ -595,7 +904,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     let uiPolishOk: boolean | null = null;
     let uiPolishReasons: string[] = [];
     // Every real create must leave a working UI — never claim success on the Vite title splash.
-    const needsUiPolish = !blankSolidColor;
+    // Marketing / quiet-luxury briefs always polish even if blank-solid heuristics misfire.
+    const needsUiPolish = !blankSolidColor || briefNeedsCreateUiPolish(briefForUi)
+      || briefLooksLikeMarketingLanding(briefForUi);
     const {
       createBriefSpecFromAsk,
       polishPromptLinesFromBrief,
@@ -608,14 +919,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     // Do not apply pre-baked Discord/marketing/interactive shells — real UI must come from the coder.
 
     if (needsUiPolish && uiPolishOk !== true) {
-      // Nova tool loop + Ready/assets verify (original). Legacy dump polish only if loop is off or App stays thin.
+      // One craft owner: tool loop when enabled; legacy dump only when loop is off.
       let usedNovaLoop = false;
+      let loopAttempted = false;
       try {
         const { shouldUseNovaCreateBuildLoop, runNovaCreateBuildLoop } = await import('@/lib/novaBuildLoop');
         const { modeStatusLabel } = await import('@/lib/novaStudioModes');
         if (shouldUseNovaCreateBuildLoop() && coderGate.ok) {
+          loopAttempted = true;
           usedNovaLoop = true;
-          host.pushStatus(modeStatusLabel('build', 'Nova tool loop'));
+          try {
+            const { announceCreatePhase } = await import('@/lib/createStatus');
+            await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
+          } catch { /* ignore */ }
+          host.pushStatus(modeStatusLabel('build', `Craft · ${coderGate.name}`));
           const loopRes = await runNovaCreateBuildLoop({
             brief: briefForUi,
             productName: lockedProductName,
@@ -632,7 +949,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               pushStatus: host.pushStatus,
               shouldAbort: () => Boolean(host.shouldAbort?.()),
             },
-            maxFixRounds: 2,
+            maxFixRounds: (
+              briefNeedsCreateUiPolish(briefForUi)
+              || briefLooksLikeMarketingLanding(briefForUi)
+              || chatAppBrief
+              || /\b(?:game|playable|arcade|3d|three\.?js|webgl|modeler)\b/i.test(briefForUi)
+            ) ? 2 : 1,
           });
           createFilesAcc = loopRes.files;
           softBindCreateStudio(host, {
@@ -642,31 +964,55 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             diskRoot: originDiskRoot,
           });
           if (loopRes.ok) {
-            uiPolishOk = true;
-            uiPolishReasons = [];
+            // Re-verify with the brief gate — never trust the loop alone on rich briefs.
+            const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
+            const gate = previewReadyForBrief(createFilesAcc, {
+              productName: lockedProductName,
+              brief: briefForUi,
+              spec: ensembleSpec,
+              contract: ensembleContract,
+            });
+            if (gate.ok) {
+              uiPolishOk = true;
+              uiPolishReasons = [];
+            } else {
+              uiPolishOk = false;
+              uiPolishReasons = gate.reasons || ['Tool loop Ready did not hold'];
+              host.pushStatus('Tool loop finished — Ready still blocked; handing off to full UI polish…');
+            }
           } else {
             uiPolishReasons = loopRes.reasons || [];
-            const appLen = String(
-              createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '',
-            ).length;
-            if (appLen >= 1200) {
-              uiPolishOk = false;
-            } else {
-              usedNovaLoop = false;
-              host.pushStatus(modeStatusLabel('build', 'Continuing with full UI polish…'));
-            }
+            uiPolishOk = false;
+            host.pushStatus('Tool loop did not clear Ready — handing off to full UI polish…');
           }
         }
       } catch (loopErr) {
-        usedNovaLoop = false;
+        if (loopAttempted) {
+          usedNovaLoop = true;
+          uiPolishOk = false;
+          uiPolishReasons = [
+            loopErr instanceof Error ? loopErr.message : 'Tool loop failed',
+          ];
+        }
         host.pushStatus(
           `Tool loop skipped — ${loopErr instanceof Error ? loopErr.message.slice(0, 72) : 'fallback'}…`,
         );
       }
 
-      if (!usedNovaLoop && uiPolishOk !== true) {
+      // Dump polish when loop is off, or when the tool loop stalled / failed Ready (handoff).
+      if (uiPolishOk !== true && (!usedNovaLoop || (loopAttempted && uiPolishOk === false))) {
       let polishSnapshot = { ...createFilesAcc };
-      host.pushStatus('Planning UI from your brief…', 'src/App.tsx');
+      // Don't pin Code to App until bytes actually grow — empty shell ≠ stall.
+      host.pushStatus(
+        usedNovaLoop
+          ? `Full UI polish · **${coderGate.ok ? coderGate.name : 'coder'}**…`
+          : 'Planning UI from your brief…',
+        null,
+      );
+      try {
+        const { setEngineModel } = await import('@/lib/novaEngine');
+        if (coderGate.ok) void setEngineModel?.(coderGate.id);
+      } catch { /* ignore */ }
       try {
         const coder = coderGate.ok
           ? coderGate
@@ -685,27 +1031,45 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           const appPath = preferTs ? 'src/App.tsx' : 'src/App.jsx';
           const basePromptLines = polishPromptLinesFromBrief(briefSpec, appPath, briefForUi);
           const polishStarted = Date.now();
-          // 14B+ local coders often need >5 min for a full App+CSS dump.
           const polishBudgetMs = 480_000;
           const polishTotalBudgetMs = 900_000;
-          /** Soft floor so polish isn't a 30s stub — quality gates still decide Ready. */
-          const CREATE_POLISH_MIN_MS = 300_000;
+          /** No byte growth for this long → cancel GGUF and retry that file. */
+          const POLISH_STALL_ABORT_MS = 18_000;
           let modelReply = '';
           let lastError = '';
           let streamBuf = '';
-          let successfulPasses = 0;
-          for (let attempt = 0; attempt < 4; attempt++) {
-            const enrichPass = attempt > 0;
+          let stalledPathHint = '';
+          // Ready means stop — at most 2 craft attempts.
+          const maxPolishAttempts = 2;
+          for (let attempt = 0; attempt < maxPolishAttempts; attempt++) {
+            const enrichPass = attempt > 0 && !stalledPathHint;
+            const stallRetry = Boolean(stalledPathHint);
+            const elapsedSoFar = Date.now() - polishStarted;
+            if (elapsedSoFar > polishTotalBudgetMs) {
+              lastError = 'UI polish budget exceeded';
+              break;
+            }
             const prompt = attempt === 0
               ? basePromptLines.join('\n')
-              : [
+              : stallRetry
+                ? [
+                    `STALL RETRY: the previous pass froze while writing ${stalledPathHint}.`,
+                    `Rewrite ONLY ${stalledPathHint} from scratch for THIS brief — finish every tag/brace.`,
+                    'Keep other project files as-is. Output @@@FILE for that path (and App.css if needed).',
+                    'No ./components. No remote placeholder images. No paywalls.',
+                    ...basePromptLines.slice(1),
+                  ].join('\n')
+                : [
                   enrichPass
                     ? 'ENRICH PASS: deepen THIS product from the brief. Add missing must-haves. Raise visual premium depth (atmosphere, type, spacing). Match the brief’s real flows — do NOT invent a generic time-slot booking UI unless the brief asks for appointments. Do NOT ship title + two static cards. NEVER use via.placeholder.com or remote placeholder image hosts. NEVER add paywalls or upgrade CTAs — Nova products stay free to use.'
                     : 'RETRY: put the ENTIRE product UI for THIS brief in a single App + App.css. No ./components. Finish every tag. No remote placeholder images. No paywalls.',
                   ...basePromptLines.slice(1),
                 ].join('\n');
-            if (enrichPass) {
-              host.pushStatus('Deepening the product UI: flows, confirmation, and premium layout…');
+            if (stallRetry) {
+              host.pushStatus(`Retrying stalled write: ${stalledPathHint}…`, stalledPathHint);
+              stalledPathHint = '';
+            } else if (enrichPass) {
+              host.pushStatus('Deepening the product UI: flows, confirmation, and premium layout…', null);
             }
             const attemptStarted = Date.now();
             const seenCodingPaths = new Set<string>();
@@ -714,6 +1078,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             let lastFocusPath = '';
             let lastFocusLen = 0;
             let lastGrowthAt = Date.now();
+            let stallAbort = false;
+            let stallAbortPath = '';
+            let stallCancelFired = false;
             const { extractStreamingFileEdits } = await import('@/lib/projectCodeEdit');
             const result = await answerStudio(
               {
@@ -729,7 +1096,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 stickyPinnedSource: host.stickyModelId ? 'local' : undefined,
                 allowFileEdits: true,
                 shouldAbort: () =>
-                  Boolean(host.shouldAbort?.())
+                  stallAbort
+                  || Boolean(host.shouldAbort?.())
                   || Date.now() - attemptStarted > polishBudgetMs
                   || Date.now() - polishStarted > polishTotalBudgetMs,
               },
@@ -773,14 +1141,31 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                       lastGrowthAt = now;
                     }
                     const stalled = Boolean(focusPath) && now - lastGrowthAt > 12_000;
+                    // Hard stall: cancel the GGUF turn and retry just this file on the next attempt.
+                    if (
+                      focusPath
+                      && now - lastGrowthAt > POLISH_STALL_ABORT_MS
+                      && !stallAbort
+                    ) {
+                      stallAbort = true;
+                      stallAbortPath = focusPath;
+                      if (!stallCancelFired) {
+                        stallCancelFired = true;
+                        void import('@/lib/novaEngine')
+                          .then(({ engineGenerateCancel }) => engineGenerateCancel())
+                          .catch(() => {});
+                      }
+                    }
                     // Paint on path switch / growth (throttled) or honest stall notice (status only).
                     if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 220) {
                       lastStudioPaint = now;
                       const base = focusPath.split('/').pop() || focusPath;
                       host.pushStatus(
-                        stalled && !contentGrew && !pathChanged
-                          ? `Still waiting on the coder for ${base}…`
-                          : createFileBuildLabel(focusPath, 'Coding'),
+                        stallAbort
+                          ? `Stalled on ${base} — cancelling to retry that file…`
+                          : stalled && !contentGrew && !pathChanged
+                            ? `Still waiting on the coder for ${base}…`
+                            : createFileBuildLabel(focusPath, 'Coding'),
                         focusPath,
                       );
                       if (pathChanged || contentGrew) {
@@ -796,6 +1181,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 } catch { /* ignore stream paint */ }
               },
             );
+            if (stallAbort && stallAbortPath) {
+              stalledPathHint = stallAbortPath;
+              lastError = `Coder stalled on ${stallAbortPath}`;
+              host.pushStatus(`Retrying ${stallAbortPath} after stall…`, stallAbortPath);
+              // Keep partial bytes; next pass rewrites just this path.
+              continue;
+            }
             if (await host.stopIfSuperseded()) {
               markCreateJobFailed(jobId, 'Stopped');
               unbindCreateChat(host, host.chatId);
@@ -905,7 +1297,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             if (missing.length || truncated) {
               const badPath = truncatedCss
                 ? 'src/App.css'
-                : (truncatedApp ? appKeyProbe : 'src/App.tsx');
+                : appKeyProbe;
               host.pushStatus(createFileReEditLabel(badPath), badPath);
               // Restore disk from last good snapshot — not memory-only.
               createFilesAcc = { ...polishSnapshot };
@@ -1020,21 +1412,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
             }
             appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+            // Stop heartbeat before the gate — otherwise it can overwrite Done and leave
+            // "Final pass…" pulsing after the reply has already settled.
+            stopPolishBeat();
             host.pushStatus(POLISH_ALMOST_DONE_LABEL);
             await new Promise((r) => setTimeout(r, 120));
             host.pushStatus(POLISH_FINAL_PASS_LABEL);
-            const needsInteractive = chatAppBrief
-              || briefRequiresInteractiveApp(briefForUi)
-              || briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|search|messag/i.test(m));
-            const ready = isPreviewReady(createFilesAcc, {
+            const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
+            const ready = previewReadyForBrief(createFilesAcc, {
               productName: lockedProductName,
               brief: briefForUi,
-              requireInteractive: needsInteractive,
+              spec: ensembleSpec,
+              contract: ensembleContract,
             });
+            host.pushStatus('Done');
             const briefMisses = briefCreateMisses(briefSpec, createFilesAcc);
             const filler = looksLikeFillerStubAppSource(appBody);
             if (!ready.ok || filler || briefMisses.length) {
-              // Fail-closed for this attempt — keep last model UI on disk; try enrich pass.
+              // Fail-closed for this attempt — one enrich retry max, then stop.
               uiPolishOk = false;
               uiPolishReasons = [
                 ...(ready.reasons || []),
@@ -1042,30 +1437,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 ...(filler ? ['App is still a filler stub (sample/placeholder text)'] : []),
                 ...(lastError ? [lastError] : []),
               ];
-              if (attempt < 3) {
+              if (attempt < maxPolishAttempts - 1) {
                 const missHint = (briefMisses[0] || ready.reasons?.[0] || 'UI depth')
                   .replace(/^missing\s+/i, '');
                 host.pushStatus(
                   `Re-editing the UI: adding ${missHint.slice(0, 72)}…`,
-                  'src/App.tsx',
+                  appPath,
                 );
                 continue;
               }
               break;
             }
-            successfulPasses += 1;
-            const elapsed = Date.now() - polishStarted;
-            // Soft Ready too early → force at least one enrich pass and a 5-minute floor.
-            if (elapsed < CREATE_POLISH_MIN_MS || successfulPasses < 2) {
-              host.pushStatus(
-                elapsed < CREATE_POLISH_MIN_MS
-                  ? 'Still building: enriching the product UI and visual polish…'
-                  : 'Second pass: deepening layout and real product flows…',
-              );
-              uiPolishOk = false;
-              uiPolishReasons = ['Enrichment pass required for premium product depth'];
-              if (attempt < 3) continue;
-            }
+            // Ready means stop — no soft floor / forced enrich after success.
             uiPolishOk = true;
             uiPolishReasons = [];
             break;
@@ -1088,39 +1471,59 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ];
         // Keep last model UI on disk — do not revert to scaffold snapshot.
       }
-      } // end legacy dump polish (!usedNovaLoop)
+      } // end dump polish (loop off or loop Ready handoff)
     }
 
-    // Image model / Brand Assets: generate or fetch product photos into public/heroes.
-    if (uiPolishOk === true && originDiskRoot && !blankSolidColor) {
+    // Brand assets + public wiring — always run when we have a disk project (even if Ready failed).
+    // Otherwise fail-closed builds keep broken /logo.svg and /heroes/*.jpg forever.
+    // Arcade / canvas games: skip hero image materialize (was hanging ~20m on "landing"
+    // negation in briefs like "Not a website landing page").
+    if (originDiskRoot && !blankSolidColor && needsUiPolish) {
       try {
         const { planBrandAssets, materializeBrandAssets } = await import('@/lib/brandAssets');
+        const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
         const { wireCreatePublicAssets } = await import('@/lib/createBuildQuality');
-        host.pushStatus('Fetching images for this brief…');
+        const isArcadeBrief = looksLikePlayableCanvasGame(briefForUi) || looksLikeFpsGame(briefForUi);
+        const tryMaterialize = !isArcadeBrief && (
+          uiPolishOk === true
+          || briefLooksLikeMarketingLanding(briefForUi)
+          || briefNeedsCreateUiPolish(briefForUi)
+        );
+        if (isArcadeBrief) {
+          host.pushStatus('Skipping hero fetch for playable game…');
+        } else if (uiPolishOk === true) {
+          host.pushStatus('Fetching images for this brief…');
+        } else {
+          host.pushStatus(tryMaterialize
+            ? 'Fetching images + wiring hero fallbacks…'
+            : 'Wiring local icons and hero fallbacks…');
+        }
         const plan = planBrandAssets(briefForUi, lockedProductName);
-        const mat = await materializeBrandAssets({
-          diskRoot: originDiskRoot,
-          files: createFilesAcc,
-          plan,
-          brief: briefForUi,
-          projectName: lockedProductName,
-        });
-        createFilesAcc = mat.files;
-        // Binary JPGs must still appear as file keys so Ready + wire see real covers.
-        for (const rel of mat.saved || []) {
-          const norm = String(rel || '').replace(/\\/g, '/');
-          if (/^public\/heroes\//i.test(norm) && createFilesAcc[norm] == null) {
-            createFilesAcc[norm] = '';
+        if (tryMaterialize) {
+          const mat = await materializeBrandAssets({
+            diskRoot: originDiskRoot,
+            files: createFilesAcc,
+            plan,
+            brief: briefForUi,
+            projectName: lockedProductName,
+          });
+          createFilesAcc = mat.files;
+          for (const rel of mat.saved || []) {
+            const norm = String(rel || '').replace(/\\/g, '/');
+            if (/^public\/heroes\//i.test(norm) && createFilesAcc[norm] == null) {
+              createFilesAcc[norm] = '';
+            }
           }
+          host.pushStatus(mat.saved.length
+            ? `Saved ${mat.saved.length} product image${mat.saved.length === 1 ? '' : 's'}…`
+            : 'Linking App.css…');
         }
         const linkedAfterHero = ensureStylesLinked(createFilesAcc);
         createFilesAcc = linkedAfterHero.files;
         const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName);
         createFilesAcc = wired.files;
-        if (mat.saved.length || linkedAfterHero.changed.length || wired.changed.length) {
-          host.pushStatus(mat.saved.length
-            ? `Saved ${mat.saved.length} product image${mat.saved.length === 1 ? '' : 's'}…`
-            : (wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…'));
+        if (wired.changed.length || linkedAfterHero.changed.length) {
+          host.pushStatus(wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…');
           const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
             ? 'src/App.tsx'
             : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
@@ -1130,7 +1533,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
               createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
               createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
-              // Never @@@FILE binary heroes/photos — that overwrote real JPGs with empty/marker text.
               ...Object.keys(createFilesAcc)
                 .filter((p) => {
                   const norm = p.replace(/\\/g, '/');
@@ -1140,7 +1542,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   if (!body.trim()) return false;
                   return true;
                 })
-                .slice(0, 12)
+                .slice(0, 20)
                 .map((p) => `@@@FILE ${p}\n${createFilesAcc[p]}`),
             ].filter(Boolean).join('\n'),
             projectId: originProjectId,
@@ -1150,22 +1552,227 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             diskRoot: originDiskRoot,
           }).then((applied) => {
             if (applied.ok && applied.updated.length) createFilesAcc = applied.files;
-          }).catch(() => { /* disk already has heroes via materialize */ });
+          }).catch(() => {});
         }
-        // Re-verify after asset wire — logo-as-cover / unwired icons must fail closed.
-        const recheck = isPreviewReady(createFilesAcc, {
-          productName: lockedProductName,
-          brief: briefForUi,
-          requireInteractive: chatAppBrief
-            || briefRequiresInteractiveApp(briefForUi)
-            || briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|search|messag|borrow/i.test(m)),
-        });
-        if (!recheck.ok) {
-          uiPolishOk = false;
-          uiPolishReasons = recheck.reasons || ['Asset wire failed Preview Ready'];
+        if (uiPolishOk === true) {
+          const recheck = isPreviewReady(createFilesAcc, {
+            productName: lockedProductName,
+            brief: briefForUi,
+            requireInteractive: chatAppBrief
+              || briefRequiresInteractiveApp(briefForUi)
+              || (
+                !briefLooksLikeMarketingLanding(briefForUi)
+                && briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|messag|borrow/i.test(m))
+              ),
+          });
+          if (!recheck.ok) {
+            uiPolishOk = false;
+            uiPolishReasons = recheck.reasons || ['Asset wire failed Preview Ready'];
+          }
         }
       } catch {
         host.pushStatus('Continuing without generated images…');
+      }
+    }
+
+    // Style hop — contract tokens + constrained CSS (no cream-bias dump).
+    if (needsUiPolish) {
+      try {
+        const cssNow = createFilesAcc['src/App.css'] || '';
+        const cssThin = cssNow.replace(/\s+/g, '').length < 900
+          || (/#0f1419/.test(cssNow) && cssNow.length < 1200)
+          || !/NOVA layout contract tokens/.test(cssNow);
+        if (cssThin) {
+          const { getEngineStatus } = await import('@/lib/novaEngine');
+          const { getBrainProfile } = await import('@/lib/brainProfile');
+          const {
+            resolveCreateEnsembleTeam,
+            ensembleMember,
+            runCreateStyleHop,
+          } = await import('@/lib/createEnsemble');
+          const profile = await getBrainProfile();
+          const status = await getEngineStatus();
+          const team = resolveCreateEnsembleTeam(status.models, {
+            ramGb: profile.ramGB,
+            maxCoderParamsB: profile.maxCoderParamsB,
+            craftId: coderGate.id,
+          });
+          const styler = ensembleMember(team, 'style')
+            || ensembleMember(team, 'design')
+            || ensembleMember(team, 'craft');
+          if (styler) {
+            host.pushStatus(`Style hop · **${styler.name}** (contract tokens)…`);
+            const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+            const styled = await runCreateStyleHop({
+              brief: briefForUi,
+              productName: lockedProductName,
+              appSource: appSrc,
+              cssSource: cssNow,
+              modelId: styler.id,
+              modelName: styler.name,
+              contract: ensembleContract,
+              shouldAbort: () => Boolean(host.shouldAbort?.()),
+            });
+            if (styled.css && styled.css.length >= cssNow.length) {
+              createFilesAcc = { ...createFilesAcc, 'src/App.css': styled.css };
+              await applyChatReplyEdits({
+                reply: `@@@FILE src/App.css\n${styled.css}`,
+                projectId: originProjectId,
+                projectName: buildIntent.name,
+                files: createFilesAcc,
+                userMessage: briefForUi,
+                diskRoot: originDiskRoot,
+              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+              host.pushStatus('Style hop applied…');
+            }
+            // Warm craft coder again — style may have loaded UIGEN / chat.
+            if (coderGate.ok) {
+              try {
+                const { setEngineModel } = await import('@/lib/novaEngine');
+                void setEngineModel?.(coderGate.id);
+              } catch { /* ignore */ }
+            }
+          }
+        }
+      } catch {
+        /* style hop best-effort */
+      }
+    }
+
+    // Verify hop: craft coder reviews App/CSS (never chat Instruct).
+    if (needsUiPolish && ensembleAttribution.includes('→')) {
+      try {
+        const { getEngineStatus, setEngineModel } = await import('@/lib/novaEngine');
+        const { getBrainProfile } = await import('@/lib/brainProfile');
+        const {
+          resolveCreateEnsembleTeam,
+          ensembleMember,
+          runCreateVerifyHop,
+        } = await import('@/lib/createEnsemble');
+        const profile = await getBrainProfile();
+        const status = await getEngineStatus();
+        const team = resolveCreateEnsembleTeam(status.models, {
+          ramGb: profile.ramGB,
+          maxCoderParamsB: profile.maxCoderParamsB,
+          craftId: coderGate.id,
+        });
+        const verifier = ensembleMember(team, 'verify')
+          || (coderGate.ok ? { id: coderGate.id, name: coderGate.name, role: 'verify' as const, source: 'local' as const } : null);
+        if (verifier) {
+          try { void setEngineModel?.(verifier.id); } catch { /* ignore */ }
+          host.pushStatus(`Verify · **${verifier.name}**…`);
+          const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+          const cssSrc = createFilesAcc['src/App.css'] || '';
+          const verified = await runCreateVerifyHop({
+            brief: briefForUi,
+            productName: lockedProductName,
+            appSource: appSrc,
+            cssSource: cssSrc,
+            modelId: verifier.id,
+            modelName: verifier.name,
+            contract: ensembleContract,
+            shouldAbort: () => Boolean(host.shouldAbort?.()),
+          });
+          if (verified.issues.length) {
+            // Ignore nitpicks free chat models often invent (imports, createRoot folklore).
+            const appForVerify = `${createFilesAcc['src/App.jsx'] || ''}\n${createFilesAcc['src/App.tsx'] || ''}`;
+            const actionable = verified.issues.filter((issue) => {
+              if (/\b(?:react\s+import|import\s+react|createroot|document\.getelementbyid|plain\s+javascript|not\s+needed|unnecessary)\b/i.test(issue)) {
+                return false;
+              }
+              const claimedMissing = issue.match(/does not have (?:a |an )?([^.]{3,60})/i)?.[1] || '';
+              const words = claimedMissing.split(/\s+/).filter((w) => w.length > 3);
+              if (words.length && words.every((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(appForVerify))) {
+                return false;
+              }
+              return true;
+            });
+            if (actionable.length && uiPolishOk === true) {
+              // Advisory only — do not demote Ready without a craft rewrite.
+              host.pushStatus(`Verify notes (${actionable.length}): ${actionable[0].slice(0, 60)}…`);
+            }
+          }
+          // Keep craft GGUF warm after verify.
+          if (coderGate.ok && verifier.id !== coderGate.id) {
+            try { void setEngineModel?.(coderGate.id); } catch { /* ignore */ }
+          }
+        }
+      } catch {
+        /* verify best-effort */
+      }
+    }
+
+    // Critic hop — vision/text grades against LayoutContract (one fail can block Ready).
+    if (needsUiPolish && ensembleContract) {
+      try {
+        const { getEngineStatus } = await import('@/lib/novaEngine');
+        const { getBrainProfile } = await import('@/lib/brainProfile');
+        const {
+          resolveCreateEnsembleTeam,
+          ensembleMember,
+          runCreateCriticHop,
+        } = await import('@/lib/createEnsemble');
+        const { scoreLayoutQuality, scoreFunctionalReady, shipReadyLabel } = await import('@/lib/createLayoutContract');
+        const layoutScore = scoreLayoutQuality(createFilesAcc, {
+          brief: briefForUi,
+          spec: ensembleSpec,
+          contract: ensembleContract,
+        });
+        const funcScore = scoreFunctionalReady(createFilesAcc, {
+          brief: briefForUi,
+          spec: ensembleSpec,
+        });
+        if (!layoutScore.ok || !funcScore.ok) {
+          uiPolishOk = false;
+          uiPolishReasons = [
+            ...uiPolishReasons,
+            ...layoutScore.reasons,
+            ...funcScore.reasons,
+            shipReadyLabel(layoutScore, funcScore),
+          ];
+          host.pushStatus(`Quality gates blocked Ready (${layoutScore.score}/${funcScore.score})…`);
+        } else {
+          const profile = await getBrainProfile();
+          const status = await getEngineStatus();
+          const team = resolveCreateEnsembleTeam(status.models, {
+            ramGb: profile.ramGB,
+            maxCoderParamsB: profile.maxCoderParamsB,
+            craftId: coderGate.id,
+          });
+          const critic = ensembleMember(team, 'critic') || ensembleMember(team, 'verify');
+          let shot: string | null = null;
+          try {
+            const api = (window as unknown as {
+              novaDesktop?: { previewCaptureLive?: () => Promise<{ ok?: boolean; dataUrl?: string }> };
+            }).novaDesktop;
+            const cap = await api?.previewCaptureLive?.();
+            if (cap?.ok && cap.dataUrl) shot = cap.dataUrl;
+          } catch { /* no live window yet */ }
+          if (critic) {
+            host.pushStatus(`Critic hop · **${critic.name}**…`);
+            const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+            const cssSrc = createFilesAcc['src/App.css'] || '';
+            const critiqued = await runCreateCriticHop({
+              brief: briefForUi,
+              productName: lockedProductName,
+              contract: ensembleContract,
+              appSource: appSrc,
+              cssSource: cssSrc,
+              modelId: critic.id,
+              modelName: critic.name,
+              screenshotDataUrl: shot,
+              shouldAbort: () => Boolean(host.shouldAbort?.()),
+            });
+            if (!critiqued.pass && critiqued.issues.length) {
+              // LLM critic is advisory — deterministic layout/functional gates already ran.
+              host.pushStatus(`Critic notes: ${critiqued.issues[0].slice(0, 72)}…`);
+            } else if (layoutScore.ok && funcScore.ok) {
+              host.pushStatus('Ready to ship — layout + functional gates passed…');
+            }
+          }
+        }
+      } catch {
+        /* critic best-effort */
       }
     }
 
@@ -1181,17 +1788,25 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Final honesty check — title splash / blank-Live crash must never be marked success.
     if (needsUiPolish) {
-      const { ensureReactImportForNamespace, appUsesReactNamespaceWithoutImport } = await import('@/lib/createBuildQuality');
+      const {
+        ensureReactImportForNamespace,
+        ensureJsxHasNoTypeScript,
+        appUsesReactNamespaceWithoutImport,
+        previewReadyForBrief,
+      } = await import('@/lib/createBuildQuality');
+      const { jsxSourceHasTypeScriptOnlySyntax } = await import('@/lib/freshSpaFromBrief');
       const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
         ? 'src/App.tsx'
         : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
       const beforeFinal = createFilesAcc[appKey] || '';
-      const healedFinal = ensureReactImportForNamespace(beforeFinal);
-      if (healedFinal !== beforeFinal) {
-        createFilesAcc = { ...createFilesAcc, [appKey]: healedFinal };
+      let healed = beforeFinal;
+      if (/\.jsx$/i.test(appKey)) healed = ensureJsxHasNoTypeScript(healed);
+      healed = ensureReactImportForNamespace(healed);
+      if (healed !== beforeFinal) {
+        createFilesAcc = { ...createFilesAcc, [appKey]: healed };
         if (originDiskRoot) {
           await applyChatReplyEdits({
-            reply: `@@@FILE ${appKey}\n${healedFinal}`,
+            reply: `@@@FILE ${appKey}\n${healed}`,
             projectId: originProjectId,
             projectName: buildIntent.name,
             files: createFilesAcc,
@@ -1201,15 +1816,92 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         }
       }
       const appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+      const jsxStillTs = Boolean(createFilesAcc['src/App.jsx'])
+        && jsxSourceHasTypeScriptOnlySyntax(createFilesAcc['src/App.jsx'] || '');
       if (uiPolishOk === true && (
         looksLikeFillerStubAppSource(appBody)
         || isEmptyOrStubAppSource(appBody)
         || appUsesReactNamespaceWithoutImport(appBody)
+        || jsxStillTs
       )) {
         uiPolishOk = false;
-        uiPolishReasons = appUsesReactNamespaceWithoutImport(appBody)
-          ? ['App uses React.* without importing React (would blank Live)']
-          : ['App is still a blank placeholder splash'];
+        uiPolishReasons = jsxStillTs
+          ? ['App.jsx still has TypeScript syntax after heal (would crash Live)']
+          : appUsesReactNamespaceWithoutImport(appBody)
+            ? ['App uses React.* without importing React (would blank Live)']
+            : ['App is still a blank placeholder splash'];
+      }
+      // Final code scan — never claim Preview Ready / Live verified on a broken tree.
+      if (uiPolishOk === true) {
+        const gate = previewReadyForBrief(createFilesAcc, {
+          productName: lockedProductName,
+          brief: briefForUi,
+          spec: ensembleSpec,
+          contract: ensembleContract,
+        });
+        if (!gate.ok) {
+          uiPolishOk = false;
+          uiPolishReasons = gate.reasons?.length
+            ? gate.reasons
+            : ['Final code scan failed Preview Ready'];
+        }
+      }
+      // Empty Vite shell must never ship as success — even if an earlier Ready check lied.
+      const finalApp = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+      if (uiPolishOk === true && (
+        isEmptyOrStubAppSource(finalApp)
+        || /return\s*\(\s*<div\s+className=["']app["']\s*\/>\s*\)/i.test(finalApp)
+        || finalApp.length < 200
+      )) {
+        uiPolishOk = false;
+        uiPolishReasons = ['App is still an empty Vite shell — UI polish did not build the page'];
+      }
+      // apple.com-style briefs must keep product bands always visible — never a click-gated shell.
+      if (uiPolishOk === true) {
+        const { briefLooksLikeAppleStyleHomepage, appleHomepageHasProductBands } = await import('@/lib/createBuildQuality');
+        if (briefLooksLikeAppleStyleHomepage(briefForUi)) {
+          const hidesBands = /selectedProduct\s*===\s*['"][^'"]+['"]\s*&&/i.test(finalApp);
+          const missingBands = !appleHomepageHasProductBands(finalApp)
+            || !/<nav\b/i.test(finalApp)
+            || /\bBuilt for general users\b/i.test(finalApp)
+            || /\bBand\s*[1-4]\b/i.test(finalApp);
+          const thinApple = finalApp.length < 2400 && !/className=["'][^"']*\bband\b/i.test(finalApp);
+          if (hidesBands || missingBands || thinApple) {
+            uiPolishOk = false;
+            uiPolishReasons = [
+              hidesBands
+                ? 'Product bands are hidden until a nav click (not apple.com-style)'
+                : thinApple
+                  ? 'Apple-style homepage is still too thin — need full-bleed hero and product bands'
+                  : 'Missing always-visible Mac / iPad / Watch / AirPods bands',
+            ];
+          }
+        }
+      }
+    }
+
+    // Last write wins. Re-wire the files that actually shipped so a late App.jsx
+    // still gets on-disk heroes and any /icons/*.svg it named.
+    if (originDiskRoot && (createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'])) {
+      const { wireCreatePublicAssets: wireFinalAssets } = await import('@/lib/createBuildQuality');
+      const wiredFinal = wireFinalAssets(createFilesAcc, lockedProductName);
+      if (wiredFinal.changed.length) {
+        createFilesAcc = wiredFinal.files;
+        const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+        await applyChatReplyEdits({
+          reply: [
+            createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
+            createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+            ...wiredFinal.changed
+              .filter((p: string) => /\/icons\/.+\.svg$/i.test(p) || /\/logo\.svg$/i.test(p))
+              .map((p: string) => `@@@FILE ${p}\n${createFilesAcc[p] || ''}`),
+          ].filter(Boolean).join('\n'),
+          projectId: originProjectId,
+          projectName: lockedProductName,
+          files: createFilesAcc,
+          userMessage: briefForUi,
+          diskRoot: originDiskRoot,
+        }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
       }
     }
 
@@ -1226,11 +1918,153 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Fail-closed: keep folder + code pills (files exist) but never Ready / Live.
     if (uiPolishOk === false) {
+      // Floors:
+      // - Apple: replace shells missing Mac/iPad/Watch/AirPods (generic "Band 1"
+      //   multi-section craft is NOT finished apple.com — realizeBriefUi owns that).
+      // - Other: only when App is truly empty/broken — never tablet-stub overwrite
+      //   of a real multi-section craft.
+      try {
+        const appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+        const hasStructure = /<(?:section|nav|main|header|footer)\b/i.test(appBody)
+          && (appBody.match(/<(?:section|main)\b/gi) || []).length >= 2;
+        const trulyEmpty = looksLikeFillerStubAppSource(appBody)
+          || isEmptyOrStubAppSource(appBody)
+          || appBody.replace(/\s+/g, '').length < 900;
+        const {
+          buildBriefInteractiveFloor,
+          previewReadyForBrief,
+          briefLooksLikeAppleStyleHomepage: appleBrief,
+          appleHomepageHasProductBands,
+        } = await import('@/lib/createBuildQuality');
+        const isApple = appleBrief(briefForUi);
+        const appleMissingBands = isApple && (
+          !appleHomepageHasProductBands(appBody)
+          || /\bBuilt for general users\b/i.test(appBody)
+          || /\bBand\s*[1-4]\b/i.test(appBody)
+          || /selectedProduct\s*===\s*['"]/.test(appBody)
+          || (appBody.length < 3200 && !/<img\b/i.test(appBody))
+        );
+        if (appleMissingBands || (trulyEmpty && !hasStructure)) {
+          if (isApple) {
+            host.pushStatus(appleMissingBands
+              ? 'Materializing apple.com-style floor (product bands missing)…'
+              : 'Materializing apple.com-style floor from empty stub…');
+            const { realizeBriefUi } = await import('@/lib/createRealize');
+            const realized = realizeBriefUi(createFilesAcc, lockedProductName, briefForUi);
+            if (realized.changed) {
+              createFilesAcc = realized.files;
+              const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+              if (originDiskRoot) {
+                await applyChatReplyEdits({
+                  reply: [
+                    createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
+                    createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+                  ].filter(Boolean).join('\n'),
+                  projectId: originProjectId,
+                  projectName: lockedProductName,
+                  files: createFilesAcc,
+                  userMessage: briefForUi,
+                  diskRoot: originDiskRoot,
+                }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+              }
+              const gate = previewReadyForBrief(createFilesAcc, {
+                productName: lockedProductName,
+                brief: briefForUi,
+                spec: ensembleSpec,
+                contract: ensembleContract,
+              });
+              if (gate.ok) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Apple-style floor cleared Preview Ready…');
+              } else {
+                uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
+              }
+            }
+          } else if (trulyEmpty && !hasStructure) {
+            const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
+            const isGameFloor = looksLikePlayableCanvasGame(briefForUi) || looksLikeFpsGame(briefForUi);
+            if (isGameFloor) {
+              host.pushStatus('Materializing playable game floor from empty stub…');
+              const { realizeBriefUi } = await import('@/lib/createRealize');
+              const realized = realizeBriefUi(createFilesAcc, lockedProductName, briefForUi);
+              if (realized.changed) {
+                createFilesAcc = realized.files;
+                const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+                if (originDiskRoot) {
+                  await applyChatReplyEdits({
+                    reply: [
+                      createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
+                      createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+                    ].filter(Boolean).join('\n'),
+                    projectId: originProjectId,
+                    projectName: lockedProductName,
+                    files: createFilesAcc,
+                    userMessage: briefForUi,
+                    diskRoot: originDiskRoot,
+                  }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+                }
+                const gate = previewReadyForBrief(createFilesAcc, {
+                  productName: lockedProductName,
+                  brief: briefForUi,
+                  spec: ensembleSpec,
+                  contract: ensembleContract,
+                });
+                if (gate.ok) {
+                  uiPolishOk = true;
+                  uiPolishReasons = [];
+                  host.pushStatus('Playable game floor cleared Preview Ready…');
+                } else {
+                  uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
+                }
+              }
+            } else {
+            host.pushStatus('Materializing brief floor from empty stub…');
+            const floor = buildBriefInteractiveFloor(lockedProductName, briefForUi);
+            const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+            createFilesAcc = {
+              ...createFilesAcc,
+              [appKey]: floor.app,
+              'src/App.css': floor.css,
+            };
+            if (originDiskRoot) {
+              await applyChatReplyEdits({
+                reply: `@@@FILE ${appKey}\n${floor.app}\n@@@FILE src/App.css\n${floor.css}`,
+                projectId: originProjectId,
+                projectName: lockedProductName,
+                files: createFilesAcc,
+                userMessage: briefForUi,
+                diskRoot: originDiskRoot,
+              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+            }
+            const gate = previewReadyForBrief(createFilesAcc, {
+              productName: lockedProductName,
+              brief: briefForUi,
+              spec: ensembleSpec,
+              contract: ensembleContract,
+            });
+            if (gate.ok) {
+              uiPolishOk = true;
+              uiPolishReasons = [];
+              host.pushStatus('Brief floor cleared Preview Ready…');
+            } else {
+              uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
+            }
+            }
+          }
+        }
+      } catch {
+        /* floor best-effort */
+      }
+    }
+
+    if (uiPolishOk === false) {
       softBindCreateStudio(host, {
         files: createFilesAcc,
         projectId: originProjectId,
         name: lockedProductName,
         diskRoot: originDiskRoot,
+        force: true,
       });
       const reasonLines = (uiPolishReasons.length ? uiPolishReasons : ['UI not Preview-ready'])
         .slice(0, 8)
@@ -1273,11 +2107,26 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ...nextSteps,
         '',
         'Folder and Code are available in this chat. Live unlocks after Preview Ready.',
+        'If the desktop froze, use **Copy freeze / build report** in the sidebar and paste it here.',
         created.grantHint || '',
       ].filter(Boolean).join('\n');
+      {
+        const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+        const cssSrc = createFilesAcc['src/App.css'] || '';
+        noteBuildContext({
+          productName: displayName,
+          diskRoot: originDiskRoot,
+          projectId: originProjectId,
+          appBytes: appSrc.length,
+          cssBytes: cssSrc.length,
+        });
+        noteBuildFail(uiPolishReasons);
+        noteBuildGateResult(false, uiPolishReasons);
+      }
       markCreateJobFailed(jobId, uiPolishReasons[0] || 'UI polish failed: scaffold only');
       // Do NOT auto-npm on fail-closed — overlapping Defender scans freeze the desktop.
-      await host.finishPlainReply(`${failAnswer}${grantNote}`, 'NOVA · scaffold');
+      // finishPlainReply clears status and snapshots Done — do not pushStatus after.
+      await host.finishPlainReply(`${failAnswer}${grantNote}`, `${ensembleAttribution || 'NOVA'} · scaffold`);
       return { status: 'handled' };
     }
 
@@ -1288,6 +2137,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       diskRoot: originDiskRoot,
       previewUrl: null,
     });
+    {
+      const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+      const cssSrc = createFilesAcc['src/App.css'] || '';
+      noteBuildContext({
+        productName: lockedProductName,
+        diskRoot: originDiskRoot,
+        projectId: originProjectId,
+        appBytes: appSrc.length,
+        cssBytes: cssSrc.length,
+      });
+      noteBuildGateResult(true, []);
+    }
     host.setChatCodePill(host.chatId, true);
     if (host.shouldPaintStudioLive(host.routeChatId, host.chatId)) {
       host.setCodePillSticky(true);
@@ -1313,9 +2174,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           preferPreviewUrl: null,
         });
         if (bootstrap.npmInstalled && uiPolishOk === true) {
+          bootstrap = { ...bootstrap, codeVerified: true };
           host.pushStatus(
             bootstrap.previewLive
-              ? 'Dependencies installed — Live preview verified…'
+              ? 'Dependencies installed — code scan passed, Live verified…'
               : 'Dependencies installed — verifying Live…',
           );
           markCreateJobReady(jobId, bootstrap.devServerUrl || null);
@@ -1371,16 +2233,21 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         'Created the project folder',
         'Wrote scaffold files',
         'Coder built the product UI',
-        bootstrap.previewLive
-          ? 'Verified Live preview'
-          : (bootstrap.npmInstalled
-            ? 'Installed project dependencies'
-            : (bootstrap.npmPending ? 'Installing project dependencies' : 'Setup incomplete')),
+        bootstrap.previewLive && bootstrap.codeVerified
+          ? 'Code scan passed — Live verified'
+          : bootstrap.previewLive
+            ? 'Live server started'
+            : (bootstrap.npmInstalled
+              ? 'Installed project dependencies'
+              : (bootstrap.npmPending ? 'Installing project dependencies' : 'Setup incomplete')),
       ],
     });
-    const createMeta = coderGate.ok && coderGate.name
-      ? `NOVA · create · ${coderGate.name}`
-      : 'NOVA · create';
+    const createMeta = ensembleAttribution && ensembleAttribution.includes('→')
+      ? `NOVA · ensemble · ${ensembleAttribution}`
+      : (coderGate.ok && coderGate.name
+        ? `NOVA · create · ${coderGate.name}`
+        : 'NOVA · create');
+    // finishPlainReply clears status and snapshots Done — do not pushStatus after.
     await host.finishPlainReply(createAnswer, createMeta);
     return { status: 'handled' };
   } catch (createErr) {

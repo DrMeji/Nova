@@ -54,6 +54,41 @@ type RecognitionResultList = {
 };
 
 /**
+ * Fix common Web Speech mishears in gaming / streamer chat.
+ * Speech engines often hear "Timmy" as "teammate".
+ */
+export function scrubDictationTranscript(text: string): string {
+  let t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return t;
+
+  // ItsTimmy / Timmy (Apex streamer) — highest-frequency miss.
+  t = t.replace(/\b(?:it'?s|its|his|is)\s+teammates?\b/gi, "it's Timmy");
+  t = t.replace(/\bteammates?\b/gi, (m, offset, full) => {
+    const before = String(full).slice(Math.max(0, offset - 24), offset);
+    // Only rewrite bare "teammate" when the utterance already smells like a name ask / Apex.
+    if (/\b(?:how\s+much|earned|earning|apex|streamer|twitch|who\s+is|about)\b/i.test(before)
+      || /\b(?:how\s+much|earned|apex|twitch|streamer)\b/i.test(String(full))) {
+      return 'Timmy';
+    }
+    return m;
+  });
+  t = t.replace(/\bits\s*timmy\b/gi, 'ItsTimmy');
+  t = t.replace(/\bit'?s\s+timmy\b/gi, "it's Timmy");
+
+  // Game titles
+  t = t.replace(/\bapex\s+legend\b/gi, 'Apex Legends');
+  t = t.replace(/\bapex\s+legends?\b/gi, 'Apex Legends');
+  t = t.replace(/\bvalorant\b/gi, 'Valorant');
+  t = t.replace(/\bleague\s+of\s+legend\b/gi, 'League of Legends');
+  t = t.replace(/\bcounter[- ]?strike\s*2\b/gi, 'CS2');
+
+  // Light cleanup
+  t = t.replace(/\bcan\s+you\s+give\s+me\s+information\s+on\s+more\s+on\b/gi, 'can you give me more information on');
+  t = t.replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+/**
  * Live speech-to-text for the Chat composer.
  * Click mic again (handle.stop) when done speaking.
  */
@@ -89,7 +124,7 @@ export function startLiveDictation(opts: {
     releaseMic();
     try { rec.stop(); } catch { /* ignore */ }
     try { rec.abort(); } catch { /* ignore */ }
-    const text = (finalText || interimText).trim();
+    const text = scrubDictationTranscript((finalText || interimText).trim());
     if (error) opts.onError?.(error);
     else if (text) opts.onFinal?.(text);
     opts.onEnd?.();
@@ -120,9 +155,9 @@ export function startLiveDictation(opts: {
         if (results[i].isFinal) rebuiltFinal += `${piece} `;
         else interim += piece;
       }
-      finalText = rebuiltFinal.replace(/\s+/g, ' ').trim();
-      interimText = interim;
-      const live = `${finalText} ${interim}`.replace(/\s+/g, ' ').trim();
+      finalText = scrubDictationTranscript(rebuiltFinal.replace(/\s+/g, ' ').trim());
+      interimText = scrubDictationTranscript(interim);
+      const live = scrubDictationTranscript(`${finalText} ${interim}`.replace(/\s+/g, ' ').trim());
       if (live) opts.onInterim?.(live);
     };
     rec.onerror = (ev) => {
@@ -202,9 +237,9 @@ function playBase64Audio(
 }
 
 async function speakViaNeural(text: string, onPlaybackStart?: () => void): Promise<boolean> {
-  if (!window.arkDesktop?.voiceNeuralSpeak) return false;
+  if (!window.novaDesktop?.voiceNeuralSpeak) return false;
   const voice = resolveNeuralVoiceId(getVoiceTtsVoiceUri() || undefined);
-  const res = await window.arkDesktop.voiceNeuralSpeak({ text, voice });
+  const res = await window.novaDesktop.voiceNeuralSpeak({ text, voice });
   if (!res?.ok || !res.base64) return false;
   await primeOutputSink();
   await playBase64Audio(res.base64, res.mime || 'audio/mpeg', onPlaybackStart);
@@ -213,7 +248,7 @@ async function speakViaNeural(text: string, onPlaybackStart?: () => void): Promi
 
 async function speakViaOpenAI(text: string, onPlaybackStart?: () => void): Promise<boolean> {
   const key = getProviderApiKeys().openai;
-  if (!key?.trim() || !window.arkDesktop?.httpRequest) return false;
+  if (!key?.trim() || !window.novaDesktop?.httpRequest) return false;
   const res = await desktopRequest('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     authProviderId: 'openai',

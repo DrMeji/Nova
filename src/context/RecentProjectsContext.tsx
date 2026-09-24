@@ -53,9 +53,9 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<RecentProject[]>(() => {
     // One-time: drop legacy Code-project Recent rows (duplicate filing-system UI).
     try {
-      if (localStorage.getItem('ark:cleared-code-recent-v1') !== '1') {
+      if (localStorage.getItem('NOVA:cleared-code-recent-v1') !== '1') {
         clearRecentProjects();
-        localStorage.setItem('ark:cleared-code-recent-v1', '1');
+        localStorage.setItem('NOVA:cleared-code-recent-v1', '1');
         return [];
       }
     } catch {
@@ -88,10 +88,10 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
 
     const pullLibrary = async () => {
       try {
-        if (localStorage.getItem('ark:skip-library-sync') === '1') {
-          localStorage.removeItem('ark:skip-library-sync');
+        if (localStorage.getItem('NOVA:skip-library-sync') === '1') {
+          localStorage.removeItem('NOVA:skip-library-sync');
           try {
-            await window.arkDesktop?.mediaClear?.();
+            await window.novaDesktop?.mediaClear?.();
           } catch {
             /* ignore */
           }
@@ -100,7 +100,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
           saveRecentChats([]);
           return;
         }
-        const res = await window.arkDesktop?.mediaLibrary?.();
+        const res = await window.novaDesktop?.mediaLibrary?.();
         if (res?.ok && Array.isArray(res.items) && res.items.length) {
           for (const item of res.items.slice(0, 40)) {
             if (!item?.id) continue;

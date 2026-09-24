@@ -15,7 +15,7 @@ interface ImportMeta {
 export {};
 declare global {
   interface Window {
-    arkDesktop?: {
+    novaDesktop?: {
       isElectron: boolean;
       isPackaged?: boolean;
       isDevBuild?: boolean;
@@ -226,6 +226,7 @@ declare global {
       localReportsList?: () => Promise<{ ok: boolean; items?: unknown[]; path?: string }>;
       localReportsClear?: () => Promise<{ ok: boolean }>;
       localReportsOpen?: () => Promise<{ ok: boolean; path?: string }>;
+      localReportsAppend?: (payload: { kind?: string; text?: string; [k: string]: unknown }) => Promise<{ ok: boolean; path?: string }>;
       signingStatus?: () => Promise<{ ok: boolean; packaged?: boolean; signed?: boolean | null; status?: string }>;
       engineGenerateStream?: (
         message: string,
@@ -259,31 +260,31 @@ declare global {
         error?: string;
       }>;
       onEngineChunk?: (handler: (payload: { text?: string }) => void) => () => void;
-      engineStatus?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
-      engineStart?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
-      engineStop?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
-      engineSetModel?: (id: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
-      engineDownload?: (id: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
+      engineStatus?: () => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
+      engineStart?: () => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
+      engineStop?: () => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
+      engineSetModel?: (id: string) => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
+      engineDownload?: (id: string) => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
       engineRegisterHunt?: (meta: {
         id: string;
         name: string;
         url: string;
         sizeGb: number;
         detail?: string;
-        category?: 'coding' | 'chat';
+        category?: 'coding' | 'chat' | 'design' | 'vision' | 'reasoning';
       }) => Promise<{ ok: boolean; error?: string; model?: unknown }>;
       engineDownloadProgress?: (id: string) => Promise<number>;
       engineDownloadError?: (id: string) => Promise<string | null>;
       engineDownloadCancel?: (id: string) => Promise<{ ok: boolean; canceled?: boolean; canceling?: boolean; error?: string }>;
-      engineImportGguf?: (filePath: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
+      engineImportGguf?: (filePath: string) => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
       engineImportGgufPick?: () => Promise<{
         ok: boolean;
         canceled?: boolean;
         count?: number;
-        status?: import('@/lib/arkEngine').ArkEngineStatus;
+        status?: import('@/lib/novaEngine').ArkEngineStatus;
       }>;
       engineDeleteModel?: (id: string) => Promise<
-        import('@/lib/arkEngine').ArkEngineStatus & { ok: boolean; error?: string; deleted?: string; removed?: number }
+        import('@/lib/novaEngine').ArkEngineStatus & { ok: boolean; error?: string; deleted?: string; removed?: number }
       >;
       engineDiskSpace?: () => Promise<{
         ok: boolean;
@@ -292,7 +293,7 @@ declare global {
         freeGb?: number | null;
         path?: string;
       }>;
-      engineEnsureRuntime?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
+      engineEnsureRuntime?: () => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
       engineGenerate?: (
         message: string,
         modelId?: string,
@@ -366,6 +367,8 @@ declare global {
         projectName?: string;
       }) => Promise<{ ok: boolean; url?: string; reloaded?: boolean; error?: string }>;
       previewReload?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
+      /** Capture the Live preview window as a data URL for the Critic hop. */
+      previewCaptureLive?: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
       /** Attach to an already-running Vite/dev preview for this cwd (no second server). */
       previewSession?: (cwd: string) => Promise<{
         ok: boolean;

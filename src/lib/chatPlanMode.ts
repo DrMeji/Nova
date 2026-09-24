@@ -60,7 +60,7 @@ export function planningConversationHint(topicHint?: string): string {
     'Open by restating their idea in your own words (one full sentence), then give a concrete best-way-to-start take (2–4 sentences).',
     'Name the problem you heard and a practical resolution path before asking anything.',
     'Then ask 1–3 product questions in plain language.',
-    'LIST FORMAT RULES: Each new reply starts numbering at 1 (never continue from a prior turn as 3, 4…). Use numbers ONLY for the main outline (1–5 big steps). Under each main step, use ★ for subsections (Hero, Featured, Tiers) — never nest 1. 2. 3. under a numbered step. Detail lines use normal bullets (-). Never restart every line at 1. Never leave fragments like “3.js.”',
+    'LIST FORMAT RULES: Each new reply starts numbering at 1. Use numbers ONLY for the main outline (1, 2, 3…). Under each main step, use normal dashes (- bullets) for details — never ★ stars, never restart a nested list at 1. Never leave fragments like “3.js.”',
     'Never end with “Would you like more information on any of these steps?” or “Do you have specific questions?”',
     'Good questions: web vs phone app, who it is for, the one must-have for v1, calm vs playful feel, offline or online.',
     'If they want a phone/mobile app, ask whether it is for overall iOS, overall Android, or a specific device (e.g. iPhone 16, Galaxy S23) — never quiz them on tech stacks.',
@@ -83,7 +83,7 @@ export function keepBuildingConversationHint(projectHint?: string): string {
     'The user wants to continue improving the open project. Do NOT rebuild from scratch. Do NOT emit @@@FILE blocks, code fences, or full source.',
     'Do NOT say “say keep building” or “create it on disk”.',
     'Give 3–5 concrete recommendations to make the current UI feel more premium / complete (hero, typography, spacing, imagery, motion, sections, copy).',
-    'LIST FORMAT: Start this reply at 1 (never “3. continued”). Numbers only for main recommendations. Under each, use ★ for subsections (Hero Section, Featured, etc.), then - bullets for details. No nested numbered lists.',
+    'LIST FORMAT: Start this reply at 1. Numbers only for main recommendations. Under each, use - bullets for details. No ★ stars. No nested numbered lists that restart at 1.',
     'End by asking which recommendation they want next, or what else they want to add.',
     topic,
   ].join(' ');
@@ -101,6 +101,20 @@ export function repairBrokenOrderedLists(text: string): string {
     .replace(/^\s*\d+\.(?:js|tsx?|jsx|css|html)\.?\s*$/gim, '')
     .replace(/^\s*\d+[.)]\s*$/gm, '')
     .replace(/\n{3,}/g, '\n\n');
+
+  // "1. Title: - Bullet: … - Bullet: …" → numbered title + real bullet lines.
+  out = out.replace(
+    /^(\s*)(?:\*\*\s*)?(\d+)[.)]\s+(\*\*[^*]+\*\*|[^:\n]+):\s*((?:[-•]\s+[^\n]+(?:\s+[-•]\s+[^\n]+)*))\s*$/gm,
+    (_all, indent, _n, title, rest) => {
+      const cleanTitle = String(title || '').replace(/\*\*/g, '').trim();
+      const bullets = String(rest || '')
+        .split(/\s+(?=[-•]\s+)/)
+        .map((b) => b.trim())
+        .filter(Boolean)
+        .map((b) => `${indent}- ${b.replace(/^[-•]\s+/, '')}`);
+      return [`${indent}1. ${cleanTitle}`, ...bullets].join('\n');
+    },
+  );
 
   type Item = { indent: string; body: string; kids: string[] };
   const lines = out.split('\n');
@@ -133,8 +147,9 @@ export function repairBrokenOrderedLists(text: string): string {
         body = body.replace(/^\*\*/, '').replace(/\*\*:?\s*$/, (tail) => (tail.includes(':') ? ':' : ''));
       }
       body = body.replace(/\*\*$/, '').trim();
-      // Drop emptied / garbage items
+      // Drop emptied / garbage / stub items (models sometimes emit "4. User" with nothing).
       if (!body || /^(?:js|tsx?|jsx|css|html)\.?$/i.test(body)) continue;
+      if (/^(?:user|users?|admin|todo|tbd|n\/?a)\.?$/i.test(body)) continue;
       run.push({ indent: m[1], body, kids: [] });
       continue;
     }
@@ -144,11 +159,29 @@ export function repairBrokenOrderedLists(text: string): string {
         // Blank line inside a numbered run — keep the run open (do not flush).
         continue;
       }
-      if (/^([-*•]|\u2022)\s+/.test(t)) {
-        run[run.length - 1].kids.push(t);
+      if (/^[★☆✦]\s+/.test(t)) {
+        const raw = t.replace(/^[★☆✦]\s+/, '').replace(/\*\*/g, '').trim();
+        const title = raw.replace(/:$/, '').trim();
+        // ★ Planning / Next Steps / Must-Haves belong in the main numbered outline.
+        if (
+          /^(?:Planning(?:\s+the\s+Solution)?|Next Steps?|Implementation(?:\s+Steps?)?|Must-Haves?(?:\s+vs\.?\s+Later)?|Acknowledge(?:\s+the\s+Problem)?)\b/i.test(title)
+        ) {
+          run.push({ indent: run[run.length - 1]?.indent || '', body: title, kids: [] });
+          continue;
+        }
+        run[run.length - 1].kids.push(`- **${title}:**`);
         continue;
       }
-      // Non-list prose ends the ordered run.
+      if (/^([-*•]|\u2022)\s+/.test(t)) {
+        run[run.length - 1].kids.push(t.replace(/^[•\u2022]\s+/, '- '));
+        continue;
+      }
+      // Short section titles between numbers stay in the same outline (do not restart at 1).
+      if (t.length < 90 && !/[.!?]"?$/.test(t) && !/^(?:got it|sure|here'?s|it sounds|you'?re|we can|i can)\b/i.test(t)) {
+        run[run.length - 1].kids.push(`- ${t.replace(/\*\*/g, '')}`);
+        continue;
+      }
+      // Longer prose ends the ordered run.
       flush();
       result.push(line);
       continue;
@@ -160,10 +193,10 @@ export function repairBrokenOrderedLists(text: string): string {
 }
 
 const SUBSECTION_LABEL_RE =
-  /^(?:Hero(?:\s+Section)?|Featured(?:\s+(?:Members?|Craftsmen|Artisans|Section))?|Testimonial(?:s)?|Call to Action|CTA|Free Tier|Premium(?:\s+Membership)?(?:\s+Tier)?|Exclusive(?:\s+Membership)?(?:\s+Tier)?|VIP(?:\s+Tier)?|Membership Benefits|Cards|Visuals|Copy|Imagery|Animation|Background Image|Headline|Subheadline|Section Title|Interactive(?:\s+Elements)?|Themed(?:\s+Collections)?|Limited[- ]Time(?:\s+Offers?)?|Button)\b/i;
+  /^(?:Hero(?:\s+Section)?|Featured(?:\s+(?:Members?|Craftsmen|Artisans|Section))?|Testimonial(?:s)?|Call to Action|CTA|Free Tier|Premium(?:\s+Membership)?(?:\s+Tier)?|Exclusive(?:\s+Membership)?(?:\s+Tier)?|VIP(?:\s+Tier)?|Membership Benefits|Cards|Visuals|Copy|Imagery|Animation|Background Image|Headline|Subheadline|Section Title|Interactive(?:\s+Elements)?|Themed(?:\s+Collections)?|Limited[- ]Time(?:\s+Offers?)?|Button|Stall List|Vendor List|Vendor Details|Product List|Stall Layout|Stall Assignment|Search(?:\s+(?:Functionality|and Filter|bar))?|Sorting and Filtering|Add and Edit|Reminders|Updates and Changes|User Interface|Notifications|Contact)\b/i;
 
 const TOPLEVEL_LABEL_RE =
-  /^(?:Define|Design|Build|Add|Create|Shape|Plan|Outline|Map|Stage|Structure|Polish|Enhance|Refine|Homepage Layout|Membership Tiers|Product Experience|Core Value|Information Architecture|Checkout|Examples|Design Elements)\b/i;
+  /^(?:Define|Design|Build|Add|Create|Shape|Plan|Outline|Map|Stage|Structure|Polish|Enhance|Refine|Acknowledge|Homepage Layout|Membership Tiers|Product Experience|Core Value|Information Architecture|Checkout|Examples|Design Elements|Must-Haves?|Next Steps?|Implementation)\b/i;
 
 function cleanListLabel(body: string): string {
   return String(body || '')
@@ -201,8 +234,8 @@ function labelsRoughlyMatch(a: string, b: string): boolean {
 }
 
 /**
- * Each reply: main outline restarts at 1. Nested/section UI pieces use ★, not 1. 2. 3.
- * Drops redundant subtitles like repeating "Homepage Layout" under "1. Homepage Layout".
+ * Main outline = continuous 1, 2, 3…. Subsections and former ★ lines become - bullets.
+ * Never emit star bullets — they look unprofessional in chat.
  */
 export function normalizeReplyListHierarchy(text: string): string {
   const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
@@ -219,7 +252,19 @@ export function normalizeReplyListHierarchy(text: string): string {
     const star = line.match(/^(\s*)[★☆✦]\s+(.*)$/);
     if (star) {
       const body = cleanListLabel(star[2]);
-      result.push(`${star[1]}★ **${body.replace(/:$/, '')}:**`);
+      const title = body.replace(/:$/, '').trim();
+      // Section headers that models mark with ★ belong in the main 1,2,3 outline.
+      if (
+        /^(?:Planning(?:\s+the\s+Solution)?|Next Steps?|Implementation(?:\s+Steps?)?|Must-Haves?(?:\s+vs\.?\s+Later)?|Acknowledge(?:\s+the\s+Problem)?)\b/i.test(title)
+        || (TOPLEVEL_LABEL_RE.test(title) && !looksLikeSubsectionLabel(title))
+      ) {
+        top += 1;
+        lastTopTitle = title;
+        result.push(`${star[1]}${top}. ${title}`);
+        nestSubs = true;
+        continue;
+      }
+      result.push(`${star[1]}- **${title}:**`);
       nestSubs = true;
       continue;
     }
@@ -235,23 +280,26 @@ export function normalizeReplyListHierarchy(text: string): string {
       if (!body) continue;
 
       const subLabel = looksLikeSubsectionLabel(body);
-      const topLabel = looksLikeTopLevelLabel(body);
-      // Prefer top-level when the label is clearly a main step — even mid-section.
-      const asTop = topLabel && !subLabel;
-      // Stars only after a main step is open (or a subtitle nudged nestSubs).
-      // First outline items in a reply stay numbered 1…n even if short.
-      const asSub = !asTop && (nestSubs || (subLabel && top > 0));
+      // Only nest as bullets when it clearly looks like a feature subsection.
+      const asSub = nestSubs && subLabel && top > 0;
 
       if (asSub) {
-        result.push(`${indent}★ **${body.replace(/:$/, '')}:**`);
-        nestSubs = true;
+        const cleaned = body.replace(/\*\*/g, '').trim();
+        const colon = cleaned.indexOf(':');
+        if (colon > 0 && colon < 56) {
+          const label = cleaned.slice(0, colon).trim();
+          const rest = cleaned.slice(colon + 1).trim().replace(/\.:$/, '.').replace(/:$/, '');
+          result.push(rest ? `${indent}- **${label}:** ${rest}` : `${indent}- **${label}:**`);
+        } else {
+          result.push(`${indent}- **${cleaned.replace(/:$/, '')}:**`);
+        }
         continue;
       }
 
       top += 1;
       lastTopTitle = body.replace(/:$/, '').trim();
       result.push(`${indent}${top}. ${lastTopTitle}`);
-      nestSubs = false;
+      nestSubs = true;
       continue;
     }
 
@@ -261,13 +309,20 @@ export function normalizeReplyListHierarchy(text: string): string {
       continue;
     }
 
-    // Skip redundant subtitle echo under a main step ("Homepage Layout" under "1. Homepage Layout").
     if (lastTopTitle && labelsRoughlyMatch(trimmed, lastTopTitle)) {
       nestSubs = true;
       continue;
     }
 
-    if (/^(?:Homepage Layout|Membership Tiers|Membership Levels|Design Elements|Examples|Homepage|Layout)\s*:?\s*$/i.test(trimmed)) {
+    if (/^(?:Homepage Layout|Membership Tiers|Membership Levels|Design Elements|Examples|Homepage|Layout|Planning the Solution|Next Steps?|Implementation(?:\s+Steps?)?|Must-Haves?\s+vs\.?\s+Later)\s*:?\s*$/i.test(trimmed)) {
+      // Promote orphan section titles into the continuous outline or a bullet.
+      if (/^(?:Planning the Solution|Next Steps?|Implementation(?:\s+Steps?)?|Must-Haves?\s+vs\.?\s+Later)\s*:?\s*$/i.test(trimmed)) {
+        top += 1;
+        lastTopTitle = cleanListLabel(trimmed).replace(/:$/, '');
+        result.push(`${top}. ${lastTopTitle}`);
+        nestSubs = true;
+        continue;
+      }
       nestSubs = true;
       continue;
     }
@@ -277,7 +332,6 @@ export function normalizeReplyListHierarchy(text: string): string {
       continue;
     }
 
-    // Fresh prose between sections — next numbered item can be top-level again.
     nestSubs = false;
     result.push(line);
   }
@@ -287,7 +341,8 @@ export function normalizeReplyListHierarchy(text: string): string {
 
 /** Full list cleanup for assistant bubbles. */
 export function normalizeAssistantLists(text: string): string {
-  return normalizeReplyListHierarchy(repairBrokenOrderedLists(text));
+  // repairBrokenOrderedLists already runs normalizeReplyListHierarchy once.
+  return repairBrokenOrderedLists(text);
 }
 
 /** Strip banned planning quiz lines the local model still emits. */

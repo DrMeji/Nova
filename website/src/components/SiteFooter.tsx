@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArkMark } from './ArkMark';
+import { NovaMark } from './NovaMark';
 
 export function SiteFooter() {
   return (
@@ -8,7 +8,7 @@ export function SiteFooter() {
         <div className="grid gap-10 sm:grid-cols-[1.4fr_1fr_1fr]">
           <div>
             <div className="flex items-center gap-2.5 mb-3 text-[var(--fg)]">
-              <ArkMark size={26} />
+              <NovaMark size={26} />
               <span className="display text-lg font-semibold">NOVA</span>
             </div>
             <p className="text-sm text-[var(--fg-muted)] leading-relaxed max-w-xs">

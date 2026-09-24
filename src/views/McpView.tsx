@@ -9,7 +9,7 @@ import {
   type McpServerConfig,
   type McpTransport,
 } from '@/lib/mcpServers';
-import { probeMcpServer } from '@/lib/arkMcp';
+import { probeMcpServer } from '@/lib/novaMcp';
 
 function serverCommand(server: McpServerConfig) {
   if (server.transport === 'stdio') {
@@ -123,7 +123,7 @@ export function McpView() {
               Connect external tool servers for Chat. stdio (local) or remote URL (HTTP / SSE).
             </p>
           </div>
-          <button type="button" className="ark-btn-primary text-xs shrink-0" onClick={openMcpCreate}>
+          <button type="button" className="nova-btn-primary text-xs shrink-0" onClick={openMcpCreate}>
             Add server
           </button>
         </div>
@@ -133,7 +133,7 @@ export function McpView() {
         ) : null}
 
         {mcpFormOpen && (
-          <div className="rounded-2xl border border-surface-border bg-ark-navy-900/50 p-4 space-y-3">
+          <div className="rounded-2xl border border-surface-border bg-nova-navy-900/50 p-4 space-y-3">
             <p className="text-sm font-medium text-content-primary">
               {mcpEditingId ? 'Edit server' : 'New server'}
             </p>
@@ -141,7 +141,7 @@ export function McpView() {
               <label className="block space-y-1 sm:col-span-2">
                 <span className="text-[11px] text-content-tertiary">Name</span>
                 <input
-                  className="ark-input w-full text-sm"
+                  className="nova-input w-full text-sm"
                   value={mcpName}
                   onChange={e => setMcpName(e.target.value)}
                   placeholder="Memory"
@@ -168,7 +168,7 @@ export function McpView() {
                   <label className="block space-y-1">
                     <span className="text-[11px] text-content-tertiary">Command</span>
                     <input
-                      className="ark-input w-full text-sm font-mono"
+                      className="nova-input w-full text-sm font-mono"
                       value={mcpCommand}
                       onChange={e => setMcpCommand(e.target.value)}
                       placeholder="npx"
@@ -177,7 +177,7 @@ export function McpView() {
                   <label className="block space-y-1">
                     <span className="text-[11px] text-content-tertiary">Args</span>
                     <input
-                      className="ark-input w-full text-sm font-mono"
+                      className="nova-input w-full text-sm font-mono"
                       value={mcpArgs}
                       onChange={e => setMcpArgs(e.target.value)}
                       placeholder="-y @modelcontextprotocol/server-memory"
@@ -186,7 +186,7 @@ export function McpView() {
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-[11px] text-content-tertiary">Working folder (optional)</span>
                     <input
-                      className="ark-input w-full text-sm font-mono"
+                      className="nova-input w-full text-sm font-mono"
                       value={mcpCwd}
                       onChange={e => setMcpCwd(e.target.value)}
                       placeholder="C:\\Projects\\my-app"
@@ -197,7 +197,7 @@ export function McpView() {
                 <label className="block space-y-1 sm:col-span-2">
                   <span className="text-[11px] text-content-tertiary">MCP endpoint URL</span>
                   <input
-                    className="ark-input w-full text-sm font-mono"
+                    className="nova-input w-full text-sm font-mono"
                     value={mcpUrl}
                     onChange={e => setMcpUrl(e.target.value)}
                     placeholder="https://example.com/mcp"
@@ -209,10 +209,10 @@ export function McpView() {
               )}
             </div>
             <div className="flex gap-2 justify-end pt-1">
-              <button type="button" className="ark-btn-ghost text-xs" onClick={resetMcpForm}>
+              <button type="button" className="nova-btn-ghost text-xs" onClick={resetMcpForm}>
                 Cancel
               </button>
-              <button type="button" className="ark-btn-primary text-xs" onClick={saveMcpForm}>
+              <button type="button" className="nova-btn-primary text-xs" onClick={saveMcpForm}>
                 Save
               </button>
             </div>
@@ -238,7 +238,7 @@ export function McpView() {
                 const open = expandedId === server.id;
                 const cmd = serverCommand(server);
                 return (
-                  <div key={server.id} className="bg-ark-navy-900/35">
+                  <div key={server.id} className="bg-nova-navy-900/35">
                     <div className="flex items-center gap-3 px-3.5 py-2.5">
                       <button
                         type="button"
@@ -261,7 +261,7 @@ export function McpView() {
                             </span>
                           ) : null}
                           {toolCount > 0 ? (
-                            <span className="shrink-0 rounded-full bg-ark-navy-950/80 border border-white/10 px-2 py-0.5 text-[10px] text-content-tertiary">
+                            <span className="shrink-0 rounded-full bg-nova-navy-950/80 border border-white/10 px-2 py-0.5 text-[10px] text-content-tertiary">
                               {toolCount} tool{toolCount === 1 ? '' : 's'}
                             </span>
                           ) : (
@@ -300,7 +300,7 @@ export function McpView() {
                           title="Remove"
                           onClick={() => {
                             if (!window.confirm(`Remove “${server.name}”?`)) return;
-                            void window.arkDesktop?.mcpStop?.({ id: server.id });
+                            void window.novaDesktop?.mcpStop?.({ id: server.id });
                             removeMcpServer(server.id);
                             setMcpServers(listMcpServers());
                             if (expandedId === server.id) setExpandedId(null);
@@ -312,7 +312,7 @@ export function McpView() {
                         <button
                           type="button"
                           className={`relative ml-1 rounded-full transition-colors shrink-0 ${
-                            server.enabled ? 'bg-content-primary' : 'bg-ark-navy-700'
+                            server.enabled ? 'bg-content-primary' : 'bg-nova-navy-700'
                           }`}
                           style={{ height: '22px', width: '40px' }}
                           aria-pressed={server.enabled}
@@ -334,7 +334,7 @@ export function McpView() {
                     {open ? (
                       <div className="px-3.5 pb-3 pl-11">
                         {toolCount > 0 ? (
-                          <ul className="rounded-xl border border-surface-border/80 bg-ark-navy-950/40 px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
+                          <ul className="rounded-xl border border-surface-border/80 bg-nova-navy-950/40 px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
                             {(server.lastTools || []).map(t => (
                               <li key={t.name} className="text-[11px] text-content-secondary truncate">
                                 <span className="font-mono text-content-primary">{t.name}</span>

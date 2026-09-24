@@ -2,8 +2,8 @@
  * Production (GitHub) builds never include these. Connect stays empty until real users post.
  */
 
-import type { ArkContact, DirectMessage, MessageAttachment, NetworkPost } from '@/lib/arkSocial';
-import { isSocialDemoEnabled } from '@/lib/arkRuntime';
+import type { NovaContact, DirectMessage, MessageAttachment, NetworkPost } from '@/lib/novaSocial';
+import { isSocialDemoEnabled } from '@/lib/novaRuntime';
 
 /** True for bat/source builds and Vite dev. false for installed Setup.exe. */
 export function socialDemoEnabledNow(): boolean {
@@ -13,16 +13,16 @@ export function socialDemoEnabledNow(): boolean {
 /** @deprecated Prefer socialDemoEnabledNow() — frozen at first import is unsafe across packaged vs bat. */
 export const SOCIAL_DEMO_ENABLED = isSocialDemoEnabled();
 
-export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
+export function buildDemoNetworkPosts(myNovaId: string): NetworkPost[] {
   if (!isSocialDemoEnabled()) return [];
-  const mine = myArkId || '1110000';
+  const mine = myNovaId || '1110000';
   const now = Date.now();
   const ago = (h: number) => new Date(now - h * 3600_000).toISOString();
 
   const everyone: NetworkPost[] = [
     {
       id: 'demo-post-1',
-      ownerArkId: '4820193',
+      ownerNovaId: '4820193',
       ownerName: 'Maya Chen',
       title: 'Coffee shop booking site',
       summary: 'Need a clean booking flow + dark menu page before Friday.',
@@ -31,12 +31,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(2),
     },
     {
       id: 'demo-post-2',
-      ownerArkId: '7193044',
+      ownerNovaId: '7193044',
       ownerName: 'Jordan Lee',
       title: 'Habit tracker iPhone mock',
       summary: 'Sharing a first SwiftUI layout for feedback on spacing.',
@@ -45,12 +45,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(5),
     },
     {
       id: 'demo-post-3',
-      ownerArkId: '3301882',
+      ownerNovaId: '3301882',
       ownerName: 'Sam Okonkwo',
       title: 'Portfolio with case studies',
       summary: 'Looking for someone to tighten typography and mobile nav.',
@@ -59,12 +59,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(9),
     },
     {
       id: 'demo-post-4',
-      ownerArkId: '9056711',
+      ownerNovaId: '9056711',
       ownerName: 'Riley Park',
       title: 'Local recipe notebook',
       summary: 'Offline-first notes app. open to co-build the search UI.',
@@ -73,12 +73,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(14),
     },
     {
       id: 'demo-post-5',
-      ownerArkId: '2288440',
+      ownerNovaId: '2288440',
       ownerName: 'Alex Rivera',
       title: 'Pixel pet idle game',
       summary: 'Finished v1 loop. sharing for playtest notes.',
@@ -87,12 +87,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(20),
     },
     {
       id: 'demo-post-6',
-      ownerArkId: '6612039',
+      ownerNovaId: '6612039',
       ownerName: 'Chris Nguyen',
       title: 'Expense splitter for roommates',
       summary: 'Stuck on equal vs custom split math. will pay for a fix.',
@@ -101,12 +101,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(28),
     },
     {
       id: 'demo-post-7',
-      ownerArkId: '1044882',
+      ownerNovaId: '1044882',
       ownerName: 'Taylor Brooks',
       title: 'Weather dashboard widgets',
       summary: 'Sharing a clean card layout for temp + forecast rows.',
@@ -115,12 +115,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(3),
     },
     {
       id: 'demo-post-8',
-      ownerArkId: '8733001',
+      ownerNovaId: '8733001',
       ownerName: 'Nina Patel',
       title: 'Indie band merch store',
       summary: 'Need product grid + cart before tour weekend. will pay.',
@@ -129,12 +129,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(4),
     },
     {
       id: 'demo-post-9',
-      ownerArkId: '5521190',
+      ownerNovaId: '5521190',
       ownerName: 'Omar Hassan',
       title: 'Study timer with playlists',
       summary: 'Pomodoro UI done. open to co-build the sound picker.',
@@ -143,12 +143,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(6),
     },
     {
       id: 'demo-post-10',
-      ownerArkId: '4482011',
+      ownerNovaId: '4482011',
       ownerName: 'Elena Vogt',
       title: 'Photo booth strip generator',
       summary: 'Finished strip layout. sharing for playtest.',
@@ -157,12 +157,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(8),
     },
     {
       id: 'demo-post-11',
-      ownerArkId: '9910334',
+      ownerNovaId: '9910334',
       ownerName: 'Dev Patel',
       title: 'Kanban for freelancers',
       summary: 'Drag-and-drop columns are buggy on touch. will pay for a fix.',
@@ -171,12 +171,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(10),
     },
     {
       id: 'demo-post-12',
-      ownerArkId: '7766502',
+      ownerNovaId: '7766502',
       ownerName: 'Priya Shah',
       title: 'Language flashcards',
       summary: 'Deck flip animation ready. feedback on empty states welcome.',
@@ -185,12 +185,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(12),
     },
     {
       id: 'demo-post-13',
-      ownerArkId: '3344556',
+      ownerNovaId: '3344556',
       ownerName: 'Marcus Cole',
       title: 'Gym PR logger',
       summary: 'Need charts for weekly progress. open to paid help.',
@@ -199,12 +199,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(15),
     },
     {
       id: 'demo-post-14',
-      ownerArkId: '2200987',
+      ownerNovaId: '2200987',
       ownerName: 'Sofia Berg',
       title: 'Minimal markdown notes',
       summary: 'Live preview works. sharing for typography notes.',
@@ -213,12 +213,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(18),
     },
     {
       id: 'demo-post-15',
-      ownerArkId: '6677881',
+      ownerNovaId: '6677881',
       ownerName: 'Kenji Sato',
       title: 'RGB lighting controller UI',
       summary: 'Color picker + presets. stuck on saved scenes list.',
@@ -227,12 +227,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(22),
     },
     {
       id: 'demo-post-16',
-      ownerArkId: '8899002',
+      ownerNovaId: '8899002',
       ownerName: 'Aisha Rahman',
       title: 'Wedding RSVP microsite',
       summary: 'Form works. will pay for prettier confirmation page.',
@@ -241,12 +241,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(25),
     },
     {
       id: 'demo-post-17',
-      ownerArkId: '1122334',
+      ownerNovaId: '1122334',
       ownerName: 'Luis Ortega',
       title: 'Street food map pins',
       summary: 'Map markers done. open for icon/style feedback.',
@@ -255,12 +255,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(30),
     },
     {
       id: 'demo-post-18',
-      ownerArkId: '5566778',
+      ownerNovaId: '5566778',
       ownerName: 'Hannah Kim',
       title: 'Podcast episode page',
       summary: 'Need waveform + chapter list before launch. can pay.',
@@ -269,12 +269,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(33),
     },
     {
       id: 'demo-post-19',
-      ownerArkId: '4455667',
+      ownerNovaId: '4455667',
       ownerName: 'Grace Lin',
       title: 'Plant watering reminders',
       summary: 'Calendar chips work. want nicer empty-day art.',
@@ -283,12 +283,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(35),
     },
     {
       id: 'demo-post-20',
-      ownerArkId: '7788990',
+      ownerNovaId: '7788990',
       ownerName: 'Ben Carter',
       title: 'Board game score tracker',
       summary: 'Need a rematch flow. happy to pay for a clean pass.',
@@ -297,12 +297,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(37),
     },
     {
       id: 'demo-post-21',
-      ownerArkId: '2233445',
+      ownerNovaId: '2233445',
       ownerName: 'Yuki Tanaka',
       title: 'Tea shop menu board',
       summary: 'Digital menu mock. feedback on type hierarchy welcome.',
@@ -311,7 +311,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(40),
     },
   ];
@@ -319,7 +319,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
   const yours: NetworkPost[] = [
     {
       id: 'demo-mine-1',
-      ownerArkId: mine,
+      ownerNovaId: mine,
       ownerName: 'You',
       title: 'Hello World page',
       summary: 'My first NOVA Code page. open to polish tips.',
@@ -328,12 +328,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: false,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(1),
     },
     {
       id: 'demo-mine-2',
-      ownerArkId: mine,
+      ownerNovaId: mine,
       ownerName: 'You',
       title: 'Need CSS help on landing hero',
       summary: 'Hero image keeps fighting the headline on small screens.',
@@ -342,12 +342,12 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       paying: true,
       visibility: 'public',
       githubUrl: '',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       createdAt: ago(7),
     },
     {
       id: 'demo-mine-3',
-      ownerArkId: mine,
+      ownerNovaId: mine,
       ownerName: 'You',
       title: 'Private draft. client dashboard',
       summary: 'Only visible to you in Yours while testing the feed.',
@@ -355,7 +355,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       intent: 'help',
       paying: false,
       visibility: 'private',
-      allowedArkIds: [],
+      allowedNovaIds: [],
       githubUrl: '',
       createdAt: ago(11),
     },
@@ -381,30 +381,30 @@ function attachFeedMeta(posts: NetworkPost[]): NetworkPost[] {
   }));
 }
 
-export function buildDemoContacts(): ArkContact[] {
+export function buildDemoContacts(): NovaContact[] {
   if (!isSocialDemoEnabled()) return [];
   const agoDays = (d: number) => new Date(Date.now() - d * 86400_000).toISOString();
   return [
-    { arkId: '4820193', displayName: 'Maya Chen', addedAt: agoDays(14) },
-    { arkId: '7193044', displayName: 'Jordan Lee', addedAt: agoDays(21) },
-    { arkId: '3301882', displayName: 'Sam Okonkwo', addedAt: agoDays(10) },
-    { arkId: '9056711', displayName: 'Riley Park', addedAt: agoDays(30) },
-    { arkId: '2288440', displayName: 'Alex Rivera', addedAt: agoDays(18) },
-    { arkId: '6612039', displayName: 'Chris Nguyen', addedAt: agoDays(25) },
-    { arkId: '1044882', displayName: 'Taylor Brooks', addedAt: agoDays(40) },
-    { arkId: '8733001', displayName: 'Nina Patel', addedAt: agoDays(12) },
-    { arkId: '5521190', displayName: 'Omar Hassan', addedAt: agoDays(8) },
-    { arkId: '4482011', displayName: 'Elena Vogt', addedAt: agoDays(16) },
-    { arkId: '9910334', displayName: 'Dev Patel', addedAt: agoDays(22) },
-    { arkId: '7766502', displayName: 'Priya Shah', addedAt: agoDays(28) },
-    { arkId: '3344556', displayName: 'Marcus Cole', addedAt: agoDays(35) },
-    { arkId: '2200987', displayName: 'Sofia Berg', addedAt: agoDays(45) },
+    { novaId: '4820193', displayName: 'Maya Chen', addedAt: agoDays(14) },
+    { novaId: '7193044', displayName: 'Jordan Lee', addedAt: agoDays(21) },
+    { novaId: '3301882', displayName: 'Sam Okonkwo', addedAt: agoDays(10) },
+    { novaId: '9056711', displayName: 'Riley Park', addedAt: agoDays(30) },
+    { novaId: '2288440', displayName: 'Alex Rivera', addedAt: agoDays(18) },
+    { novaId: '6612039', displayName: 'Chris Nguyen', addedAt: agoDays(25) },
+    { novaId: '1044882', displayName: 'Taylor Brooks', addedAt: agoDays(40) },
+    { novaId: '8733001', displayName: 'Nina Patel', addedAt: agoDays(12) },
+    { novaId: '5521190', displayName: 'Omar Hassan', addedAt: agoDays(8) },
+    { novaId: '4482011', displayName: 'Elena Vogt', addedAt: agoDays(16) },
+    { novaId: '9910334', displayName: 'Dev Patel', addedAt: agoDays(22) },
+    { novaId: '7766502', displayName: 'Priya Shah', addedAt: agoDays(28) },
+    { novaId: '3344556', displayName: 'Marcus Cole', addedAt: agoDays(35) },
+    { novaId: '2200987', displayName: 'Sofia Berg', addedAt: agoDays(45) },
   ];
 }
 
 /** Demo peers who “texted you” and are waiting. green unread dot preview (dev only). */
 const DEMO_UNREAD_LIST = ['4820193', '9056711', '5521190', '4482011'] as const;
-export const DEMO_UNREAD_ARK_IDS: readonly string[] = isSocialDemoEnabled() ? DEMO_UNREAD_LIST : [];
+export const DEMO_UNREAD_NOVA_IDS: readonly string[] = isSocialDemoEnabled() ? DEMO_UNREAD_LIST : [];
 
 const RANDOM_CHATS: Record<string, string[]> = {
   '4820193': ['Did you see that game last night?', 'lol that ending was wild', 'You free later?'],
@@ -442,48 +442,48 @@ const DEMO_LAST_MSG_MINUTES: Record<string, number> = {
 };
 
 /** Short preview line for the people list. */
-export function demoPreviewLine(peerArkId: string): string | null {
-  if (peerArkId === '3301882') return 'On it. ping me when you’re free to hop on a quick call.';
-  const lines = RANDOM_CHATS[peerArkId];
+export function demoPreviewLine(peerNovaId: string): string | null {
+  if (peerNovaId === '3301882') return 'On it. ping me when you’re free to hop on a quick call.';
+  const lines = RANDOM_CHATS[peerNovaId];
   if (!lines?.length) return null;
   return lines[lines.length - 1] || null;
 }
 
 /** Demo thread with Sam (files) or light random back-and-forth for others. */
-export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessage[] {
+export function buildDemoThread(myNovaId: string, peerNovaId: string): DirectMessage[] {
   if (!isSocialDemoEnabled()) return [];
-  const me = myArkId || '3218815';
+  const me = myNovaId || '3218815';
   const t = Date.now();
   const at = (m: number) => new Date(t - m * 60_000).toISOString();
 
-  if (peerArkId === '3301882') {
+  if (peerNovaId === '3301882') {
     const them = '3301882';
     return [
       {
         id: 'demo-dm-1',
-        senderArkId: them,
-        recipientArkId: me,
+        senderNovaId: them,
+        recipientNovaId: me,
         body: 'Hey. saw your Networking post. Still need help on the booking flow?',
         createdAt: at(48),
       },
       {
         id: 'demo-dm-2',
-        senderArkId: me,
-        recipientArkId: them,
+        senderNovaId: me,
+        recipientNovaId: them,
         body: 'Yeah. Walk-in vs reservation is fighting me on mobile.',
         createdAt: at(45),
       },
       {
         id: 'demo-dm-3',
-        senderArkId: them,
-        recipientArkId: me,
+        senderNovaId: them,
+        recipientNovaId: me,
         body: 'Send me the folder and I’ll sketch a cleaner layout.',
         createdAt: at(42),
       },
       {
         id: 'demo-dm-4',
-        senderArkId: me,
-        recipientArkId: them,
+        senderNovaId: me,
+        recipientNovaId: them,
         body: '',
         createdAt: at(40),
         attachment: {
@@ -494,15 +494,15 @@ export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessa
       },
       {
         id: 'demo-dm-5',
-        senderArkId: them,
-        recipientArkId: me,
+        senderNovaId: them,
+        recipientNovaId: me,
         body: 'Got it. Here’s a first pass on the hero + booking card.',
         createdAt: at(28),
       },
       {
         id: 'demo-dm-6',
-        senderArkId: them,
-        recipientArkId: me,
+        senderNovaId: them,
+        recipientNovaId: me,
         body: '',
         createdAt: at(27),
         attachment: {
@@ -513,33 +513,33 @@ export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessa
       },
       {
         id: 'demo-dm-7',
-        senderArkId: me,
-        recipientArkId: them,
+        senderNovaId: me,
+        recipientNovaId: them,
         body: 'This looks solid. Can you also tweak the menu page spacing?',
         createdAt: at(12),
       },
       {
         id: 'demo-dm-8',
-        senderArkId: them,
-        recipientArkId: me,
+        senderNovaId: them,
+        recipientNovaId: me,
         body: 'On it. ping me when you’re free to hop on a quick call.',
         createdAt: at(8),
       },
     ];
   }
 
-  const lines = RANDOM_CHATS[peerArkId];
+  const lines = RANDOM_CHATS[peerNovaId];
   if (!lines?.length) return [];
-  const lastMin = DEMO_LAST_MSG_MINUTES[peerArkId] ?? 60;
+  const lastMin = DEMO_LAST_MSG_MINUTES[peerNovaId] ?? 60;
   // End on their message for unread demos; otherwise end on yours.
-  const unread = (DEMO_UNREAD_ARK_IDS as readonly string[]).includes(peerArkId);
+  const unread = (DEMO_UNREAD_NOVA_IDS as readonly string[]).includes(peerNovaId);
   const seq = unread && lines.length % 2 === 0 ? [...lines, lines[lines.length - 1]] : lines;
   return seq.map((body, i) => {
     const fromThem = i % 2 === 0;
     return {
-      id: `demo-dm-${peerArkId}-${i}`,
-      senderArkId: fromThem ? peerArkId : me,
-      recipientArkId: fromThem ? me : peerArkId,
+      id: `demo-dm-${peerNovaId}-${i}`,
+      senderNovaId: fromThem ? peerNovaId : me,
+      recipientNovaId: fromThem ? me : peerNovaId,
       body,
       createdAt: at(lastMin + (seq.length - 1 - i) * 6),
     };
@@ -549,41 +549,41 @@ export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessa
 export type DemoGroup = {
   id: string;
   name: string;
-  memberArkIds: string[];
+  memberNovaIds: string[];
   messages: {
     id: string;
-    senderArkId: string;
+    senderNovaId: string;
     body: string;
     createdAt: string;
     attachment?: MessageAttachment;
   }[];
 };
 
-export function buildDemoGroups(myArkId: string): DemoGroup[] {
+export function buildDemoGroups(myNovaId: string): DemoGroup[] {
   if (!isSocialDemoEnabled()) return [];
-  const me = myArkId || '3218815';
+  const me = myNovaId || '3218815';
   const t = Date.now();
   const at = (m: number) => new Date(t - m * 60_000).toISOString();
   return [
     {
       id: 'demo-group-1',
       name: 'Weekend plans',
-      memberArkIds: [me, '4820193', '7193044', '8733001'],
+      memberNovaIds: [me, '4820193', '7193044', '8733001'],
       messages: [
-        { id: 'dg1-1', senderArkId: '4820193', body: 'Beach or brunch?', createdAt: at(90) },
-        { id: 'dg1-2', senderArkId: '7193044', body: 'Brunch first, beach after', createdAt: at(85) },
-        { id: 'dg1-3', senderArkId: me, body: 'I’m in. 11am?', createdAt: at(80) },
-        { id: 'dg1-4', senderArkId: '8733001', body: 'Perfect. I’ll grab a table.', createdAt: at(70) },
+        { id: 'dg1-1', senderNovaId: '4820193', body: 'Beach or brunch?', createdAt: at(90) },
+        { id: 'dg1-2', senderNovaId: '7193044', body: 'Brunch first, beach after', createdAt: at(85) },
+        { id: 'dg1-3', senderNovaId: me, body: 'I’m in. 11am?', createdAt: at(80) },
+        { id: 'dg1-4', senderNovaId: '8733001', body: 'Perfect. I’ll grab a table.', createdAt: at(70) },
       ],
     },
     {
       id: 'demo-group-2',
       name: 'Game night',
-      memberArkIds: [me, '3301882', '1044882', '6612039'],
+      memberNovaIds: [me, '3301882', '1044882', '6612039'],
       messages: [
-        { id: 'dg2-1', senderArkId: '1044882', body: 'Who’s bringing snacks?', createdAt: at(120) },
-        { id: 'dg2-2', senderArkId: me, body: 'I got chips + soda', createdAt: at(110) },
-        { id: 'dg2-3', senderArkId: '3301882', body: 'I’ll bring controllers', createdAt: at(100) },
+        { id: 'dg2-1', senderNovaId: '1044882', body: 'Who’s bringing snacks?', createdAt: at(120) },
+        { id: 'dg2-2', senderNovaId: me, body: 'I got chips + soda', createdAt: at(110) },
+        { id: 'dg2-3', senderNovaId: '3301882', body: 'I’ll bring controllers', createdAt: at(100) },
       ],
     },
   ];

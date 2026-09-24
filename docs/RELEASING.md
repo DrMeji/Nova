@@ -12,7 +12,7 @@ In-app **Settings → Updates** reads the **public** repo anonymously. That only
 1. Bump `package.json` version and private changelog.
 2. Commit + tag on **Nova-Source** only (`git push origin main` and `git push origin vX.Y.Z`).
 3. **Test first (private):** CI Release on a `v*` tag builds the installer and publishes to **Nova-Source** only. Download that build (or use a local bat/dev `electron:build`) and smoke-test before anything goes public.
-4. **Then public:** Actions → **Release** → Run workflow → same tag → check **publish_public**. That step needs repo secret `ARK_PUBLIC_RELEASE_TOKEN`. Or run locally after a good build:
+4. **Then public:** Actions → **Release** → Run workflow → same tag → check **publish_public**. That step needs repo secret `NOVA_PUBLIC_RELEASE_TOKEN`. Or run locally after a good build:
 
 ```powershell
 pwsh scripts/publish-public-release.ps1 -Tag v0.1.147 -Repos @('DrMeji/Nova')

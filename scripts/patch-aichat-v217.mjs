@@ -49,16 +49,16 @@ mustReplace(
 );
 
 mustReplace(
-  'drop-runArkAgentLoop-import',
+  'drop-runNovaAgentLoop-import',
   `import {
-  runArkAgentLoop,
+  runNovaAgentLoop,
   shouldRunAgentLoop,
   agentLoopPreferCloud,
   agentLoopStepsToTrace,
-} from '@/lib/arkAgentLoop';`,
+} from '@/lib/novaAgentLoop';`,
   `import {
   shouldRunAgentLoop,
-} from '@/lib/arkAgentLoop';`,
+} from '@/lib/novaAgentLoop';`,
 );
 
 {
@@ -133,8 +133,8 @@ mustReplace(
       const createOutcome = await runCreateTurn({`,
 );
 
-if (/\brunArkAgentLoop\b/.test(src)) {
-  console.error('FAIL: runArkAgentLoop still present');
+if (/\brunNovaAgentLoop\b/.test(src)) {
+  console.error('FAIL: runNovaAgentLoop still present');
   process.exit(1);
 }
 

@@ -33,7 +33,7 @@ export type AgentTracePayload = {
   canContinue?: boolean;
 };
 
-const TRACE_MARKER_RE = /<!--ark-trace:([\s\S]*?)-->\n?/;
+const TRACE_MARKER_RE = /<!--nova-trace:([\s\S]*?)-->\n?/;
 
 export function isTraceMessage(content: string): boolean {
   return TRACE_MARKER_RE.test(String(content || ''));
@@ -60,7 +60,7 @@ export function parseTraceMessage(content: string): {
 
 export function encodeTraceMessage(payload: AgentTracePayload): string {
   const answer = String(payload.answer || '').trim();
-  return `<!--ark-trace:${JSON.stringify(payload)}-->${answer ? `\n${answer}` : ''}`;
+  return `<!--nova-trace:${JSON.stringify(payload)}-->${answer ? `\n${answer}` : ''}`;
 }
 
 export function stripAgentTrace(content: string): string {

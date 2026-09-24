@@ -240,7 +240,7 @@ for (const c of CASES) {
     const planText = buildPlanningStarterReply()
       + '\n'
       + (parseGreenfieldIdea(c.text) ? buildGreenfieldPlanReply(parseGreenfieldIdea(c.text)) : '');
-    if (/<!--ark-prompt-chips:|^\s*Create project [A-Za-z]|Keep planning|Add more features to the plan/m.test(planText)) {
+    if (/<!--nova-prompt-chips:|^\s*Create project [A-Za-z]|Keep planning|Add more features to the plan/m.test(planText)) {
       console.error(`FAIL [${c.name}]: planning replies must not embed create/keep-planning chips`);
       failed += 1;
     }

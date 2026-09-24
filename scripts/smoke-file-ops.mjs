@@ -8,7 +8,7 @@ import { classifyDiskIntent } from '../src/lib/chatDiskIntent.ts';
 const CASES = [
   {
     name: 'read absolute path',
-    text: 'Read C:\\Users\\me\\Desktop\\ARK-FileLab\\warehouse-ledger.ts and tell me about restock',
+    text: 'Read C:\\Users\\me\\Desktop\\NOVA-FileLab\\warehouse-ledger.ts and tell me about restock',
     read: true,
     pathIncludes: 'warehouse-ledger.ts',
   },

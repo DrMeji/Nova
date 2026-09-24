@@ -200,7 +200,7 @@ for (let i = 0; i < STEPS.length; i++) {
 }
 
 // Read-only disk check (Nova wrote these — Cursor did not edit the project).
-const disk = path.join(process.env.USERPROFILE || '', 'Documents', 'ARK', 'Projects', NAME);
+const disk = path.join(process.env.USERPROFILE || '', 'Documents', 'NOVA Projects', NAME);
 try {
   const css = fs.readFileSync(path.join(disk, 'src', 'App.css'), 'utf8');
   const tsx = fs.readFileSync(path.join(disk, 'src', 'App.tsx'), 'utf8')

@@ -1,7 +1,7 @@
 /** NOVA Brain localhost API. backed by NOVA Engine only. */
 
 import { desktopRequest } from '@/lib/httpDesktop';
-import { engineGenerate } from '@/lib/arkEngine';
+import { engineGenerate } from '@/lib/novaEngine';
 
 import { refreshBrainUrl, getBrainUrl } from '@/lib/brainUrl';
 
@@ -12,7 +12,7 @@ export const BRAIN_URL = 'http://127.0.0.1:8787';
 async function brainAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
-    const row = await window.arkDesktop?.brainTokenGet?.();
+    const row = await window.novaDesktop?.brainTokenGet?.();
     if (row?.token) headers.Authorization = `Bearer ${row.token}`;
   } catch {
     /* dev without token */
@@ -65,7 +65,7 @@ export async function brainGenerate(
 }> {
   let ipcFailed = false;
   try {
-    if (window.arkDesktop?.engineGenerate) {
+    if (window.novaDesktop?.engineGenerate) {
       const result = await engineGenerate(message, modelId, kind, {
         mediaDurationSec: mediaOpts?.mediaDurationSec,
         referenceImageDataUrl: mediaOpts?.referenceImageDataUrl,
@@ -79,7 +79,7 @@ export async function brainGenerate(
     }
   } catch (err) {
     ipcFailed = true;
-    if (!window.arkDesktop?.engineGenerate) throw err;
+    if (!window.novaDesktop?.engineGenerate) throw err;
   }
 
   const headers = await brainAuthHeaders();
@@ -131,8 +131,8 @@ export async function brainGenerateStream(
   kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
   try {
-    if (window.arkDesktop?.engineGenerateStream) {
-      const { engineGenerateStream } = await import('@/lib/arkEngine');
+    if (window.novaDesktop?.engineGenerateStream) {
+      const { engineGenerateStream } = await import('@/lib/novaEngine');
       const result = await engineGenerateStream(message, modelId, onChunk, kind);
       return {
         reply: result.reply,

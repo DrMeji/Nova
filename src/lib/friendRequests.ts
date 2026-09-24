@@ -3,28 +3,28 @@
  */
 
 import { supabase } from '@/lib/supabase';
-import { canUseCloud } from '@/lib/arkSocial';
-import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
-import { isDevArkAlias } from '@/lib/arkDevAccount';
+import { canUseCloud } from '@/lib/novaSocial';
+import { formatNovaId, isNovaUserId, lookupNovaUser, normalizeNovaId } from '@/lib/novaUserId';
+import { isDevNovaAlias } from '@/lib/novaDevAccount';
 import { pushLocalNotification, dismissFriendRequestNotification, loadLocalNotifications } from '@/lib/localNotifications';
 import { pushSidebarToast } from '@/lib/sidebarToast';
-import { isBlockedArkId, isBlockedFromAdding } from '@/lib/arkSocial';
+import { isBlockedNovaId, isBlockedFromAdding } from '@/lib/novaSocial';
 
 export type FriendRequest = {
   id: string;
-  fromArkId: string;
+  fromNovaId: string;
   fromName: string;
   fromAvatarUrl?: string;
-  toArkId: string;
+  toNovaId: string;
   createdAt: string;
   status: 'pending' | 'accepted' | 'declined';
 };
 
 const KEY = 'NOVA:friend-requests';
 
-function sameArkId(a?: string, b?: string): boolean {
+function sameNovaId(a?: string, b?: string): boolean {
   if (!a || !b) return false;
-  return formatArkId(normalizeArkId(a)) === formatArkId(normalizeArkId(b));
+  return formatNovaId(normalizeNovaId(a)) === formatNovaId(normalizeNovaId(b));
 }
 
 function readLocal(): FriendRequest[] {
@@ -49,10 +49,10 @@ function writeLocal(list: FriendRequest[]) {
 function mapRow(row: Record<string, unknown>): FriendRequest {
   return {
     id: String(row.id),
-    fromArkId: String(row.from_ark_id),
-    fromName: String(row.from_name || row.from_ark_id),
+    fromNovaId: String(row.from_nova_id),
+    fromName: String(row.from_name || row.from_nova_id),
     fromAvatarUrl: row.from_avatar_url ? String(row.from_avatar_url) : undefined,
-    toArkId: String(row.to_ark_id),
+    toNovaId: String(row.to_nova_id),
     createdAt: String(row.created_at),
     status: (row.status === 'accepted' || row.status === 'declined') ? row.status : 'pending',
   };
@@ -60,10 +60,10 @@ function mapRow(row: Record<string, unknown>): FriendRequest {
 
 async function fetchCloudRequests(): Promise<FriendRequest[]> {
   try {
-    // RLS scopes rows to my_ark_id(); do not add a client-side ID filter — stale local
+    // RLS scopes rows to my_nova_id(); do not add a client-side ID filter — stale local
     // cache IDs would hide valid inbound/outbound requests.
     const { data, error } = await supabase
-      .from('ark_friend_requests')
+      .from('nova_friend_requests')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(80);
@@ -82,28 +82,28 @@ function mergeRequests(local: FriendRequest[], cloud: FriendRequest[]): FriendRe
   return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function syncFriendRequests(myArkId: string, userId?: string | null): Promise<FriendRequest[]> {
-  const me = normalizeArkId(myArkId);
-  if (!isArkUserId(me)) return [];
-  const local = readLocal().filter(r => sameArkId(r.fromArkId, me) || sameArkId(r.toArkId, me));
+export async function syncFriendRequests(myNovaId: string, userId?: string | null): Promise<FriendRequest[]> {
+  const me = normalizeNovaId(myNovaId);
+  if (!isNovaUserId(me)) return [];
+  const local = readLocal().filter(r => sameNovaId(r.fromNovaId, me) || sameNovaId(r.toNovaId, me));
   if (!canUseCloud(userId)) return local;
   const cloud = await fetchCloudRequests();
   const merged = mergeRequests(local, cloud);
   writeLocal(merged);
-  notifyPendingInbound(myArkId, merged);
+  notifyPendingInbound(myNovaId, merged);
   return merged;
 }
 
-export function listPendingInbound(myArkId: string): FriendRequest[] {
-  const me = normalizeArkId(myArkId);
-  if (!isArkUserId(me)) return [];
-  return readLocal().filter(r => sameArkId(r.toArkId, me) && r.status === 'pending');
+export function listPendingInbound(myNovaId: string): FriendRequest[] {
+  const me = normalizeNovaId(myNovaId);
+  if (!isNovaUserId(me)) return [];
+  return readLocal().filter(r => sameNovaId(r.toNovaId, me) && r.status === 'pending');
 }
 
-export function listPendingOutbound(myArkId: string): FriendRequest[] {
-  const me = normalizeArkId(myArkId);
-  if (!isArkUserId(me)) return [];
-  return readLocal().filter(r => sameArkId(r.fromArkId, me) && r.status === 'pending');
+export function listPendingOutbound(myNovaId: string): FriendRequest[] {
+  const me = normalizeNovaId(myNovaId);
+  if (!isNovaUserId(me)) return [];
+  return readLocal().filter(r => sameNovaId(r.fromNovaId, me) && r.status === 'pending');
 }
 
 function notifyInbound(req: FriendRequest) {
@@ -113,19 +113,19 @@ function notifyInbound(req: FriendRequest) {
     id: notifId,
     kind: 'friend',
     title: `${req.fromName} wants to be friends`,
-    body: `${req.fromName} · NOVA ID ${req.fromArkId} sent you a friend request.`,
-    forArkId: req.toArkId,
+    body: `${req.fromName} · NOVA ID ${req.fromNovaId} sent you a friend request.`,
+    forNovaId: req.toNovaId,
     friendRequestId: req.id,
-    fromArkId: req.fromArkId,
+    fromNovaId: req.fromNovaId,
     fromName: req.fromName,
     fromAvatarUrl: req.fromAvatarUrl,
   });
 }
 
 /** Create Accept/Decline notifications for inbound pending rows (sync + offline catch-up). */
-export function notifyPendingInbound(myArkId: string, requests?: FriendRequest[]) {
+export function notifyPendingInbound(myNovaId: string, requests?: FriendRequest[]) {
   const pending = (requests ?? readLocal()).filter(
-    r => sameArkId(r.toArkId, myArkId) && r.status === 'pending',
+    r => sameNovaId(r.toNovaId, myNovaId) && r.status === 'pending',
   );
   for (const req of pending) {
     notifyInbound(req);
@@ -156,31 +156,31 @@ function friendlyFriendError(raw: string | undefined): string {
 }
 
 export async function sendFriendRequest(opts: {
-  fromArkId: string;
+  fromNovaId: string;
   fromName: string;
   fromAvatarUrl?: string;
-  toArkIdRaw: string;
+  toNovaIdRaw: string;
   userId?: string | null;
 }): Promise<{ ok: true; request: FriendRequest } | { ok: false; error: string }> {
-  const from = normalizeArkId(opts.fromArkId);
-  const rawTo = String(opts.toArkIdRaw || '').trim();
-  const toAlias = isDevArkAlias(rawTo);
-  const to = toAlias ? '' : normalizeArkId(rawTo);
-  if (!isArkUserId(from)) {
+  const from = normalizeNovaId(opts.fromNovaId);
+  const rawTo = String(opts.toNovaIdRaw || '').trim();
+  const toAlias = isDevNovaAlias(rawTo);
+  const to = toAlias ? '' : normalizeNovaId(rawTo);
+  if (!isNovaUserId(from)) {
     return { ok: false, error: 'Your NOVA ID is missing. Sign out and sign back in.' };
   }
-  if (!toAlias && !isArkUserId(to)) {
+  if (!toAlias && !isNovaUserId(to)) {
     return { ok: false, error: 'Enter a valid 7-digit NOVA ID (or DEV for the developer account)' };
   }
   if (!canUseCloud(opts.userId)) {
     return { ok: false, error: 'Sign in to send friend requests to other NOVA users.' };
   }
 
-  if (isBlockedArkId(toAlias ? 'DEV' : to)) {
+  if (isBlockedNovaId(toAlias ? 'DEV' : to)) {
     return { ok: false, error: 'You blocked this user. Unblock them in Settings → Privacy first.' };
   }
 
-  const found = await lookupArkUser(toAlias ? 'DEV' : to);
+  const found = await lookupNovaUser(toAlias ? 'DEV' : to);
   if (!found) {
     return {
       ok: false,
@@ -189,21 +189,21 @@ export async function sendFriendRequest(opts: {
         : `No NOVA account found for ID ${to}. They must sign in once so their ID is registered.`,
     };
   }
-  if (found.arkId === from) return { ok: false, error: 'That’s your own NOVA ID' };
+  if (found.novaId === from) return { ok: false, error: 'That’s your own NOVA ID' };
 
-  if (await isBlockedFromAdding(found.arkId, opts.userId)) {
+  if (await isBlockedFromAdding(found.novaId, opts.userId)) {
     return { ok: false, error: 'This user is not accepting friend requests from you.' };
   }
 
   const all = await syncFriendRequests(from, opts.userId);
-  if (all.some(r => sameArkId(r.fromArkId, from) && sameArkId(r.toArkId, found.arkId) && r.status === 'pending')) {
+  if (all.some(r => sameNovaId(r.fromNovaId, from) && sameNovaId(r.toNovaId, found.novaId) && r.status === 'pending')) {
     return { ok: false, error: 'Friend request already sent' };
   }
 
   try {
-    const { data, error } = await supabase.from('ark_friend_requests').insert({
-      from_ark_id: from,
-      to_ark_id: found.arkId,
+    const { data, error } = await supabase.from('nova_friend_requests').insert({
+      from_nova_id: from,
+      to_nova_id: found.novaId,
       from_name: opts.fromName || 'NOVA user',
       from_avatar_url: opts.fromAvatarUrl || null,
       status: 'pending',
@@ -214,13 +214,13 @@ export async function sendFriendRequest(opts: {
     const req = mapRow(data as Record<string, unknown>);
     writeLocal([req, ...readLocal().filter(r => r.id !== req.id)]);
 
-    const label = toAlias ? 'DEV' : found.arkId;
-    pushSidebarToast(`Friend request was sent to ${label}`, { ttlMs: 8_000, id: `fr-sent-${found.arkId}` });
+    const label = toAlias ? 'DEV' : found.novaId;
+    pushSidebarToast(`Friend request was sent to ${label}`, { ttlMs: 8_000, id: `fr-sent-${found.novaId}` });
     pushLocalNotification({
       kind: 'system',
       title: 'Friend request sent',
       body: `Your request was sent to ${label}. You’ll connect after they accept.`,
-      forArkId: from,
+      forNovaId: from,
     });
 
     return { ok: true, request: req };
@@ -232,7 +232,7 @@ export async function sendFriendRequest(opts: {
 export async function respondFriendRequest(
   requestId: string,
   decision: 'accepted' | 'declined',
-  opts?: { userId?: string | null; myArkId?: string; _retried?: boolean },
+  opts?: { userId?: string | null; myNovaId?: string; _retried?: boolean },
 ): Promise<FriendRequest | null> {
   const all = readLocal();
   const idx = all.findIndex(r => r.id === requestId);
@@ -241,10 +241,10 @@ export async function respondFriendRequest(
   if (canUseCloud(opts?.userId)) {
     try {
       if (decision === 'accepted') {
-        const { error } = await supabase.rpc('accept_ark_friend_request', { p_request_id: requestId });
+        const { error } = await supabase.rpc('accept_nova_friend_request', { p_request_id: requestId });
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('ark_friend_requests')
+        const { error } = await supabase.from('nova_friend_requests')
           .update({ status: 'declined', updated_at: new Date().toISOString() })
           .eq('id', requestId);
         if (error) throw error;
@@ -263,8 +263,8 @@ export async function respondFriendRequest(
   }
 
   if (idx < 0 && !local) {
-    if (!opts?._retried && opts?.myArkId && canUseCloud(opts.userId)) {
-      await syncFriendRequests(opts.myArkId, opts.userId);
+    if (!opts?._retried && opts?.myNovaId && canUseCloud(opts.userId)) {
+      await syncFriendRequests(opts.myNovaId, opts.userId);
       return respondFriendRequest(requestId, decision, { ...opts, _retried: true });
     }
     return null;
@@ -290,19 +290,19 @@ export function findFriendRequestByNotificationId(notificationId: string): Frien
 
 /** Realtime: inbound requests + outbound acceptances (add contact on sender side). */
 export function subscribeFriendRequests(
-  myArkId: string,
+  myNovaId: string,
   userId: string | null | undefined,
   handlers: {
     onInbound?: (req: FriendRequest) => void;
     onAccepted?: (req: FriendRequest) => void;
   },
 ): () => void {
-  if (!myArkId || !canUseCloud(userId)) return () => undefined;
+  if (!myNovaId || !canUseCloud(userId)) return () => undefined;
 
-  void syncFriendRequests(myArkId, userId);
+  void syncFriendRequests(myNovaId, userId);
 
   const channel = supabase
-    .channel(`NOVA-fr-${myArkId}`)
+    .channel(`NOVA-fr-${myNovaId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'ark_friend_requests' },
@@ -312,7 +312,7 @@ export function subscribeFriendRequests(
         if (!existing.some(r => r.id === req.id)) {
           writeLocal([req, ...existing]);
         }
-        if (sameArkId(req.toArkId, myArkId) && req.status === 'pending') {
+        if (sameNovaId(req.toNovaId, myNovaId) && req.status === 'pending') {
           notifyInbound(req);
           handlers.onInbound?.(req);
         }
@@ -328,7 +328,7 @@ export function subscribeFriendRequests(
         if (i >= 0) list[i] = req;
         else list.unshift(req);
         writeLocal(list);
-        if (req.status === 'accepted' && sameArkId(req.fromArkId, myArkId)) {
+        if (req.status === 'accepted' && sameNovaId(req.fromNovaId, myNovaId)) {
           handlers.onAccepted?.(req);
         }
         if (req.status !== 'pending') {

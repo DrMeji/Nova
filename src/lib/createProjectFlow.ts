@@ -21,6 +21,8 @@ export type ProjectBootstrapResult = {
   bootstrapNote?: string;
   /** True when a localhost Preview probe succeeded for this create. */
   previewLive?: boolean;
+  /** True when Preview Ready code scan passed before claiming Live verified. */
+  codeVerified?: boolean;
 };
 
 export type CreateProjectResult = {
@@ -53,7 +55,7 @@ export async function resolveNewProjectParent(
     const locRaw = String(getLocalPrefs().projectLocation || '').trim();
     let loc = locRaw;
     if (loc.startsWith('~/') || loc === '~') {
-      const roots = await window.arkDesktop?.browseRoots?.();
+      const roots = await window.novaDesktop?.browseRoots?.();
       const docs = roots?.roots?.find(r => r.id === 'documents')?.path;
       const desk = roots?.roots?.find(r => r.id === 'desktop')?.path;
       const base = (grants.documents && docs) || (grants.desktop && desk) || '';
@@ -82,21 +84,21 @@ export async function resolveNewProjectParent(
     return { parentPath: joinPath(parent, intent.slug), source: intent.explicitPath };
   }
 
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
 
   // Prefer NOVA's own projects folder (not Desktop\Projects).
   if (grants.documents && documents) {
-    const arkDir = joinPath(documents, 'NOVA Projects');
-    await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
-    return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\NOVA Projects' };
+    const novaDir = joinPath(documents, 'NOVA Projects');
+    await window.novaDesktop?.workspaceMkdir?.({ targetPath: novaDir });
+    return { parentPath: joinPath(novaDir, intent.slug), source: 'Documents\\NOVA Projects' };
   }
 
   if (grants.desktop && desktop) {
-    const arkDir = joinPath(desktop, 'NOVA Projects');
-    await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
-    return { parentPath: joinPath(arkDir, intent.slug), source: 'Desktop\\NOVA Projects' };
+    const novaDir = joinPath(desktop, 'NOVA Projects');
+    await window.novaDesktop?.workspaceMkdir?.({ targetPath: novaDir });
+    return { parentPath: joinPath(novaDir, intent.slug), source: 'Desktop\\NOVA Projects' };
   }
 
   // First create with grants never touched: enable Documents so mkdir is not blocked.
@@ -104,23 +106,23 @@ export async function resolveNewProjectParent(
     try {
       const { setLocalPrefs } = await import('@/lib/localPrefs');
       setLocalPrefs({ allowDocumentsFolderAccess: true });
-      await window.arkDesktop?.workspaceSetGrants?.({
+      await window.novaDesktop?.workspaceSetGrants?.({
         desktop: false,
         documents: true,
         fullPc: false,
         executionMode: grants.executionMode || 'allowlist',
       });
-      const arkDir = joinPath(documents, 'NOVA Projects');
-      const mkdir = await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
+      const novaDir = joinPath(documents, 'NOVA Projects');
+      const mkdir = await window.novaDesktop?.workspaceMkdir?.({ targetPath: novaDir });
       if (mkdir?.ok !== false) {
-        return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\NOVA Projects' };
+        return { parentPath: joinPath(novaDir, intent.slug), source: 'Documents\\NOVA Projects' };
       }
     } catch {
       /* fall through to sandbox */
     }
   }
 
-  const sandbox = await window.arkDesktop?.workspaceSandboxRoot?.();
+  const sandbox = await window.novaDesktop?.workspaceSandboxRoot?.();
   if (sandbox?.ok && sandbox.path) {
     return {
       parentPath: joinPath(sandbox.path, intent.slug),
@@ -173,7 +175,7 @@ export async function runCreateProjectFlow(
     const trySlug = i === 0 ? cleaned.slug : `${cleaned.slug}-${i + 1}`;
     const tryName = i === 0 ? cleaned.name : `${cleaned.name} ${i + 1}`;
     const tryPath = i === 0 ? parentPath : joinPath(parentDir, trySlug);
-    mkdir = await window.arkDesktop?.workspaceMkdir?.({ targetPath: tryPath });
+    mkdir = await window.novaDesktop?.workspaceMkdir?.({ targetPath: tryPath });
     if (mkdir?.ok) {
       finalPath = tryPath;
       finalName = tryName;
@@ -199,7 +201,7 @@ export async function runCreateProjectFlow(
     };
   }
 
-  const bind = await window.arkDesktop?.workspaceOpenRoot?.({
+  const bind = await window.novaDesktop?.workspaceOpenRoot?.({
     projectId,
     projectName: finalName,
     sourceDir: finalPath,
@@ -298,7 +300,7 @@ export async function runCreateProjectFlow(
   for (const rel of mustCheck) {
     const full = `${finalPath.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
     try {
-      const st = await window.arkDesktop?.workspaceStatPath?.(full);
+      const st = await window.novaDesktop?.workspaceStatPath?.(full);
       if (!st?.ok || !st.isFile) missingOnDisk.push(rel);
     } catch {
       missingOnDisk.push(rel);
@@ -326,7 +328,7 @@ export async function runCreateProjectFlow(
     const stillMissing: string[] = [];
     for (const rel of missingOnDisk) {
       const full = `${finalPath.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
-      const st = await window.arkDesktop?.workspaceStatPath?.(full);
+      const st = await window.novaDesktop?.workspaceStatPath?.(full);
       if (!st?.ok || !st.isFile) stillMissing.push(rel);
     }
     if (stillMissing.length) {
@@ -359,21 +361,21 @@ async function folderHasPackageJson(projectPath: string): Promise<boolean> {
   const sep = projectPath.includes('\\') ? '\\' : '/';
   const pkg = `${projectPath.replace(/[/\\]+$/, '')}${sep}package.json`;
   try {
-    const st = await window.arkDesktop?.workspaceStatPath?.(pkg);
+    const st = await window.novaDesktop?.workspaceStatPath?.(pkg);
     if (st?.ok && st.isFile) return true;
   } catch {
     /* fall through */
   }
   try {
     // Avoid node -e (blocked). Presence via directory listing is enough.
-    const listed = await window.arkDesktop?.agentRun?.({
+    const listed = await window.novaDesktop?.agentRun?.({
       command: 'npm --version',
       cwd: projectPath,
       skipConfirm: true,
       userConfirmed: true,
     });
     if (listed?.ok) {
-      const st2 = await window.arkDesktop?.workspaceStatPath?.(pkg);
+      const st2 = await window.novaDesktop?.workspaceStatPath?.(pkg);
       if (st2?.ok && st2.isFile) return true;
     }
   } catch {
@@ -449,7 +451,7 @@ export async function bootstrapProjectWorkspace(
 
   if (npmInstallLooksFailed(install)) {
     // No winget — tell the user once. Background hammer freezes weak PCs.
-    const nodeOk = await window.arkDesktop?.agentRun?.({
+    const nodeOk = await window.novaDesktop?.agentRun?.({
       command: 'node -v',
       cwd: undefined,
       skipConfirm: true,
@@ -480,8 +482,8 @@ export async function bootstrapProjectWorkspace(
   }
 
   // SSOT: getOrAttachPreview attaches or starts once for this cwd.
-  if (window.arkDesktop?.getOrAttachPreview) {
-    const live = await window.arkDesktop.getOrAttachPreview(projectPath);
+  if (window.novaDesktop?.getOrAttachPreview) {
+    const live = await window.novaDesktop.getOrAttachPreview(projectPath);
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
     }
@@ -497,7 +499,7 @@ export async function bootstrapProjectWorkspace(
   }
 
   // depsReady: skip a second npm install — double install was freezing the whole PC.
-  const dev = await window.arkDesktop?.agentStartDevServer?.({
+  const dev = await window.novaDesktop?.agentStartDevServer?.({
     cwd: projectPath,
     depsReady: true,
   });
@@ -532,59 +534,83 @@ export function formatCreateProjectReply(
   const isStatic = intent.kind === 'static-web'
     || (!hasPackageJson && intent.kind !== 'vite-react' && intent.kind !== 'python');
   const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
-  const where = result.projectPath ? `\n\n**Project folder:** \`${result.projectPath}\`` : '';
+  const codeVerified = bootstrap?.codeVerified === true;
+  const folderLine = result.projectPath
+    ? `- Folder: \`${result.projectPath}\``
+    : '';
 
   let body: string;
-  if (livePreview) {
+  if (livePreview && codeVerified) {
     body = [
-      `**${displayName}** is ready.`,
+      `Created **${displayName}**.`,
       '',
-      'The product UI is on disk, dependencies installed, and Live preview verified.',
-      'Open **Live** under the chat to review it in a window.',
-      where,
+      '- Project files written on disk',
+      '- Dependencies installed',
+      '- Code scan passed — Live preview verified',
+      folderLine,
       '',
-      'Want changes to layout, copy, colors, or images? Tell me what to refine.',
+      'Open **Live** under the chat to view it, or tell me what to change next.',
+    ].filter(Boolean).join('\n');
+  } else if (livePreview) {
+    body = [
+      `Created **${displayName}**.`,
+      '',
+      '- Project files written on disk',
+      '- Dependencies installed',
+      '- Live server started (code scan incomplete — check Live carefully)',
+      folderLine,
+      '',
+      'Open **Live** under the chat to view it, or tell me what to change next.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmPending) {
     body = [
-      `**${displayName}** is built on disk — finishing setup.`,
+      `Created **${displayName}** — finishing setup.`,
       '',
-      'Installing project dependencies now. Live stays locked until install and verify finish.',
-      where,
+      '- Project files written on disk',
+      '- Installing dependencies now',
+      '- Live unlocks when Ready',
+      folderLine,
       '',
-      'I will unlock **Live** automatically when Ready. If install stalls, say **install npm dependencies**.',
+      'If install stalls, say **install npm dependencies**.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmInstalled === false) {
     body = [
-      `**${displayName}** is on disk, but setup did not finish.`,
+      `Created **${displayName}**, but setup did not finish.`,
       '',
-      'Dependencies are not installed yet, so Live is not available.',
+      '- Project files are on disk',
+      '- Dependencies are not installed yet',
+      '- Live is unavailable until install succeeds',
+      folderLine,
+      '',
       bootstrap.bootstrapNote || 'Say **install npm dependencies** to retry.',
-      where,
     ].filter(Boolean).join('\n');
   } else if (intent.kind === 'python') {
     body = [
-      `**${displayName}** is ready on disk.`,
-      where,
+      `Created **${displayName}**.`,
+      '',
+      '- Project files written on disk',
+      folderLine,
       '',
       'Edit `app/main.py` next, or tell me what to build.',
     ].filter(Boolean).join('\n');
   } else if (isStatic || hasPackageJson || projectUsesNpm(intent.kind)) {
     body = [
-      `**${displayName}** is on disk.`,
+      `Created **${displayName}**.`,
+      '',
+      '- Project files written on disk',
+      folderLine,
       '',
       bootstrap?.bootstrapNote
-        || 'Open **Live** when it appears under the chat, or say **run Preview** if it stays hidden.',
-      where,
-      '',
-      'Want changes to layout, copy, colors, or images? Tell me what to refine.',
+        || 'Open **Live** when it appears under the chat, or tell me what to change next.',
     ].filter(Boolean).join('\n');
   } else {
     body = [
-      `**${displayName}** is on disk.`,
-      where,
+      `Created **${displayName}**.`,
       '',
-      'Want anything changed? Tell me what to improve.',
+      '- Project files written on disk',
+      folderLine,
+      '',
+      'Tell me what you want to change next.',
     ].filter(Boolean).join('\n');
   }
 

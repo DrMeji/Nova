@@ -58,6 +58,22 @@ export function formatReplyElapsed(ms: number) {
   return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 }
 
+/** Footer model chip — one short name, no Local/Cloud prefix noise. */
+export function shortReplyModelLabel(providerUsed?: string | null): string {
+  let t = String(providerUsed || '').trim();
+  if (!t) return 'NOVA';
+  t = t
+    .replace(/^Local\s*·\s*/i, '')
+    .replace(/^Cloud\s*·\s*/i, '')
+    .replace(/^Free\s*·\s*/i, '')
+    .replace(/^Optional\s*·\s*/i, '')
+    .replace(/\s+Instruct\s*$/i, '')
+    .replace(/\s*·\s*(?:create craft|attached files|scaffold|plan|chat).*$/i, '')
+    .trim();
+  if (/^nova multimodal$/i.test(t)) return 'Multimodal';
+  return t.length > 28 ? `${t.slice(0, 26).trim()}…` : (t || 'NOVA');
+}
+
 export function formatMBps(MBps: number) {
   if (!Number.isFinite(MBps) || MBps <= 0) return 'n/a';
   const mbpsBits = MBps * 8;
@@ -183,7 +199,7 @@ export function computePreloadPlan(
 /** Best-effort speed sample from Hugging Face (same CDN as GGUF installs). */
 export async function runSpeedTest(): Promise<SpeedSample> {
   try {
-    const desktop = await window.arkDesktop?.speedTest?.();
+    const desktop = await window.novaDesktop?.speedTest?.();
     if (desktop?.ok && (desktop.MBps > 0 || (desktop.downMBps ?? 0) > 0)) {
       const down = desktop.downMBps ?? desktop.MBps;
       const hosts = Array.isArray(desktop.hosts) ? desktop.hosts : undefined;

@@ -27,7 +27,7 @@ if (typeof globalThis.sessionStorage === 'undefined') {
     length: 0,
   };
 }
-globalThis.window.arkDesktop = {
+globalThis.window.novaDesktop = {
   projectWrite: async ({ files }) => ({ ok: true, root: 'C:\\smoke\\project', files }),
   workspaceWriteFile: async () => ({ ok: true }),
   agentRun: async ({ command }) => {
@@ -38,7 +38,7 @@ globalThis.window.arkDesktop = {
   },
 };
 
-const { parseAgentToolReply, runArkAgentLoop, shouldRunAgentLoop } = await import('../src/lib/arkAgentLoop.ts');
+const { parseAgentToolReply, runNovaAgentLoop, shouldRunAgentLoop } = await import('../src/lib/arkAgentLoop.ts');
 const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
 setLocalPrefs({ agentLoopEnabled: true });
 const { applyAgentPatches, parseAgentPatches } = await import('../src/lib/arkAgentPatch.ts');
@@ -155,7 +155,7 @@ await task('7. agent gate Ask vs Agent', () => {
 
 await task('8. loop: list→grep→patch→done', async () => {
   let calls = 0;
-  const loop = await runArkAgentLoop({
+  const loop = await runNovaAgentLoop({
     brief: 'Rename hello to greet',
     files: {
       'package.json': '{"scripts":{"build":"echo ok"},"dependencies":{"react":"18","vite":"5"}}',
@@ -191,7 +191,7 @@ await task('8. loop: list→grep→patch→done', async () => {
 
 await task('9. loop recovers from prose then tools', async () => {
   let calls = 0;
-  const loop = await runArkAgentLoop({
+  const loop = await runNovaAgentLoop({
     brief: 'read app',
     files: { 'src/App.tsx': 'export default 1\n' },
     projectId: 'eval2',
@@ -208,7 +208,7 @@ await task('9. loop recovers from prose then tools', async () => {
 });
 
 await task('10. step-cap sets hitStepCap + observations', async () => {
-  const loop = await runArkAgentLoop({
+  const loop = await runNovaAgentLoop({
     brief: 'explore forever',
     files: { 'a.ts': '1' },
     projectId: 'eval3',

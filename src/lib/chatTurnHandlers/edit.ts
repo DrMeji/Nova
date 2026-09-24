@@ -219,27 +219,55 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
       }
     }
     if (!verified.ok) {
-      // Fail closed — revert.
-      const revertBlocks = finalUpdated
-        .filter((p) => snapshot[p] != null)
-        .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
-        .join('\n');
-      if (revertBlocks) {
+      const { applyQuotedUiEdits } = await import('@/lib/createRealize');
+      const quoted = applyQuotedUiEdits(finalFiles, host.editUserMessage);
+      if (quoted.changed) {
+        finalFiles = quoted.files;
+        const appKey = finalFiles['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+        finalUpdated = [...new Set([...finalUpdated, appKey, 'src/App.css'].filter((p) => finalFiles[p] != null))];
         await applyChatReplyEdits({
-          reply: revertBlocks,
+          reply: [
+            finalFiles[appKey] ? `@@@FILE ${appKey}\n${finalFiles[appKey]}` : '',
+            finalFiles['src/App.css'] ? `@@@FILE src/App.css\n${finalFiles['src/App.css']}` : '',
+          ].filter(Boolean).join('\n'),
           projectId: host.projectId,
           projectName: host.projectLabel,
-          files: snapshot,
+          files: finalFiles,
           userMessage: host.editUserMessage,
           diskRoot: host.diskRoot,
-        });
+        }).then((r) => { if (r.ok) finalFiles = r.files; }).catch(() => {});
+        verified = verifyMicroAskApplied(host.editUserMessage, finalFiles);
+      }
+    }
+    if (!verified.ok) {
+      const quotedNow = [...String(host.editUserMessage || '').matchAll(/["“”']([^"“”']{2,80})["“”']/g)]
+        .map((m) => m[1].trim());
+      const blob = `${finalFiles['src/App.jsx'] || ''}\n${finalFiles['src/App.tsx'] || ''}`;
+      const landed = quotedNow.filter((q) => q && blob.includes(q));
+      if (!landed.length) {
+        const revertBlocks = finalUpdated
+          .filter((p) => snapshot[p] != null)
+          .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
+          .join('\n');
+        if (revertBlocks) {
+          await applyChatReplyEdits({
+            reply: revertBlocks,
+            projectId: host.projectId,
+            projectName: host.projectLabel,
+            files: snapshot,
+            userMessage: host.editUserMessage,
+            diskRoot: host.diskRoot,
+          });
+        }
       }
       const miss = editMiss(
         'verify_failed',
         [
-          'That edit didn’t match what you asked for, so I left the project unchanged.',
-          verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : '',
-          'Try one clearer change (e.g. brand name only, or “add sticky nav with Products Specs Buy”).',
+          landed.length
+            ? `Updated ${landed.map((q) => `“${q}”`).join(', ')}. Still missing: ${(verified.missing || []).join(', ') || 'the rest of that edit'}.`
+            : 'That edit didn’t match what you asked for, so I left the project unchanged.',
+          landed.length ? 'Say the missing piece on its own if you want that added next.' : (verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : ''),
+          landed.length ? '' : 'Try one clearer change (e.g. brand name only, or “add sticky nav with Products Specs Buy”).',
         ].filter(Boolean).join(' '),
       );
       host.onFailed({
@@ -325,6 +353,8 @@ export type RunEditTurnHost = SurgicalEditHost & {
   stickyModelName?: string | null;
   preferredModelId?: string | null;
   preferredModelName?: string | null;
+  /** Soft-pin the resolved coder on the chat Multimodal pill while editing. */
+  onCoderPinned?: (coder: { id: string; name: string }) => void;
   /** Model generate with AbortSignal; budget from codingFileEditTimeoutMs (45s–480s). */
   generate?: (opts: {
     signal: AbortSignal;
@@ -345,20 +375,21 @@ export type RunEditTurnResult =
  */
 export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnResult> {
   // Resume a capped create/edit tool loop when the user says "continue".
+  // Code overlay: only auto-opens on first create — edits stay closed unless the user clicks Code.
   try {
-    const { looksLikeAgentContinueAsk, loadAgentContinue, clearAgentContinue } = await import('@/lib/arkAgentContinue');
+    const { looksLikeAgentContinueAsk, loadAgentContinue, clearAgentContinue } = await import('@/lib/novaAgentContinue');
     const { shouldUseNovaEditBuildLoop } = await import('@/lib/novaBuildLoop');
     if (looksLikeAgentContinueAsk(host.content) && host.projectId && shouldUseNovaEditBuildLoop()) {
       const cont = loadAgentContinue(host.projectId);
       if (cont?.brief) {
-        const { runArkAgentLoop } = await import('@/lib/arkAgentLoop');
+        const { runNovaAgentLoop } = await import('@/lib/novaAgentLoop');
         const { packNovaBuildContext } = await import('@/lib/novaBuildContext');
         const { modeStatusLabel } = await import('@/lib/novaStudioModes');
         const { answerStudio } = await import('@/lib/studioAnswerEngine');
         host.pushStatus(modeStatusLabel('fix', 'Continuing tool loop'));
         const coderId = String(host.stickyModelId || host.preferredModelId || host.modelId || '');
         const coderName = String(host.stickyModelName || host.preferredModelName || host.modelName || 'coder');
-        const loop = await runArkAgentLoop({
+        const loop = await runNovaAgentLoop({
           brief: cont.brief,
           files: packNovaBuildContext(host.files),
           projectId: host.projectId,
@@ -432,18 +463,15 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     return { status: 'weak_miss' };
   }
 
-  // BrainProfile: block wrong-size / wrong-VRAM coder before any generate.
+  // BrainProfile: resolve a real local coder (same as create) — never gate rebuild on chat Instruct sticky.
   {
-    const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
-    const profile = await getBrainProfile();
-    const coderId = host.stickyModelId || host.preferredModelId || host.modelId;
-    const coderName = host.stickyModelName || host.preferredModelName || host.modelName;
-    const gate = assertCoderAllowed(profile, coderId, coderName);
-    if (!gate.ok) {
+    const { resolveCreateUiPolishCoder } = await import('@/lib/chatTurnHandlers/create');
+    const resolved = await resolveCreateUiPolishCoder(host);
+    if (!resolved.ok) {
       host.onWeakMiss?.();
       const elapsedMs = Date.now() - host.replyStartedAt;
       const answer = [
-        gate.reason,
+        resolved.reason || 'Create/build needs a coder GGUF (for example Qwen Coder 7B/14B).',
         '',
         `Ask: “${String(host.editUserMessage || '').trim().slice(0, 160)}”`,
         '',
@@ -460,13 +488,21 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       host.onFailed({ reply, elapsedMs });
       return { status: 'weak_miss' };
     }
+    try {
+      host.onCoderPinned?.({ id: resolved.id, name: resolved.name });
+    } catch { /* ignore */ }
+    // Prefer resolved coder for the rest of this edit turn.
+    (host as { stickyModelId?: string | null }).stickyModelId = resolved.id;
+    (host as { stickyModelName?: string | null }).stickyModelName = resolved.name;
+    (host as { preferredModelId?: string | null }).preferredModelId = resolved.id;
+    (host as { preferredModelName?: string | null }).preferredModelName = resolved.name;
   }
 
   // Nova edit tool loop (substantial asks) — free, no paywall; surgical already missed.
   try {
     const { shouldUseNovaEditBuildLoop } = await import('@/lib/novaBuildLoop');
     const { packNovaBuildContext } = await import('@/lib/novaBuildContext');
-    const { runArkAgentLoop } = await import('@/lib/arkAgentLoop');
+    const { runNovaAgentLoop } = await import('@/lib/novaAgentLoop');
     const { modeStatusLabel } = await import('@/lib/novaStudioModes');
     const ask = String(host.editUserMessage || host.content || '');
     const substantial = ask.length >= 40
@@ -476,7 +512,7 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       const { answerStudio } = await import('@/lib/studioAnswerEngine');
       const coderId = String(host.stickyModelId || host.preferredModelId || host.modelId || '');
       const coderName = String(host.stickyModelName || host.preferredModelName || host.modelName || 'coder');
-      const loop = await runArkAgentLoop({
+      const loop = await runNovaAgentLoop({
         brief: [
           ask.slice(0, 2500),
           '',
@@ -649,26 +685,36 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
 
   const verified = verifyMicroAskApplied(host.editUserMessage, applied.files);
   if (!verified.ok) {
-    const revertBlocks = applied.updated
-      .filter((p) => snapshot[p] != null)
-      .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
-      .join('\n');
-    if (revertBlocks) {
-      await applyChatReplyEdits({
-        reply: revertBlocks,
-        projectId: host.projectId,
-        projectName: host.projectLabel,
-        files: snapshot,
-        userMessage: host.editUserMessage,
-        diskRoot: host.diskRoot,
-      });
+    const quoted = [...String(host.editUserMessage || '').matchAll(/["“”']([^"“”']{2,80})["“”']/g)]
+      .map((m) => m[1].trim())
+      .filter((q) => q && !/\.(jsx?|tsx?|css|html)$/i.test(q));
+    const appNow = `${applied.files?.['src/App.jsx'] || ''}\n${applied.files?.['src/App.tsx'] || ''}\n${applied.files?.['src/App.css'] || ''}`;
+    const landed = quoted.filter((q) => appNow.includes(q));
+    const partial = landed.length > 0;
+    if (!partial) {
+      const revertBlocks = applied.updated
+        .filter((p) => snapshot[p] != null)
+        .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
+        .join('\n');
+      if (revertBlocks) {
+        await applyChatReplyEdits({
+          reply: revertBlocks,
+          projectId: host.projectId,
+          projectName: host.projectLabel,
+          files: snapshot,
+          userMessage: host.editUserMessage,
+          diskRoot: host.diskRoot,
+        });
+      }
     }
     const miss = editMiss(
       'verify_failed',
       [
-        'That edit didn’t match what you asked for, so I left the project unchanged.',
-        verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : '',
-        'Try one clearer change (e.g. change the name to Tesla).',
+        partial
+          ? `Updated ${landed.map((q) => `“${q}”`).join(', ')}. Still missing: ${(verified.missing || []).join(', ') || 'the rest of that edit'}.`
+          : 'That edit didn’t match what you asked for, so I left the project unchanged.',
+        partial ? '' : (verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : ''),
+        partial ? 'Say the missing piece on its own if you want that added next.' : 'Try one clearer change (e.g. change the name to Tesla).',
       ].filter(Boolean).join(' '),
     );
     host.onFailed({

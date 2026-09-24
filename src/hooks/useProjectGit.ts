@@ -1,6 +1,6 @@
 /** Git helpers extracted from ProjectWorkspace for maintainability. */
 
-import { gitClone, gitCommit, gitPush, gitStatus } from '@/lib/arkGitClient';
+import { gitClone, gitCommit, gitPush, gitStatus } from '@/lib/novaGitClient';
 
 export async function refreshProjectGit(projectId: string) {
   return gitStatus(projectId);

@@ -69,6 +69,18 @@ export function hasChatInflight(): boolean {
   return byChat.size > 0 || legacyCount > 0;
 }
 
+/** True when this chatId still has an in-flight generation (tab switches must not interrupt). */
+export function isChatInflight(chatId: string | null | undefined): boolean {
+  const id = String(chatId || '').trim();
+  if (!id) return false;
+  return byChat.has(id);
+}
+
+/** Chat ids with active work — Recent sidebar pulse. */
+export function listInflightChatIds(): string[] {
+  return [...byChat.keys()];
+}
+
 export function getChatJobId(chatId: string): string | null {
   const id = String(chatId || '').trim();
   if (!id) return null;

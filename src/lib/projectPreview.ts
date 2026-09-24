@@ -28,9 +28,9 @@ export async function attachPreviewIfExists(opts: {
     return { ok: true, url: prefer, attached: true };
   }
   const root = String(opts.cwd || '').trim();
-  if (root && window.arkDesktop?.previewSession) {
+  if (root && window.novaDesktop?.previewSession) {
     try {
-      const session = await window.arkDesktop.previewSession(root);
+      const session = await window.novaDesktop.previewSession(root);
       const decision = decidePreviewSessionAttach(session);
       if (decision.action === 'attach') {
         return { ok: true, url: decision.url, attached: true };
@@ -71,9 +71,9 @@ export async function openInAppPreview(
 ): Promise<boolean> {
   if (!url) return false;
   const projectId = opts?.projectId || 'chat-preview';
-  if (window.arkDesktop?.previewOpenWindow) {
+  if (window.novaDesktop?.previewOpenWindow) {
     const device = opts?.device || null;
-    await window.arkDesktop.previewOpenWindow({
+    await window.novaDesktop.previewOpenWindow({
       projectId,
       url,
       title: opts?.title || (device ? `${device.label} · Preview` : 'Preview'),
@@ -124,8 +124,8 @@ export async function ensureInAppPreview(opts: {
     return preferUrl;
   }
 
-  if (window.arkDesktop?.previewUpdate && Object.keys(files).length) {
-    const updated = await window.arkDesktop.previewUpdate({
+  if (window.novaDesktop?.previewUpdate && Object.keys(files).length) {
+    const updated = await window.novaDesktop.previewUpdate({
       projectId,
       files,
       projectName: title || 'Preview',
@@ -138,8 +138,8 @@ export async function ensureInAppPreview(opts: {
     }
   }
 
-  if (window.arkDesktop?.previewStart && Object.keys(files).length) {
-    const res = await window.arkDesktop.previewStart({
+  if (window.novaDesktop?.previewStart && Object.keys(files).length) {
+    const res = await window.novaDesktop.previewStart({
       projectId,
       projectName: title || 'Preview',
       files,
@@ -171,9 +171,9 @@ export async function refreshLivePreview(opts: {
 
   // Vite HMR already live-reloads; still poke the window so it comes to front after edits.
   if (opts.previewUrl && isViteProject(files) && /localhost|127\.0\.0\.1/.test(opts.previewUrl)) {
-    const status = await window.arkDesktop?.previewStatus?.(pid);
+    const status = await window.novaDesktop?.previewStatus?.(pid);
     if (status?.windowOpen) {
-      await window.arkDesktop?.previewReload?.(pid);
+      await window.novaDesktop?.previewReload?.(pid);
       return opts.previewUrl;
     }
     if (opts.openIfClosed !== false) {
@@ -182,7 +182,7 @@ export async function refreshLivePreview(opts: {
     return opts.previewUrl;
   }
 
-  const status = await window.arkDesktop?.previewStatus?.(pid);
+  const status = await window.novaDesktop?.previewStatus?.(pid);
   const windowOpen = Boolean(status?.windowOpen);
   if (!windowOpen && opts.openIfClosed === false) return opts.previewUrl || status?.url || null;
 
@@ -202,13 +202,13 @@ export async function ensureViteDevServer(cwd: string): Promise<{ ok: boolean; u
   if (attached.ok) {
     return { ok: true, url: attached.url, attached: true, reused: true };
   }
-  if (root && window.arkDesktop?.getOrAttachPreview) {
-    return window.arkDesktop.getOrAttachPreview(root);
+  if (root && window.novaDesktop?.getOrAttachPreview) {
+    return window.novaDesktop.getOrAttachPreview(root);
   }
-  if (!window.arkDesktop?.agentStartDevServer) {
+  if (!window.novaDesktop?.agentStartDevServer) {
     return { ok: false, error: 'Dev server not available in this build.' };
   }
-  return window.arkDesktop.agentStartDevServer({ cwd: root || cwd });
+  return window.novaDesktop.agentStartDevServer({ cwd: root || cwd });
 }
 
 function joinRoot(root: string, rel: string): string {
@@ -218,7 +218,7 @@ function joinRoot(root: string, rel: string): string {
 
 async function readTextRel(root: string, rel: string): Promise<string | null> {
   try {
-    const read = await window.arkDesktop?.readTextFile?.({ path: joinRoot(root, rel) });
+    const read = await window.novaDesktop?.readTextFile?.({ path: joinRoot(root, rel) });
     if (read?.ok && typeof read.text === 'string') return read.text;
   } catch {
     /* missing */
@@ -264,11 +264,12 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
   // rebinds never drop App.jsx / CSS after a Recent switch.
   for (const dir of ['src', 'src/components', 'src/pages', 'css', 'js', 'styles']) {
     try {
-      const listing = await window.arkDesktop?.listDir?.(joinRoot(root, dir));
+      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, dir));
       if (!listing?.ok) continue;
       for (const item of listing.items || []) {
         if (item.kind !== 'file' || !item.name) continue;
         if (!/\.(html?|css|js|jsx|mjs|cjs|ts|tsx|svg|json)$/i.test(item.name)) continue;
+        if (/^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i.test(item.name)) continue;
         const rel = `${dir}/${item.name}`.replace(/\\/g, '/');
         if (files[rel]) continue;
         const text = await readTextRel(root, rel);
@@ -282,7 +283,7 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
   // Static asset siblings next to static/index.html (text only — images stay on live server).
   for (const dir of ['static', 'public', 'dist']) {
     try {
-      const listing = await window.arkDesktop?.listDir?.(joinRoot(root, dir));
+      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, dir));
       if (!listing?.ok) continue;
       for (const item of listing.items || []) {
         if (item.kind !== 'file' || !item.name) continue;
@@ -343,8 +344,8 @@ export async function ensureBoundFolderPreview(opts: {
     return { ok: true, url: attached.url };
   }
 
-  if (window.arkDesktop?.getOrAttachPreview) {
-    const live = await window.arkDesktop.getOrAttachPreview(root);
+  if (window.novaDesktop?.getOrAttachPreview) {
+    const live = await window.novaDesktop.getOrAttachPreview(root);
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       await openInAppPreview(live.url, {
         projectId: opts.projectId,
@@ -361,8 +362,8 @@ export async function ensureBoundFolderPreview(opts: {
           || 'Could not start the live preview. Say **install npm dependencies** then click Localhost again.',
       };
     }
-  } else if (window.arkDesktop?.agentStartFolderPreview) {
-    const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
+  } else if (window.novaDesktop?.agentStartFolderPreview) {
+    const live = await window.novaDesktop.agentStartFolderPreview({ cwd: root });
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       await openInAppPreview(live.url, {
         projectId: opts.projectId,

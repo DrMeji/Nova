@@ -44,6 +44,8 @@ const PROJECTS_KEY = 'NOVA:recent-projects';
 const CREATIONS_KEY = 'NOVA:recent-creations';
 const CHATS_KEY = 'NOVA:recent-chats';
 const DELETED_MEDIA_KEY = 'NOVA:deleted-media-ids';
+const DELETED_CHATS_KEY = 'NOVA:deleted-chat-ids';
+const DELETED_PROJECTS_KEY = 'NOVA:deleted-project-keys';
 
 /** Keep Recent short; older unpinned chats move to History overflow. */
 const RECENT_SIDEBAR_MAX = 4;
@@ -64,7 +66,7 @@ export function getMemoryThumb(id: string) {
 
 /** Pixels for vision APIs from ark-media ids already stored via rememberThumb. */
 export function extractVisionImages(content: string): { mime: string; data: string }[] {
-  const ids = [...String(content || '').matchAll(/!\[[^\]]*]\(ark-media:([^)]+)\)/g)]
+  const ids = [...String(content || '').matchAll(/!\[[^\]]*]\(nova-media:([^)]+)\)/g)]
     .map(m => m[1].trim())
     .filter(Boolean);
   const out: { mime: string; data: string }[] = [];
@@ -80,7 +82,7 @@ export function loadRecentProjects(): RecentProject[] {
   try {
     const raw = localStorage.getItem(PROJECTS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as RecentProject[];
+    return (JSON.parse(raw) as RecentProject[]).filter((p) => !isProjectDeleted(p.id, p.diskPath, p.name));
   } catch {
     return [];
   }
@@ -119,9 +121,15 @@ export function renameRecentChatTitle(chatId: string, title: string): RecentChat
   return list;
 }
 
-export function removeRecentProject(id: string): RecentProject[] {
+export function removeRecentProject(id: string, diskPath?: string | null, name?: string | null): RecentProject[] {
+  markProjectDeleted(id, diskPath, name);
   const list = loadRecentProjects().filter(p => p.id !== id);
   saveRecentProjects(list);
+  try {
+    window.dispatchEvent(new Event('NOVA:projects-changed'));
+  } catch {
+    /* ignore */
+  }
   return list;
 }
 
@@ -136,9 +144,53 @@ export function clearRecentProjects(): RecentProject[] {
   return [];
 }
 
+/** Permanent project delete key (id, disk path, and/or folder name). */
+export function projectDeleteKey(id?: string | null, diskPath?: string | null, name?: string | null): string[] {
+  const keys: string[] = [];
+  if (id) keys.push(`id:${id}`);
+  if (diskPath) {
+    const norm = String(diskPath).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    keys.push(`path:${norm}`);
+    const base = norm.split('/').pop();
+    if (base) keys.push(`name:${base}`);
+  }
+  if (name) keys.push(`name:${String(name).trim().toLowerCase()}`);
+  return keys.filter(Boolean);
+}
+
+function loadDeletedProjectKeys(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as string[];
+    return new Set(Array.isArray(arr) ? arr.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markProjectDeleted(id?: string | null, diskPath?: string | null, name?: string | null) {
+  const keys = projectDeleteKey(id, diskPath, name);
+  if (!keys.length) return;
+  const ids = loadDeletedProjectKeys();
+  for (const k of keys) ids.add(k);
+  try {
+    localStorage.setItem(DELETED_PROJECTS_KEY, JSON.stringify([...ids].slice(-500)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isProjectDeleted(id?: string | null, diskPath?: string | null, name?: string | null): boolean {
+  const deleted = loadDeletedProjectKeys();
+  if (!deleted.size) return false;
+  return projectDeleteKey(id, diskPath, name).some((k) => deleted.has(k));
+}
+
 /** Put a project in Recent only when the user actually works in it (chat / files). */
 export function ensureRecentProject(id: string, name?: string, diskPath?: string): RecentProject[] {
   if (!id || id.startsWith('demo-')) return loadRecentProjects();
+  if (isProjectDeleted(id, diskPath, name)) return loadRecentProjects();
   const list = loadRecentProjects();
   const label = (name || '').trim() || 'Code project';
   const existing = list.find(p => p.id === id);
@@ -209,12 +261,19 @@ export function loadRecentChats(): RecentChat[] {
     const raw = localStorage.getItem(CHATS_KEY);
     if (!raw) return [];
     const list = JSON.parse(raw) as RecentChat[];
-    const capped = capRecentAndArchive(Array.isArray(list) ? list : []);
-    const activeBefore = list.filter(c => !c.archivedAt).length;
+    const deleted = loadDeletedChatIds();
+    const filtered = (Array.isArray(list) ? list : []).filter(c => c?.id && !deleted.has(c.id));
+    const capped = capRecentAndArchive(filtered);
+    const activeBefore = filtered.filter(c => !c.archivedAt).length;
     const activeAfter = capped.filter(c => !c.archivedAt).length;
-    const archivedBefore = list.filter(c => c.archivedAt).length;
+    const archivedBefore = filtered.filter(c => c.archivedAt).length;
     const archivedAfter = capped.filter(c => c.archivedAt).length;
-    if (activeBefore !== activeAfter || archivedBefore !== archivedAfter || capped.length !== list.length) {
+    if (
+      activeBefore !== activeAfter
+      || archivedBefore !== archivedAfter
+      || capped.length !== filtered.length
+      || filtered.length !== (Array.isArray(list) ? list.length : 0)
+    ) {
       try {
         localStorage.setItem(CHATS_KEY, JSON.stringify(capped));
       } catch {
@@ -261,6 +320,10 @@ export function saveRecentChats(list: RecentChat[]) {
 }
 
 export function upsertRecentChat(entry: RecentChat) {
+  // Permanent deletes must stick — ignore resurrecting upserts for tombstoned ids.
+  if (isChatDeleted(entry.id)) {
+    return loadRecentChats();
+  }
   const prev = loadRecentChats().find(c => c.id === entry.id);
   const merged: RecentChat = {
     ...prev,
@@ -327,12 +390,44 @@ export function archiveRecentChat(chatId: string) {
 }
 
 /**
- * Permanently wipe a chat and linked local data (thread, creation meta, thumbs).
+ * Permanently wipe a chat and linked local data (thread, creation meta, thumbs, project folder).
  * Does not leave a recoverable copy on this PC.
  */
 export function deleteRecentChatPermanently(chatId: string) {
   const existing = loadRecentChats().find(c => c.id === chatId);
   const mediaIds = collectChatMediaIds(chatId, existing?.creationId);
+
+  markChatDeleted(chatId);
+
+  // Wipe linked Code / create project folder from build memory when present.
+  try {
+    const raw = localStorage.getItem(`NOVA:chat-build-memory:${chatId}`);
+    if (raw) {
+      const mem = JSON.parse(raw) as { projectId?: string | null };
+      const pid = String(mem?.projectId || '').trim();
+      if (pid) {
+        void window.novaDesktop?.projectDeleteFiles?.(pid)?.catch?.(() => undefined);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Also wipe any Recent project whose id matches this chat (create-from-chat pattern).
+  try {
+    const linked = loadRecentProjects().filter(
+      (p) => p.id === chatId || p.id === `chat:${chatId}` || p.id.startsWith(`${chatId}-`),
+    );
+    for (const p of linked) {
+      void window.novaDesktop?.projectDeleteFiles?.(p.id)?.catch?.(() => undefined);
+      if (p.diskPath) {
+        void window.novaDesktop?.workspaceDeleteFolder?.({ targetPath: p.diskPath })?.catch?.(() => undefined);
+      }
+      removeRecentProject(p.id, p.diskPath, p.name);
+    }
+  } catch {
+    /* ignore */
+  }
 
   const nextChats = loadRecentChats().filter(c => c.id !== chatId);
   saveRecentChats(nextChats);
@@ -380,6 +475,33 @@ function loadDeletedMediaIds(): Set<string> {
   }
 }
 
+function loadDeletedChatIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_CHATS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as string[];
+    return new Set(Array.isArray(arr) ? arr.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Tombstone so upserts cannot resurrect a forever-deleted chat. */
+export function markChatDeleted(id: string) {
+  if (!id) return;
+  const ids = loadDeletedChatIds();
+  ids.add(id);
+  try {
+    localStorage.setItem(DELETED_CHATS_KEY, JSON.stringify([...ids].slice(-400)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isChatDeleted(id: string) {
+  return Boolean(id) && loadDeletedChatIds().has(id);
+}
+
 export function markMediaDeleted(id: string) {
   if (!id) return;
   const ids = loadDeletedMediaIds();
@@ -401,7 +523,7 @@ export function collectChatMediaIds(chatId: string, creationId?: string): string
   try {
     const raw = localStorage.getItem(chatThreadKey(chatId));
     if (raw) {
-      for (const m of raw.matchAll(/ark-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
+      for (const m of raw.matchAll(/nova-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
       for (const m of raw.matchAll(/"libraryId"\s*:\s*"([^"]+)"/g)) ids.add(m[1]);
     }
   } catch {
@@ -411,7 +533,7 @@ export function collectChatMediaIds(chatId: string, creationId?: string): string
     if (creationId) {
       const raw = localStorage.getItem(`NOVA:chat-thread:creation:${creationId}`);
       if (raw) {
-        for (const m of raw.matchAll(/ark-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
+        for (const m of raw.matchAll(/nova-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
       }
     }
   } catch {
@@ -435,7 +557,7 @@ function wipeCreationLocal(creationId: string) {
   } catch {
     /* ignore */
   }
-  void window.arkDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+  void window.novaDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
 }
 
 export function deleteCreationPermanently(creationId: string) {
@@ -483,8 +605,8 @@ export function deleteCreationPermanently(creationId: string) {
 
 export function titleFromPrompt(prompt: string): string {
   let cleaned = String(prompt || '')
-    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
-    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^Agent mode\.[^\n]*\n+/i, '')
     .replace(/^Plan this out step by step[^\n]*\n+/i, '')
     .replace(/^Debug this\.[^\n]*\n+/i, '')
@@ -505,14 +627,14 @@ export async function resolveCreationDataUrl(creation: RecentCreation): Promise<
   const mem = memoryThumbs.get(creation.id);
   if (mem) return mem;
   try {
-    if (window.arkDesktop?.mediaGet) {
-      const res = await window.arkDesktop.mediaGet(creation.id);
+    if (window.novaDesktop?.mediaGet) {
+      const res = await window.novaDesktop.mediaGet(creation.id);
       if (res?.ok && res.item?.dataUrl) {
         rememberThumb(creation.id, res.item.dataUrl);
         return res.item.dataUrl;
       }
     }
-    const res = await window.arkDesktop?.mediaLibrary?.();
+    const res = await window.novaDesktop?.mediaLibrary?.();
     const hit = res?.items?.find(i => i.id === creation.id);
     if (hit?.dataUrl) {
       rememberThumb(creation.id, hit.dataUrl);
@@ -543,11 +665,11 @@ export function slimChatContent(content: string, libraryId?: string): string {
   return content
     .replace(/!\[([^\]]*)\]\((data:image\/[^)]+)\)/g, (_m, alt) => {
       const id = libraryId || 'inline';
-      return `![${alt || 'NOVA generation'}](ark-media:${id})`;
+      return `![${alt || 'NOVA generation'}](nova-media:${id})`;
     })
     .replace(/!\[([^\]]*)\]\((data:video\/[^)]+)\)/g, (_m, alt) => {
       const id = libraryId || 'inline';
-      return `![${alt || 'NOVA generation'}](ark-media:${id})`;
+      return `![${alt || 'NOVA generation'}](nova-media:${id})`;
     });
 }
 
@@ -558,7 +680,7 @@ export function mediaMessageMarkdown(
   opts?: { real?: boolean; kind?: 'image' | 'video'; source?: string },
 ): string {
   const safe = (alt || 'NOVA generation').slice(0, 80).replace(/[\[\]]/g, '');
-  const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
+  const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](nova-media:${libraryId})`;
   const sourceLine = '';
   if (opts?.source?.includes('motion-still')) {
     return [

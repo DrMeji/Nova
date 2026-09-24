@@ -116,7 +116,7 @@ function looksLikeAddFileAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (isProjectCreateBrief(t)) return false;
   // Attached photos / asset links are not "add a file" to the project tree.
-  if (/!\[[^\]]*]\((?:ark-media:|data:image\/)/i.test(t)) return false;
+  if (/!\[[^\]]*]\((?:nova-media:|data:image\/)/i.test(t)) return false;
   if (/\b(?:use (?:this|these)|for (?:the )?(?:site|hero|logo|background)|professional icons?)\b/i.test(t)
     && /\b(?:image|photo|icon|unsplash|iconify|pexels)\b/i.test(t)) {
     return false;
@@ -163,10 +163,34 @@ function looksLikeCreateProjectAsk(text: string): boolean {
   return isCreate && hasNoun;
 }
 
+function looksLikeCodeSyntaxFixAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // "remove all TS types" / "fix App.jsx React.FC crash" — code heal, not disk delete.
+  if (/\bremove\s+all\s+(?:ts|typescript)\s+types?\b/i.test(t)) return true;
+  if (/\b(?:typescript|react\.fc|type\s+annotation|ts\s+types?)\b/i.test(t)
+    && /\b(?:fix|remove|strip|delete|crash|error|syntax)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:fix|repair|heal|upgrade)\b[\s\S]{0,100}\b(?:live|preview|crash(?:ing)?|syntax|babel|vite)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:App|main|index)\.(?:jsx|tsx|js|ts|css)\b/i.test(t)
+    && /\b(?:fix|crash|syntax|typescript|react\.fc|error|upgrade|edit|change|remove)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 function looksLikeDeleteFileAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!DELETE_RE.test(t)) return false;
   if (!FILE_RE.test(t)) return false;
+  // Code fixes that say "remove … from the .jsx file" are edits, not disk deletes.
+  if (looksLikeCodeSyntaxFixAsk(t)) return false;
+  if (looksLikeCodeEditAsk(t) && /\b(?:typescript|react\.fc|syntax|crashing|preview|live)\b/i.test(t)) {
+    return false;
+  }
   if (/\bdelete\s+(?:the\s+)?(?:project|workspace|folder|directory)\b/i.test(t) && !FILE_RE.test(t)) {
     return false;
   }
@@ -265,7 +289,7 @@ function extractFileName(text: string): string | null {
     /\b(?:add|create)\s+(?:a\s+)?file\s+(?:called|named)\s+["\u201c']?([A-Za-z0-9 _.-]{1,64})["\u201d']?/i,
     // "create notes.md" / "write todo.md"
     /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b([A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12})\b/i,
-    /\b([A-Za-z0-9_-]+\.(?:md|txt|json|csv|html|css|js|ts|py))\b/i,
+    /\b([A-Za-z0-9_-]+\.(?:md|txt|json|csv|html|css|js|jsx|ts|tsx|py))\b/i,
   ];
   for (const re of patterns) {
     const m = t.match(re);
@@ -472,8 +496,8 @@ export function classifyDiskIntent(
   if (
     looksLikeCodeEditAsk(t)
     && !looksLikeAddFileAsk(t)
-    && !DELETE_RE.test(t)
     && !looksLikeRenameFileAsk(t)
+    && (!DELETE_RE.test(t) || looksLikeCodeSyntaxFixAsk(t) || !looksLikeDeleteFileAsk(t))
   ) {
     return { type: 'none' };
   }

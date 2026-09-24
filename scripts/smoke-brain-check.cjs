@@ -2,13 +2,13 @@
  * Smoke checks for brain API honesty (run with NOVA desktop open).
  * node scripts/smoke-brain-check.cjs
  *
- * Set ARK_BRAIN_SMOKE_OPTIONAL=1 to skip (exit 0) when brain is offline — used in CI.
+ * Set NOVA_BRAIN_SMOKE_OPTIONAL=1 to skip (exit 0) when brain is offline — used in CI.
  */
 const http = require('http');
 
-const BASE = process.env.ARK_BRAIN_URL || 'http://127.0.0.1:8787';
-const TOKEN = process.env.ARK_BRAIN_TOKEN || '';
-const OPTIONAL = process.env.ARK_BRAIN_SMOKE_OPTIONAL === '1';
+const BASE = process.env.NOVA_BRAIN_URL || 'http://127.0.0.1:8787';
+const TOKEN = process.env.NOVA_BRAIN_TOKEN || '';
+const OPTIONAL = process.env.NOVA_BRAIN_SMOKE_OPTIONAL === '1';
 
 function request(method, path, body, headers = {}) {
   return new Promise((resolve, reject) => {

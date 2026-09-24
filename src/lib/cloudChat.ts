@@ -81,7 +81,7 @@ async function openaiCompatible(
     })),
   ];
 
-  const useMainAuth = Boolean(providerKeyId && window.arkDesktop?.httpRequest);
+  const useMainAuth = Boolean(providerKeyId && window.novaDesktop?.httpRequest);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...extraHeaders,
@@ -162,7 +162,7 @@ async function chatAnthropic(
     role: t.role === 'assistant' ? 'assistant' : 'user',
     content: anthropicTurnContent(t, i === visionAt),
   }));
-  const useMainAuth = Boolean(window.arkDesktop?.httpRequest);
+  const useMainAuth = Boolean(window.novaDesktop?.httpRequest);
   const headers: Record<string, string> = {
     'anthropic-version': '2023-06-01',
     'Content-Type': 'application/json',
@@ -774,7 +774,7 @@ async function runAttempt(
     };
   } catch (err) {
     if (isRateLimited(err)) {
-      void import('@/lib/arkHuntBootstrap').then(m =>
+      void import('@/lib/novaHuntBootstrap').then(m =>
         m.installNextWhenCurrentRanOut({ kind: 'chat', reason: 'quota' }),
       ).catch(() => undefined);
     }

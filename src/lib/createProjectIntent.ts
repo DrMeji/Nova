@@ -85,6 +85,9 @@ export { slugifyProjectName } from '@/lib/projectNames';
 /** When the user says create/build but never names the product. */
 export function fallbackCreateProjectName(text: string): string {
   const t = String(text || '');
+  // Prefer an explicit ProductName in the ask before generic Site/App.
+  const named = extractProjectName(t);
+  if (named && !/^(site|app|my app|board|game|tool|new app)$/i.test(named)) return named;
   const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
   if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
   if (/\b(?:game|arcade|fps|shooter)\b/i.test(t)) return 'Game';
@@ -104,18 +107,21 @@ export function extractProjectName(text: string): string | null {
     /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:app|application|website|site)\s+named\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:project|app|product|system)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
-    // "Create the project apple.com on disk" / "Create project Peach"
-    /\bcreate\s+(?:the\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48})/i,
-    // "Create the Ledger Bay project on disk"
-    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48}?)\s+project(?:\s+on\s+disk)?\b/i,
-    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48}?)\s+on\s+disk\b/i,
-    // "build EmberOak on disk" / "go ahead and build QuietStreak on disk"
+    // "ok start building ForgeLane now" / "start building ForgeLane"
+    /\b(?:ok(?:ay)?\s+)?(?:lets?\s+)?start\s+building\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b/,
+    /\bbuilding\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b/,
+    // Prefer explicit "build ProductName …" before "create the project on disk" junk.
+    /\b(?:ok\s+)?(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b(?=\s*[.!,;:—–-]|\s+(?:now|phone|tiny|simple|with|for|a|an|the|and)\b)/,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\s+on\s+disk\b/,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
-    // "build QuietShelf for me" / "go ahead and build QuietShelf — …"
     /\b(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+for\s+me)?\b(?=\s*[—–\-:.,]|\s+(?:a|an|the|with|for|that|as)\b)/,
     /\b(?:go\s+ahead\s+and\s+)?(?:build|create)\s+([A-Z][A-Za-z0-9.]{1,40})\s+for\s+me\b/i,
-    /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
+    // "Create the project Peach" — never "create the project on disk…"
+    /\bcreate\s+(?:the\s+)?project\s+(?!on\s+disk\b)["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9._-]{0,48})/i,
+    // "Create the Ledger Bay project on disk"
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48}?)\s+project(?:\s+on\s+disk)?\b/i,
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._-]{0,48}?)\s+on\s+disk\b/i,
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+(?!on\s+disk\b)["“']?([A-Za-z][A-Za-z0-9._-]{1,48})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+as\b/i,
     // "Create SaltPier restaurant website" / "Create Nightglass site"
@@ -134,7 +140,11 @@ export function extractProjectName(text: string): string | null {
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
       // Reject ultra-generic leftovers from older chats / "create the project on disk".
-      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website)$/i.test(raw)) continue;
+      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website|nova|projects)$/i.test(raw)) continue;
+      if (/^on\s+disk\b/i.test(raw)) continue;
+      // Never take the parent "NOVA Projects" folder as the product name.
+      if (/^nova(\s+projects?)?$/i.test(raw) || (/\bprojects?\b/i.test(raw) && /^nova\b/i.test(raw))) continue;
+      if (/nova\s+projects/i.test(raw)) continue;
       if (raw.length >= 2 && raw.length <= 48) return raw;
     }
   }
@@ -248,7 +258,7 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     || wantsPlanningOnly(t);
   const shortCreateAsk = t.length <= 200
     && /\b(?:create|build|make|scaffold|spin\s+up|kick\s+off|open)\b/i.test(t)
-    && /\b(?:website|site|web\s*app|react\s+app|app|project|page|landing)\b/i.test(t);
+    && /\b(?:website|site|web\s*app|react\s+app|app|project|page|landing|game|arcade|3d|modeler|dashboard|tool)\b/i.test(t);
   const wantsImmediateBuild = !richReplicaBrief && !explicitPlanOnly && (
     shortCreateAsk
     || looksLikeBuildStart(t)

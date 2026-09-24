@@ -34,7 +34,7 @@ export async function runCmdTurn(host: RunCmdTurnHost): Promise<RunCmdTurnResult
     return { status: 'handled' };
   }
 
-  if (!host.agentCwd || !window.arkDesktop?.agentRun) return { status: 'miss' };
+  if (!host.agentCwd || !window.novaDesktop?.agentRun) return { status: 'miss' };
   if (!chatTurnAllowsExec(host.content, host.composerMode as never)) return { status: 'miss' };
 
   const agentCmd = inferAgentCommand(host.content, host.hasPackageJson);

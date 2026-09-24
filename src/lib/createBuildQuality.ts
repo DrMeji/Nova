@@ -5,11 +5,18 @@
 
 import { buildScaffoldFiles } from '@/lib/projectScaffolds';
 import { upgradePollinationsUrlsInSource } from '@/lib/siteHeroImages';
-import { looksLikeTruncatedUiSource } from '@/lib/freshSpaFromBrief';
+import { looksLikeTruncatedUiSource, isBrokenReactAppSource, jsxSourceHasTypeScriptOnlySyntax, stripIllegalTsFromJsx, looksLikePlayableCanvasGame, looksLikeSpatialApp, looksLikeFpsGame } from '@/lib/freshSpaFromBrief';
 import { blankSolidColorFromAsk } from '@/lib/webProjectCanon';
 import { wantsChatAppScaffold } from '@/lib/webLandingFromBrief';
 import type { CreateIdentity, CreatePalette } from '@/lib/createIdentity';
 import { createIdentityFromBrief } from '@/lib/createIdentity';
+import {
+  buildProductSpec,
+  scoreFunctionalReady,
+  scoreLayoutQuality,
+  type LayoutContract,
+  type ProductSpec,
+} from '@/lib/createLayoutContract';
 
 const PROSE_MARKERS = [
   /the updated file should/i,
@@ -50,18 +57,198 @@ export function looksLikeModelProseLeak(text: string): boolean {
   return Boolean(sentences && sentences.length >= 1);
 }
 
+/**
+ * Close dangling `{` blocks in CSS so PostCSS/Vite does not fail the module
+ * (Unclosed block → App.css import throws → #root stays empty / blank Live).
+ */
+/**
+ * PostCSS "Missed semicolon" blanks Live the same way an unclosed block does:
+ * `justify-content:center position:relative` never loads App.css, so #root stays empty.
+ */
+export function healMissedCssSemicolons(css: string): string {
+  const src = String(css || '');
+  if (!src.trim()) return src;
+  return src.replace(
+    /([a-zA-Z_-][\w-]*\s*:\s*(?:[^;{}]|(\([^)]*\)))+?)(\s+)(?=[a-zA-Z_-][\w-]*\s*:)/g,
+    (full, decl, _paren, space) => (/;\s*$/.test(decl) ? full : `${decl};${space}`),
+  );
+}
+
+export function healUnbalancedCssBraces(css: string): string {
+  let s = healMissedCssSemicolons(css);
+  if (!s.trim()) return s;
+  const stripped = s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+  let depth = 0;
+  for (let i = 0; i < stripped.length; i += 1) {
+    const ch = stripped[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+  }
+  if (depth > 0 && depth < 48) {
+    s = `${s.replace(/\s*$/, '')}\n${'}'.repeat(depth)}\n`;
+  }
+  return s;
+}
+
+/** Count unclosed CSS `{` blocks (ignoring comments/strings). */
+export function countUnclosedCssBlocks(css: string): number {
+  const stripped = String(css || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+  let depth = 0;
+  for (let i = 0; i < stripped.length; i += 1) {
+    const ch = stripped[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+  }
+  return depth;
+}
+
+/**
+ * Free models invent `src={logo}` / `src={heroImage}` without declaring them → ReferenceError blank Live.
+ * Rewrite bare identifiers to on-disk hero paths (or a safe empty string when none exist).
+ */
+export function healUndefinedImgSrcBindings(app: string, heroes: string[] = []): string {
+  let s = String(app || '');
+  if (!s || !/\bsrc=\{[A-Za-z_$]/.test(s)) return s;
+  const declared = new Set<string>();
+  for (const m of s.matchAll(/\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)) {
+    declared.add(m[1]);
+  }
+  for (const m of s.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\b/g)) declared.add(m[1]);
+  for (const m of s.matchAll(/\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  for (const m of s.matchAll(/\bimport\s+\{([^}]+)\}/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/i).pop()?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) declared.add(name);
+    }
+  }
+  // Destructuring: const { logo, basketImage } = …
+  for (const m of s.matchAll(/\b(?:const|let|var)\s*\{([^}]+)\}/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(':')[0]?.trim().split(/\s+as\s+/i).pop()?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) declared.add(name);
+    }
+  }
+  const safe = new Set([
+    'COVER_HREFS', 'undefined', 'null', 'true', 'false', 'window', 'document',
+    'props', 'state', 'item', 'book', 'product', 'img', 'image', 'src',
+  ]);
+  let ni = 0;
+  s = s.replace(/\bsrc=\{([A-Za-z_$][\w$]*)\}/g, (full, id: string) => {
+    if (declared.has(id) || safe.has(id)) return full;
+    // Member-like names that are usually props — leave alone if declared via props.
+    if (/^(?:props|state)$/i.test(id)) return full;
+    if (heroes.length) {
+      const href = heroes[ni % heroes.length];
+      ni += 1;
+      return `src="${href}"`;
+    }
+    return 'src=""';
+  });
+  return s;
+}
+
+/** `items.map` with no `const items` throws and leaves #root empty. */
+export function healUndeclaredItemsList(app: string, heroes: string[] = []): string {
+  const s = String(app || '');
+  if (!/\bitems\.map\s*\(/.test(s)) return s;
+  if (/\b(?:const|let|var|function)\s+items\b/.test(s)) return s;
+  const titles = [...s.matchAll(/item\.title\s*===\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  const names = [...new Set(titles.length ? titles : ['iPhone', 'Mac', 'iPad', 'Watch', 'AirPods'])];
+  const rows = names.map((title, i) => {
+    const safe = title.replace(/['\\]/g, '');
+    const icon = heroes.length ? heroes[i % heroes.length] : '/logo.svg';
+    return `  { id: '${i + 1}', title: '${safe}', blurb: '${safe}', icon: '${icon}' }`;
+  }).join(',\n');
+  const decl = `const items = [\n${rows},\n];\n`;
+  if (/(?:const\s+App\s*=\s*\([^)]*\)\s*=>\s*\{|function\s+App\s*\([^)]*\)\s*\{)/.test(s)) {
+    return s.replace(
+      /(const\s+App\s*=\s*\([^)]*\)\s*=>\s*\{|function\s+App\s*\([^)]*\)\s*\{)/,
+      `$1\n  ${decl}`,
+    );
+  }
+  return `${decl}${s}`;
+}
+
+/**
+ * Product bands gated on selectedProduct === 'Mac' paint blank until a click —
+ * nothing like apple.com. Unwrap those conditionals so every band is always on screen.
+ */
+export function healHiddenProductBands(app: string): string {
+  let s = String(app || '');
+  if (!s) return s;
+  if (!/selectedProduct\s*===\s*['"][^'"]+['"]\s*&&/i.test(s)
+    && !/\{selectedItem\s*&&/i.test(s)) {
+    return s;
+  }
+  // {selectedProduct === 'Mac' && ( <>...</> )} → <>...</>
+  s = s.replace(
+    /\{\s*selectedProduct\s*===\s*['"][^'"]+['"]\s*&&\s*\(\s*<>\s*([\s\S]*?)\s*<\/>\s*\)\s*\}/gi,
+    '$1',
+  );
+  s = s.replace(
+    /\{\s*selectedProduct\s*===\s*['"][^'"]+['"]\s*&&\s*\(\s*([\s\S]*?)\s*\)\s*\}/gi,
+    '$1',
+  );
+  // Drop unused selectedProduct state if nothing references it anymore.
+  if (!/\bselectedProduct\b/.test(s.replace(/const\s*\[\s*selectedProduct[\s\S]*?\]\s*=\s*useState[^;]+;?/i, ''))) {
+    s = s.replace(/const\s*\[\s*selectedProduct\s*,\s*setSelectedProduct\s*\]\s*=\s*useState\([^)]*\)\s*;?\s*/i, '');
+    s = s.replace(/\s*onClick=\{\(\)\s*=>\s*setSelectedProduct\([^)]*\)\}/gi, '');
+  }
+  return s;
+}
+
+/** Brief asks for an apple.com-like full-bleed product homepage. */
+export function briefLooksLikeAppleStyleHomepage(brief: string): boolean {
+  const t = String(brief || '');
+  if (!t.trim()) return false;
+  if (/\bapple\.com\b/i.test(t)) return true;
+  return /\b(?:iphone|mac|ipad|airpods)\b/i.test(t)
+    && /\b(?:product\s+band|colorful\s+band|full[- ]?bleed|thin\s+nav|hero)\b/i.test(t);
+}
+
+/**
+ * True when Mac / iPad / Watch / AirPods appear as real product stages —
+ * not merely as thin-nav link text (which previously cleared Ready on Band-N stubs).
+ */
+export function appleHomepageHasProductBands(app: string): boolean {
+  const src = String(app || '');
+  if (!src.trim()) return false;
+  if (/\bBand\s*[1-4]\b/i.test(src)) return false;
+  // Strip chrome that often lists product names without owning a band.
+  const body = src
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+    .replace(/className=["'][^"']*nav[^"']*["'][\s\S]*?(?=<(?:section|main|footer)\b)/gi, ' ');
+  const products = ['Mac', 'iPad', 'Watch', 'AirPods'] as const;
+  let hits = 0;
+  for (const p of products) {
+    const reHeading = new RegExp(`<(?:h[1-3]|p)\\b[^>]*>[^<]*\\b${p}\\b`, 'i');
+    const reData = new RegExp(`(?:name|title|id)\\s*[:=]\\s*['"\`]${p}['"\`]`, 'i');
+    const reSectionId = new RegExp(`<(?:section|div)\\b[^>]*(?:id|aria-label)=["'][^"']*\\b${p}\\b`, 'i');
+    if (reHeading.test(body) || reData.test(body) || reSectionId.test(body)) hits += 1;
+  }
+  return hits >= 3;
+}
+
 /** Drop trailing / embedded assistant chatter from CSS or markup. */
 function isTrailingAssistantProse(rest: string): boolean {
   const t = String(rest || '').trim();
   if (!t) return false;
-  if (/@@@FILE|```|To verify|Please |Note that|You should|Open the/i.test(t)) return true;
-  if (/^(?:Added|Updated|Done|Here|I (?:added|updated|changed|fixed)|The (?:updated|file))\b/i.test(t)) {
+  if (/@@@FILE|```|To verify|Please |Note that|You should|Open the|This enhanced|This completes/i.test(t)) return true;
+  if (/^(?:Added|Updated|Done|Here|This |I (?:added|updated|changed|fixed)|The (?:updated|file))\b/i.test(t)) {
     return true;
   }
   // English sentence with no CSS/JS tokens.
   if (/^[A-Z][\w\s,',-]{8,}\.$/m.test(t) && !/[{};=<>]|className|import |export |function /.test(t)) {
     return true;
   }
+  if (/This implementation includes|The page is designed to be/i.test(t)) return true;
   return false;
 }
 
@@ -85,6 +272,16 @@ export function stripModelProseFromSource(path: string, content: string): string
     // Trailing English lines that are not CSS (e.g. "Added the logo centered on screen.")
     text = text.replace(/\n[A-Z][A-Za-z][^;{}:\n]{8,}\.?\s*$/g, '');
     text = text.replace(/\n?#{0,6}\s*@@@FILE\b[\s\S]*$/i, '');
+    // Cut trailing essay after the last CSS rule: `}\nThis implementation…`
+    {
+      const lastBrace = text.lastIndexOf('}');
+      if (lastBrace > 40) {
+        const tail = text.slice(lastBrace + 1);
+        if (/This implementation|The page is designed|Here is|Note that|Please /i.test(tail)) {
+          text = `${text.slice(0, lastBrace + 1).trimEnd()}\n`;
+        }
+      }
+    }
     if (looksLikeModelProseLeak(text) && (text.match(/\{/g) || []).length < 1) {
       return '';
     }
@@ -139,12 +336,34 @@ export function stripModelProseFromSource(path: string, content: string): string
           const head = text.slice(0, semi + 1);
           const tail = text.slice(semi + 1);
           if (isTrailingAssistantProse(tail) || looksLikeModelProseLeak(text)) {
-            if (isTrailingAssistantProse(tail) || /To verify|Please |Note |You should|```|@@@FILE|Added |Done\./i.test(tail)) {
+            if (isTrailingAssistantProse(tail) || /To verify|Please |Note |You should|```|@@@FILE|Added |Done\.|This enhanced|This completes/i.test(tail)) {
               text = `${head}\n`;
+            }
+          }
+        } else {
+          // `export default function App() { ... }\nThis enhanced…` — no semicolon form.
+          const after = text.slice(exp);
+          const lastBrace = after.lastIndexOf('}');
+          if (lastBrace > 0) {
+            const cutAt = exp + lastBrace + 1;
+            const tail = text.slice(cutAt);
+            if (
+              tail.trim()
+              && (
+                isTrailingAssistantProse(tail)
+                || /^(?:\s*)(?:This |The |Here |Note |Please |You |I |To |Added |Done)/m.test(tail)
+                || looksLikeModelProseLeak(tail)
+              )
+            ) {
+              text = `${text.slice(0, cutAt).trimEnd()}\n`;
             }
           }
         }
       }
+    }
+    // Always strip TS generics from .jsx/.js payloads before they hit disk.
+    if (/\.jsx$/i.test(p) || /(?:^|\/)[^/]+\.js$/i.test(p)) {
+      text = stripIllegalTsFromJsx(text);
     }
     return text;
   }
@@ -323,6 +542,27 @@ export function looksLikeFillerStubAppSource(body: string): boolean {
   return false;
 }
 
+/**
+ * Old Veopx / quiet-luxury stock copy. Fail Ready unless the brief asked for those phrases.
+ */
+export function looksLikeStockQuietLuxuryCopy(app: string, brief = ''): boolean {
+  const s = String(app || '');
+  if (!s) return false;
+  const b = String(brief || '');
+  // Brief explicitly requested this lookbook — allow it.
+  if (/Light,?\s*distilled|Quiet by design|Presence without|Made for the in-between/i.test(b)) {
+    return false;
+  }
+  let hits = 0;
+  if (/Light,?\s*distilled/i.test(s)) hits += 1;
+  if (/Quiet by design/i.test(s)) hits += 1;
+  if (/Light that listens/i.test(s)) hits += 1;
+  if (/Presence without\s+(?:the\s+)?noise/i.test(s)) hits += 1;
+  if (/Made for the in-between/i.test(s)) hits += 1;
+  if (/Meet\s+\w+\s+One/i.test(s)) hits += 1;
+  return hits >= 2;
+}
+
 export function isEmptyOrStubAppSource(body: string): boolean {
   const s = String(body || '');
   if (!s.trim()) return true;
@@ -358,16 +598,61 @@ export function appUsesReactNamespaceWithoutImport(body: string): boolean {
 }
 
 /**
- * Heal blank-Live crash: `React.useState` without `import React`.
- * Prefer a default React import so existing React.* calls keep working.
+ * Heal blank-Live crash: `React.useState` without `import React`,
+ * or bare `useState(` / `useEffect(` without a hooks import.
  */
 export function ensureReactImportForNamespace(app: string): string {
-  const s = String(app || '');
-  if (!appUsesReactNamespaceWithoutImport(s)) return s;
-  if (/^['"]use client['"];?\s*/.test(s)) {
-    return s.replace(/^(['"]use client['"];?\s*)/, `$1import React from 'react';\n`);
+  let s = String(app || '');
+  if (appUsesReactNamespaceWithoutImport(s)) {
+    if (/^['"]use client['"];?\s*/.test(s)) {
+      s = s.replace(/^(['"]use client['"];?\s*)/, `$1import React from 'react';\n`);
+    } else {
+      s = `import React from 'react';\n${s}`;
+    }
   }
-  return `import React from 'react';\n${s}`;
+  const namedImport = s.match(/import\s+(?:React\s*,\s*)?\{([^}]*)\}\s*from\s*['"]react['"]/);
+  const already = new Set(
+    String(namedImport?.[1] || '')
+      .split(',')
+      .map((p) => p.trim().split(/\s+as\s+/i)[0].trim())
+      .filter(Boolean),
+  );
+  const missing = ['useState', 'useEffect', 'useMemo', 'useCallback', 'useRef'].filter((h) =>
+    new RegExp(`\\b${h}\\s*[<(]`).test(s)
+    && !already.has(h)
+    && !new RegExp(`\\bReact\\.${h}\\b`).test(s)
+  );
+  if (!missing.length) return s;
+  if (namedImport) {
+    const nextList = [...already, ...missing].join(', ');
+    return s.replace(
+      /import\s+(React\s*,\s*)?\{[^}]*\}\s*from\s*['"]react['"]/,
+      (_m, reactPrefix) => `import ${reactPrefix || ''}{ ${nextList} } from 'react'`,
+    );
+  }
+  if (/\bimport\s+React\s+from\s*['"]react['"]/.test(s)) {
+    return s.replace(
+      /\bimport\s+React\s+from\s*['"]react['"]/,
+      `import React, { ${missing.join(', ')} } from 'react'`,
+    );
+  }
+  if (/^['"]use client['"];?\s*/.test(s)) {
+    return s.replace(/^(['"]use client['"];?\s*)/, `$1import { ${missing.join(', ')} } from 'react';\n`);
+  }
+  if (/import\s+['"]\.\/App\.css['"]/.test(s)) {
+    return s.replace(
+      /import\s+['"]\.\/App\.css['"];?/,
+      `import './App.css';\nimport { ${missing.join(', ')} } from 'react';`,
+    );
+  }
+  return `import { ${missing.join(', ')} } from 'react';\n${s}`;
+}
+
+/** Heal TS-only syntax written into .jsx so Vite Live does not crash. */
+export function ensureJsxHasNoTypeScript(app: string): string {
+  const s = String(app || '');
+  if (!jsxSourceHasTypeScriptOnlySyntax(s)) return s;
+  return stripIllegalTsFromJsx(s);
 }
 
 /**
@@ -408,16 +693,29 @@ export function restaurantBriefBuiltAsCoffeeShop(app: string, brief: string): bo
 export function briefLooksLikeMarketingLanding(brief: string): boolean {
   const t = String(brief || '');
   if (!t.trim()) return false;
+  // Games / 3D / interactive apps are never marketing landings — use playable/interactive Ready.
+  if (looksLikePlayableCanvasGame(t) || looksLikeSpatialApp(t) || looksLikeFpsGame(t)) return false;
   if (/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(t)
     && !/\b(?:landing|restaurant|cafe|menu|marketing)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:game|playable|arcade|canvas\s+game|fps|shooter|three\.?js|webgl|3d\s+(?:app|editor|tool|model)|modeler)\b/i.test(t)
+    && !/\b(?:landing\s+page|marketing\s+site|product\s+marketing|home\s*page|apple\.com|full[- ]?bleed)\b/i.test(t)) {
+    return false;
+  }
+  // Bare "viewport" is layout jargon (first viewport) — not a 3D app ask.
+  if (/\bviewport\b/i.test(t)
+    && !/\b(?:three\.?js|webgl|3d|orbit|mesh|babylon|modeler)\b/i.test(t)
+    && !/\b(?:landing|home\s*page|apple\.com|full[- ]?bleed|product\s+band)\b/i.test(t)) {
     return false;
   }
   // Quiet-luxury / product marketing sites — even when also "premium website" SPA signals.
   if (/\b(?:quiet\s+luxury|soft\s+(?:mint\s+|green\s+)?orbs?|scroll\s+to\s+reveal|product\s+marketing|premium\s+product|pc\s*case|gaming\s+pc|computer\s*case|mid[\s-]?tower)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:landing(?:\s+page)?|marketing\s+site)\b/i.test(t)) return true;
-  return /\b(?:landing(?:\s+page)?|marketing\s+site|product\s+marketing|premium\s+product|quiet\s+luxury|apple\.com|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|hero|tagline|dishes?|website|soft\s+(?:green\s+)?orbs?|scroll\s+to\s+reveal)\b/i.test(t);
+  if (/\b(?:landing(?:\s+page)?|marketing\s+site|homepage|home\s+page|coffee\s+homepage)\b/i.test(t)) return true;
+  // Do not let bare "website" / "hero" alone force landing depth — too many app/game briefs say that.
+  return /\b(?:landing(?:\s+page)?|marketing\s+site|product\s+marketing|premium\s+product|quiet\s+luxury|apple\.com|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|tagline|dishes?|soft\s+(?:green\s+)?orbs?|scroll\s+to\s+reveal|sign[- ]?in|login\s+page|cinematic|embark|platform\s+button|headphones?|earbuds?|headset|audio\s+product|luxur(?:y|ious)\s+(?:product|landing|site)|aquarium|saltwater|reef\s+shop|coral|fish\s+shop|pet\s+store|florist|flower\s+shop)\b/i.test(t);
 }
 
 /**
@@ -437,6 +735,15 @@ export function briefNeedsCreateUiPolish(brief: string): boolean {
     || (/\bservers?\b/i.test(t) && /\bchannels?\b/i.test(t))
     || /\bchat\s+pane\b/i.test(t)
     || /\b(?:chat|messaging)\s+(?:web\s+)?app\b/i.test(t)
+  )) {
+    return true;
+  }
+  // Games / 3D / canvas apps — always polish thoroughly (never scaffold-only speedrun).
+  if (t.length >= 16 && (
+    looksLikePlayableCanvasGame(t)
+    || looksLikeSpatialApp(t)
+    || looksLikeFpsGame(t)
+    || /\b(?:game|playable|arcade|three\.?js|webgl|3d\s+(?:app|editor|tool|scene)|modeler)\b/i.test(t)
   )) {
     return true;
   }
@@ -520,7 +827,25 @@ export function looksLikeReactEntrypointSource(appSource: string | undefined | n
   if (/\bcreateRoot\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
   if (/\bReactDOM\.(?:createRoot|render)\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
   if (/from\s+['"]\.\/App['"]/.test(s) && /\brender\s*\(/.test(s)) return true;
+  // Model sometimes pastes main.tsx into App.tsx (createRoot + getElementById('root')).
+  if (/\bcreateRoot\s*\(/.test(s) && /getElementById\s*\(\s*['"]root['"]/.test(s)) return true;
+  if (/from\s+['"]react-dom\/client['"]/.test(s) && /\.render\s*\(/.test(s)) return true;
   return false;
+}
+
+export function stripEntrypointBleedFromApp(app: string): string {
+  let s = String(app || '');
+  if (!s) return s;
+  const hadEntrypoint = looksLikeReactEntrypointSource(s) || /\bcreateRoot\s*\(/.test(s);
+  if (!hadEntrypoint) return s;
+  s = s.replace(/\n?import\s+\{\s*createRoot\s*\}\s+from\s+['"]react-dom\/client['"]\s*;?\s*/g, '\n');
+  s = s.replace(/\n?createRoot\s*\([\s\S]*?\)\s*;?\s*/g, '\n');
+  s = s.replace(/\n?ReactDOM\.(?:createRoot|render)\s*\([\s\S]*?\)\s*;?\s*/g, '\n');
+  s = s.replace(/document\.getElementById\([^)]+\)!/g, '');
+  if (!/export\s+default/i.test(s) && /(?:const|function)\s+App\b/.test(s)) {
+    s = `${s.trimEnd()}\n\nexport default App;\n`;
+  }
+  return s.trimEnd() + '\n';
 }
 
 /** Neutral last-resort App when the model left an unusable shell (not genre-specific).
@@ -1080,6 +1405,13 @@ export function isPreviewReady(
   const css = files['src/App.css'] || '';
   const indexCss = files['src/index.css'] || '';
   const cssBlob = `${css}\n${indexCss}`;
+  // Include sibling components so split Header/Hero/Footer crafts are not scored as thin App-only.
+  const uiBlob = [
+    app,
+    ...Object.entries(files)
+      .filter(([p]) => /^src\/(?!main\.|index\.)[\w./-]+\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')))
+      .map(([, body]) => String(body || '')),
+  ].join('\n');
   const html = files['index.html'] || '';
   const pkg = files['package.json'] || '';
   const brief = String(opts?.brief || '');
@@ -1109,9 +1441,37 @@ export function isPreviewReady(
   if (looksLikeReactEntrypointSource(app)) reasons.push('App.jsx looks like a Vite entry file, not a component');
   if (app.length < 120) reasons.push('App.jsx too thin');
   if (!/export\s+default/i.test(app)) reasons.push('App.jsx has no default export');
+  if (
+    /\b(?:useState|useEffect|useMemo|useCallback|useRef)\s*[<(]/.test(app)
+    && !/\bimport\s+[^;]*\b(?:useState|useEffect|useMemo|useCallback|useRef)\b/.test(app)
+    && !/\bReact\.(?:useState|useEffect|useMemo|useCallback|useRef)\b/.test(app)
+  ) {
+    reasons.push('App uses React hooks without importing them (would blank Live)');
+  }
   if (looksLikeModelProseLeak(app) || looksLikeModelProseLeak(css)) reasons.push('model prose leaked into source');
   if (looksLikeTruncatedUiSource(app) || looksLikeTruncatedUiSource(css)) {
     reasons.push('App/CSS source looks truncated mid-write');
+  }
+  if (countUnclosedCssBlocks(css) > 0) {
+    reasons.push('App.css has unclosed blocks (would blank Live)');
+  }
+  {
+    const miss = createPolishMissingLocalImports(files);
+    if (miss.length) {
+      reasons.push(`App imports missing modules (${miss.slice(0, 3).join(', ')}) — would blank Live`);
+    }
+  }
+  if (/\bsrc=\{([A-Za-z_$][\w$]*)\}/.test(app)) {
+    const undeclared = [...app.matchAll(/\bsrc=\{([A-Za-z_$][\w$]*)\}/g)]
+      .map((m) => m[1])
+      .filter((id) => {
+        if (/^(?:COVER_HREFS|undefined|null|true|false|props|state|item|book|product)$/.test(id)) return false;
+        return !new RegExp(`\\b(?:const|let|var|function|import)\\s+${id}\\b`).test(app)
+          && !new RegExp(`\\bimport\\s+\\{[^}]*\\b${id}\\b`).test(app);
+      });
+    if (undeclared.length) {
+      reasons.push(`App references undeclared img src={${undeclared[0]}} (would blank Live)`);
+    }
   }
   // App.css must be linked or Live stays browser-default.
   if (css && !(
@@ -1131,6 +1491,9 @@ export function isPreviewReady(
   if (looksLikeFillerStubAppSource(app)) {
     reasons.push('App is still a filler stub (sample/placeholder text)');
   }
+  if (looksLikeStockQuietLuxuryCopy(app, brief)) {
+    reasons.push('App reused stock quiet-luxury demo copy instead of inventing this brand');
+  }
   // Remote placeholder hosts break offline / in Electron Live.
   if (/via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com/i.test(app)) {
     reasons.push('App uses broken remote placeholder image URLs');
@@ -1140,6 +1503,23 @@ export function isPreviewReady(
   }
   if (appUsesReactNamespaceWithoutImport(app)) {
     reasons.push('App uses React.* hooks without importing React (blank Live)');
+  }
+  // Hard gate: broken App shell, OR TypeScript-only syntax in .jsx (Vite babel crash).
+  if (isBrokenReactAppSource(app)) {
+    reasons.push('App source is broken or incomplete (would crash or blank Live)');
+  }
+  const appIsJsx = Boolean(jsx) && scoreApp(jsx) >= scoreApp(tsx);
+  if (appIsJsx && jsxSourceHasTypeScriptOnlySyntax(app)) {
+    reasons.push('src/App.jsx contains TypeScript syntax (Vite Live crash — strip types or use .tsx)');
+  }
+  for (const [path, body] of Object.entries(files)) {
+    const norm = path.replace(/\\/g, '/');
+    if (!/\.(?:jsx|js)$/i.test(norm)) continue;
+    if (/node_modules|\.config\.|vite\.config|main\.(?:jsx|js)$/i.test(norm)) continue;
+    if (norm === 'src/App.jsx') continue; // already checked
+    if (jsxSourceHasTypeScriptOnlySyntax(String(body || ''))) {
+      reasons.push(`${norm} contains TypeScript syntax (Vite Live crash — use plain JS or rename to .tsx)`);
+    }
   }
   if (/NOVA-search/i.test(app) || /NOVA-search/i.test(html)) {
     reasons.push('App still looks like a search chrome stub');
@@ -1164,31 +1544,92 @@ export function isPreviewReady(
 
   // Landing / restaurant / marketing: brand + one paragraph is never Ready.
   if (briefLooksLikeMarketingLanding(brief)) {
-    const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(app)
-      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid|grid|cards?)\b/i.test(app);
-    const hasCta = /<(?:button|a)\b/i.test(app)
-      || /\b(?:cta|order|reserve|book|explore|menu|purchase|add\s*to\s*cart|get\s+started|shop)\b/i.test(app);
+    const appleStyle = briefLooksLikeAppleStyleHomepage(brief);
+    const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(uiBlob)
+      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid|grid|cards?|band)\b/i.test(uiBlob);
+    const hasCta = /<(?:button|a)\b/i.test(uiBlob)
+      || /\b(?:cta|order|reserve|book|explore|menu|purchase|add\s*to\s*cart|get\s+started|shop|learn\s+more)\b/i.test(uiBlob);
     const cssLen = cssBlob.replace(/\s+/g, '').length;
-    const sectionCount = (app.match(/<(?:section|main|header|footer)\b/gi) || []).length;
+    const sectionCount = (uiBlob.match(/<(?:section|main|header|footer)\b/gi) || []).length
+      + (uiBlob.match(/className=["'][^"']*\bhero\b/i) ? 1 : 0)
+      + (uiBlob.match(/className=["'][^"']*\bband\b/i) ? 1 : 0);
     const hasPremiumCss = /gradient|radial-gradient|@keyframes|backdrop-filter|box-shadow|background-image/i.test(cssBlob);
+    const hasMotion = /@keyframes|animation\s*:|transition\s*:/i.test(cssBlob);
+    const hasHeroVisual = /\/heroes\/|<img\b|background-image|radial-gradient|full[- ]?bleed|\.hero\b/i.test(`${uiBlob}\n${cssBlob}`);
+    const hasDiskHeroes = Object.keys(files).some((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)/i.test(p.replace(/\\/g, '/')));
     const wantsBooking = /\b(?:reserv|appointment|time\s*slot|book\s+(?:a\s+)?(?:table|appointment|slot))\b/i.test(brief)
       && !/\b(?:borrow|bookshelf|library|lend(?:ing)?|checked\s*out|return\s+button)\b/i.test(brief);
-    if (app.length < (wantsBooking ? 2200 : 1800)) reasons.push('landing App.jsx too thin for a real page');
+    // Quiet-luxury / orb aesthetic — never force this on apple.com-style product bands.
+    const wantsPremium = !appleStyle && /\b(?:quiet[\s-]?luxury|luxur(?:y|ious)|editorial|serif|orb|vesper|distilled|atmosphere|cinematic|sign[- ]?in|embark|game\s+auth|lumenforge|headphones?|parchment|cream|sage|gold\s+light)\b/i.test(brief);
+    const minApp = appleStyle ? 2200 : (wantsPremium ? (hasDiskHeroes ? 1800 : 2800) : (wantsBooking ? 2200 : 1800));
+    const minCss = appleStyle ? 900 : (wantsPremium ? 1400 : (wantsBooking ? 1200 : 900));
+    const uiLen = uiBlob.replace(/\s+/g, '').length;
+    const depthOk = hasStructure && hasHeroVisual && (hasMotion || hasPremiumCss || appleStyle) && sectionCount >= 2;
+    if (uiLen < minApp && app.length < minApp && !depthOk) {
+      reasons.push('landing App.jsx too thin for a real page');
+    }
     if (!hasStructure || sectionCount < 2) reasons.push('landing App missing sections (hero/menu/footer)');
-    if (cssLen < (wantsBooking ? 1200 : 900)) reasons.push('landing CSS too thin');
-    if (!hasPremiumCss && cssLen < 2000) reasons.push('landing CSS lacks premium depth (gradients, atmosphere, or motion)');
-    if (restaurantBriefBuiltAsCoffeeShop(app, brief)) {
+    if (cssLen < minCss) reasons.push('landing CSS too thin');
+    if (!appleStyle && !hasPremiumCss && cssLen < 2000) {
+      reasons.push('landing CSS lacks premium depth (gradients, atmosphere, or motion)');
+    }
+    if (wantsPremium && !hasMotion) {
+      reasons.push('premium landing missing CSS motion (@keyframes / animation)');
+    }
+    if (wantsPremium && !hasHeroVisual) {
+      reasons.push('premium landing missing hero visual / atmospheric imagery');
+    }
+    // Marketing/auth pages that ship a blank white canvas as the "hero" are not Ready.
+    if (
+      wantsPremium
+      && /<canvas\b/i.test(uiBlob)
+      && !/<img\b/i.test(uiBlob)
+      && /fillStyle\s*=\s*['"](?:white|#fff|rgba\(\s*255)/i.test(uiBlob)
+    ) {
+      reasons.push('premium landing used a blank canvas stub instead of a real hero visual');
+    }
+    if (wantsPremium && !/serif|Playfair|Iowan|Palatino|Georgia|Cormorant|Fraunces|Times New Roman/i.test(`${uiBlob}\n${cssBlob}`)) {
+      reasons.push('premium landing missing serif display typography');
+    }
+    if (wantsPremium && !/orb|radial-gradient|glow|@keyframes|animation\s*:/i.test(`${uiBlob}\n${cssBlob}`)) {
+      reasons.push('premium landing missing atmospheric light / orb treatment');
+    }
+    if (appleStyle) {
+      if (!appleHomepageHasProductBands(uiBlob)) {
+        reasons.push('apple-style homepage missing product bands (Mac / iPad / Watch / AirPods)');
+      }
+      if (!/<nav\b/i.test(uiBlob)) {
+        reasons.push('apple-style homepage missing thin top nav');
+      }
+      if (/\bBuilt for general users\b/i.test(uiBlob) || /\bBand\s*[1-4]\b/i.test(uiBlob)) {
+        reasons.push('apple-style homepage still uses stub copy (Band N / general users)');
+      }
+      if (/circle[^>]*r=["']?\d+/i.test(cssBlob + uiBlob) && /rx=["']?(?:36|46|48)/i.test(cssBlob + uiBlob)) {
+        reasons.push('apple-style homepage still uses toy tablet hero bezel');
+      }
+      // Bands must be visual stages, not plain text paragraphs.
+      const bandImgs = (uiBlob.match(/<(?:img|svg)\b/gi) || []).length
+        + (cssBlob.match(/background(?:-image)?\s*:\s*[^;]*url\(/gi) || []).length;
+      if (bandImgs < 2 && app.length < 4500) {
+        reasons.push('apple-style homepage bands lack product-stage imagery');
+      }
+    }
+    if (restaurantBriefBuiltAsCoffeeShop(uiBlob, brief)) {
       reasons.push('restaurant brief built as a coffee shop instead');
     }
-    if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(app)) {
+    if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(uiBlob)) {
       reasons.push('restaurant/menu brief missing menu content');
     }
     if (!hasCta && /\b(?:cta|button|order|reserve|explore)\b/i.test(brief)) {
-      reasons.push('landing App missing a primary CTA');
+      reasons.push('landing missing a clear CTA');
+    }
+    // Wrong default export (export default Header) cannot mount a product page.
+    if (/export\s+default\s+(Header|Hero|Footer|Nav|FeatureBand)\b/i.test(app)) {
+      reasons.push('App.jsx default-exports a partial component instead of the page');
     }
     if (wantsBooking) {
-      const hasState = /\buseState\b|\bReact\.useState\b/.test(app);
-      const hasSlots = /\b(?:slot|time|schedule|select)\b/i.test(app);
+      const hasState = /\buseState\b|\bReact\.useState\b/.test(uiBlob);
+      const hasSlots = /\b(?:slot|time|schedule|select)\b/i.test(uiBlob);
       if (!hasState) reasons.push('booking landing needs interactive state (useState)');
       if (!hasSlots) reasons.push('booking landing missing time-slot / schedule UI');
     }
@@ -1464,6 +1905,73 @@ export function isPlayableArcadeGameReady(files: Record<string, string>): Previe
   return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
+/**
+ * Pick the right Preview Ready gate for this brief — games/3D/apps must not use marketing landing depth.
+ */
+export function previewReadyForBrief(
+  files: Record<string, string>,
+  opts?: {
+    productName?: string;
+    brief?: string;
+    requireInteractive?: boolean;
+    spec?: ProductSpec | null;
+    contract?: LayoutContract | null;
+  },
+): PreviewReadyResult {
+  const brief = String(opts?.brief || '');
+  // apple.com-style product homepages must never use the 3D/spatial gate
+  // (layout recipes say "first viewport" which used to false-positive).
+  if (briefLooksLikeAppleStyleHomepage(brief) || briefLooksLikeMarketingLanding(brief)) {
+    const base = isPreviewReady(files, {
+      ...opts,
+      requireInteractive: Boolean(opts?.requireInteractive) && !briefLooksLikeAppleStyleHomepage(brief),
+    });
+    const reasons = [...base.reasons];
+    const spec = opts?.spec || buildProductSpec({
+      brief,
+      productName: opts?.productName || '',
+    });
+    const layout = scoreLayoutQuality(files, { brief, spec, contract: opts?.contract || null });
+    const functional = scoreFunctionalReady(files, { brief, spec });
+    for (const r of layout.reasons) reasons.push(r);
+    for (const r of functional.reasons) reasons.push(r);
+    return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+  }
+  if (looksLikeFpsGame(brief)) return isPlayableGameReady(files);
+  if (looksLikePlayableCanvasGame(brief)) return isPlayableArcadeGameReady(files);
+  if (looksLikeSpatialApp(brief)) {
+    const base = isPreviewReady(files, { ...opts, requireInteractive: true });
+    const reasons = [...base.reasons];
+    const app = files['src/App.jsx'] || files['src/App.tsx'] || '';
+    const pkg = files['package.json'] || '';
+    if (!/\bthree\b/i.test(pkg) && !/\bfrom\s+['"]three['"]/i.test(app)) {
+      reasons.push('3D brief missing three.js dependency or import');
+    }
+    if (!/<canvas\b|\bWebGLRenderer\b|\bTHREE\b/i.test(app) && app.length < 1800) {
+      reasons.push('3D App missing canvas / WebGL scene');
+    }
+    return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+  }
+  const marketing = briefLooksLikeMarketingLanding(brief);
+  const commerce = /\b(?:cart|checkout|booking|reserv|borrow)\b/i.test(brief);
+  const needsInteractive = (!marketing || commerce) && (
+    Boolean(opts?.requireInteractive)
+    || briefRequiresInteractiveApp(brief)
+    || briefLooksLikeChatApp(brief)
+  );
+  const base = isPreviewReady(files, { ...opts, requireInteractive: needsInteractive });
+  const reasons = [...base.reasons];
+  const spec = opts?.spec || buildProductSpec({
+    brief,
+    productName: opts?.productName || '',
+  });
+  const layout = scoreLayoutQuality(files, { brief, spec, contract: opts?.contract || null });
+  const functional = scoreFunctionalReady(files, { brief, spec });
+  for (const r of layout.reasons) reasons.push(r);
+  for (const r of functional.reasons) reasons.push(r);
+  return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+}
+
 /** True when App already has multi-section landing structure (keep it; don't revert to stub). */
 export function appLooksLikeStructuredLanding(app: string): boolean {
   const s = String(app || '');
@@ -1537,6 +2045,144 @@ export function sanitizeCreatePolishPlaceholders(app: string): string {
 }
 
 /**
+ * Free 7B coders often split Header/Hero/Footer into sibling files and leave
+ * App.jsx exporting only Header (or a thin shell). Collapse into one App so
+ * Live mounts a real page and Ready can see sections.
+ */
+export function assembleCreateAppFromParts(
+  files: Record<string, string>,
+  productName = 'App',
+): { files: Record<string, string>; changed: string[] } {
+  const next = { ...files };
+  const changed: string[] = [];
+  const appKey = next['src/App.jsx']
+    ? 'src/App.jsx'
+    : (next['src/App.tsx'] ? 'src/App.tsx' : '');
+  if (!appKey) return { files: next, changed };
+
+  const brand = String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48) || 'Brand';
+  const app = String(next[appKey] || '');
+  const siblingBodies: string[] = [];
+  for (const [p, body] of Object.entries(next)) {
+    const norm = p.replace(/\\/g, '/');
+    if (!/^src\/(?!main\.|index\.)[\w./-]+\.(jsx|tsx)$/i.test(norm)) continue;
+    siblingBodies.push(String(body || ''));
+  }
+  const blob = siblingBodies.join('\n');
+  const wrongDefault = /export\s+default\s+(Header|Hero|Footer|Nav|FeatureBand|Feature|Banner)\b/i.test(app);
+  const thinOrShell = app.replace(/\s+/g, '').length < 2200
+    || !/<(?:section|main|footer)\b/i.test(app)
+    || (/export\s+default\s+Header\b/i.test(app));
+  const hasSplitParts = /const\s+(Header|Hero|Footer|FeatureBand)\b/i.test(blob)
+    || Object.keys(next).some((p) => /src\/(?:Header|Hero|Footer|Feature)/i.test(p.replace(/\\/g, '/')));
+  // App imports ./components/Navbar etc. that were never written — blank Live.
+  const missingLocal = createPolishMissingLocalImports(next);
+  const hasMissingComponents = missingLocal.some((s) =>
+    /components\//i.test(s)
+    || /\/(?:Navbar|Nav|Header|Hero|Footer|FeatureBand|Feature|Banner)\b/i.test(s),
+  );
+  if (!wrongDefault && !(thinOrShell && hasSplitParts) && !hasMissingComponents) {
+    return { files: next, changed };
+  }
+
+  const extractInner = (src: string): string => {
+    const m = String(src || '').match(/return\s*\(\s*([\s\S]*?)\s*\);/);
+    return m ? m[1].trim() : '';
+  };
+  let headline = '';
+  let lede = '';
+  // Prefer copy already on the App shell (e.g. <Hero title="Glow soft" lede="…"/>).
+  const titleProp = app.match(/<(?:Hero|Banner)\b[^>]*\btitle=["']([^"']+)["']/i)
+    || app.match(/<(?:h1|h2)\b[^>]*>([^<]{3,80})<\/(?:h1|h2)>/i);
+  const ledeProp = app.match(/<(?:Hero|Banner)\b[^>]*\blede=["']([^"']+)["']/i);
+  if (titleProp) headline = titleProp[1].trim();
+  if (ledeProp) lede = ledeProp[1].trim();
+  for (const body of siblingBodies) {
+    if (/const\s+Hero\b|function\s+Hero\b|className=["']headline["']/i.test(body)) {
+      const h = body.match(/<h1[^>]*>([^<]{3,80})<\/h1>/i);
+      const p = body.match(/<(?:p)[^>]*className=["'][^"']*lede[^"']*["'][^>]*>([^<]{3,160})<\/p>/i)
+        || body.match(/<(?:p)[^>]*>([^<]{12,160})<\/p>/i);
+      if (h && !headline) headline = h[1].trim();
+      if (p && !lede) lede = p[1].trim();
+    }
+  }
+  if (!headline) {
+    const h2 = blob.match(/<h1[^>]*>([^<]{3,80})<\/h1>/i);
+    if (h2) headline = h2[1].trim();
+  }
+  headline = headline || 'Crafted with care.';
+  lede = lede || `${brand} — a quiet luxury product made to last.`;
+
+  const heroes = Object.keys(next)
+    .map((p) => p.replace(/\\/g, '/'))
+    .filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp)$/i.test(p))
+    .map((p) => '/' + p.replace(/^public\//i, ''));
+  const heroSrc = heroes[0] || `/heroes/${brand.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brand'}-hero.jpg`;
+
+  const headerInner = extractInner(siblingBodies.find((b) => /const\s+Header\b|function\s+Header\b/i.test(b)) || '')
+    || `<header className="header sticky-nav" role="banner">
+        <a className="brand-wordmark" href="#top">${brand}</a>
+        <nav>
+          <a className="nav-link" href="#discover">Discover</a>
+          <a className="nav-link" href="#support">Support</a>
+        </nav>
+      </header>`;
+
+  const assembled = `import './App.css';
+
+export default function App() {
+  return (
+    <div className="app">
+      ${headerInner.includes('brand-wordmark') || headerInner.includes(brand)
+        ? headerInner
+        : `<header className="header sticky-nav" role="banner">
+        <a className="brand-wordmark" href="#top">${brand}</a>
+        <nav>
+          <a className="nav-link" href="#discover">Discover</a>
+          <a className="nav-link" href="#support">Support</a>
+        </nav>
+      </header>`}
+      <main>
+        <section className="hero" id="top">
+          <div className="hero-text">
+            <h1>${headline.replace(/\.$/, '')}.</h1>
+            <p className="lede">${lede}</p>
+            <button type="button" className="cta-button">Explore</button>
+          </div>
+          <figure className="hero-media">
+            <img src="${heroSrc}" alt="${brand}" />
+          </figure>
+        </section>
+        <section className="feature-bands" id="discover">
+          <article className="feature-band">
+            <h2>Material honesty</h2>
+            <p>Textures and finishes chosen for this brand — not stock filler cards.</p>
+          </article>
+          <article className="feature-band">
+            <h2>Quiet detail</h2>
+            <p>Spacing, type, and motion tuned so the page feels finished on first scroll.</p>
+          </article>
+          <article className="feature-band">
+            <h2>Made to last</h2>
+            <p>A product story you can explore — not a Vite title splash.</p>
+          </article>
+        </section>
+      </main>
+      <footer className="footer" id="support">
+        <a className="nav-link" href="#top">Back to top</a>
+        <p>© 2026 ${brand}</p>
+      </footer>
+    </div>
+  );
+}
+`;
+
+  next[appKey] = assembled;
+  changed.push(appKey);
+  return { files: next, changed };
+}
+
+/**
  * After Brand Assets land in public/, wire them into App + CSS and strip the
  * common failure mode where /logo.svg is stretched as a full-bleed background
  * (reads as a giant geometric mark behind the page).
@@ -1545,8 +2191,16 @@ export function wireCreatePublicAssets(
   files: Record<string, string>,
   productName = 'App',
 ): { files: Record<string, string>; changed: string[] } {
-  const next = { ...files };
-  const changed: string[] = [];
+  const assembled = assembleCreateAppFromParts(files, productName);
+  const importHeal = healMissingLocalImports(assembled.files, productName);
+  const next = { ...importHeal.files };
+  const changed: string[] = [...assembled.changed];
+  if (importHeal.healed.length) {
+    const healedAppKey = next['src/App.tsx'] && !next['src/App.jsx']
+      ? 'src/App.tsx'
+      : (next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : ''));
+    if (healedAppKey) changed.push(healedAppKey);
+  }
   const keys = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
   const hasLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
   const hasSearch = keys.some((p) => /(^|\/)public\/icons\/search\.svg$/i.test(p));
@@ -1562,6 +2216,17 @@ export function wireCreatePublicAssets(
   if (cssKey) {
     let css = String(next[cssKey] || '');
     const before = css;
+    // Model often leaves the last rule unclosed — PostCSS then blanks Live.
+    css = healUnbalancedCssBraces(css);
+    if (heroes.length) {
+      css = css.replace(/url\(\s*(['"]?)(\/[^'")\s]+)\1\s*\)/gi, (full, q, href) => {
+        const rel = `public${href}`.toLowerCase();
+        const exists = keys.some((p) => p.replace(/\\/g, '/').toLowerCase() === rel);
+        if (exists) return full;
+        const quote = q || "'";
+        return `url(${quote}${heroes[0]}${quote})`;
+      });
+    }
     // Never stretch the brand mark across the whole viewport.
     css = css.replace(
       /background(?:-image)?\s*:\s*[^;]*url\(\s*['"]?\/logo\.svg['"]?\s*\)[^;]*;?/gi,
@@ -1571,12 +2236,15 @@ export function wireCreatePublicAssets(
       /\.logo[^{]*\{[^}]*background[^}]*\/logo\.svg[^}]*\}/gi,
       '.logo { width: 36px; height: 36px; object-fit: contain; }',
     );
+    // Close again before appends so injections never nest into a dangling block.
+    css = healUnbalancedCssBraces(css);
+    // Hero photo underlay — tint from existing --bg / page color, never hardcode cream.
     if (heroes[0] && !/url\(\s*['"]?\/heroes\//i.test(css)) {
-      css += `\n.app-shell, .app { background-image: linear-gradient(180deg, rgba(250,247,242,0.92), rgba(245,240,232,0.96)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
+      css += `\n.app-shell, .app { background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg, #0f1419) 88%, transparent), color-mix(in srgb, var(--bg, #0f1419) 94%, transparent)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
     }
     if ((hasLogo || hasSearch || hasBag) && !/\.sticky-nav\b/.test(css)) {
       css += `
-.sticky-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.25rem; position: sticky; top: 0; z-index: 20; background: rgba(250,247,242,0.92); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(60,40,20,0.08); }
+.sticky-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.25rem; position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg, #0f1419) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line, rgba(232,238,244,0.14)); }
 .nav-left, .nav-right { display: flex; align-items: center; gap: 0.75rem; }
 .nav-logo, .nav-icon { display: block; object-fit: contain; }
 .nav-brand { font-weight: 700; letter-spacing: -0.03em; }
@@ -1591,6 +2259,11 @@ export function wireCreatePublicAssets(
   if (appKey) {
     let app = String(next[appKey] || '');
     const before = app;
+    app = ensureReactImportForNamespace(app);
+    app = stripEntrypointBleedFromApp(app);
+    app = healUndefinedImgSrcBindings(app, heroes);
+    app = healUndeclaredItemsList(app, heroes);
+    app = healHiddenProductBands(app);
     // Prefer on-disk heroes over empty/broken/data-uri tiles for browse cards.
     if (heroes.length) {
       if (!/\bCOVER_HREFS\b/.test(app)) {
@@ -1665,33 +2338,200 @@ export function wireCreatePublicAssets(
     app = app.replace(/\bBook Title\s*\d+\b/gi, () => shelfNames[ni++ % shelfNames.length]);
     app = app.replace(/\bA brief description of the book\b/gi, 'Soft paper tones · warm walnut shelf copy');
 
-    // Inject a compact nav with real public icons when files exist but UI never references them.
-    const needsNavWire = (hasLogo || hasSearch || hasBag)
-      && !/\/logo\.svg|\/icons\/(?:search|bag)\.svg/i.test(app);
-    if (needsNavWire) {
+    // Inject sticky-nav icons from public/ when files exist but UI never references them.
+    // Prefer inline nav icons over absolute icon-rails (marketing layouts forbid rails).
+    const iconFiles = keys
+      .filter((p) => /(?:^|\/)public\/icons\/([a-z0-9_-]+)\.svg$/i.test(p))
+      .map((p) => {
+        const m = p.replace(/\\/g, '/').match(/public\/icons\/([a-z0-9_-]+)\.svg$/i);
+        return m ? m[1].toLowerCase() : '';
+      })
+      .filter(Boolean);
+    const unusedIcons = iconFiles.filter((id) => !new RegExp(`/icons/${id}\\.svg`, 'i').test(app));
+    const needsLogoWire = hasLogo && !/\/logo\.svg/i.test(app);
+    const needsIconWire = unusedIcons.length > 0;
+    if (needsLogoWire || needsIconWire) {
+      const prefer = ['search', 'bag', 'user', 'settings', 'mail', 'grid', 'clock', 'more'];
+      const ordered = [
+        ...prefer.filter((id) => unusedIcons.includes(id) || (iconFiles.includes(id) && !new RegExp(`/icons/${id}\\.svg`, 'i').test(app))),
+        ...unusedIcons.filter((id) => !prefer.includes(id)),
+      ].filter((id, i, arr) => arr.indexOf(id) === i).slice(0, 6);
       const logo = hasLogo
         ? `<img className="nav-logo" src="/logo.svg" alt="${brand}" width="36" height="36" />`
         : `<span className="nav-brand">${brand}</span>`;
-      const search = hasSearch
-        ? `<img className="nav-icon" src="/icons/search.svg" alt="" width="20" height="20" aria-label="Search" />`
-        : '';
-      const bag = hasBag
-        ? `<img className="nav-icon" src="/icons/bag.svg" alt="" width="20" height="20" aria-label="Shelf bag" />`
-        : '';
-      const nav = `<header className="sticky-nav" role="banner"><div className="nav-left">${logo}</div><div className="nav-right">${search}${bag}</div></header>\n`;
-      if (/<h1\b/i.test(app)) {
-        app = app.replace(/<h1\b/i, `${nav}<h1`);
-      } else if (/className=["'][^"']*\bapp\b[^"']*["'][^>]*>/i.test(app)) {
-        app = app.replace(
-          /(className=["'][^"']*\bapp\b[^"']*["'][^>]*>)/i,
-          `$1\n      ${nav}`,
-        );
+      const iconImgs = ordered
+        .map((id) => `<img className="nav-icon" data-icon="${id}" src="/icons/${id}.svg" alt="${id}" width="20" height="20" />`)
+        .join('');
+      // Strip absolute icon-rails — they hide the product and leave icons unused in the real nav.
+      app = app.replace(/<div className=["'][^"']*\bicon-rail\b[^"']*["'][^>]*>[\s\S]*?<\/div>\s*/gi, '');
+      if (/className=["'][^"']*\bsticky-nav\b[^"']*["']/i.test(app)) {
+        if (needsLogoWire && /nav-left|brand-wordmark/i.test(app)) {
+          if (/className=["'][^"']*\bnav-left\b[^"']*["'][^>]*>/i.test(app)) {
+            app = app.replace(/(className=["'][^"']*\bnav-left\b[^"']*["'][^>]*>)/i, `$1${logo}`);
+          } else if (/className=["'][^"']*\bbrand-wordmark\b[^"']*["'][^>]*>/i.test(app)) {
+            app = app.replace(
+              /(<[^>]*className=["'][^"']*\bbrand-wordmark\b[^"']*["'][^>]*>)/i,
+              `${logo}$1`,
+            );
+          }
+        }
+        if (iconImgs) {
+          if (/className=["'][^"']*\bnav-right\b[^"']*["'][^>]*>/i.test(app)) {
+            app = app.replace(/(className=["'][^"']*\bnav-right\b[^"']*["'][^>]*>)/i, `$1${iconImgs}`);
+          } else if (/className=["'][^"']*\bnav-links\b[^"']*["'][^>]*>[\s\S]*?<\/nav>/i.test(app)) {
+            app = app.replace(
+              /(<\/nav>)/i,
+              `</nav><div className="nav-right" aria-label="Tools">${iconImgs}</div>`,
+            );
+          } else {
+            app = app.replace(
+              /(className=["'][^"']*\bsticky-nav\b[^"']*["'][^>]*>)/i,
+              `$1<div className="nav-right" aria-label="Tools">${iconImgs}</div>`,
+            );
+          }
+        }
+      } else if (/<(?:h1|header|section)\b/i.test(app) || /className=["'][^"']*\bapp\b/i.test(app)) {
+        const nav = `<header className="sticky-nav" role="banner"><div className="nav-left">${logo}</div><div className="nav-right">${iconImgs}</div></header>\n`;
+        if (/className=["'][^"']*\bapp\b[^"']*["'][^>]*>/i.test(app)) {
+          app = app.replace(/(className=["'][^"']*\bapp\b[^"']*["'][^>]*>)/i, `$1\n      ${nav}`);
+        } else {
+          app = app.replace(/<(?:h1|header|section)\b/i, `${nav}$&`);
+        }
+      }
+      if (cssKey && iconImgs && !/\.nav-icon\b/.test(String(next[cssKey] || ''))) {
+        let css = String(next[cssKey] || '');
+        css += `
+.nav-right { display: flex; align-items: center; gap: 0.75rem; }
+.nav-icon { display: block; object-fit: contain; opacity: 0.9; }
+.nav-logo { display: block; object-fit: contain; }
+`;
+        next[cssKey] = css;
+        changed.push(cssKey);
       }
     }
+
+    // Bare /hero.jpg, /logo.svg, /icons/*.svg, or missing /heroes/*.jpg → offline-safe fallbacks.
+    const hasPublicLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
+    const publicHeroSet = new Set(
+      keys.filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
+        .map((p) => '/' + p.replace(/^public\//i, '').toLowerCase()),
+    );
+    const svgHero = 'data:image/svg+xml,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1100" viewBox="0 0 960 1100">`
+      + `<defs>`
+      + `<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">`
+      + `<stop offset="0%" stop-color="#0f1419"/><stop offset="45%" stop-color="#1a222c"/><stop offset="100%" stop-color="#122033"/>`
+      + `</linearGradient>`
+      + `<linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">`
+      + `<stop offset="0%" stop-color="#2a2e2c"/><stop offset="55%" stop-color="#5a625c"/><stop offset="100%" stop-color="#1a1f1c"/>`
+      + `</linearGradient>`
+      + `<linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">`
+      + `<stop offset="0%" stop-color="#c4a45a"/><stop offset="100%" stop-color="#8a6b2f"/>`
+      + `</linearGradient>`
+      + `</defs>`
+      + `<rect width="960" height="1100" fill="url(#bg)"/>`
+      + `<polygon points="0,0 280,0 0,320" fill="#c6e6c0" opacity="0.55"/>`
+      + `<polygon points="960,0 680,0 960,360" fill="#ffd478" opacity="0.28"/>`
+      + `<path d="M250 420 C250 260 710 260 710 420" fill="none" stroke="url(#metal)" stroke-width="42" stroke-linecap="round"/>`
+      + `<rect x="198" y="400" width="110" height="220" rx="48" fill="url(#metal)"/>`
+      + `<rect x="652" y="400" width="110" height="220" rx="48" fill="url(#metal)"/>`
+      + `<circle cx="253" cy="510" r="34" fill="url(#gold)" opacity="0.9"/>`
+      + `<circle cx="707" cy="510" r="34" fill="url(#gold)" opacity="0.9"/>`
+      + `<text x="480" y="980" text-anchor="middle" fill="#1a1f1c" font-family="Georgia,serif" font-size="40" letter-spacing="4">${brand.replace(/[<>&]/g, '').toUpperCase().slice(0, 18)}</text>`
+      + `</svg>`,
+    );
+    if (!publicHeroSet.size) {
+      app = app.replace(/src=["']\/hero\.jpg["']/gi, `src="${svgHero}"`);
+      app = app.replace(/src=["']\/heroes\/[^"']+["']/gi, `src="${svgHero}"`);
+    } else {
+      app = app.replace(/src=["'](\/heroes\/[^"']+)["']/gi, (full, href) => {
+        if (publicHeroSet.has(String(href).toLowerCase())) return full;
+        return `src="${svgHero}"`;
+      });
+      if (/src=["']\/hero\.jpg["']/i.test(app)) {
+        const first = [...publicHeroSet][0];
+        app = app.replace(/src=["']\/hero\.jpg["']/gi, `src="${first}"`);
+      }
+    }
+    // Models often invent /assets/logo.svg or /public/hero.jpg — Vite serves public/ at /.
+    app = app.replace(/(['"`])\/assets\/(logo\.svg|icons\/)/gi, '$1/$2');
+    app = app.replace(/(['"`])\/public\//g, '$1/');
+    if (heroes[0]) {
+      const heroSet = new Set(heroes.map((h) => h.toLowerCase()));
+      app = app.replace(/url\(\s*(['"`])(\/[^'"`)\s]+)\1\s*\)/gi, (full, _q, href) => {
+        const pathOnly = String(href).split('?')[0].toLowerCase();
+        if (heroSet.has(pathOnly)) return full;
+        if (keys.some((p) => `/${p.replace(/^public\//i, '').replace(/\\/g, '/')}`.toLowerCase() === pathOnly)) return full;
+        return `url("${heroes[0]}")`;
+      });
+    }
+    if (!hasPublicLogo && /src=["']\/logo\.svg["']/i.test(app)) {
+      app = app.replace(
+        /<img\b[^>]*src=["']\/logo\.svg["'][^>]*\/?>/gi,
+        `<span className="logo-mark" aria-label="${brand}">${brand}</span>`,
+      );
+    }
+    // Missing platform icons → write public/icons/*.svg files (do NOT inline into JSX —
+    // data-URI replaces previously ate the button's closing `>` and blanked Live).
+    if (
+      /const\s+\[\s*filteredItems\s*,/.test(app)
+      && /const\s+items\s*=\s*\[/.test(app)
+      && /filteredItems\.map\b/.test(app)
+    ) {
+      app = app.replace(
+        /\{filteredItems\.map\b/g,
+        '{(filteredItems.length ? filteredItems : items).map',
+      );
+    }
+    const iconHits = [...app.matchAll(/src=["']\/icons\/([a-z0-9_-]+)\.svg["']/gi)];
+    for (const hit of iconHits) {
+      const name = String(hit[1] || '');
+      if (!name) continue;
+      const rel = `public/icons/${name}.svg`;
+      const exists = keys.some((p) => p.replace(/\\/g, '/').toLowerCase().endsWith(rel.toLowerCase()))
+        || Boolean(next[rel]);
+      if (exists) continue;
+      const fill = /steam/i.test(name) ? '#1b2838'
+        : /epic/i.test(name) ? '#2a2a2a'
+        : /play/i.test(name) ? '#003791'
+        : /xbox/i.test(name) ? '#107c10'
+        : '#222';
+      next[rel] = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24" rx="4" fill="${fill}"/><circle cx="12" cy="12" r="5" fill="#fff" opacity="0.9"/></svg>\n`;
+      changed.push(rel);
+    }
+    // Heal: `<button … onClick={…}\n  <img` missing `>` before children (common free-model crash).
+    app = app.replace(
+      /(<button\b[^>]*?onClick=\{[^}]+\})\s*\r?\n(\s*<)/gi,
+      '$1>\n$2',
+    );
+    // Heal accidental ` / />` self-close junk from prior bad rewrites.
+    app = app.replace(/\s+\/\s*\/>/g, ' />');
 
     if (app !== before) {
       next[appKey] = app;
       changed.push(appKey);
+    }
+  }
+
+  // Never inject cream/sage/gold apple-home atmosphere as a Ready heal.
+  // Layout Contract / Design hop owns palette; thin CSS stays honest for the gate.
+  if (cssKey) {
+    const css = healUnbalancedCssBraces(String(next[cssKey] || ''));
+    // Strip legacy atmospheric injects left from older builds.
+    let cleaned = css
+      .replace(/\/\*\s*Prefer cream atmosphere[\s\S]*?(?=\n\/\*|\n\.|\n@media|$)/gi, '')
+      .replace(/\/\*\s*NOVA create polish — brief companion[\s\S]*?(?=\/\* NOVA|\n\/\*|@media \(max-width: 640px\)[\s\S]*?\}\s*$)/gi, '')
+      .replace(/@keyframes\s+novaAtmosSweep\s*\{[\s\S]*?\}\s*/gi, '')
+      .replace(/@keyframes\s+novaCompanionSweep\s*\{[\s\S]*?\}\s*/gi, '')
+      .replace(/@keyframes\s+novaGoldSheen\s*\{[\s\S]*?\}\s*/gi, '')
+      .replace(/body\s*\{\s*background-color:\s*#f3eee4\s*!important;[\s\S]*?color:\s*#14181c;\s*\}\s*/gi, '')
+      .replace(/body::before\s*\{[\s\S]*?z-index:\s*0;\s*\}\s*/gi, '')
+      .replace(/--bg:\s*#f3eee4\s*;/gi, '--bg: #0f1419;')
+      .replace(/--panel:\s*#faf7f0\s*;/gi, '--panel: #1a222c;');
+    cleaned = healUnbalancedCssBraces(cleaned);
+    if (cleaned !== String(next[cssKey] || '')) {
+      next[cssKey] = cleaned;
+      changed.push(cssKey);
     }
   }
 
@@ -1730,7 +2570,17 @@ export function buildMarketingCompanionCss(
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
 body { font-family: ${p.font}; }
-.app { min-height: 100vh; display: flex; flex-direction: column; background: radial-gradient(1200px 600px at 20% -10%, ${p.glow} 0%, var(--bg) 55%); }
+.app { min-height: 100vh; display: flex; flex-direction: column; background:
+  radial-gradient(1200px 600px at 20% -10%, ${p.glow} 0%, transparent 55%),
+  linear-gradient(125deg, ${p.bg}, color-mix(in srgb, ${p.glow} 35%, ${p.bg}), ${p.panel});
+  background-size: 180% 180%;
+  animation: novaCompanionSweep 18s ease-in-out infinite;
+}
+@keyframes novaCompanionSweep {
+  0% { background-position: 0% 40%; }
+  50% { background-position: 100% 60%; }
+  100% { background-position: 0% 40%; }
+}
 .header, header, .sticky-nav {
   position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px);
   background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line);
@@ -1774,6 +2624,296 @@ body { font-family: ${p.font}; }
 `;
 }
 
+/** Marketing / shop landing floor — uses on-disk heroes; never booking stubs. */
+function buildMarketingShopFloor(
+  title: string,
+  brief: string,
+  p: CreatePalette,
+  kind: 'reef' | 'shop',
+): { app: string; css: string } {
+  const reef = kind === 'reef';
+  const bands = reef
+    ? [
+        { id: 'livestock', title: 'Livestock', body: 'Corals and reef fish, healthy and ready for home tanks.' },
+        { id: 'kits', title: 'Care kits', body: 'Salt, test kits, and lighting matched to your reef.' },
+        { id: 'visit', title: 'Visit', body: 'Tue–Sat 10–6 · Ask about acclimation and water parameters.' },
+      ]
+    : [
+        { id: 'featured', title: 'Featured', body: `Signature pieces from ${title}.` },
+        { id: 'story', title: 'Our story', body: 'Crafted with care for people who notice the details.' },
+        { id: 'visit', title: 'Visit', body: 'Open daily · Come see what’s new.' },
+      ];
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brand';
+  const hero = `/heroes/${slug}-hero.webp`;
+  const story = `/heroes/${slug}-story.webp`;
+  const app = `import './App.css';
+
+export default function App() {
+  return (
+    <div className="site">
+      <header className="topnav" role="banner">
+        <nav className="topnav-inner" aria-label="Primary">
+          <a className="mark" href="#top">${title}</a>
+          ${bands.map((b) => `<a href="#${b.id}">${b.title}</a>`).join('\n          ')}
+          <a href="#visit">Hours</a>
+        </nav>
+      </header>
+      <section className="hero full-bleed" id="top">
+        <div className="hero-copy">
+          <p className="eyebrow">${reef ? 'Saltwater / Reef' : 'Welcome'}</p>
+          <h1>${reef ? 'Reef life, carefully curated.' : `${title}.`}</h1>
+          <p className="sub">${reef ? 'Corals, fish, and care kits for calm, living aquariums.' : (String(brief || '').slice(0, 120) || 'A premium shop experience.')}</p>
+          <div className="cta-row">
+            <a className="pill pill-primary" href="#${bands[0].id}">${reef ? 'Browse livestock' : 'Explore'}</a>
+            <a className="pill pill-ghost" href="#visit">Visit</a>
+          </div>
+        </div>
+        <img className="hero-photo" src="${hero}" alt="${title} hero" />
+      </section>
+      ${bands.map((b, i) => `
+      <section className="band band-${i % 2 === 0 ? 'light' : 'dark'}" id="${b.id}">
+        <div className="band-copy">
+          <h2>${b.title}</h2>
+          <p>${b.body}</p>
+        </div>
+        <img src="${i === 0 ? story : hero}" alt="${b.title}" />
+      </section>`).join('\n')}
+      <footer className="foot" id="visit">
+        <a href="#top">${title}</a>
+        <a href="#visit">Hours</a>
+        <a href="#top">Contact</a>
+      </footer>
+    </div>
+  );
+}
+`;
+  const css = `:root {
+  --bg: ${reef ? '#04151c' : p.bg};
+  --ink: ${reef ? '#e8f6f8' : p.text};
+  --mute: ${reef ? '#8eb8c0' : p.muted};
+  --accent: ${reef ? '#2ec4b6' : p.accent};
+  --panel: ${reef ? '#0a2430' : p.panel};
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; }
+.site { width: 100%; }
+.topnav { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); }
+.topnav-inner { max-width: 1040px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 1.1rem; justify-content: center; padding: 0.85rem 1rem; }
+.topnav a { color: var(--ink); text-decoration: none; font-size: 0.92rem; opacity: 0.9; }
+.mark { font-weight: 700; letter-spacing: -0.02em; }
+.hero { min-height: 88vh; display: grid; place-items: center; text-align: center; padding: 4rem 1.25rem 3rem; position: relative; overflow: hidden; }
+.hero-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.55; }
+.hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 35%, transparent), var(--bg)); }
+.hero-copy { position: relative; z-index: 1; max-width: 40rem; }
+.eyebrow { text-transform: uppercase; letter-spacing: 0.08em; color: var(--mute); font-size: 0.8rem; }
+.hero h1, .band h2 { margin: 0.35rem 0 0; font-size: clamp(2.2rem, 6vw, 3.8rem); letter-spacing: -0.03em; font-weight: 650; }
+.sub, .band p { margin: 0.75rem auto 0; max-width: 34rem; color: var(--mute); font-size: clamp(1.05rem, 2.2vw, 1.25rem); }
+.cta-row { display: flex; gap: 0.85rem; justify-content: center; flex-wrap: wrap; margin-top: 1.35rem; }
+.pill { display: inline-flex; align-items: center; justify-content: center; padding: 0.55rem 1.15rem; border-radius: 980px; text-decoration: none; font-size: 0.95rem; }
+.pill-primary { background: var(--accent); color: #042026; font-weight: 600; }
+.pill-ghost { border: 1px solid var(--accent); color: var(--accent); }
+.band { display: grid; gap: 1.5rem; padding: 4rem 1.25rem; text-align: center; justify-items: center; }
+.band img { width: min(720px, 90vw); border-radius: 22px; object-fit: cover; max-height: 380px; }
+.band-light { background: var(--panel); color: var(--ink); }
+.band-dark { background: color-mix(in srgb, var(--bg) 92%, #000); }
+.foot { display: flex; flex-wrap: wrap; gap: 1.25rem; justify-content: center; padding: 2.5rem 1rem 3rem; background: #021017; }
+.foot a { color: var(--mute); text-decoration: none; font-size: 0.85rem; }
+`;
+  return { app, css };
+}
+
+/**
+ * When craft leaves a title stub, materialize a brief-aware interactive floor
+ * (hero + item grid + hours + confirm form) using CreateIdentity palette —
+ * never cream luxury companion or Veopx stock copy.
+ */
+export function buildBriefInteractiveFloor(productName: string, brief = ''): { app: string; css: string } {
+  const identity = createIdentityFromBrief(productName, brief);
+  const title = String(identity.name || productName || 'Product').replace(/[*/\\<>]/g, '').slice(0, 48) || 'Product';
+  const p = identity.palette;
+  const t = String(brief || identity.brief || '');
+  const boatish = /\b(?:boat|skiff|harbor|dock|clipper|marina|sail)\b/i.test(t);
+  const machineish = /\b(?:machine|laser|cnc|makerspace|forge|printer)\b/i.test(t);
+  const reefish = /\b(?:aquarium|saltwater|reef|coral|fish\s+shop|livestock)\b/i.test(t);
+  // Marketing / shop landings must NOT ship the booking "Core / Day / Reserve" stub.
+  if (reefish || (briefLooksLikeMarketingLanding(t) && !boatish && !machineish)) {
+    return buildMarketingShopFloor(title, t, p, reefish ? 'reef' : 'shop');
+  }
+  const items = boatish
+    ? [
+        { name: 'Harbor Skiff', blurb: 'Weekend day-boat for 4.', status: 'Open' },
+        { name: 'Clipper 18', blurb: 'Steady for foggy mornings.', status: 'Open' },
+        { name: 'Dock Runner', blurb: 'Quick loops around the bay.', status: 'Hold' },
+      ]
+    : machineish
+      ? [
+          { name: 'Laser bay', blurb: 'Open until 9pm.', status: 'Free' },
+          { name: 'CNC table', blurb: 'Book a 2-hour slot.', status: 'Free' },
+          { name: '3D printers', blurb: 'Three stations online.', status: 'Busy' },
+        ]
+      : [
+          { name: `${title} Core`, blurb: 'Primary offer for this brief.', status: 'Open' },
+          { name: `${title} Day`, blurb: 'Everyday pick.', status: 'Open' },
+          { name: `${title} Reserve`, blurb: 'Weekend special.', status: 'Hold' },
+        ];
+  const hours = boatish
+    ? 'Sat-Sun 8am-6pm | Dock C'
+    : machineish
+      ? 'Tonight 5pm-10pm | Shop floor'
+      : 'Open hours | See below';
+  const cta = boatish ? 'Reserve' : machineish ? 'Book slot' : 'Confirm';
+  const itemsLit = JSON.stringify(items, null, 2);
+  const app = `import { useState } from 'react';
+import './App.css';
+
+const ITEMS = ${itemsLit};
+
+export default function App() {
+  const [name, setName] = useState('');
+  const [note, setNote] = useState('');
+  const [picked, setPicked] = useState(ITEMS[0].name);
+  const [confirmed, setConfirmed] = useState('');
+  return (
+    <div className="app">
+      <header className="sticky-nav" role="banner">
+        <div className="nav-left">
+          <img className="nav-logo" src="/logo.svg" alt="${title}" width="36" height="36" />
+          <div className="brand-wordmark">${title}</div>
+        </div>
+        <nav className="nav-links" aria-label="Primary">
+          <a href="#fleet">Browse</a>
+          <a href="#hours">Hours</a>
+          <a href="#reserve">${cta}</a>
+        </nav>
+        <div className="nav-right" aria-label="Tools">
+          <img className="nav-icon" data-icon="user" src="/icons/user.svg" alt="profile" width="20" height="20" />
+          <img className="nav-icon" data-icon="settings" src="/icons/settings.svg" alt="settings" width="20" height="20" />
+          <img className="nav-icon" data-icon="mail" src="/icons/mail.svg" alt="mail" width="20" height="20" />
+        </div>
+      </header>
+      <section className="hero" id="top">
+        <p className="eyebrow">${title}</p>
+        <h1>${boatish ? 'Boats ready for the weekend.' : machineish ? 'Machines free tonight.' : `${title} - ready when you are.`}</h1>
+        <p className="lede">${boatish ? 'See open skiffs, weekend hours, and reserve a boat without an account.' : machineish ? 'Check open bays, tonight hours, and book a slot without calling.' : 'Browse what is open, check hours, and confirm without an account.'}</p>
+      </section>
+      <section className="hours-strip" id="hours">${hours}</section>
+      <section className="product-grid" id="fleet" aria-label="Available">
+        {ITEMS.map((item) => (
+          <article className="product-card" key={item.name}>
+            <h3>{item.name}</h3>
+            <p>{item.blurb}</p>
+            <span className="chip">{item.status}</span>
+            <button type="button" onClick={() => setPicked(item.name)}>Select</button>
+          </article>
+        ))}
+      </section>
+      <section className="reserve" id="reserve">
+        <h2>${cta}</h2>
+        <p className="dim">Selected: {picked}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setConfirmed(name.trim() ? \`Saved for \${name.trim()} - \${picked}\` : \`Saved - \${picked}\`);
+          }}
+        >
+          <label>
+            Name
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+          </label>
+          <label>
+            Note
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" />
+          </label>
+          <button type="submit">${cta}</button>
+        </form>
+        {confirmed ? <p className="confirm" role="status">{confirmed}</p> : null}
+      </section>
+      <footer className="footer">${title}</footer>
+    </div>
+  );
+}
+`;
+  const css = `/* NOVA brief floor - ${title} */
+:root {
+  --bg: ${p.bg};
+  --panel: ${p.panel};
+  --text: ${p.text};
+  --muted: ${p.muted};
+  --accent: ${p.accent};
+  --line: ${p.line};
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+body { font-family: ${p.font}; }
+.app {
+  min-height: 100vh; display: flex; flex-direction: column;
+  background:
+    radial-gradient(900px 480px at 15% -10%, ${p.glow} 0%, transparent 55%),
+    linear-gradient(160deg, ${p.bg}, ${p.panel});
+  color: var(--text);
+}
+.sticky-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.35rem; position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.nav-left { display: flex; align-items: center; gap: 0.65rem; }
+.brand-wordmark { font-weight: 750; letter-spacing: -0.03em; font-size: 1.15rem; }
+.nav-links { display: flex; gap: 1.1rem; }
+.nav-links a { color: var(--muted); text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
+.nav-right { display: flex; align-items: center; gap: 0.75rem; }
+.nav-icon, .nav-logo { display: block; object-fit: contain; }
+.hero { padding: 3.5rem 1.35rem 2rem; max-width: 920px; margin: 0 auto; }
+.eyebrow { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; color: var(--accent); margin: 0 0 0.75rem; }
+.hero h1 { margin: 0 0 0.85rem; font-size: clamp(2rem, 5vw, 3.4rem); letter-spacing: -0.04em; line-height: 1.05; }
+.lede { margin: 0; color: var(--muted); max-width: 42rem; line-height: 1.55; font-size: 1.05rem; }
+.hours-strip {
+  margin: 0 1.35rem 1.5rem; padding: 0.85rem 1.1rem; border-radius: 12px;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--muted); max-width: 1100px; width: calc(100% - 2.7rem);
+}
+.product-grid {
+  display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  max-width: 1100px; margin: 0 auto 2rem; padding: 0 1.35rem; width: 100%;
+}
+.product-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 1.1rem; display: flex; flex-direction: column; gap: 0.45rem;
+}
+.product-card h3 { margin: 0; font-size: 1.05rem; }
+.product-card p { margin: 0; color: var(--muted); line-height: 1.45; font-size: 0.92rem; }
+.chip {
+  align-self: flex-start; font-size: 0.75rem; letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--accent);
+}
+.product-card button, .reserve button {
+  appearance: none; border: 0; border-radius: 10px; padding: 0.65rem 1rem;
+  background: var(--accent); color: ${p.btnInk}; font-weight: 700; cursor: pointer; margin-top: auto;
+}
+.reserve {
+  max-width: 560px; margin: 0 auto 3rem; padding: 0 1.35rem; width: 100%;
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+.reserve h2 { margin: 0; letter-spacing: -0.03em; }
+.dim { color: var(--muted); margin: 0; }
+.reserve form { display: flex; flex-direction: column; gap: 0.75rem; }
+.reserve label { display: flex; flex-direction: column; gap: 0.35rem; color: var(--muted); font-size: 0.9rem; }
+.reserve input {
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; padding: 0.65rem 0.85rem;
+}
+.confirm { color: var(--accent); font-weight: 600; }
+.footer { margin-top: auto; border-top: 1px solid var(--line); padding: 1.25rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 640px) {
+  .hero { padding-top: 2.5rem; }
+}
+`;
+  return { app, css };
+}
+
 export function cssBlobIsThin(files: Record<string, string>, minLen = 1500): boolean {
   const css = `${files['src/App.css'] || ''}\n${files['src/index.css'] || ''}`;
   return css.replace(/\s+/g, '').length < minLen;
@@ -1802,8 +2942,8 @@ export function createPolishMissingLocalImports(
 }
 
 /**
- * Heal App that imports missing local modules (e.g. ./productData) by stripping
- * those imports and inlining a tiny data stub so Live does not crash.
+ * Heal App that imports missing local modules (e.g. ./productData or ./components/Hero)
+ * by collapsing to a single-file landing or stripping imports + JSX so Live does not crash.
  */
 export function healMissingLocalImports(
   files: Record<string, string>,
@@ -1811,6 +2951,16 @@ export function healMissingLocalImports(
 ): { files: Record<string, string>; healed: string[] } {
   const missing = createPolishMissingLocalImports(files);
   if (!missing.length) return { files, healed: [] };
+  const missingUi = missing.some((s) =>
+    /components\//i.test(s)
+    || /\/(?:Navbar|Nav|Header|Hero|Footer|FeatureBand|Feature|Banner)\b/i.test(s),
+  );
+  if (missingUi) {
+    const assembled = assembleCreateAppFromParts(files, productName);
+    if (assembled.changed.length && !createPolishMissingLocalImports(assembled.files).length) {
+      return { files: assembled.files, healed: missing };
+    }
+  }
   const next = { ...files };
   const appKey = next['src/App.tsx'] && !next['src/App.jsx']
     ? 'src/App.tsx'
@@ -1819,16 +2969,34 @@ export function healMissingLocalImports(
   let app = String(next[appKey] || '');
   const healed: string[] = [];
   const brand = String(productName || 'Item').replace(/[*/\\]/g, '').slice(0, 28) || 'Item';
+  const droppedNames = new Set<string>();
 
   for (const spec of missing) {
     const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Drop `import … from './missing'` / `import './missing'`.
+    const importLine = app.match(new RegExp(`^\\s*import\\s+([^;]*?)from\\s+['"]${esc}['"]\\s*;?\\s*$`, 'im'));
+    if (importLine) {
+      const clause = importLine[1].trim();
+      const def = clause.match(/^([A-Za-z_$][\w$]*)/);
+      if (def && !clause.startsWith('{')) droppedNames.add(def[1]);
+      const named = clause.match(/\{([^}]+)\}/);
+      if (named) {
+        for (const part of named[1].split(',')) {
+          const name = part.trim().split(/\s+as\s+/i).pop()?.trim();
+          if (name && /^[A-Za-z_$][\w$]*$/.test(name)) droppedNames.add(name);
+        }
+      }
+    }
     app = app.replace(new RegExp(`^\\s*import\\s+[^;]*?from\\s+['"]${esc}['"]\\s*;?\\s*$`, 'gim'), '');
     app = app.replace(new RegExp(`^\\s*import\\s+['"]${esc}['"]\\s*;?\\s*$`, 'gim'), '');
     healed.push(spec);
   }
 
-  // If the App referenced a product/items catalog that vanished with the import, inject a local stub.
+  for (const name of droppedNames) {
+    const ne = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    app = app.replace(new RegExp(`<${ne}\\b[^>]*/>`, 'g'), '');
+    app = app.replace(new RegExp(`<${ne}\\b[^>]*>[\\s\\S]*?</${ne}>`, 'g'), '');
+  }
+
   if (
     healed.some((h) => /product|item|book|catalog|data|shelf/i.test(h))
     && !/\bconst\s+(?:ITEMS|PRODUCTS|BOOKS|items|products|books)\s*=/.test(app)
@@ -1843,7 +3011,6 @@ export function healMissingLocalImports(
     } else {
       app = `${stub}\n${app}`;
     }
-    // Soft alias common names models import.
     if (/\bproductData\b/.test(app) && !/\bconst\s+productData\b/.test(app)) {
       app = app.replace(stub, `${stub}const productData = ITEMS;\n`);
     }

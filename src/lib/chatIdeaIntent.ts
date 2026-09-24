@@ -167,6 +167,28 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
     return false;
   }
 
+  // Design sketch: "I want a homepage that feels like apple.com…" with sections, no build verb.
+  if (
+    t.length >= 40
+    && t.length < 1200
+    && /\bi\s+want\s+a\s+(?:homepage|home\s*page|landing(?:\s+page)?|website|site|page)\b/i.test(t)
+    && /\b(?:feels?\s+like|looks?\s+like|similar\s+to|inspired\s+by)\b/i.test(t)
+    && !/\b(?:build\s+it|create\s+(?:it|the|files|project)|scaffold|go\s+build|on\s+disk|start\s+building|write\s+(?:the\s+)?code)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Layout sketch without a create command — nav / hero / bands / footer described.
+  if (
+    t.length >= 60
+    && t.length < 1200
+    && !/\b(?:build\s+it|create\s+(?:a\s+)?(?:new\s+)?(?:project|files)|scaffold|go\s+build|on\s+disk|start\s+building)\b/i.test(t)
+    && /\b(?:nav|navigation|hero|footer)\b/i.test(t)
+    && /\b(?:band|section|white\s+space|motion|cta|button)\b/i.test(t)
+    && /\b(?:homepage|home\s*page|landing|apple\.com|product)\b/i.test(t)
+  ) {
+    return true;
+  }
+
   // "…like Twitch/Discord…" plus a question mark → talk, not scaffold.
   if (
     /\b(?:app|website|site|platform)\b/i.test(t)
@@ -190,6 +212,42 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
       || /\bno\s+(?:accounts?|payments?|login|sign[- ]?ups?|auth)\b/i.test(t)
     )
     && /\b(?:app|shelf|list|screen|page|browse|borrow|checkout|checked\s+out|lend|friends?|phone|tiny|simple)\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  // Real-world problem + soft product sketch (no build/create command) → plan together.
+  // e.g. "I organize farmers market stalls and keep losing track… think of a tiny phone page"
+  if (
+    t.length >= 40
+    && t.length < 900
+    && !/\b(?:build\s+it\s+now|scaffold|on\s+disk|open\s+preview|start\s+building|write\s+(?:the\s+)?(?:code|files)|make\s+me|spin\s+up)\b/i.test(t)
+    && !/\b(?:create|scaffold)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)
+    && (
+      /\b(?:losing\s+track|keep\s+losing|hard\s+to\s+(?:track|keep\s+up)|can'?t\s+(?:keep|track)|forget(?:ting)?\s+who)\b/i.test(t)
+      || /\b(?:organize|organising|organizing|manage|tracking)\b[\s\S]{0,80}\b(?:stalls?|vendors?|inventory|books?|gear|shelf|borrow)\b/i.test(t)
+      || /\bthink\s+of\s+(?:a\s+)?(?:tiny|simple|small|little)\s+(?:phone\s+)?(?:page|app|screen)\b/i.test(t)
+      || /\b(?:phone[- ]?friendly|mobile[- ]?first|tiny\s+phone)\b/i.test(t)
+    )
+    && (
+      /\b(?:page|app|screen|list|stalls?|vendors?|market|phone|browse|track)\b/i.test(t)
+      || /\b(?:sage|cream|terracotta|soft\s+\w+)\b/i.test(t)
+    )
+  ) {
+    return true;
+  }
+
+  // Feasibility / honesty checks — talk only, even if they say "build".
+  // e.g. "is that actually possible to build as a first version?"
+  if (
+    /\?/i.test(t)
+    && (
+      /\b(?:is\s+(?:that|this|it)\s+actually\s+possible)\b/i.test(t)
+      || /\b(?:will\s+(?:that|this|it)\s+(?:really\s+)?work)\b/i.test(t)
+      || /\b(?:how\s+long\s+(?:would|will|does)\s+(?:a\s+)?(?:first|useful)?\s*(?:version|v1)?\s*take)\b/i.test(t)
+      || /\b(?:roughly\s+how\s+long|feasible|feasibility)\b/i.test(t)
+      || /\bpossible\s+to\s+build\b/i.test(t)
+    )
   ) {
     return true;
   }
@@ -646,7 +704,7 @@ export function looksLikeGreenfieldStartWorkGo(text: string): boolean {
 export function looksLikeGreenfieldKeepPlanning(text: string): boolean {
   const t = String(text || '');
   // Require an explicit planning-continue signal — not bare “not yet” (too common in normal talk).
-  return /\b(?:keep\s+planning|plan\s+only|more\s+planning|just\s+plan|add\s+more\s+features\s+to\s+the\s+plan|expand\s+the\s+plan)\b/i.test(t);
+  return /\b(?:keep\s+planning|plan\s+only|more\s+planning|just\s+plan|add\s+more\s+features\s+to\s+the\s+plan|expand\s+the\s+plan|fold\s+(?:those|these|them|it)\s+into\s+the\s+plan|add\s+(?:those|these|them)\s+to\s+the\s+plan|update\s+the\s+plan)\b/i.test(t);
 }
 
 export function looksLikeGreenfieldHaveFolder(text: string): boolean {

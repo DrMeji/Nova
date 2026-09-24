@@ -1,8 +1,8 @@
-/** UI catalog for Local AI. ids/sizes must match electron/arkCatalog.cjs (enforced by smoke-catalog-ssot). */
+/** UI catalog for Local AI. ids/sizes must match electron/novaCatalog.cjs (enforced by smoke-catalog-ssot). */
 
 import { sortModelsByCategoryThenSizeDesc } from '@/lib/modelSort';
 
-export type EngineUiCategory = 'general' | 'coding' | 'reasoning' | 'fast' | 'vision';
+export type EngineUiCategory = 'general' | 'coding' | 'design' | 'reasoning' | 'fast' | 'vision';
 
 export type EngineUiModel = {
   id: string;
@@ -21,6 +21,7 @@ export const ENGINE_UI_CATALOG: EngineUiModel[] = sortModelsByCategoryThenSizeDe
   { id: 'qwen25-coder-32b', name: 'Qwen2.5-Coder 32B', category: 'coding', sizeGb: 20, tone: 'from-indigo-500 to-violet-800', initial: '32' },
   { id: 'deepseek-coder-v2-lite', name: 'DeepSeek Coder V2 Lite', category: 'coding', sizeGb: 8.9, tone: 'from-cyan-500 to-teal-700', initial: 'DS' },
   { id: 'starcoder2-7b', name: 'StarCoder2 7B', category: 'coding', sizeGb: 4.3, tone: 'from-amber-500 to-orange-700', initial: 'Sc' },
+  { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', category: 'design', sizeGb: 2.5, tone: 'from-rose-400 to-orange-600', initial: 'UI' },
   { id: 'qwen25-7b', name: 'Qwen2.5 7B Instruct', category: 'general', sizeGb: 4.7, tone: 'from-sky-400 to-blue-700', initial: 'Q7' },
   { id: 'llama31-8b', name: 'Llama 3.1 8B Instruct', category: 'general', sizeGb: 4.9, tone: 'from-indigo-500 to-blue-800', initial: 'L8' },
   { id: 'mistral-7b', name: 'Mistral 7B Instruct', category: 'general', sizeGb: 4.1, tone: 'from-orange-400 to-amber-700', initial: 'Mi' },

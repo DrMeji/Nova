@@ -40,8 +40,8 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
     'X-GitHub-Api-Version': '2022-11-28',
   };
 
-  if (window.arkDesktop?.httpRequest) {
-    const res = await window.arkDesktop.httpRequest(url, { method: 'GET', headers });
+  if (window.novaDesktop?.httpRequest) {
+    const res = await window.novaDesktop.httpRequest(url, { method: 'GET', headers });
     if (!res.ok) {
       const msg =
         typeof res.data === 'object' && res.data && 'message' in res.data
@@ -52,8 +52,8 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
     return res.data as T;
   }
 
-  if (window.arkDesktop?.httpGet) {
-    const res = await window.arkDesktop.httpGet(url, headers);
+  if (window.novaDesktop?.httpGet) {
+    const res = await window.novaDesktop.httpGet(url, headers);
     if (!res.ok) {
       const msg =
         typeof res.data === 'object' && res.data && 'message' in res.data
@@ -87,8 +87,8 @@ async function githubSend<T>(token: string, path: string, method: string, body?:
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (window.arkDesktop?.httpRequest) {
-    const res = await window.arkDesktop.httpRequest(url, {
+  if (window.novaDesktop?.httpRequest) {
+    const res = await window.novaDesktop.httpRequest(url, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,

@@ -19,8 +19,8 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
 import { getHardwareClass, getAccurateHardware } from '@/lib/api';
 import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
@@ -35,7 +35,7 @@ import {
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import {
   Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
@@ -45,7 +45,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
   const {
     activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
     flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, scheduleAccountDeletion, cancelAccountDeletion,
+    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
@@ -98,25 +98,25 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                     <label className="block text-xs font-medium text-content-secondary">NOVA ID</label>
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
-                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
-                      {isArkDevEmail(user?.email)
+                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-nova-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
+                      {isNovaDevEmail(user?.email)
                         ? 'DEV'
-                        : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
+                        : (profile?.nova_id ? formatNovaId(profile.nova_id) : '•••••••')}
                     </p>
                     <button
                       type="button"
-                      disabled={!profile?.ark_id && !isArkDevEmail(user?.email)}
+                      disabled={!profile?.nova_id && !isNovaDevEmail(user?.email)}
                       onClick={() => {
-                        if (!profile?.ark_id && !isArkDevEmail(user?.email)) return;
-                        const arkIdText = isArkDevEmail(user?.email)
+                        if (!profile?.nova_id && !isNovaDevEmail(user?.email)) return;
+                        const novaIdText = isNovaDevEmail(user?.email)
                           ? 'DEV'
-                          : formatArkId(String(profile?.ark_id ?? ''));
-                        void navigator.clipboard.writeText(arkIdText).then(() => {
+                          : formatNovaId(String(profile?.nova_id ?? ''));
+                        void navigator.clipboard.writeText(novaIdText).then(() => {
                           setArkCopied(true);
                           window.setTimeout(() => setArkCopied(false), 1600);
                         }).catch(() => undefined);
                       }}
-                      className="ark-btn-secondary shrink-0"
+                      className="nova-btn-secondary shrink-0"
                       title="Copy NOVA ID"
                     >
                       {arkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -132,52 +132,23 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                 </div>
 
                 <div className="flex flex-wrap gap-2 pt-1 items-center">
-                  <button type="button" onClick={signOut} className="ark-btn-secondary !text-ark-accent-red">
+                  <button type="button" onClick={signOut} className="nova-btn-secondary !text-nova-accent-red">
                     Sign Out
                   </button>
                   {user?.id && user.id !== 'guest-local' ? (
-                    profile?.delete_scheduled_at ? (
-                      <button
-                        type="button"
-                        disabled={deleteAccountBusy}
-                        className="ark-btn-secondary !text-amber-200 border-amber-500/40 disabled:opacity-50"
-                        onClick={() => {
-                          setDeleteAccountBusy(true);
-                          setDeleteAccountMsg(null);
-                          void cancelAccountDeletion().then((res: any) => {
-                            setDeleteAccountBusy(false);
-                            if (!res.ok) {
-                              setDeleteAccountMsg(res.error);
-                              return;
-                            }
-                            flashSaved('Deletion canceled');
-                          });
-                        }}
-                      >
-                        {deleteAccountBusy ? 'Canceling…' : 'Cancel account deletion'}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={deleteAccountBusy}
-                        className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
-                        onClick={() => {
-                          setDeleteAccountMsg(null);
-                          setDeleteConfirmOpen(true);
-                        }}
-                      >
-                        Delete account
-                      </button>
-                    )
+                    <button
+                      type="button"
+                      disabled={deleteAccountBusy}
+                      className="nova-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                      onClick={() => {
+                        setDeleteAccountMsg(null);
+                        setDeleteConfirmOpen(true);
+                      }}
+                    >
+                      Delete account
+                    </button>
                   ) : null}
                 </div>
-                {profile?.delete_scheduled_at ? (
-                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                    Account deletion is scheduled for{' '}
-                    {new Date(profile.delete_scheduled_at).toLocaleString()}. You can cancel above before then.
-                    We will email {user?.email || 'you'} when mail delivery is live.
-                  </p>
-                ) : null}
                 {deleteAccountMsg ? (
                   <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
                 ) : null}
@@ -191,23 +162,19 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="NOVA-delete-account-title"
-                className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-ark-navy-900 shadow-2xl p-5 space-y-3"
+                className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-nova-navy-900 shadow-2xl p-5 space-y-3"
               >
                 <h3 id="NOVA-delete-account-title" className="text-base font-semibold text-content-primary">
-                  You&apos;re about to delete your account
+                  Delete your account permanently?
                 </h3>
                 <p className="text-sm text-content-secondary leading-relaxed">
-                  This starts a <span className="text-content-primary font-medium">24-hour</span> deletion window.
-                  Your account stays usable until then. After 24 hours it is permanently removed.
-                </p>
-                <p className="text-[12px] text-content-tertiary leading-relaxed">
-                  We&apos;ll send an email to <span className="text-content-secondary">{user?.email || 'your inbox'}</span>{' '}
-                  confirming the schedule (email delivery ships with SMTP. The notice is prepared on this PC for now).
+                  This removes your NOVA account and cloud data <span className="text-content-primary font-medium">immediately</span>.
+                  It cannot be undone. Local projects on this PC are not deleted unless you remove them yourself.
                 </p>
                 <div className="flex flex-wrap gap-2 justify-end pt-1">
                   <button
                     type="button"
-                    className="ark-btn-secondary"
+                    className="nova-btn-secondary"
                     disabled={deleteAccountBusy}
                     onClick={() => setDeleteConfirmOpen(false)}
                   >
@@ -215,23 +182,22 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                   </button>
                   <button
                     type="button"
-                    className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                    className="nova-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
                     disabled={deleteAccountBusy}
                     onClick={() => {
                       setDeleteAccountBusy(true);
                       setDeleteAccountMsg(null);
-                      void scheduleAccountDeletion(24).then((res: any) => {
+                      void deleteAccountPermanently().then((res: { ok: boolean; error?: string }) => {
                         setDeleteAccountBusy(false);
                         if (!res.ok) {
-                          setDeleteAccountMsg(res.error);
+                          setDeleteAccountMsg(res.error || 'Could not delete account');
                           return;
                         }
                         setDeleteConfirmOpen(false);
-                        flashSaved('Deletion scheduled · 24 hours');
                       });
                     }}
                   >
-                    {deleteAccountBusy ? 'Scheduling…' : 'Delete in 24 hours'}
+                    {deleteAccountBusy ? 'Deleting…' : 'Delete forever'}
                   </button>
                 </div>
               </div>
@@ -353,8 +319,8 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
               <div className="space-y-6 max-w-3xl">
                 {/* Status */}
                 <div className="ark-card p-4 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
-                    <Cpu className="w-5 h-5 text-ark-accent-green" />
+                  <div className="w-10 h-10 rounded-lg bg-nova-accent-green/10 flex items-center justify-center shrink-0">
+                    <Cpu className="w-5 h-5 text-nova-accent-green" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Routing brain</p>
@@ -369,7 +335,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                   <p className="text-sm font-medium text-content-primary">NOVA Brain details</p>
                   <button
                     type="button"
-                    className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
+                    className="nova-btn-secondary text-xs shrink-0 self-start sm:self-center"
                     onClick={() => {
                       onClose?.();
                       navigate({ name: 'brain' });
@@ -398,20 +364,20 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                         }}
                         className={`w-full text-left p-3 rounded-lg border transition-all ${
                           aiMode === mode.value
-                            ? 'border-ark-blue-400 bg-ark-blue-500/10'
+                            ? 'border-nova-blue-400 bg-nova-blue-500/10'
                             : 'border-surface-border hover:border-surface-border-light'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
+                            <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-nova-blue-300' : 'text-content-primary'}`}>
                               {mode.label}
                             </p>
                             {'hint' in mode && mode.hint ? (
                               <p className="text-xs text-content-tertiary mt-0.5">{mode.hint}</p>
                             ) : null}
                           </div>
-                          {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
+                          {aiMode === mode.value && <Check className="w-4 h-4 text-nova-blue-400 shrink-0" />}
                         </div>
                       </button>
                     ))}
@@ -505,7 +471,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                 {/* Local GGUF */}
                 <SettingsGroup title="Local GGUF (advanced)">
                   <div className="rounded-xl border border-surface-border p-5 space-y-6 bg-surface/30">
-                    <div className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 px-3 py-2.5">
+                    <div className="rounded-lg border border-surface-border/80 bg-nova-navy-950/40 px-3 py-2.5">
                       <p className="text-[11px] font-medium text-content-secondary">Local chat history capacity</p>
                       <p className="text-sm text-content-primary mt-0.5 tabular-nums">
                         {ggufCtxCapacityLabel()}

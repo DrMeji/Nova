@@ -3,7 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { supabase, supabaseConfigured } from '../lib/supabase';
 
 export type SiteProfile = {
-  ark_id: string | null;
+  nova_id: string | null;
   display_name: string | null;
 };
 
@@ -45,8 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle();
     setProfile(
       data
-        ? { ark_id: data.ark_id ?? null, display_name: data.display_name ?? null }
-        : { ark_id: null, display_name: null },
+        ? { nova_id: data.nova_id ?? null, display_name: data.display_name ?? null }
+        : { nova_id: null, display_name: null },
     );
   }, [user]);
 

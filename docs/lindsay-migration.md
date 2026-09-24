@@ -16,7 +16,7 @@ Keep the **NOVA desktop app running** (window can be minimized to the tray). Clo
 4. In Lindsay (or your client), set the API / Ollama base URL and bearer token to those copied values.
 5. Use NOVA model ids (or common aliases) — see below.
 
-Packaged NOVA requires the token on chat and model routes. `ARK_BRAIN_TOKEN` is optional only for an unpackaged localhost development build.
+Packaged NOVA requires the token on chat and model routes. `NOVA_BRAIN_TOKEN` is optional only for an unpackaged localhost development build.
 
 ## Model names
 
@@ -39,4 +39,4 @@ Prefer exact NOVA ids from `GET /api/tags` or `GET /v1/models`. If the client om
 - OpenAI-shaped: `/v1/chat/completions`
 - Native: `/v1/chat`, `/v1/chat/stream`, `/v1/contract`, `/health`
 
-Full contract: [NOVA-brain-api.md](./ark-brain-api.md) · OpenAPI: [NOVA-brain-openapi.yaml](./ark-brain-openapi.yaml) · sample: `examples/external-brain-client/`
+Full contract: [NOVA-brain-api.md](./nova-brain-api.md) · OpenAPI: [NOVA-brain-openapi.yaml](./nova-brain-openapi.yaml) · sample: `examples/external-brain-client/`

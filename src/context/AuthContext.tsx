@@ -18,9 +18,9 @@ import {
   prepareLaunchForTesting,
 } from '@/lib/setup';
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
-import { ensureArkId, formatArkId, readLocalArkId } from '@/lib/arkUserId';
-import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
-import { cancelOwnAccountDeletion, deleteOwnAccountPermanently, finalizeScheduledDeletionIfDue, scheduleOwnAccountDeletion } from '@/lib/deleteAccount';
+import { ensureNovaId, formatNovaId, readLocalNovaId } from '@/lib/novaUserId';
+import { mergeGuestSocialToCloud } from '@/lib/novaSocial';
+import { deleteOwnAccountPermanently } from '@/lib/deleteAccount';
 import { accountResetRedirectUrl } from '@/lib/accountWeb';
 
 // Guest identity used when login is bypassed (dev / testing only).
@@ -47,7 +47,7 @@ function guestProfile(): Profile {
     id: 'guest-local',
     display_name: 'Guest',
     avatar_url: null,
-    ark_id: readLocalArkId('guest-local'),
+    nova_id: readLocalNovaId('guest-local'),
     onboarding_completed: isSetupCompleted(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -69,11 +69,7 @@ interface AuthContextValue {
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  /** Schedule permanent deletion in ~24 hours (grace period). */
-  scheduleAccountDeletion: (hours?: number) => Promise<{ ok: true; deleteAt: string } | { ok: false; error: string }>;
-  /** Cancel a pending scheduled deletion. */
-  cancelAccountDeletion: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  /** Immediately wipe the account (used when the grace period has elapsed). */
+  /** Permanently delete the signed-in account immediately. */
   deleteAccountPermanently: () => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Guest login. skipSetup: true jumps straight into the app; false runs first-run optimize. */
   bypassLogin: (options?: { skipSetup?: boolean }) => void;
@@ -153,14 +149,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accountEmail = authUser?.email || null;
     if (profileRes.data) {
       const p = profileRes.data as Profile;
-      const due = await finalizeScheduledDeletionIfDue(p.delete_scheduled_at);
-      if (due === 'deleted') {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setSettings(null);
-        return;
-      }
       const metaName = authUser?.user_metadata?.display_name as string | undefined;
       const display = p.display_name || metaName || null;
       setProfile({
@@ -169,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Machine install flag wins. never skip first-run because of a cloud profile.
         onboarding_completed: setupDone,
       });
-      const arkId = await ensureArkId(userId, accountEmail);
-      setProfile(prev => prev ? { ...prev, ark_id: arkId } : prev);
+      const novaId = await ensureNovaId(userId, accountEmail);
+      setProfile(prev => prev ? { ...prev, nova_id: novaId } : prev);
       if (display) {
         try {
           const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
@@ -187,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: userId,
         display_name: null,
         avatar_url: null,
-        ark_id: await ensureArkId(userId, accountEmail),
+        nova_id: await ensureNovaId(userId, accountEmail),
         onboarding_completed: setupDone,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -206,16 +194,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Migrate any browser localStorage auth session into Electron userData.
       try {
-        if (window.arkDesktop?.authStorageSet) {
+        if (window.novaDesktop?.authStorageSet) {
           const legacy = Object.keys(localStorage).filter(k => /auth-token/i.test(k));
           for (const k of legacy) {
             const v = localStorage.getItem(k);
             if (!v) continue;
-            const existing = await window.arkDesktop.authStorageGet?.(k);
-            if (!existing) await window.arkDesktop.authStorageSet(k, v);
+            const existing = await window.novaDesktop.authStorageGet?.(k);
+            if (!existing) await window.novaDesktop.authStorageSet(k, v);
             if (k !== 'ark-auth-token') {
-              const primary = await window.arkDesktop.authStorageGet?.('ark-auth-token');
-              if (!primary) await window.arkDesktop.authStorageSet('ark-auth-token', v);
+              const primary = await window.novaDesktop.authStorageGet?.('ark-auth-token');
+              if (!primary) await window.novaDesktop.authStorageSet('ark-auth-token', v);
             }
           }
         }
@@ -234,7 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       let isPackaged = false;
       try {
-        const meta = await window.arkDesktop?.appMeta?.();
+        const meta = await window.novaDesktop?.appMeta?.();
         isPackaged = Boolean(meta?.isPackaged);
         if (!cancelled) setPackaged(isPackaged);
       } catch {
@@ -258,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           /* ignore */
         }
         try {
-          await window.arkDesktop?.authStorageRemove?.('ark-auth-token');
+          await window.novaDesktop?.authStorageRemove?.('ark-auth-token');
         } catch {
           /* ignore */
         }
@@ -400,7 +388,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(healed);
       setUser(healed.user ?? null);
       restoreHoldUntilRef.current = Date.now() + 12_000;
-      localStorage.setItem('ark:last-auth', JSON.stringify({
+      localStorage.setItem('NOVA:last-auth', JSON.stringify({
         method: 'supabase',
         email,
         at: new Date().toISOString(),
@@ -483,12 +471,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Cloud flag is informational; local install setup still gates the UI.
           onboarding_completed: isSetupCompleted(),
         });
-        const arkId = await ensureArkId(data.user.id, email);
+        const novaId = await ensureNovaId(data.user.id, email);
 
         // Enforce: users do not choose their own username at signup.
         // If no displayName was provided, set display_name to the 7-digit NOVA ID.
         if (!trimmed) {
-          const auto = formatArkId(arkId);
+          const auto = formatNovaId(novaId);
           await supabase.from('profiles').update({ display_name: auto }).eq('id', data.user.id);
           const { setLocalPrefs } = await import('@/lib/localPrefs');
           setLocalPrefs({ displayName: auto });
@@ -529,7 +517,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!redirectTo) {
       return {
         error:
-          'Email reset is not configured for this build (missing VITE_ARK_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your NOVA account site → Forgot password.',
+          'Email reset is not configured for this build (missing VITE_NOVA_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your NOVA account site → Forgot password.',
       };
     }
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
@@ -550,7 +538,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (packaged) return;
     // Session-only — do not persist across bat / Electron restarts.
     localStorage.removeItem(BYPASS_KEY);
-    localStorage.setItem('ark:last-auth', JSON.stringify({
+    localStorage.setItem('NOVA:last-auth', JSON.stringify({
       method: 'bypass',
       at: new Date().toISOString(),
     }));
@@ -568,8 +556,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
     // Drop any real auth token so the next cold start lands on Auth, not a restored session.
     void supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
-    void ensureArkId('guest-local').then(id => {
-      setProfile(prev => prev ? { ...prev, ark_id: id } : prev);
+    void ensureNovaId('guest-local').then(id => {
+      setProfile(prev => prev ? { ...prev, nova_id: id } : prev);
     });
   };
 
@@ -589,24 +577,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore
     }
     try {
-      await window.arkDesktop?.authStorageRemove?.('ark-auth-token');
+      await window.novaDesktop?.authStorageRemove?.('nova-auth-token');
+      await window.novaDesktop?.authStorageRemove?.('ark-auth-token');
     } catch {
       /* ignore */
     }
-  };
-
-  const scheduleAccountDeletion = async (hours = 24) => {
-    const result = await scheduleOwnAccountDeletion(hours);
-    if (!result.ok) return result;
-    await refreshProfile();
-    return result;
-  };
-
-  const cancelAccountDeletion = async () => {
-    const result = await cancelOwnAccountDeletion();
-    if (!result.ok) return result;
-    await refreshProfile();
-    return result;
   };
 
   const deleteAccountPermanently = async () => {
@@ -619,7 +594,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setSettings(null);
     try {
-      // Clear encrypted Electron session too (key-by-key via remove, then signOut).
       await supabase.auth.signOut({ scope: 'local' });
     } catch {
       /* ignore */
@@ -629,8 +603,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (user?.id === 'guest-local' || bypass) {
-      const id = await ensureArkId('guest-local');
-      setProfile({ ...guestProfile(), ark_id: id });
+      const id = await ensureNovaId('guest-local');
+      setProfile({ ...guestProfile(), nova_id: id });
       return;
     }
     if (user) await loadProfileAndSettings(user.id, user);
@@ -659,8 +633,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       resetPassword,
       signOut,
-      scheduleAccountDeletion,
-      cancelAccountDeletion,
       deleteAccountPermanently,
       bypassLogin,
       refreshProfile,

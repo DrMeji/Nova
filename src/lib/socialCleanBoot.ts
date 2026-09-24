@@ -24,8 +24,8 @@ function wipeFriendNotifications() {
       if (n.title?.toLowerCase().includes('friend request')) return false;
       return true;
     });
-    localStorage.setItem('ark:local-notifications', JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent('ark:local-notifications'));
+    localStorage.setItem('NOVA:local-notifications', JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent('NOVA:local-notifications'));
   } catch {
     /* ignore */
   }
@@ -69,7 +69,7 @@ export function runArkIdRotationIfNeeded(): boolean {
 /** Run once per token on packaged retail installs only (not bat/source builds). */
 export function runSocialReleaseCleanIfNeeded(): boolean {
   try {
-    if (window.arkDesktop?.isPackaged !== true) return false;
+    if (window.novaDesktop?.isPackaged !== true) return false;
     const tokenKey = 'NOVA:social-release-clean';
     if (localStorage.getItem(tokenKey) === SOCIAL_RELEASE_CLEAN_TOKEN) return false;
     clearSocialDevData();

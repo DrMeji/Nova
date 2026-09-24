@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
-function formatArkId(raw: string | null | undefined) {
+function formatNovaId(raw: string | null | undefined) {
   if (!raw) return 'Assigned in the app';
   const digits = raw.replace(/\D/g, '');
   if (digits.length === 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
@@ -80,8 +80,8 @@ export function ProfileMenu() {
   };
 
   const copyArkId = async () => {
-    if (!profile?.ark_id) return;
-    await navigator.clipboard.writeText(formatArkId(profile.ark_id));
+    if (!profile?.nova_id) return;
+    await navigator.clipboard.writeText(formatNovaId(profile.nova_id));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };
@@ -132,15 +132,15 @@ export function ProfileMenu() {
             <p className="profile-label">NOVA ID</p>
             <div className="flex items-center gap-2">
               <p className="text-sm font-medium text-[var(--fg)] tracking-wide">
-                {formatArkId(profile?.ark_id)}
+                {formatNovaId(profile?.nova_id)}
               </p>
-              {profile?.ark_id ? (
+              {profile?.nova_id ? (
                 <button type="button" className="text-xs text-[var(--accent)] hover:underline" onClick={() => void copyArkId()}>
                   {copied ? 'Copied' : 'Copy'}
                 </button>
               ) : null}
             </div>
-            {!profile?.ark_id ? (
+            {!profile?.nova_id ? (
               <p className="text-xs text-[var(--fg-muted)] mt-1 leading-relaxed">
                 Your NOVA ID is created when you open the desktop app and finish account setup there.
               </p>

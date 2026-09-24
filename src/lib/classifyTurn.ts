@@ -11,6 +11,7 @@ import {
   looksLikeRequirementsAsk,
   looksLikeTalkBeforeCreateAsk,
   looksLikeGreenfieldCreateGo,
+  resolveGreenfieldFromThread,
 } from '@/lib/chatIdeaIntent';
 import {
   parseNewProjectIntent,
@@ -18,6 +19,7 @@ import {
   fallbackCreateProjectName,
   extractProjectName,
   isCreateVerbNoun,
+  findBestProductBrief,
 } from '@/lib/createProjectIntent';
 import {
   looksLikeKeepBuildingAsk,
@@ -82,6 +84,8 @@ export function classifyTurn(
     chatId?: string | null;
     /** Pending greenfield brief — used to allow bare “go build” creates. */
     pendingBrief?: string | null;
+    /** Recent user turns — rebuild brief when “go build” has no pending store entry. */
+    recentUserLines?: string[] | null;
   },
 ): ClassifyTurnResult {
   const t0 = String(message || '').trim();
@@ -104,9 +108,26 @@ export function classifyTurn(
     return { kind: explicit, reason: 'explicit-ark-kind' };
   }
 
-  // 1a. Requirements / exploratory "I want to build…" — plain chat, never scaffold.
-  if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) {
-    return { kind: 'chat', reason: looksLikeRequirementsAsk(t) ? 'requirements-advice' : 'talk-before-create' };
+  // 1a. Requirements / exploratory "I want to build…" — plain chat only when
+  // there is no named product and no go-build signal (otherwise fall through to create).
+  if (looksLikeTalkBeforeCreateAsk(t)) {
+    return { kind: 'chat', reason: 'talk-before-create' };
+  }
+  if (looksLikeRequirementsAsk(t)) {
+    const named = extractProjectName(t);
+    const goBuild = looksLikeGreenfieldCreateGo(t) || looksLikeBuildStart(t);
+    if (!named && !goBuild) {
+      return { kind: 'chat', reason: 'requirements-advice' };
+    }
+  }
+
+  // Confirming a plan in prose is a chat turn. The canned "I saved a plan" card
+  // only fires for an explicit plan-only ask, not "do not create files, confirm the plan".
+  if (
+    /\bconfirm the plan\b/i.test(t)
+    && /\b(?:do not|don't|dont)\s+(?:create|write|scaffold|build)\b/i.test(t)
+  ) {
+    return { kind: 'chat', reason: 'confirm-plan-in-prose' };
   }
 
   // 1. Explicit plan-only
@@ -124,9 +145,16 @@ export function classifyTurn(
   // 1b. "Start building…" / "ok create it" after requirements — create (pending brief),
   // not chat. Bound folders stay edit/keep_building below unless brand-new.
   if (looksLikeGreenfieldCreateGo(t) && (!workspace || brandNewProductAsk(t))) {
-    const pendingBrief = String(opts?.pendingBrief || '').trim();
+    let pendingBrief = String(opts?.pendingBrief || '').trim();
+    const threadLines = (opts?.recentUserLines || []).map((l) => String(l || '').trim()).filter(Boolean);
+    // Rebuild brief from prior user turns when the go-phrase itself has no product meat.
+    if (pendingBrief.length < 40 && threadLines.length) {
+      const fromThread = resolveGreenfieldFromThread(t, threadLines, null);
+      const best = findBestProductBrief(threadLines) || String(fromThread?.summary || '').trim();
+      if (best.length >= 40) pendingBrief = best;
+    }
     const hasProductNoun = /\b(?:app|application|website|site|web\s*app|project|page|landing|homepage)\b/i.test(t);
-    const named = extractProjectName(t);
+    const named = extractProjectName(t) || extractProjectName(pendingBrief);
     const substantialBody = t.length >= 28 && !/^(?:lets?\s+build(?:\s+(?:this|that|it))?|build\s+this|build\s+that|go\s+implement|go\s+build|ok(?:ay)?(?:\s+lets?)?\s+start(?:\s+building)?|start\s+building)\s*[.!]?\s*$/i.test(t);
     if (!workspace && !hasProductNoun && !named && pendingBrief.length < 40 && !substantialBody) {
       return { kind: 'chat', reason: 'greenfield-go-needs-brief' };
@@ -134,7 +162,7 @@ export function classifyTurn(
     return {
       kind: 'create',
       reason: 'greenfield-create-go',
-      createName: named || extractProjectName(pendingBrief) || fallbackCreateProjectName(t) || 'App',
+      createName: named || fallbackCreateProjectName(pendingBrief || t) || 'App',
     };
   }
 
@@ -149,7 +177,7 @@ export function classifyTurn(
     return { kind: 'open_folder', reason: 'folder-path-ask' };
   }
 
-  // 2. Bound folder: edit / keep_building (unless brand-new product)
+  // 2. Bound folder: edit / keep_building (unless brand-new product or a clear *new* create ask)
   if (workspace && !brandNewProductAsk(t)) {
     if (looksLikeKeepBuildingAsk(t) || looksLikeInPlaceRebuildAsk(t)) {
       return { kind: 'keep_building', reason: looksLikeInPlaceRebuildAsk(t) ? 'inplace-rebuild-bound' : 'keep-building-bound' };
@@ -160,8 +188,20 @@ export function classifyTurn(
     if (looksLikeConversationalEditShorthand(t)) {
       return { kind: 'edit', reason: 'conversational-shorthand-bound' };
     }
+    // Create-wording on a bound folder → edit only when the ask targets *this* project,
+    // not a different product noun (todo app / new site while folder is open).
     if (isCreateVerbNoun(t) || parseNewProjectIntent(t) || looksLikeBuildStart(t)) {
-      // Same chat create wording without brand-new → polish/edit the bound folder
+      const intent = parseNewProjectIntent(t);
+      const named = intent?.name || extractProjectName(t);
+      const asksDifferentProduct = Boolean(named && named.length >= 3)
+        && !/\b(?:this|the\s+(?:app|site|page|project)|it)\b/i.test(t);
+      if (asksDifferentProduct || brandNewProductAsk(t)) {
+        return {
+          kind: 'create',
+          reason: 'create-new-while-bound',
+          createName: named || fallbackCreateProjectName(t) || 'App',
+        };
+      }
       return { kind: 'edit', reason: 'create-wording-on-bound-folder' };
     }
     if (/\b(?:add|put|place|change|update|fix|remove|delete)\b/i.test(t)) {

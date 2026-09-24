@@ -19,8 +19,8 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
 import { getAccurateHardware } from '@/lib/api';
 import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
@@ -35,7 +35,7 @@ import {
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import {
   Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
@@ -45,7 +45,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
   const {
     activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
     flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, scheduleAccountDeletion, cancelAccountDeletion,
+    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
@@ -88,7 +88,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                       onClick={() => patchPrefs({ defaultModelId: m.id, defaultCodeModelId: m.id })}
                       className={`w-full text-left p-3 rounded-lg border transition-all ${
                         isSelected
-                          ? 'border-ark-blue-400 bg-ark-blue-500/10'
+                          ? 'border-nova-blue-400 bg-nova-blue-500/10'
                           : 'border-surface-border hover:border-surface-border-light'
                       }`}
                     >
@@ -99,7 +99,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                         </p>
                       )}
                       {isSelected && (
-                        <p className="text-[10px] text-ark-blue-300 mt-1">Selected</p>
+                        <p className="text-[10px] text-nova-blue-300 mt-1">Selected</p>
                       )}
                     </button>
                   );
@@ -110,7 +110,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                     onClose?.();
                     navigate({ name: 'models' });
                   }}
-                  className="ark-btn-secondary w-full sm:col-span-2"
+                  className="nova-btn-secondary w-full sm:col-span-2"
                 >
                   Open Models library
                 </button>
@@ -122,7 +122,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
           {activeSection === 'providers' && (
             <SettingsSection title="Providers">
               <div className="space-y-3">
-                {secretsEncrypted === false && window.arkDesktop ? (
+                {secretsEncrypted === false && window.novaDesktop ? (
                   <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-3">
                     <p className="text-sm font-semibold text-rose-200">NO_ENCRYPTION: secure key storage is unavailable</p>
                     <p className="text-xs text-rose-100/75 mt-1">
@@ -131,8 +131,8 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                   </div>
                 ) : null}
                 <div className="ark-card p-3.5 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
-                    <Cloud className="w-4 h-4 text-ark-blue-400" />
+                  <div className="w-9 h-9 rounded-lg bg-nova-blue-500/10 flex items-center justify-center shrink-0">
+                    <Cloud className="w-4 h-4 text-nova-blue-400" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Cloud connections</p>
@@ -198,7 +198,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                               <button
                                 type="button"
                                 className="text-[11px] text-sky-400 hover:text-sky-300"
-                                onClick={() => void window.arkDesktop?.openExternal?.(p.keyUrl!)}
+                                onClick={() => void window.novaDesktop?.openExternal?.(p.keyUrl!)}
                               >
                                 Where to get a {p.name} key →
                               </button>
@@ -208,14 +208,14 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                               value={keyDraft}
                               onChange={e => setKeyDraft(e.target.value)}
                               placeholder="Paste API key"
-                              className="ark-input"
+                              className="nova-input"
                               spellCheck={false}
                               autoComplete="off"
                             />
                             <div className="flex gap-2">
                               <button
                                 type="button"
-                                className="ark-btn-secondary flex-1"
+                                className="nova-btn-secondary flex-1"
                                 onClick={() => {
                                   void (async () => {
                                     try {
@@ -236,7 +236,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                               </button>
                               <button
                                 type="button"
-                                className="ark-btn-primary flex-1"
+                                className="nova-btn-primary flex-1"
                                 disabled={!keyDraft.trim()}
                                 onClick={() => {
                                   void (async () => {
@@ -260,7 +260,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                               {(hasKey || keyDraft.trim()) && (
                                 <button
                                   type="button"
-                                  className="ark-btn-secondary flex-1"
+                                  className="nova-btn-secondary flex-1"
                                   disabled={!keyDraft.trim() && !hasKey}
                                   onClick={() => {
                                     setKeyTestFor(p.id);
@@ -300,7 +300,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                     <button
                       type="button"
                       className="text-[11px] text-sky-400 hover:text-sky-300 shrink-0"
-                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')}
+                      onClick={() => void window.novaDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')}
                       title="Public download page (setup guide docs are not on the public repo)"
                     >
                       Releases
@@ -308,7 +308,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {(['github', 'google'] as const).map((id: any) => (
-                      <div key={id} className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 p-2.5">
+                      <div key={id} className="rounded-lg border border-surface-border/80 bg-nova-navy-950/40 p-2.5">
                         <OAuthClientRow pluginId={id} onSaved={(msg) => {
                           setSavedFlash(msg);
                           window.setTimeout(() => setSavedFlash(''), 1600);
@@ -356,12 +356,12 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                     <span className="text-content-secondary">App profile</span>
                     <span className="text-content-primary text-right font-mono text-xs">
                       {userDataProfile
-                        || (window.arkDesktop?.isElectron
+                        || (window.novaDesktop?.isElectron
                           ? '…'
                           : 'Browser')}
-                      {userDataProfile === 'NOVA-Dev' || userDataProfile === 'ARK-Dev'
+                      {userDataProfile === 'NOVA-Dev'
                         ? ' · source bat'
-                        : userDataProfile === 'NOVA' || userDataProfile === 'ARK'
+                        : userDataProfile === 'NOVA'
                           ? ' · installed'
                           : ''}
                     </span>
@@ -380,7 +380,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                 </div>
                 <button
                   type="button"
-                  className="ark-btn-secondary"
+                  className="nova-btn-secondary"
                   disabled={hwScanning}
                   onClick={() => {
                     setHwScanning(true);

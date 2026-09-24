@@ -2,7 +2,7 @@
 
 Product release notes for Settings → Update and release packaging.
 
-> **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`ARK_CHANGELOG`).
+> **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`NOVA_CHANGELOG`).
 
 ## 0.1.230
 
@@ -34,4 +34,4 @@ Product release notes for Settings → Update and release packaging.
 
 ## Earlier
 
-See `ARK_CHANGELOG` in `src/lib/changelog.ts` for 0.1.206 and prior entries.
+See `NOVA_CHANGELOG` in `src/lib/changelog.ts` for 0.1.206 and prior entries.

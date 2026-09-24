@@ -11,8 +11,8 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
 
   useEffect(() => {
     void Promise.all([
-      window.arkDesktop?.brainTokenGet?.(),
-      window.arkDesktop?.brainStatus?.(),
+      window.novaDesktop?.brainTokenGet?.(),
+      window.novaDesktop?.brainStatus?.(),
     ]).then(([token, status]) => {
       if (token?.url) setBrainUrl(token.url);
       if (token?.token) setBrainToken(token.token);
@@ -45,19 +45,19 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
       </div>
       <div className="grid gap-2">
         <label className="block text-[11px] text-content-tertiary">URL</label>
-        <input readOnly value={brainUrl} className="ark-input font-mono text-xs" />
+        <input readOnly value={brainUrl} className="nova-input font-mono text-xs" />
         <label className="block text-[11px] text-content-tertiary">Token</label>
         <input
           readOnly
           type="password"
           value={brainToken || '(none. dev mode)'}
-          className="ark-input font-mono text-xs"
+          className="nova-input font-mono text-xs"
         />
       </div>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="ark-btn-secondary text-xs"
+          className="nova-btn-secondary text-xs"
           onClick={() => {
             const clip = `URL: ${brainUrl}\nToken: ${brainToken || ''}`;
             void navigator.clipboard.writeText(clip).then(() => {
@@ -70,7 +70,7 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
         </button>
         <button
           type="button"
-          className="ark-btn-secondary text-xs"
+          className="nova-btn-secondary text-xs"
           onClick={() => {
             const curl = `curl "${brainUrl}/v1/chat" -H "Authorization: Bearer ${brainToken}" -H "Content-Type: application/json" -d "{\\"message\\":\\"Hello from my app\\"}"`;
             void navigator.clipboard.writeText(curl).then(() => {
@@ -83,9 +83,9 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
         </button>
         <button
           type="button"
-          className="ark-btn-secondary text-xs"
+          className="nova-btn-secondary text-xs"
           onClick={() => {
-            void window.arkDesktop?.brainTokenRotate?.().then(res => {
+            void window.novaDesktop?.brainTokenRotate?.().then(res => {
               if (res?.token) setBrainToken(res.token);
               if (res?.url) setBrainUrl(res.url);
               setFlash('Token rotated. update Lindsay/clients');

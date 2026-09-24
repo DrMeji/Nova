@@ -28,14 +28,14 @@ export function markSetupCompleted() {
   localStorage.setItem(SETUP_KEY, '1');
   gatePromise = null;
   freshInstallGate = false;
-  void window.arkDesktop?.setupSet?.(true)?.catch?.(() => {});
+  void window.novaDesktop?.setupSet?.(true)?.catch?.(() => {});
   window.dispatchEvent(new Event('NOVA:setup-changed'));
 }
 
 export function clearSetupCompleted() {
   localStorage.removeItem(SETUP_KEY);
   gatePromise = null;
-  void window.arkDesktop?.setupSet?.(false)?.catch?.(() => {});
+  void window.novaDesktop?.setupSet?.(false)?.catch?.(() => {});
   window.dispatchEvent(new Event('NOVA:setup-changed'));
 }
 
@@ -56,7 +56,7 @@ export async function ensureFirstRunGate(): Promise<void> {
       }
 
       try {
-        const state = await window.arkDesktop?.setupGet?.();
+        const state = await window.novaDesktop?.setupGet?.();
         if (state && typeof state.completed === 'boolean') {
           if (state.completed) {
             localStorage.setItem(SETUP_KEY, '1');
@@ -72,10 +72,10 @@ export async function ensureFirstRunGate(): Promise<void> {
       }
 
       // No desktop file yet. treat as not completed until onboarding finishes.
-      if (window.arkDesktop?.setupGet) {
+      if (window.novaDesktop?.setupGet) {
         localStorage.removeItem(SETUP_KEY);
         freshInstallGate = true;
-        await window.arkDesktop.setupSet?.(false)?.catch?.(() => {});
+        await window.novaDesktop.setupSet?.(false)?.catch?.(() => {});
       }
     })();
   }

@@ -44,7 +44,7 @@ async function loadKeyFilesFromDisk(
   existing: Record<string, string>,
 ): Promise<Record<string, string>> {
   if (Object.keys(existing).length > 0) return existing;
-  const read = window.arkDesktop?.readTextFile;
+  const read = window.novaDesktop?.readTextFile;
   if (!read) return existing;
   const files: Record<string, string> = { ...existing };
   for (const rel of KEY_FILES) {

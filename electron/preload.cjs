@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const packagedFlag = process.argv.find(a => typeof a === 'string' && a.startsWith('--ark-packaged='));
 const isPackagedApp = packagedFlag ? packagedFlag.endsWith('=1') : false;
 
-const arkDesktopApi = {
+const novaDesktopApi = {
   isElectron: true,
   isPackaged: isPackagedApp,
   isDevBuild: !isPackagedApp,
@@ -97,6 +97,7 @@ const arkDesktopApi = {
   localReportsList: () => ipcRenderer.invoke('NOVA:local-reports-list'),
   localReportsClear: () => ipcRenderer.invoke('NOVA:local-reports-clear'),
   localReportsOpen: () => ipcRenderer.invoke('NOVA:local-reports-open'),
+  localReportsAppend: (payload) => ipcRenderer.invoke('NOVA:local-reports-append', payload),
   signingStatus: () => ipcRenderer.invoke('NOVA:signing-status'),
   engineStatus: () => ipcRenderer.invoke('NOVA:engine-status'),
   engineStart: () => ipcRenderer.invoke('NOVA:engine-start'),
@@ -125,6 +126,7 @@ const arkDesktopApi = {
   previewCloseLive: () => ipcRenderer.invoke('NOVA:preview-close-live'),
   previewUpdate: (payload) => ipcRenderer.invoke('NOVA:preview-update', payload),
   previewReload: (projectId) => ipcRenderer.invoke('NOVA:preview-reload', projectId),
+  previewCaptureLive: () => ipcRenderer.invoke('NOVA:preview-capture-live'),
   previewSession: (cwd) => ipcRenderer.invoke('NOVA:preview-session', cwd),
   getOrAttachPreview: (cwd) => ipcRenderer.invoke('NOVA:preview-get-or-attach', cwd),
   mediaLibrary: () => ipcRenderer.invoke('NOVA:media-library'),
@@ -208,13 +210,13 @@ if (!isPackagedApp) {
     'getOrAttachPreview',
     'previewSession',
   ];
-  const absent = required.filter((k) => typeof arkDesktopApi[k] !== 'function');
+  const absent = required.filter((k) => typeof novaDesktopApi[k] !== 'function');
   if (absent.length) {
     console.error('[NOVA preload] missing create/apply IPC:', absent.join(', '));
   }
 }
 
-contextBridge.exposeInMainWorld('arkDesktop', arkDesktopApi);
+contextBridge.exposeInMainWorld('novaDesktop', novaDesktopApi);
 
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
 ipcRenderer.on('NOVA:open-settings', (_event, payload) => {

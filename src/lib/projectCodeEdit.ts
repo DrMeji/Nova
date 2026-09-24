@@ -11,7 +11,7 @@ import {
   touchesPreviewServing,
   webMicroAskEdits,
 } from '@/lib/webProjectCanon';
-import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
+import { applyAgentPatches, parseAgentPatches } from '@/lib/novaAgentPatch';
 import { extractBrandLabel, looksLikeNameTextColorAsk } from '@/lib/brandLabel';
 
 export type ProjectFileMap = Record<string, string>;
@@ -297,7 +297,7 @@ function languageFor(path: string): string | undefined {
 /** Flatten preferred full-path map from mixed basename/full keys. */
 function isInternalProjectFile(path: string) {
   const base = (path.split('/').pop() || path).toLowerCase();
-  return base === 'ark-chat.json' || base === 'ark-meta.json';
+  return base === 'ark-chat.json' || base === 'nova-meta.json';
 }
 
 export function flattenProjectFiles(files: ProjectFileMap): ProjectFileMap {
@@ -901,7 +901,7 @@ export function webScaffoldFallbackEdits(_userMessage: string): ParsedFileEdit[]
 export function composePreviewHtml(files: ProjectFileMap): string {
   const flat = flattenProjectFiles(prunePlaceholderJunk(files));
   let html = '';
-  if (flat['ark-preview.html']?.trim()) html = flat['ark-preview.html'];
+  if (flat['nova-preview.html']?.trim()) html = flat['nova-preview.html'];
   if (!html.trim()) html = flat['index.html'] || '';
   if (!html.trim()) {
     const htmlPath = Object.keys(flat).find(p => /\.html?$/i.test(p) && !isPlaceholderJunkPath(p));

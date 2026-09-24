@@ -15,7 +15,7 @@ export const GGUF_CTX_MIN = 8192;
 
 /**
  * Pick a llama.cpp `-c` size from installed system RAM (GB).
- * Same table as electron/arkGguf.cjs — keep them in sync.
+ * Same table as electron/novaGguf.cjs — keep them in sync.
  */
 export function resolveGgufCtx(ramGb: number): number {
   const ram = Number(ramGb);

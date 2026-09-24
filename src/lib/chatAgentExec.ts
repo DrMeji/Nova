@@ -8,7 +8,7 @@ import {
   agentExecutionBlockedMessage,
 } from '@/lib/agentExecution';
 import { inferInstallCommand, looksLikeInstallDepsAsk, looksLikeRunDevServerAsk } from '@/lib/folderPathAsk';
-import { classifyGitAsk } from '@/lib/arkGitClient';
+import { classifyGitAsk } from '@/lib/novaGitClient';
 
 export type AgentRunOutcome = {
   handled: boolean;
@@ -70,8 +70,8 @@ export function runtimeInstallManualReply(message: string): string {
 }
 
 export async function probeRuntime(command: string): Promise<boolean> {
-  if (!window.arkDesktop?.agentRun) return false;
-  const ran = await window.arkDesktop.agentRun({
+  if (!window.novaDesktop?.agentRun) return false;
+  const ran = await window.novaDesktop.agentRun({
     command,
     cwd: undefined,
     skipConfirm: true,
@@ -145,7 +145,7 @@ export async function runAgentCommand(opts: {
   skipConfirm?: boolean;
 }): Promise<AgentRunOutcome> {
   const { command, cwd } = opts;
-  if (!window.arkDesktop?.agentRun) {
+  if (!window.novaDesktop?.agentRun) {
     return { handled: true, reply: 'Agent commands need the NOVA desktop app.' };
   }
   if (!agentCommandAllowed(command)) {
@@ -161,7 +161,7 @@ export async function runAgentCommand(opts: {
       },
     };
   }
-  const ran = await window.arkDesktop.agentRun({
+  const ran = await window.novaDesktop.agentRun({
     command,
     cwd,
     skipConfirm: true,

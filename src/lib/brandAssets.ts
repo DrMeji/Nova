@@ -33,6 +33,10 @@ const BANNED_PHOTO_IDS = [
   '1517248135467-4c7edcad34c4',
   '1523275335684-37898b6baf30',
   '1497366216548-37526070297c',
+  // Recycled forest / field / ocean stills. They showed up as coffee, tea, and hot chocolate.
+  '1441974231531',
+  '1500530855697',
+  '1518837695005',
 ];
 
 const ICONIFY_COLLECTIONS = new Set([
@@ -69,7 +73,7 @@ export function tintIconSvg(svg: string, ink = '#1a1a1a'): string {
 }
 
 async function saveUrl(diskRoot: string, rel: string, url: string): Promise<{ ok: boolean; text: string; rel: string }> {
-  if (!window.arkDesktop?.workspaceSaveAsset) return { ok: false, text: '', rel };
+  if (!window.novaDesktop?.workspaceSaveAsset) return { ok: false, text: '', rel };
   let destRel = rel;
   let fetchUrl = String(url || '');
   // Unsplash auto=format may return AVIF/WebP — force JPEG for <img src="*.jpg"> reliability.
@@ -87,7 +91,7 @@ async function saveUrl(diskRoot: string, rel: string, url: string): Promise<{ ok
       : 'jpg';
     destRel = rel.replace(/\.(?:jpe?g|png|webp|gif|avif)$/i, `.${ext}`);
   }
-  const saved = await window.arkDesktop.workspaceSaveAsset({
+  const saved = await window.novaDesktop.workspaceSaveAsset({
     targetPath: joinDisk(diskRoot, destRel),
     url: fetchUrl,
     timeoutMs: 45000,
@@ -172,8 +176,14 @@ export function looksLikeAssetLinkAsk(message: string): boolean {
 }
 
 function looksLikeGame(brief: string): boolean {
-  return /\b(?:game|playable|canvas|wasd|three\.?js|webgl)\b/i.test(brief)
-    && !/\b(?:apple\.com|marketing|homepage|landing)\b/i.test(brief);
+  const t = String(brief || '');
+  // Negations like "not a website landing page" must not count as marketing.
+  const marketingHit = /\b(?:apple\.com|marketing\s+site|product\s+homepage)\b/i.test(t)
+    || (/\b(?:homepage|landing(?:\s+page)?)\b/i.test(t)
+      && !/\b(?:not\s+(?:a\s+)?(?:website\s+)?landing|not\s+(?:a\s+)?homepage|no\s+landing)\b/i.test(t)
+      && !/\b(?:game|playable|arcade|canvas\s+game|paddle|bricks?)\b/i.test(t));
+  if (marketingHit) return false;
+  return /\b(?:game|playable|arcade|canvas\s+game|paddle|bricks?|wasd|three\.?js|webgl)\b/i.test(t);
 }
 
 /** Real company marks via Iconify simple-icons (local copies, not hotlinked). */
@@ -358,8 +368,10 @@ function heroQueriesFor(name: string, t: string): Array<{ id: string; q: string 
   const slug = String(name || 'brand').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'brand';
   const blob = `${name} ${t}`.replace(/\s+/g, ' ').trim().slice(0, 160);
   return [
-    { id: `${slug}-hero`, q: `${blob || name} unique original photograph editorial` },
-    { id: `${slug}-story`, q: `${name} lifestyle editorial photography unique ${slug}` },
+    { id: `${slug}-hero`, q: `${blob || name} product studio photograph, no landscape, no forest, no ocean` },
+    { id: `${slug}-story`, q: `${name} product detail studio photograph, different angle` },
+    { id: `${slug}-detail`, q: `${name} close product color studio photograph` },
+    { id: `${slug}-color`, q: `${name} second product studio photograph, distinct subject` },
   ];
 }
 
@@ -432,27 +444,18 @@ export function planBrandAssets(brief: string, projectName: string): BrandAssetP
       /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(u) || /unsplash|pexels|openverse|imgur|cloudinary/i.test(u),
     );
     const identity = createIdentityFromBrief(name, t);
-    // Cinema Unsplash only when the brief itself asks for cinematic atmosphere — never a lookbook mood.
-    const allowCinemaFallback = /\b(?:cinematic|movie|film|atmospheric)\b/i.test(t);
-    const curatedCinema = allowCinemaFallback ? [
-      'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=2400&q=90',
-      'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2400&q=90',
-      'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=2400&q=90',
-    ] : [];
-    const cinemaHero = allowCinemaFallback && heroQueries.some((h) => /^cinema/i.test(h.id));
     const heroSlots = [...heroQueries];
     for (let i = heroQueries.length; i < photoUrls.length; i++) {
       heroSlots.push({ id: `${identity.slug}-user-${i + 1}`, q: heroQueries[0]?.q || `${name} product photography` });
     }
     heroSlots.forEach((h, i) => {
-      const curated = cinemaHero && /^cinema/i.test(h.id) ? curatedCinema[i % curatedCinema.length] : undefined;
       slots.push({
         role: 'hero',
         id: h.id,
         rel: `public/heroes/${h.id}.jpg`,
         href: publicHref(`public/heroes/${h.id}.jpg`),
         query: h.q,
-        explicitUrl: photoUrls[i] || curated,
+        explicitUrl: photoUrls[i],
       });
     });
   }
@@ -503,24 +506,24 @@ async function resolveHeroSourceUrl(
   }
   const prompt = promptCore.join(', ').slice(0, 380);
 
-  // 1) Local image weights only — never bare engineGenerate (that cascades to Pollinations drift).
-  try {
-    const { listReadyLocalImageModels } = await import('@/lib/siteHeroImages');
-    const ready = await listReadyLocalImageModels();
-    if (ready[0]?.id) {
-      const gen = await window.arkDesktop?.engineGenerate?.(prompt, ready[0].id, 'image');
-      if (gen?.ok && gen.media?.dataUrl && !/pollinations/i.test(String(gen.source || gen.modelName || ''))) {
-        return gen.media.dataUrl;
-      }
-    }
-  } catch { /* fall through */ }
-
-  // 2) Cloud image keys (HF / OpenAI) — still not Pollinations.
+  // 1) Hugging Face FLUX when keyed (premium path — never Pollinations).
   try {
     const { cloudGenerateImage } = await import('@/lib/cloudMedia');
     const cloud = await cloudGenerateImage(prompt);
     if (cloud?.dataUrl) return cloud.dataUrl;
     if (cloud?.url && !/pollinations/i.test(cloud.url)) return cloud.url;
+  } catch { /* fall through */ }
+
+  // 2) Local image weights when installed.
+  try {
+    const { listReadyLocalImageModels } = await import('@/lib/siteHeroImages');
+    const ready = await listReadyLocalImageModels();
+    if (ready[0]?.id) {
+      const gen = await window.novaDesktop?.engineGenerate?.(prompt, ready[0].id, 'image');
+      if (gen?.ok && gen.media?.dataUrl && !/pollinations/i.test(String(gen.source || gen.modelName || ''))) {
+        return gen.media.dataUrl;
+      }
+    }
   } catch { /* fall through */ }
 
   // 3) Hardware product sites: curated REAL PC-case photos only (verified subjects — never Pollinations).
@@ -563,11 +566,6 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
     : /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|food|kitchen|tulip|flower|logo|icon|infographic|x[- ]?ray|microscop|forensic|archaeolog|insect|bird|dog|cat)\b/i;
   const hardware = /\b(?:pc\s*case|chassis|tower|gpu|keyboard|mouse|laptop|gaming)\b/i.test(ctx)
     && !bakery && !florist;
-  const curatedCinema = [
-    'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=2400&q=90',
-    'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2400&q=90',
-    'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=2400&q=90',
-  ];
   const curatedHardware = [
     'https://images.unsplash.com/photo-1593640408182-31c70c8268f5?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
     'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
@@ -581,7 +579,7 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
         : [query];
   for (const q of tries.filter(Boolean)) {
     try {
-      const found = await window.arkDesktop?.brandSearchImages?.({ query: q, pageSize: 12 });
+      const found = await window.novaDesktop?.brandSearchImages?.({ query: q, pageSize: 12 });
       const ranked = (found?.results || [])
         .filter((r) => {
           if (!r.url || skipBanned(r.url)) return false;
@@ -602,11 +600,10 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
       /* try next */
     }
   }
-  // Bakery/florist: never fall back to forest/ocean cinema stock — caller uses SVG.
-  if (bakery || florist) return '';
-  const pool = hardware ? curatedHardware : curatedCinema;
-  const idx = Math.abs(_seed || 0) % pool.length;
-  return pool[idx] || pool[0] || '';
+  // No shared forest/ocean stock. Image gen already ran. A miss stays empty so the caller draws a product stage.
+  if (bakery || florist || !hardware) return '';
+  const idx = Math.abs(_seed || 0) % curatedHardware.length;
+  return curatedHardware[idx] || curatedHardware[0] || '';
 }
 
 export function wireBrandAssetsIntoSource(source: string, plan: BrandAssetPlan, filePath = ''): string {
@@ -859,12 +856,12 @@ export async function materializeBrandAssets(opts: {
         seed + saved.length,
       );
       if (generated) urls.push(generated);
-      else urls.push(svgHeroDataUrl(identity));
+      else urls.push(svgHeroDataUrl(identity, slot.id || slot.query || ''));
     } else if (!urls.length && slot.query) {
       const photo = await pickPhotoUrl(slot.query, `${opts.projectName} ${slot.query}`, seed + saved.length);
       if (photo) urls.push(photo);
       else if (slot.role === 'hero') {
-        urls.push(svgHeroDataUrl(createIdentityFromBrief(opts.projectName, opts.brief)));
+        urls.push(svgHeroDataUrl(createIdentityFromBrief(opts.projectName, opts.brief), slot.id || slot.query || ''));
       }
     }
     for (const url of urls) {
@@ -872,8 +869,8 @@ export async function materializeBrandAssets(opts: {
       if (/^data:image\/svg\+xml/i.test(url)) {
         const raw = decodeURIComponent(url.replace(/^data:image\/svg\+xml[^,]*,/i, ''));
         const destRel = slot.rel.replace(/\.(?:jpe?g|png|webp|gif|avif)$/i, '.svg');
-        if (window.arkDesktop?.workspaceWriteFile) {
-          const w = await window.arkDesktop.workspaceWriteFile({
+        if (window.novaDesktop?.workspaceWriteFile) {
+          const w = await window.novaDesktop.workspaceWriteFile({
             targetPath: joinDisk(opts.diskRoot, destRel),
             content: raw,
           });
@@ -920,8 +917,8 @@ export async function materializeBrandAssets(opts: {
       if (result.text.includes('<svg')) {
         const tinted = tintIconSvg(result.text, ink);
         files[result.rel] = tinted;
-        if (tinted !== result.text && window.arkDesktop?.workspaceWriteFile) {
-          await window.arkDesktop.workspaceWriteFile({
+        if (tinted !== result.text && window.novaDesktop?.workspaceWriteFile) {
+          await window.novaDesktop.workspaceWriteFile({
             targetPath: joinDisk(opts.diskRoot, result.rel),
             content: tinted,
           });
@@ -970,10 +967,10 @@ export async function materializeBrandAssets(opts: {
       .replace(/filter:\s*invert\(1\);?/gi, '');
   }
 
-  if (saved.length && window.arkDesktop?.workspaceWriteFile) {
+  if (saved.length && window.novaDesktop?.workspaceWriteFile) {
     for (const rel of ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css']) {
       if (!files[rel]) continue;
-      await window.arkDesktop.workspaceWriteFile({
+      await window.novaDesktop.workspaceWriteFile({
         targetPath: joinDisk(opts.diskRoot, rel),
         content: files[rel],
       });
@@ -988,7 +985,7 @@ export async function materializeBrandAssets(opts: {
 
 export function looksLikeUseAttachedAsset(message: string): 'hero' | 'logo' | 'icon' | null {
   const t = String(message || '');
-  const hasImg = /!\[[^\]]*]\((?:ark-media:|data:image\/)/i.test(t) || extractVisionImages(t).length > 0;
+  const hasImg = /!\[[^\]]*]\((?:nova-media:|data:image\/)/i.test(t) || extractVisionImages(t).length > 0;
   if (!hasImg) return null;
   if (/\b(?:logo|favicon|wordmark|app\s*icon)\b/i.test(t)) return 'logo';
   if (/\b(?:nav\s*icon|toolbar\s*icon|search\s*icon)\b/i.test(t)) return 'icon';
@@ -1021,7 +1018,7 @@ async function allAttachedDataUrls(message: string): Promise<string[]> {
   for (const img of extractVisionImages(message)) {
     push(`data:${img.mime};base64,${img.data}`);
   }
-  for (const m of String(message || '').matchAll(/ark-media:([^)\s]+)/g)) {
+  for (const m of String(message || '').matchAll(/nova-media:([^)\s]+)/g)) {
     const id = m[1];
     const thumb = getMemoryThumb(id);
     if (thumb?.startsWith('data:image/')) {
@@ -1029,7 +1026,7 @@ async function allAttachedDataUrls(message: string): Promise<string[]> {
       continue;
     }
     try {
-      const got = await window.arkDesktop?.mediaGet?.(id);
+      const got = await window.novaDesktop?.mediaGet?.(id);
       push(got?.item?.dataUrl);
     } catch {
       /* ignore */
@@ -1109,15 +1106,15 @@ export async function applyAttachedChatImagesAsAssets(opts: {
   const role = looksLikeUseAttachedAsset(opts.message) || 'hero';
   const dataUrls = await allAttachedDataUrls(opts.message);
   if (!dataUrls.length) return { ok: false, files: opts.files, saved: [], error: 'No image pixels on this message.' };
-  if (!window.arkDesktop?.workspaceSaveAsset) {
+  if (!window.novaDesktop?.workspaceSaveAsset) {
     return { ok: false, files: opts.files, saved: [], error: 'Asset save unavailable' };
   }
 
   let files = { ...opts.files };
   for (const relFile of ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css']) {
-    if (files[relFile] || !window.arkDesktop?.readTextFile) continue;
+    if (files[relFile] || !window.novaDesktop?.readTextFile) continue;
     try {
-      const read = await window.arkDesktop.readTextFile({ path: joinDisk(opts.diskRoot, relFile) });
+      const read = await window.novaDesktop.readTextFile({ path: joinDisk(opts.diskRoot, relFile) });
       if (read?.ok && typeof read.text === 'string') {
         files[relFile] = read.text;
       }
@@ -1135,7 +1132,7 @@ export async function applyAttachedChatImagesAsAssets(opts: {
       : role === 'icon' && i === 0
         ? `public/icons/user.${ext}`
         : `public/heroes/user-hero${i === 0 ? '' : `-${i + 1}`}.${ext}`;
-    const written = await window.arkDesktop.workspaceSaveAsset({
+    const written = await window.novaDesktop.workspaceSaveAsset({
       targetPath: joinDisk(opts.diskRoot, rel),
       base64: dataUrl,
     });
@@ -1166,8 +1163,8 @@ export async function applyAttachedChatImagesAsAssets(opts: {
   }
 
   for (const relFile of ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css']) {
-    if (!files[relFile] || !window.arkDesktop.workspaceWriteFile) continue;
-    await window.arkDesktop.workspaceWriteFile({
+    if (!files[relFile] || !window.novaDesktop.workspaceWriteFile) continue;
+    await window.novaDesktop.workspaceWriteFile({
       targetPath: joinDisk(opts.diskRoot, relFile),
       content: files[relFile],
     });

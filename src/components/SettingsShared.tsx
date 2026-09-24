@@ -81,17 +81,17 @@ export function OAuthClientRow({
           label: 'GitHub',
           url: 'https://github.com/settings/developers',
           steps: 'OAuth App → Device Flow → copy Client ID',
-          env: 'ARK_GITHUB_CLIENT_ID',
+          env: 'NOVA_GITHUB_CLIENT_ID',
         }
       : {
           label: 'Google',
           url: 'https://console.cloud.google.com/apis/credentials',
           steps: 'Desktop/Web OAuth client → paste Client ID',
-          env: 'ARK_GOOGLE_CLIENT_ID',
+          env: 'NOVA_GOOGLE_CLIENT_ID',
         };
 
   useEffect(() => {
-    void window.arkDesktop?.pluginOAuthStatus?.().then((s) => {
+    void window.novaDesktop?.pluginOAuthStatus?.().then((s) => {
       const stored = s?.stored?.[pluginId];
       if (stored) setValue(stored);
     });
@@ -104,7 +104,7 @@ export function OAuthClientRow({
         <button
           type="button"
           className="text-[11px] text-sky-400 hover:text-sky-300"
-          onClick={() => void window.arkDesktop?.openExternal?.(setup.url)}
+          onClick={() => void window.novaDesktop?.openExternal?.(setup.url)}
         >
           Open console
         </button>
@@ -115,13 +115,13 @@ export function OAuthClientRow({
           value={value}
           onChange={e => setValue(e.target.value)}
           placeholder={`${setup.env} or paste client id`}
-          className="ark-input flex-1 text-sm"
+          className="nova-input flex-1 text-sm"
         />
         <button
           type="button"
-          className="ark-btn-secondary shrink-0 text-xs"
+          className="nova-btn-secondary shrink-0 text-xs"
           onClick={() => {
-            void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then((res) => {
+            void window.novaDesktop?.pluginOAuthSetClient?.(pluginId, value).then((res) => {
               if (res && typeof res === 'object' && 'ok' in res && res.ok === false) {
                 onSaved(`Could not save ${pluginId} client id`);
                 return;
@@ -161,7 +161,7 @@ export function Field({
         onChange={e => onChange(e.target.value)}
         onBlur={onBlur}
         disabled={disabled}
-        className="ark-input disabled:opacity-60"
+        className="nova-input disabled:opacity-60"
       />
     </div>
   );
@@ -207,7 +207,7 @@ export function GgufSliderRow({
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-content-primary">{label}</p>
-        <span className="text-xs font-mono text-ark-blue-300 tabular-nums shrink-0">{valueLabel}</span>
+        <span className="text-xs font-mono text-nova-blue-300 tabular-nums shrink-0">{valueLabel}</span>
       </div>
       <input
         type="range"
@@ -315,7 +315,7 @@ export function StorageBar({
         <span className="text-sm text-content-primary truncate">{label}</span>
         <span className="text-xs text-content-tertiary shrink-0">{used} / {total}</span>
       </div>
-      <div className="h-2 bg-ark-navy-800 rounded-full overflow-hidden">
+      <div className="h-2 bg-nova-navy-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
       </div>
     </div>

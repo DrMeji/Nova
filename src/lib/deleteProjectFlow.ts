@@ -2,7 +2,7 @@
  * Delete project/folder from Chat. zero external imports (avoids Vite pulling main bundle → TDZ).
  */
 
-const PREFS_KEY = 'ark:local-prefs';
+const PREFS_KEY = 'NOVA:local-prefs';
 
 const DELETE_GRANT_OFF_MSG =
   'I need permission to read folders on your PC.\n\nOn first setup, enable **Give NOVA access to your PC** (or open **Settings → Security** → Allow Desktop folder access + Full PC access), confirm the dialog, then ask again.';
@@ -69,7 +69,7 @@ function hasFolderAccessGrant(): boolean {
 }
 
 function parseCatalogSnapshot(content: string): CatalogSnapshot | null {
-  const m = String(content || '').match(/<!--ark-catalog:([\s\S]*?)-->/);
+  const m = String(content || '').match(/<!--nova-catalog:([\s\S]*?)-->/);
   if (!m?.[1]) return null;
   try {
     return JSON.parse(m[1]) as CatalogSnapshot;
@@ -254,7 +254,7 @@ function findDeletePathInCatalogThread(
 }
 
 async function pathIsDirectory(targetPath: string): Promise<boolean> {
-  const stat = await window.arkDesktop?.pathStat?.(targetPath);
+  const stat = await window.novaDesktop?.pathStat?.(targetPath);
   return Boolean(stat?.ok && stat.isDirectory);
 }
 
@@ -272,7 +272,7 @@ export function buildDeleteNotFoundMessage(name: string): string {
 }
 
 async function findInProjectsParent(projectsDir: string, wantName: string): Promise<string | null> {
-  const listing = await window.arkDesktop?.listDir?.(projectsDir);
+  const listing = await window.novaDesktop?.listDir?.(projectsDir);
   if (!listing?.ok) return null;
   for (const item of listing.items || []) {
     if (item.kind !== 'dir') continue;
@@ -283,7 +283,7 @@ async function findInProjectsParent(projectsDir: string, wantName: string): Prom
 
 async function resolveDeleteByFastPaths(wantName: string): Promise<{ path: string; name: string } | null> {
   const variants = nameVariants(wantName);
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
   const prefs = readPrefs();
@@ -302,15 +302,11 @@ async function resolveDeleteByFastPaths(wantName: string): Promise<{ path: strin
   }
   if (prefs.allowDocumentsFolderAccess && documents) {
     for (const variant of variants) {
-      candidates.push(joinPath(joinPath(documents, 'NOVA Projects'), variant));
-      candidates.push(joinPath(joinPath(documents, 'ARK Projects'), variant));
-    }
+      candidates.push(joinPath(joinPath(documents, 'NOVA Projects'), variant));    }
   }
   if (prefs.allowDesktopFolderAccess && desktop) {
     for (const variant of variants) {
-      candidates.push(joinPath(joinPath(desktop, 'NOVA Projects'), variant));
-      candidates.push(joinPath(joinPath(desktop, 'ARK Projects'), variant));
-    }
+      candidates.push(joinPath(joinPath(desktop, 'NOVA Projects'), variant));    }
   }
 
   const hit = await firstExistingDirectory([...new Set(candidates)]);
@@ -320,7 +316,7 @@ async function resolveDeleteByFastPaths(wantName: string): Promise<{ path: strin
 
 function isProjectsContainerPath(folderPath: string): boolean {
   const p = String(folderPath || '').trim();
-  return /[/\\](?:NOVA |ARK )?Projects$/i.test(p) || /[/\\]projects$/i.test(p);
+  return /[/\\](?:NOVA )?Projects$/i.test(p) || /[/\\]projects$/i.test(p);
 }
 
 export async function resolveDeleteProjectFolder(opts: {
@@ -345,7 +341,7 @@ export async function resolveDeleteProjectFolder(opts: {
   }
 
   const prefs = readPrefs();
-  await window.arkDesktop?.workspaceSetGrants?.({
+  await window.novaDesktop?.workspaceSetGrants?.({
     desktop: prefs.allowDesktopFolderAccess,
     documents: prefs.allowDocumentsFolderAccess,
     fullPc: prefs.allowFullPcAccess,
@@ -408,7 +404,7 @@ export async function resolveDeleteProjectFolder(opts: {
 
 export async function resolveDesktopProjectsFolderOnDisk(): Promise<{ path: string; name: string } | null> {
   if (!hasFolderAccessGrant()) return null;
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   if (!desktop) return null;
   const projectsPath = joinPath(desktop, 'Projects');
@@ -432,18 +428,18 @@ export async function deleteProjectFolderOnDisk(opts: {
   projectId?: string | null;
 }): Promise<{ ok: boolean; path?: string; error?: string }> {
   const want = String(opts.folderPath || '').replace(/[/\\]+$/, '').toLowerCase();
-  if (opts.projectId && window.arkDesktop?.workspaceDeleteRoot && window.arkDesktop?.projectPath) {
-    const info = await window.arkDesktop.projectPath(opts.projectId);
+  if (opts.projectId && window.novaDesktop?.workspaceDeleteRoot && window.novaDesktop?.projectPath) {
+    const info = await window.novaDesktop.projectPath(opts.projectId);
     const root = info?.ok ? String(info.root || '').replace(/[/\\]+$/, '').toLowerCase() : '';
     if (root && want && root === want) {
-      const viaProject = await window.arkDesktop.workspaceDeleteRoot({ projectId: opts.projectId });
+      const viaProject = await window.novaDesktop.workspaceDeleteRoot({ projectId: opts.projectId });
       if (viaProject.ok) return viaProject;
     }
   }
-  if (!window.arkDesktop?.workspaceDeleteFolder) {
+  if (!window.novaDesktop?.workspaceDeleteFolder) {
     return { ok: false, error: 'Delete is only available in the desktop app.' };
   }
-  return window.arkDesktop.workspaceDeleteFolder({ targetPath: opts.folderPath });
+  return window.novaDesktop.workspaceDeleteFolder({ targetPath: opts.folderPath });
 }
 
 export type DeleteProjectChatOutcome =
@@ -506,7 +502,7 @@ export async function handleDeleteProjectChatRequest(opts: {
 
   let folderPath = resolved.path;
   if (!folderPath && workspaceProjectId) {
-    const info = await window.arkDesktop?.projectPath?.(workspaceProjectId);
+    const info = await window.novaDesktop?.projectPath?.(workspaceProjectId);
     if (info?.ok && info.root) folderPath = info.root;
   }
   if (!folderPath && deleteTarget === 'follow-up' && stickyDiskTarget?.kind === 'folder') {

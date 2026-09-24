@@ -10,11 +10,11 @@ import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, getProviderApiKeys, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { resolvePreferredCloudProvider, hasAnyCloudChatKey } from '@/lib/cloudChat';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
-import { tipAt, tipStartIndex } from '@/lib/arkTips';
+import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
+import { tipAt, tipStartIndex } from '@/lib/novaTips';
 import {
   BACKUP_DOWNLOAD_EVENT,
-} from '@/lib/arkHuntBootstrap';
+} from '@/lib/novaHuntBootstrap';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -57,7 +57,7 @@ import {
   type InspectFinding,
 } from '@/lib/projectInspect';
 import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
-import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/arkGitClient';
+import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/novaGitClient';
 import { verifyGitHubToken, type GitHubRepo } from '@/lib/github';
 import {
   MEDIA_GEN_STAGES,
@@ -71,7 +71,7 @@ import {
   needsImageBrief,
   parseImageRequest,
 } from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
 import {
   executionModeLabel,
   getAgentExecutionMode,
@@ -106,25 +106,25 @@ import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessa
 import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
-import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
+import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
 import {
   formatSkillsForPrompt,
   resolveSkillsForBrief,
   skillNamesLabel,
   type NovaSkillPack,
 } from '@/lib/novaSkills';
-import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/arkQuickEdit';
+import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/novaQuickEdit';
 import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import {
   arkSelfHarmBlockedReply,
   isArkProtectedPathOnDisk,
   looksLikeArkSelfHarmAsk,
-} from '@/lib/arkSelfGuard';
+} from '@/lib/novaSelfGuard';
 import {
   harmfulContentBlockedReply,
   looksLikeHarmfulContentAsk,
-} from '@/lib/arkContentSafety';
+} from '@/lib/novaContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
 import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
@@ -142,7 +142,7 @@ import {
   runMcpAutoToolLoop,
   looksLikeArkCapabilityAsk,
   formatArkCapabilitiesHelp,
-} from '@/lib/arkMcp';
+} from '@/lib/novaMcp';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
@@ -326,7 +326,7 @@ import {
   type PluginDef,
 } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
-import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/novaEngine';
 import { runMediaChatTurn } from '@/lib/chatMediaTurn';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
 import { cleanProductTitle, looksLikeSpatialApp, looksLikePlayableCanvasGame, looksLikeFpsGame } from '@/lib/freshSpaFromBrief';
@@ -463,6 +463,11 @@ export type AIChatSendPrepResult =
     };
 
 export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Promise<AIChatSendPrepResult> {
+  // Fix common mic mishears before the bubble is stored (Timmy ≠ teammate).
+  try {
+    const { scrubDictationTranscript } = await import('@/lib/voiceSession');
+    content = scrubDictationTranscript(content);
+  } catch { /* ignore */ }
   const {
     activeGenChatIdRef,
     activeModelRef,
@@ -547,7 +552,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const userId = user?.id || 'guest-local';
   if (mode === 'voice') {
     if (!isVoiceTabEnabled()) return { status: 'done' };
-    if (!content.trim()) content = '<!--ark-voice-turn-->';
+    if (!content.trim()) content = '<!--nova-voice-turn-->';
     await runEphemeralVoiceTurn(content);
     return { status: 'done' };
   }
@@ -684,9 +689,9 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const assistantId = crypto.randomUUID();
   const isMediaMode = mode === 'image' || mode === 'video';
   // Reading… only when THIS message includes an upload. not leftover studio files.
-  const readingAttach = /<!--ark-attach:/.test(content)
-    || /<!--ark-auto-read-->/.test(content)
-    || /!\[[^\]]*\]\(ark-media:/.test(content)
+  const readingAttach = /<!--nova-attach:/.test(content)
+    || /<!--nova-auto-read-->/.test(content)
+    || /!\[[^\]]*\]\(nova-media:/.test(content)
     || /!\[[^\]]*\]\(data:image\//.test(content);
   const statusLabel = isMediaMode
     ? MEDIA_GEN_STAGES[mode][0].label
@@ -718,7 +723,14 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     return true;
   });
   const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
-  const nextThread: ChatMessage[] = [...normalized, userMsg];
+  // Try-again: last bubble is already this user prompt — do not append a duplicate.
+  const lastMsg = normalized[normalized.length - 1];
+  const sameUserOpen =
+    lastMsg?.role === 'user'
+    && String(lastMsg.content || '').trim() === String(content || '').trim();
+  const regenerating = Boolean(ctx.regeneratePendingRef?.current) || sameUserOpen;
+  if (ctx.regeneratePendingRef) ctx.regeneratePendingRef.current = false;
+  const nextThread: ChatMessage[] = sameUserOpen ? [...normalized] : [...normalized, userMsg];
   if (shouldOfferCloudKeyNudge({
     chatId: activeChatId,
     message: content,
@@ -741,7 +753,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   persistModeThread(mode, messagesRef.current, { chatId: activeChatId });
   setMessages(messagesRef.current);
   // One __generating__ seed in messages; live labels go through the status store only.
-  setChatTurnStatus({ chatId: activeChatId, assistantId, label: statusLabel, history: [statusLabel] });
+  setChatTurnStatus({ chatId: activeChatId, assistantId, label: statusLabel, history: [{ label: statusLabel, at: Date.now() }] });
   generatingRef.current = true;
   const genJobId = crypto.randomUUID();
   beginChatInflight(activeChatId, genJobId);
@@ -749,7 +761,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const endInflightOnce = () => {
     if (inflightEnded) return;
     inflightEnded = true;
-    endChatInflight();
+    endChatInflight(activeChatId);
   };
   setGenerating(true);
   if (isMediaMode) {
@@ -1007,7 +1019,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     if (await stopIfSuperseded()) return;
 
     pushAssistantStatus('Reading project summaries…');
-    const roots = await window.arkDesktop?.browseRoots?.();
+    const roots = await window.novaDesktop?.browseRoots?.();
     const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path || null;
     const built = await buildFolderCatalogData(opts.targetPath, opts.displayName, {
       desktopPath,
@@ -1087,7 +1099,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const intentText = normalizeMessyUserAsk(
     stripComposerPrefix(content)
       .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
-      .replace(/!\[[^\]]*]\(ark-media:[^)]+\)/gi, ' '),
+      .replace(/!\[[^\]]*]\(nova-media:[^)]+\)/gi, ' '),
   );
   const diskIntent = classifyDiskIntent(intentText, {
     recentUserMessages: recentUserLines,
@@ -1181,12 +1193,15 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   // Create/build briefs and same-chat scrap/rebuild are excluded (see chatDiskIntent).
   const skipDiskForInPlaceRebuild = looksLikeInPlaceRebuildAsk(intentText);
   const skipDiskForCodeEdit = looksLikeCodeEditAsk(intentText)
-    && diskIntent.type === 'none'
     && hasActiveWorkspace({
       files: resolvedStudio.files,
       projectId: resolvedStudio.projectId || turnProjectId,
       diskRoot: resolvedStudio.diskRoot || turnDiskRoot,
-    });
+    })
+    && (
+      diskIntent.type === 'none'
+      || diskIntent.type === 'delete_file'
+    );
   if ((mode === 'general' || mode === 'code') && !skipDiskForInPlaceRebuild && !skipDiskForCodeEdit) {
     // delete → early dispatchOwnedTurn (WAVE 1)
 
@@ -1289,12 +1304,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   // PC system tasks. restore point, read file (no workspace required; Full PC / Desktop grant).
   if ((mode === 'general' || mode === 'code') && hasFolderAccessGrant()) {
     await syncWorkspaceGrantsFromPrefs();
-    const homeCwd = (await window.arkDesktop?.browseRoots?.())?.roots?.find(r => r.id === 'home')?.path
+    const homeCwd = (await window.novaDesktop?.browseRoots?.())?.roots?.find(r => r.id === 'home')?.path
       || chatStudioDiskRootRef.current
       || diskRoot
       || undefined;
 
-    if (looksLikeRestorePointAsk(content) && window.arkDesktop?.agentRun) {
+    if (looksLikeRestorePointAsk(content) && window.novaDesktop?.agentRun) {
       const cmd = buildRestorePointCommand(`NOVA ${new Date().toLocaleDateString()}`);
       const restoreOutcome = await runAgentCommand({
         command: cmd,
@@ -1335,12 +1350,16 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     && (
       /\b(?:also|plus)\b/i.test(intentText)
       || /\badd\b[\s\S]{0,80}\b(?:reminder|chart|report|bill|feature|panel|modal|screen|indicator)/i.test(intentText)
+      || /\bfold\s+(?:those|these|them|it)\s+into\s+the\s+plan\b/i.test(intentText)
+      || /\b(?:want|add)\s+(?:three|3|two|2|more)\s+extras?\b/i.test(intentText)
+      || /\bsoft\s+sage\b|\bsave-?a-?bag\b|\bundo\b/i.test(intentText)
     ),
   );
   if ((mode === 'general' || mode === 'code') && (
     looksLikeGreenfieldKeepPlanning(intentText)
     || /\badd\s+more\s+features\s+to\s+the\s+plan\b/i.test(intentText)
     || /\bexpand\s+the\s+plan\b/i.test(intentText)
+    || /\bfold\s+(?:those|these|them|it)\s+into\s+the\s+plan\b/i.test(intentText)
     || looksLikePlanFeatureAdd
   )) {
     let pending = pendingPlanExpand;
@@ -1483,6 +1502,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     pinnedModel,
     composerMode,
     isMediaMode,
+    regenerating,
     diskIntent,
     diskRoot: _diskRoot,
     diskProjectId: chatStudioProjectIdRef.current || resolvedStudio.projectId || null,

@@ -8,10 +8,10 @@ export function getBrainUrl() {
 
 export async function refreshBrainUrl(): Promise<string> {
   try {
-    const row = await window.arkDesktop?.brainTokenGet?.();
+    const row = await window.novaDesktop?.brainTokenGet?.();
     if (row?.url) cachedUrl = row.url;
     else {
-      const status = await window.arkDesktop?.brainStatus?.();
+      const status = await window.novaDesktop?.brainStatus?.();
       if (status?.url) cachedUrl = status.url;
     }
   } catch {

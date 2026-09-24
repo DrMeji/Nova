@@ -10,6 +10,7 @@ import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from 
 import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
 import { getUsableTokens } from '@/lib/ggufContext';
 import { normalizeAssistantLists } from '@/lib/chatPlanMode';
+import { scrubHelpVoice, scrubBuildAggression, ensurePlanningExit } from '@/lib/plainChatAsk';
 import { scrubUnexpectedForeignScript } from '@/lib/scrubForeignBleed';
 
 export type RouterChatTurn = {
@@ -51,7 +52,7 @@ export const BASE_SYSTEM =
   + 'When web lookup notes are provided in the thread, prefer those facts over guessing. Still answer the user directly. '
   + 'For places (restaurants, shops): if preferences/allergies are unknown, ask briefly first; then recommend and offer a maps link when you know a location. '
   + 'For troubleshooting (car, PC, home): give likely causes and safe next steps, ask when the symptom happens, and say when a pro should look at it. '
-  + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
+  + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then ask clarifying questions. Do not jump to scaffolding or folders until they clearly ask to build. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
   + 'Be accurate and complete. Lead with the problem you heard and a clear path forward. Never close with hollow quiz lines like “Would you like more information on any of these steps?” or “Do you have specific questions?” '
   + 'If a follow-up is useful, ask one concrete question about their situation (who it is for, what “done” looks like, or which piece to tackle first). '
@@ -64,7 +65,15 @@ export const BASE_SYSTEM =
   + 'If they ask what you can do / what NOVA does: answer in ONE professional sentence (or two short ones) about real NOVA abilities — local and cloud chat, building websites and apps when they ask you to create, editing files in folders they grant, images and project help. No fake categories (calendar, entertainment packages, generic “personal assistance”). No long numbered lists. '
   + 'When they ask about building something (Discord-like app, Netflix-like site, a product, a business): answer THAT question. Confirm familiarity if asked, explain what it is, then discuss requirements / approach in complete sentences. Never stop after a colon or “here is the structure” with no body. Do not dump unfinished code unless they asked for code. '
   + 'Never open by restating their request in first person ("I want to build…", "I would like to create…"). '
-  + 'Acknowledge as the assistant ("Sure — here is how I would approach that"), then give concrete steps. '
+  + 'When offering help, speak as the assistant: “I can help with that”, “I can tackle this”. '
+  + 'Use “we” only for shared work after help is accepted (“we can go through this one by one”, “we’ll start with the stall list”). Never open with “We can definitely help”. '
+  + 'Talk like a co-builder once planning: prefer “we’ll add…”, “I can set that up when you’re ready”. '
+  + 'Never lecture with “you can use React Native / you should implement / here’s how you do it” as if the user must code it themselves — Nova builds on disk when they ask. '
+  + 'When someone describes a real-world problem (losing track of stalls, books, gear): acknowledge it, then give a richer plan — who it is for, what to track (domain-accurate fields), day-of flows, must-haves vs later, and what a useful v1 looks like. Number steps 1, 2, 3… in order (never repeat 1). After the list, add a short overall wrap-up (what to do first and how it fits together), then 1–2 clarifying questions. Do not stop at the last numbered item with no closing. '
+  + 'Do NOT push “create a Vite + React app”, pick a folder, or “would you like to proceed with creating this page” until they clearly ask to build or create. '
+  + 'When discussing an app idea for NOVA before they ask to build: stay in planning mode — screens, fields, flows, must-haves — not install steps. '
+  + 'Never pitch React Native, Flutter, Firebase, Express, MongoDB, AWS, or paid backends unless they explicitly ask. '
+  + 'Acknowledge as the assistant ("Sure — here’s how I can help"), then give concrete steps with clean 1, 2, 3 numbering and - bullets under each. No ★ stars. '
   + 'When they give concrete product/device/gear specs (camera mm / f-stop / ISO / shutter, iPhone model + lenses, bike size, GPU, phone storage, etc.), '
   + 'ground every recommendation in THOSE specs: best settings, technique, or next steps for that exact kit — not generic advice that ignores what they listed. '
   + 'Name their gear back once so it is clear you used it, then give tailored guidance. '
@@ -175,6 +184,10 @@ export function isSoftContinuityAsk(text: string): boolean {
   if (/^(?:(?:please\s+)?(?:give|tell|show)\s+(?:me\s+)?)?(?:the\s+)?(?:overall|full(?:\s+details?)?|complete(?:\s+(?:picture|overview|details?))?|everything|all\s+(?:of\s+)?(?:it|that)|more\s+(?:details?|info(?:rmation)?))[.!?]*$/i.test(t)) {
     return true;
   }
+  // Substantive new asks ("more information about Elon Musk") are NOT soft — they need a
+  // fresh answer, not a quiet deepen retry that rewrites/retracts the live stream.
+  if (t.length > 56 && /\b(?:about|regarding)\s+\S+/i.test(t)) return false;
+  if (t.length > 72) return false;
   return FOLLOW_UP_HINT.test(t) || SOFT_FOLLOW_UP_HINT.test(t) || THREAD_CONTINUE_HINT.test(t);
 }
 
@@ -304,8 +317,31 @@ function looksLikeSideQuestInline(text: string): boolean {
   if (/\b(?:lyrics?|lyric\s+to|words\s+to\s+(?:the\s+)?(?:song|track))\b/i.test(t)) return true;
   if (/\b(?:song|track|album)\b/i.test(t) && /\b(?:by|from|lyrics|artist)\b/i.test(t)) return true;
   if (/\b(?:weather|forecast|temperature|humid(?:ity)?)\b/i.test(t)) return true;
-  if (/\b(?:F1|formula\s*1|grand\s+prix|nascar|nba|nfl|mlb|nhl|world\s+cup|premier\s+league)\b/i.test(t)) return true;
-  if (/\b(?:upcoming|next)\s+(?:race|races|gp|grand\s+prix)\b/i.test(t)) return true;
+  if (/\b(?:F1|formula\s*1|grand\s+prix|nascar|nba|nfl|mlb|nhl|mls|world\s+cup|premier\s+league|ufc|boxing|tennis|golf|olympics?)\b/i.test(t)) return true;
+  if (/\b(?:valorant|valora(?:nt|qnt)|cs2|counter[- ]?strike|league\s+of\s+legends|\blo\s*l\b|dota\s*2|overwatch|rocket\s+league|apex\s+legends|fortnite|call\s+of\s+duty|warzone|rainbow\s+six|r6\s+siege|esports?|e[- ]?sports)\b/i.test(t)) return true;
+  if (/\b(?:PRX|paper\s*rex|team\s+liquid|\bTL\b|FNATIC|FNC|Sentinels|SEN|NRG|Cloud9|C9|Gen\.?\s*G|T1|DRX|Evil\s+Geniuses|\bEG\b|G2|NaVi|Natus\s+Vincere|100\s*Thieves|LOUD|KR[UÜ]|FURIA)\b/i.test(t)
+    && /\b(?:win|won|vs\.?|versus|match|series|playoffs?|tournament|champions?|masters|vct|predict|or)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:upcoming|next)\s+(?:race|races|gp|grand\s+prix|match|game|series)\b/i.test(t)) return true;
+  if (/\bwho\s+(?:do\s+(?:you|u)\s+think\s+)?(?:i'?d\s+|is\s+)?(?:gonna|gon+a|gon\s*na|gonman|going\s+to|will|would)\s+win\b/i.test(t)) return true;
+  if (/\bwho\s+(?:do\s+(?:you|u)\s+think\b).{0,40}\bwin\b/i.test(t)) return true;
+  if (/\bwho\s+(?:wins?|winning)\b/i.test(t) && /\b(?:or|vs\.?|versus)\b/i.test(t)) return true;
+  if (/\b(?:predict|prediction|favorite|favourite|underdog)\b/i.test(t)
+    && /\b(?:win|match|game|series|vs\.?|versus|tournament)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:who\s+(?:is|are|was|were|'s)|who(?:'s)\s+|tell\s+me\s+about|what\s+(?:is|are)\s+(?:the\s+)?(?:brand|company|streamer|player))\b/i.test(t)
+    && !/\b(?:file|folder|project|website|app\.jsx|button|css)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:twitch|youtube\.com|streamer|stream\s+on|pro\s+player)\b/i.test(t)
+    && /\b(?:who|what|about|info|information|details?)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:who\s+created|founded|founder|how\s+did\s+(?:they|it|the\s+brand|the\s+company)\s+(?:start|begin|get\s+started))\b/i.test(t)) {
+    return true;
+  }
   if (/\b(?:stock|stocks|share\s+price|AAPL|TSLA|NVDA|S&P|nasdaq|dow\s+jones)\b/i.test(t)) return true;
   if (/\b(?:white\s+house|president|congress|election|headlines?|breaking\s+news|current\s+events)\b/i.test(t)) return true;
   if (/\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:weather|score|price|news)\b/i.test(t)) return true;
@@ -332,8 +368,8 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
     return `${body}${chipNote}`.trim();
   }
 
-  if (raw.includes('ark-media:')) {
-    const stripped = stripAgentTrace(raw.replace(/!\[[^\]]*]\(ark-media:[^)]+\)/g, '').trim());
+  if (raw.includes('nova-media:')) {
+    const stripped = stripAgentTrace(raw.replace(/!\[[^\]]*]\(nova-media:[^)]+\)/g, '').trim());
     const note = '[Attached image]';
     return stripped ? `${stripped}\n\n${note}` : note;
   }
@@ -362,7 +398,7 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
         if (!t) return true;
         if (/^(loading model|build\s*:|model\s*:|ftype\s*:|modalities\s*:|available commands)/i.test(t)) return false;
         if (/^\[\s*Prompt:/i.test(t)) return false;
-        if (/ark-engine[\\/]+models/i.test(t)) return false;
+        if (/nova-engine[\\/]+models/i.test(t)) return false;
         return true;
       })
       .join('\n')
@@ -688,6 +724,7 @@ export function sanitizeAssistantReply(
   raw: string,
   lastUserMessage?: string,
   previousAssistant?: string,
+  opts?: { stream?: boolean },
 ): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
@@ -729,6 +766,13 @@ export function sanitizeAssistantReply(
   text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
   text = tidyMarkdownStars(text);
   text = normalizeAssistantLists(text);
+  text = scrubHelpVoice(text);
+  text = scrubBuildAggression(text);
+  // Display-time safety net for talk plans that stop on a list with no wrap-up.
+  // Skip while streaming — appending Overall mid-chunk causes visible retract/rewrite.
+  if (!opts?.stream && /^\s*\d+[.)]\s+/m.test(text)) {
+    text = ensurePlanningExit(text, lastUserMessage || text);
+  }
 
   // Strip fancy dashes from model output (em/en dash). keep normal hyphens in words/versions.
   text = text
@@ -892,7 +936,7 @@ export function sanitizeAssistantReply(
       || /<(?:section|div|header|nav|button|form|select|option|style|script)\b/i.test(text)
       || /\b(?:document\.querySelector|addEventListener|useState\s*\(|className\s*=)/i.test(text)
       || ((text.match(/[{};]/g) || []).length >= 10 && /className=|<\/?[A-Z][A-Za-z]+/.test(text));
-    if (hadCodeDump) {
+    if (hadCodeDump && !opts?.stream) {
       text = text
         .replace(/@@@FILE\s+[^\n\r]+\s*```[\w.+-]*\s*\n[\s\S]*?```/gi, '')
         .replace(/```(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|java|swift|kotlin|vue|svelte)[^\n]*\n[\s\S]*?```/gi, '')
@@ -904,13 +948,18 @@ export function sanitizeAssistantReply(
         .replace(/^\s*(?:import|export|const|let|var|function|return|className=)\b[^\n]*$/gim, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-      const diskContext = Boolean(
-        user
-        && /\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold|apply|edit\s+(?:the\s+)?(?:code|file)|fix\s+(?:the\s+)?(?:bug|code))\b/i.test(user),
-      );
-      if ((!text || text.length < 12 || /here'?s how you can do it/i.test(text)) && diskContext) {
-        text = 'I applied that in your project files. Open **Code** or **Preview** to review — say if you want the source shown here.';
+      // Never invent “I applied that…” — only apply handlers may claim disk writes.
+      if (!text || text.length < 12 || /here'?s how you can do it/i.test(text)) {
+        text = user && /\b(?:rebuild|edit|fix|apply)\b/i.test(user)
+          ? 'I could not apply that change yet. Say **rebuild the UI** again with a coder pinned in **Models**, or open **Code** to edit.'
+          : (text || 'Got it — happy to keep going in plain language.');
       }
+    } else if (hadCodeDump && opts?.stream) {
+      // Live: unwrap fences lightly; never collapse the bubble to a canned line mid-stream.
+      text = text
+        .replace(/@@@FILE\s+[^\n\r]+\s*/gi, '')
+        .replace(/```[\w.+-]*\n?/g, '')
+        .trim();
     }
   }
 
@@ -1005,6 +1054,20 @@ export function isCannedGreetingReply(reply: string, userMessage?: string): bool
   if (!r) return !userMessageIsPureGreeting(userMessage); // was only the greeting
   if (/^Hello! How can I assist you today\??\.?$/i.test(raw)) {
     return !userMessageIsPureGreeting(userMessage);
+  }
+  // Mid-thread reset: greeting + assist ask when the user already gave product context.
+  if (
+    /Hello!\s*How can I assist you today/i.test(raw)
+    && !userMessageIsPureGreeting(userMessage)
+  ) {
+    return true;
+  }
+  // Generic "how can I assist / what would you like" with no substance after a real ask.
+  if (
+    /^(?:Hi|Hello|Hey)[!.,]?\s*(?:How can I (?:assist|help) you today|What (?:can I|would you like)[^.!?]{0,40})\??\.?\s*$/i.test(raw)
+    && !userMessageIsPureGreeting(userMessage)
+  ) {
+    return true;
   }
   // Greeting mashed into a stub / truncated flash
   if (
@@ -1147,8 +1210,9 @@ export function usableAssistantText(
   raw: string,
   lastUserMessage?: string,
   previousAssistant?: string,
+  opts?: { stream?: boolean },
 ): string {
-  const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant);
+  const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant, opts);
   if (cleaned.trim()) {
     if (isCannedGreetingReply(cleaned, lastUserMessage)) return '';
     return scrubUnexpectedForeignScript(

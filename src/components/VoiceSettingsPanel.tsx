@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Mic, Volume2, RefreshCw } from 'lucide-react';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import { isVoiceTabEnabled } from '@/lib/voiceMode';
 import {
   VOICE_DEVICE_AUTO,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/voiceAudio';
 
 const SELECT_CLASS =
-  'w-full rounded-lg border border-surface-border bg-ark-navy-800/80 px-3 py-2.5 text-xs text-content-primary focus:outline-none focus:ring-1 focus:ring-sky-500/40';
+  'w-full rounded-lg border border-surface-border bg-nova-navy-800/80 px-3 py-2.5 text-xs text-content-primary focus:outline-none focus:ring-1 focus:ring-sky-500/40';
 
 type VoiceSettingsPanelProps = {
   onSaved?: (msg: string) => void;
@@ -55,8 +55,8 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
   useEffect(() => {
     void refreshDevices();
     const loadVoices = async () => {
-      if (window.arkDesktop?.voiceNeuralVoices) {
-        const res = await window.arkDesktop.voiceNeuralVoices();
+      if (window.novaDesktop?.voiceNeuralVoices) {
+        const res = await window.novaDesktop.voiceNeuralVoices();
         setNeuralTts(Boolean(res?.ok && res.voices?.length));
       } else {
         setNeuralTts(false);
@@ -106,24 +106,24 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
 
   return (
     <div className="space-y-4 pb-20">
-      {isArkDevSession() && (
+      {isNovaDevSession() && (
         <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3 text-xs text-sky-100/90">
           Dev build · Voice tab always on
         </div>
       )}
 
-      <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
+      <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary">Voice chat</p>
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm text-content-primary">Enable Voice tab in Chat</p>
           <button
             type="button"
-            disabled={isArkDevSession()}
+            disabled={isNovaDevSession()}
             onClick={() => patch({ voiceChatEnabled: !prefs.voiceChatEnabled })}
-            className={`relative rounded-full transition-colors shrink-0 ${prefs.voiceChatEnabled || isArkDevSession() ? 'bg-content-primary' : 'bg-ark-navy-700'} ${isArkDevSession() ? 'opacity-70' : ''}`}
+            className={`relative rounded-full transition-colors shrink-0 ${prefs.voiceChatEnabled || isNovaDevSession() ? 'bg-content-primary' : 'bg-nova-navy-700'} ${isNovaDevSession() ? 'opacity-70' : ''}`}
             style={{ height: '22px', width: '40px' }}
             aria-pressed={voiceLive}
-            title={isArkDevSession() ? 'Always on in dev builds' : undefined}
+            title={isNovaDevSession() ? 'Always on in dev builds' : undefined}
           >
             <div
               className={`absolute top-0.5 bg-white rounded-full transition-transform ${voiceLive ? 'translate-x-5' : 'translate-x-0.5'}`}
@@ -133,7 +133,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
+      <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-medium text-content-primary flex items-center gap-2">
             <Mic className="w-4 h-4 text-content-secondary" />
@@ -141,7 +141,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
           </p>
           <button
             type="button"
-            className="ark-btn-secondary text-[10px] !px-2 !py-1"
+            className="nova-btn-secondary text-[10px] !px-2 !py-1"
             onClick={() => void refreshDevices()}
             disabled={loadingDevices}
             title="Refresh devices"
@@ -171,7 +171,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         </select>
         <button
           type="button"
-          className="ark-btn-secondary text-xs"
+          className="nova-btn-secondary text-xs"
           onClick={() => void runMicTest()}
           disabled={testingMic}
         >
@@ -179,7 +179,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         </button>
       </div>
 
-      <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
+      <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary flex items-center gap-2">
           <Volume2 className="w-4 h-4 text-content-secondary" />
           Headphones / speakers
@@ -206,7 +206,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         </select>
         <button
           type="button"
-          className="ark-btn-secondary text-xs"
+          className="nova-btn-secondary text-xs"
           onClick={() => void runSpeakerTest()}
           disabled={testingSpeaker}
         >
@@ -214,7 +214,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         </button>
       </div>
 
-      <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
+      <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary">Spoken voice</p>
         <select
           value={spokenVoice}
@@ -230,7 +230,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
       </div>
 
       {status ? (
-        <p className="text-xs text-content-secondary rounded-lg border border-surface-border bg-ark-navy-900/50 px-3 py-2">{status}</p>
+        <p className="text-xs text-content-secondary rounded-lg border border-surface-border bg-nova-navy-900/50 px-3 py-2">{status}</p>
       ) : null}
     </div>
   );

@@ -1,7 +1,7 @@
 /** Deployed NOVA account website (website/ folder) — used for Supabase email reset redirects. */
 
 export function accountWebsiteOrigin(): string {
-  const v = (import.meta as { env?: Record<string, string> }).env?.VITE_ARK_WEBSITE_ORIGIN;
+  const v = (import.meta as { env?: Record<string, string> }).env?.VITE_NOVA_WEBSITE_ORIGIN;
   return typeof v === 'string' ? v.trim().replace(/\/$/, '') : '';
 }
 

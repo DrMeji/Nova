@@ -24,7 +24,7 @@ const header = `/**
 import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, getProviderApiKeys, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -46,11 +46,11 @@ import {
   needsImageBrief,
   parseImageRequest,
 } from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import { isVideoTabEnabled } from '@/lib/featurePark';
 import { runPluginAction } from '@/lib/plugins';
-import { engineGenerateCancel } from '@/lib/arkEngine';
+import { engineGenerateCancel } from '@/lib/novaEngine';
 import { getChatJobId } from '@/lib/chatInflight';
 import { classifyErrorMessage } from '@/lib/errors';
 import {
@@ -310,7 +310,7 @@ let out = s.slice(0, startIdx) + replacement + s.slice(endAt);
 
 const importLine = "import { runMediaChatTurn } from '@/lib/chatMediaTurn';";
 if (!out.includes(importLine)) {
-  const anchor = "import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';";
+  const anchor = "import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/novaEngine';";
   if (!out.includes(anchor)) throw new Error('arkEngine import anchor missing');
   out = out.replace(anchor, `${anchor}${nl}${importLine}`);
 }

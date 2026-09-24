@@ -11,11 +11,11 @@ import {
 import { useSocial } from '@/context/SocialContext';
 import { useAuth } from '@/context/AuthContext';
 import { listPendingInbound, syncFriendRequests } from '@/lib/friendRequests';
-import { formatArkId } from '@/lib/arkUserId';
-import { ArkAvatar } from '@/components/ArkAvatar';
+import { formatNovaId } from '@/lib/novaUserId';
+import { NovaAvatar } from '@/components/NovaAvatar';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { clearActivity } from '@/lib/activityIndicators';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { useRouter } from '@/context/RouterContext';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { formatActivityAge } from '@/lib/presenceStatus';
@@ -61,18 +61,18 @@ export function NotificationsView() {
   const [query, setQuery] = useState('');
   const [localTick, setLocalTick] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || undefined);
+  const myNovaId = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || undefined);
   const demos = useMemo(() => buildDemoNotifications(), []);
   const local = useMemo(
-    () => loadLocalNotifications(myArkId),
-    [localTick, myArkId],
+    () => loadLocalNotifications(myNovaId),
+    [localTick, myNovaId],
   );
   const inbound = useMemo(
-    () => (myArkId ? listPendingInbound(myArkId) : []),
-    [myArkId, localTick],
+    () => (myNovaId ? listPendingInbound(myNovaId) : []),
+    [myNovaId, localTick],
   );
   const inboundNotices = useMemo((): LocalNotification[] => {
-    if (!myArkId) return [];
+    if (!myNovaId) return [];
     const known = new Set(local.filter(n => n.friendRequestId).map(n => n.friendRequestId));
     return inbound
       .filter(req => !known.has(req.id))
@@ -80,28 +80,28 @@ export function NotificationsView() {
         id: `fr-in-${req.id}`,
         kind: 'friend' as const,
         title: `${req.fromName} wants to be friends`,
-        body: `${req.fromName} · NOVA ID ${req.fromArkId} sent you a friend request.`,
+        body: `${req.fromName} · NOVA ID ${req.fromNovaId} sent you a friend request.`,
         createdAt: req.createdAt,
         unread: true,
-        forArkId: myArkId,
+        forNovaId: myNovaId,
         friendRequestId: req.id,
-        fromArkId: req.fromArkId,
+        fromNovaId: req.fromNovaId,
         fromName: req.fromName,
         fromAvatarUrl: req.fromAvatarUrl,
       }));
-  }, [inbound, local, myArkId]);
+  }, [inbound, local, myNovaId]);
 
   useEffect(() => {
-    if (!myArkId) return;
-    void syncFriendRequests(myArkId, user?.id);
-  }, [myArkId, user?.id]);
+    if (!myNovaId) return;
+    void syncFriendRequests(myNovaId, user?.id);
+  }, [myNovaId, user?.id]);
 
   useEffect(() => {
     if (route.name !== 'notifications') return;
-    markLocalNotificationsRead(myArkId);
+    markLocalNotificationsRead(myNovaId);
     clearActivity('notifications');
     setLocalTick(t => t + 1);
-  }, [route.name, myArkId]);
+  }, [route.name, myNovaId]);
 
   useEffect(() => {
     const bump = () => setLocalTick(t => t + 1);
@@ -155,10 +155,10 @@ export function NotificationsView() {
 
   return (
     <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-      <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
+      <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-nova-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
         <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
           <div className="mt-3 flex items-center justify-center">
-            <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-ark-navy-950/70 border border-white/10 px-3">
+            <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-nova-navy-950/70 border border-white/10 px-3">
               <Search className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
               <input
                 value={query}
@@ -189,7 +189,7 @@ export function NotificationsView() {
                 </p>
               </div>
             ) : (
-              <div className="rounded-xl border border-white/[0.07] bg-ark-navy-950/30 overflow-hidden divide-y divide-white/[0.06]">
+              <div className="rounded-xl border border-white/[0.07] bg-nova-navy-950/30 overflow-hidden divide-y divide-white/[0.06]">
                 {shown.map(n => {
                   const section = sectionFor(n);
                   const showHeader = section !== lastSection;
@@ -222,9 +222,9 @@ export function NotificationsView() {
 
                         <div className="shrink-0 pt-0.5">
                           {friend ? (
-                            <ArkAvatar
+                            <NovaAvatar
                               name={friend.fromName || 'NOVA user'}
-                              src={friend.fromAvatarUrl || (friend.fromArkId === profile?.ark_id ? getLocalPrefs().avatarDataUrl : undefined)}
+                              src={friend.fromAvatarUrl || (friend.fromNovaId === profile?.nova_id ? getLocalPrefs().avatarDataUrl : undefined)}
                               size="md"
                             />
                           ) : (
@@ -245,11 +245,11 @@ export function NotificationsView() {
                               <p className="text-xs text-content-secondary mt-1 leading-relaxed">
                                 {n.body}
                               </p>
-                              {friend?.fromArkId && (
+                              {friend?.fromNovaId && (
                                 <p className="text-[10px] font-mono text-content-tertiary mt-1.5 tracking-wider">
                                   {friend.fromName === 'DEV' || /^dev$/i.test(friend.fromName || '')
                                     ? 'DEV'
-                                    : formatArkId(friend.fromArkId)}
+                                    : formatNovaId(friend.fromNovaId)}
                                 </p>
                               )}
                             </div>

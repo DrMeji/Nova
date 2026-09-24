@@ -62,7 +62,7 @@ export async function persistProjectThreadToDisk(
   if (!projectId) return;
   const payload: Record<string, string> = { ...(files || {}) };
   payload[PROJECT_CHAT_FILE] = serializeProjectThread(messages);
-  delete payload['ark-meta.json'];
+  delete payload['nova-meta.json'];
   await safeProjectWrite({
     projectId,
     projectName: projectName || 'Code',

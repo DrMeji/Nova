@@ -13,8 +13,25 @@ type CodeEditorProps = {
 export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
   function CodeEditor({ path, value, onChange, readOnly, jumpLine, onSave }, ref) {
     const language = languageFromPath(path);
-    const highlighted = useMemo(() => highlightCode(value, language), [value, language]);
-    const lineCount = Math.max(1, value.split('\n').length);
+    const rawLineCount = Math.max(1, value.split('\n').length);
+    // Huge lockfiles / dumps: never mount thousands of gutter nodes (scroll glitch).
+    const MAX_PAINT_LINES = 400;
+    const truncated = rawLineCount > MAX_PAINT_LINES;
+    const paintValue = truncated
+      ? `${value.split('\n').slice(0, MAX_PAINT_LINES).join('\n')}\n\n/* … ${rawLineCount - MAX_PAINT_LINES} more lines hidden — open the file in Explorer if you need the full lockfile */\n`
+      : value;
+    // Live create streams huge App buffers — full highlight every chunk freezes the shell.
+    // During watch-only, paint plain text (escaped) and only syntax-highlight when idle/small.
+    const highlighted = useMemo(() => {
+      if (readOnly && paintValue.length > 2400) {
+        return paintValue
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+      return highlightCode(paintValue, language);
+    }, [paintValue, language, readOnly]);
+    const lineCount = Math.max(1, paintValue.split('\n').length);
     const lines = useMemo(
       () => Array.from({ length: lineCount }, (_, i) => String(i + 1)),
       [lineCount],
@@ -41,8 +58,8 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
       const ta = typeof ref === 'object' && ref?.current ? ref.current : null;
       if (!ta) return;
       const root = ta.parentElement;
-      const pre = root?.querySelector('.ark-code-highlight') as HTMLElement | null;
-      const gutter = root?.querySelector('.ark-code-gutter') as HTMLElement | null;
+      const pre = root?.querySelector('.nova-code-highlight') as HTMLElement | null;
+      const gutter = root?.querySelector('.nova-code-gutter') as HTMLElement | null;
       ta.scrollTop = ta.scrollHeight;
       if (pre) {
         pre.scrollTop = ta.scrollTop;
@@ -52,24 +69,28 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
     }, [value, path, readOnly, ref]);
 
     return (
-      <div className="ark-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
-        <div className="ark-code-gutter" aria-hidden>
+      <div className="nova-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
+        <div className="nova-code-gutter" aria-hidden>
           {lines.map(n => (
             <div key={n}>{n}</div>
           ))}
         </div>
         <pre
-          className="ark-code-highlight"
+          className="nova-code-highlight"
           aria-hidden
           dangerouslySetInnerHTML={{ __html: `${highlighted}\n` }}
         />
         <textarea
           ref={ref}
           data-nova-code-editor=""
-          value={value}
-          onChange={e => onChange(e.target.value)}
+          value={paintValue}
+          readOnly={readOnly || truncated}
+          onChange={e => {
+            if (truncated) return;
+            onChange(e.target.value);
+          }}
           onKeyDown={e => {
-            if (readOnly) return;
+            if (readOnly || truncated) return;
             if (e.key === 'Tab') {
               e.preventDefault();
               const ta = e.currentTarget;
@@ -90,8 +111,8 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
           onScroll={e => {
             const ta = e.currentTarget;
             const root = ta.parentElement;
-            const pre = root?.querySelector('.ark-code-highlight') as HTMLElement | null;
-            const gutter = root?.querySelector('.ark-code-gutter') as HTMLElement | null;
+            const pre = root?.querySelector('.nova-code-highlight') as HTMLElement | null;
+            const gutter = root?.querySelector('.nova-code-gutter') as HTMLElement | null;
             if (pre) {
               pre.scrollTop = ta.scrollTop;
               pre.scrollLeft = ta.scrollLeft;
@@ -100,8 +121,7 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
           }}
           spellCheck={false}
           wrap="off"
-          readOnly={readOnly}
-          className="ark-code-input"
+          className="nova-code-input"
           aria-label={path}
         />
       </div>

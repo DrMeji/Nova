@@ -4,7 +4,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const arkSecrets = require('../electron/arkSecrets.cjs');
+const arkSecrets = require('../electron/novaSecrets.cjs');
 
 const root = path.join(__dirname, '..');
 let failed = 0;

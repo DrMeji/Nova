@@ -39,7 +39,7 @@ export function useWorkspace(projectId: string | null) {
     }
     setState((prev) => ({ ...prev, projectId: id, loading: true, error: null }));
     try {
-      const read = await window.arkDesktop?.projectRead?.(id);
+      const read = await window.novaDesktop?.projectRead?.(id);
       if (!read?.ok || !read.files) {
         setState((prev) => ({
           ...prev,

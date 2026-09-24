@@ -1,7 +1,7 @@
 /**
  * Pick which NOVA Engine GGUF Auto should run.
  * Never selects Ollama. Engine ids only.
- * Keep ranking in sync with electron/arkModelRank.cjs (Lindsay / Engine).
+ * Keep ranking in sync with electron/novaModelRank.cjs (Lindsay / Engine).
  *
  * Adaptive: uses whatever coder GGUFs are ready + fit this PC (RAM/params),
  * not a single hardcoded “always 7B” path.
@@ -33,6 +33,16 @@ export const CODER_ENGINE_RANK = [
   'starcoder2-7b',
 ] as const;
 
+/** Design / UI layout brains (LayoutContract hop) — prefer UI-specialist GGUFs. */
+export const DESIGN_ENGINE_RANK = [
+  'uigen-fx-4b',
+  'qwendean-4b',
+  'qwen25-14b',
+  'qwen25-7b',
+  'llama31-8b',
+  'mistral-7b',
+] as const;
+
 /** Fast polish preference when the PC is mid-tier (still coder-only). */
 export const CREATE_POLISH_CODER_RANK = [
   'qwen25-coder-14b',
@@ -55,6 +65,7 @@ const MIN_RAM_GB: Record<string, number> = {
   'deepseek-r1-distill-8b': 10,
   'deepseek-coder-v2-lite': 12,
   'starcoder2-7b': 10,
+  'uigen-fx-4b': 6,
   'llama32-3b': 6,
   'sd15-local': 8,
   'sdxl-turbo-local': 12,
@@ -65,6 +76,38 @@ type EngineRow = { id?: string; status?: string; name?: string };
 
 export function isCoderEngineId(id: string | undefined | null): boolean {
   return /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(String(id || ''));
+}
+
+/** UI / design-specialist GGUFs (not craft coders). */
+export function isUiDesignEngineId(id: string | undefined | null): boolean {
+  return /uigen|qwendean|ui[-_]?architect|frontend[-_]?ui/i.test(String(id || ''));
+}
+
+/** Prefer UI-specialist GGUFs for Design role; fall back to Instruct chats. */
+export function rankedReadyDesignIds(
+  models: EngineRow[] | undefined,
+  ramGb = 8,
+  maxCoderParamsB?: number | null,
+): string[] {
+  const ready = (models || [])
+    .filter((m) => String(m.status || '') === 'ready')
+    .map((m) => String(m.id || ''))
+    .filter(Boolean)
+    .filter((id) => fitsRam(id, ramGb));
+  const specialists = ready.filter((id) => isUiDesignEngineId(id));
+  const instruct = rankedReadyEngineIds(models, 'chat', ramGb, maxCoderParamsB)
+    .filter((id) => !isCoderEngineId(id));
+  const ordered: string[] = [];
+  for (const id of DESIGN_ENGINE_RANK) {
+    if (specialists.includes(id) || instruct.includes(id)) ordered.push(id);
+  }
+  for (const id of specialists) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  for (const id of instruct) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered;
 }
 
 function fitsRam(id: string, ramGb: number) {
@@ -229,8 +272,9 @@ export function pickLocalCoderModel(
 }
 
 /**
- * Create UI polish: adaptive among ready coders.
- * Strong PCs (maxParams ≥ 14) → quality (14B/32B). Weaker → fast mid-tier.
+ * Create UI polish: always the best ready coder that fits (14B+ when ready).
+ * Never stick on a weaker pinned coder (e.g. 7B) when a stronger one is ready.
+ * Pill + engine must match what status announces.
  */
 export function pickReadyCreatePolishCoder(
   models: EngineRow[] | undefined,
@@ -241,14 +285,44 @@ export function pickReadyCreatePolishCoder(
   },
 ): { id: string; name: string } | null {
   const maxParamsB = opts?.maxParamsB;
+  const ramGb = opts?.ramGb ?? 16;
+  const readyHas14 = (models || []).some((m) => {
+    if (m.status !== 'ready' || !m.id) return false;
+    const p = parseParamsB(m.id);
+    return p != null && p >= 13.5 && /coder/i.test(String(m.id));
+  });
+  const cappedMax = (maxParamsB == null || maxParamsB <= 0)
+    ? (readyHas14 ? 14 : maxParamsB)
+    : maxParamsB;
   const mode: 'quality' | 'fast' =
-    typeof maxParamsB === 'number' && maxParamsB >= 14 ? 'quality' : 'fast';
-  return pickBestReadyCoder(models, {
-    preferSelectedId: opts?.preferSelectedId,
-    ramGb: opts?.ramGb ?? 16,
-    maxParamsB,
+    (typeof cappedMax === 'number' && cappedMax >= 14) || (readyHas14 && (maxParamsB == null || maxParamsB <= 0))
+      ? 'quality'
+      : 'fast';
+
+  // Ignore sticky prefer when picking create craft — always best first.
+  const best = pickBestReadyCoder(models, {
+    preferSelectedId: undefined,
+    ramGb,
+    maxParamsB: cappedMax,
     mode,
   });
+  if (!best) return null;
+
+  const selected = String(opts?.preferSelectedId || '').trim();
+  if (selected && selected !== 'NOVA-auto' && isCoderEngineId(selected)) {
+    const readyRows = (models || []).filter((m) => m.status === 'ready' && m.id);
+    const hit = readyRows.find((m) => m.id === selected);
+    if (hit && fitsRam(selected, ramGb)) {
+      const p = parseParamsB(selected);
+      if (cappedMax == null || cappedMax <= 0 || p == null || p <= cappedMax + 0.01) {
+        // Honor an explicit pin only when it is at least as strong as the best ready coder.
+        if (coderQualityScore(selected) >= coderQualityScore(best.id)) {
+          return { id: selected, name: String(hit.name || selected) };
+        }
+      }
+    }
+  }
+  return best;
 }
 
 const IMAGE_BACKUP_RANK = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local'] as const;

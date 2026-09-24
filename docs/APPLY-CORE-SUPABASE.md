@@ -32,7 +32,7 @@ RLS audit note: **`docs/RLS-AUDIT.md`**.
 2. **Authentication → URL configuration** in Supabase:
    - Add `https://YOUR-SITE/account/reset` to **Redirect URLs**
    - Add `https://YOUR-SITE/**` (or localhost `http://localhost:5180/**` for dev)
-3. Set `VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` before `npm run build` (desktop forgot-password uses Supabase `resetPasswordForEmail` with redirect to `/account/reset`).
+3. Set `VITE_NOVA_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` before `npm run build` (desktop forgot-password uses Supabase `resetPasswordForEmail` with redirect to `/account/reset`).
 4. **Custom SMTP (recommended before invites)** — Project Settings → Auth → SMTP. Built-in Supabase mail is ~2 messages/hour; signup rate-limit errors tell users to wait, disable Confirm email for testing, or Sign in if the account already exists (`AuthContext.signUp`).
 5. **Auth hard-fail** — a desktop build without `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` must show the “NOVA could not start” screen (`supabaseConfigError`), not a blank shell.
 

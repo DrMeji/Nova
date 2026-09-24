@@ -26,7 +26,7 @@ import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { runSocialReleaseCleanIfNeeded, runArkIdRotationIfNeeded } from '@/lib/socialCleanBoot';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { applyLocalAppearancePrefs } from '@/lib/applyLocalAppearance';
-import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
+import { startModelHuntCycle } from '@/lib/novaHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
 import { cancelAll, hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
@@ -163,15 +163,15 @@ function AppContent() {
       void import('@/lib/workspaceGrants').then(m => m.syncWorkspaceGrantsFromPrefs());
     };
     applyPrefs();
-    window.addEventListener('ark:prefs-changed', applyPrefs);
-    return () => window.removeEventListener('ark:prefs-changed', applyPrefs);
+    window.addEventListener('nova:prefs-changed', applyPrefs);
+    return () => window.removeEventListener('nova:prefs-changed', applyPrefs);
   }, []);
 
   useEffect(() => {
-    void window.arkDesktop?.appMeta?.().then((meta) => {
+    void window.novaDesktop?.appMeta?.().then((meta) => {
       if (!meta?.isPackaged) return;
       if (getLocalPrefs().launchOnStartup) {
-        void window.arkDesktop?.loginItemSet?.(true);
+        void window.novaDesktop?.loginItemSet?.(true);
       }
     });
   }, []);
@@ -184,7 +184,7 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="h-full bg-ark-navy-950 flex flex-col items-center justify-center gap-4 px-6">
+      <div className="h-full bg-nova-navy-950 flex flex-col items-center justify-center gap-4 px-6">
         <Loader2 className="w-6 h-6 text-content-secondary animate-spin" />
         <RotatingTip className="text-[11px] text-content-tertiary text-center leading-relaxed max-w-sm min-h-[2.5rem]" />
       </div>
@@ -232,8 +232,8 @@ function AppearancePrefsSync() {
   useEffect(() => {
     applyLocalAppearancePrefs();
     const onPrefs = () => applyLocalAppearancePrefs();
-    window.addEventListener('ark:prefs-changed', onPrefs);
-    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+    window.addEventListener('nova:prefs-changed', onPrefs);
+    return () => window.removeEventListener('nova:prefs-changed', onPrefs);
   }, []);
   return null;
 }
@@ -257,7 +257,7 @@ function OpenLastProjectOnLaunch() {
 function App() {
   if (supabaseConfigError) {
     return (
-      <div className="h-screen flex items-center justify-center bg-ark-navy-950 text-white p-8 text-center">
+      <div className="h-screen flex items-center justify-center bg-nova-navy-950 text-white p-8 text-center">
         <div className="max-w-md space-y-3">
           <p className="text-lg font-semibold">NOVA could not start</p>
           <p className="text-sm text-white/70">{supabaseConfigError}</p>
@@ -270,7 +270,7 @@ function App() {
   return (
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}
-      <div className="h-screen min-w-0 relative overflow-hidden bg-ark-navy-950">
+      <div className="h-screen min-w-0 relative overflow-hidden bg-nova-navy-950">
         <AuthProvider>
           <RouterProvider>
             <TitleBar />

@@ -36,7 +36,7 @@ export function DeviceFamilyChips({
           key={item.id}
           type="button"
           onClick={() => onPick(item.id)}
-          className="min-w-[5.5rem] flex flex-col items-center gap-1.5 rounded-xl border border-surface-border bg-ark-navy-950/60 px-3 py-2.5 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+          className="min-w-[5.5rem] flex flex-col items-center gap-1.5 rounded-xl border border-surface-border bg-nova-navy-950/60 px-3 py-2.5 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
         >
           <item.icon className="w-5 h-5 text-sky-400" />
           <span className="text-[11px] font-medium">{item.label}</span>

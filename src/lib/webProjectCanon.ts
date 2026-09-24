@@ -1,6 +1,7 @@
 import { extractBrandLabel, extractNameRenameTarget, extractNameTextColorTarget, looksLikeNameTextColorAsk } from '@/lib/brandLabel';
 import { looksLikeNameFontStyleAsk, normalizeMessyUiEditAsk } from '@/lib/editAskResolve';
 import { parseNamedBrandLogos, parseNamedUiIcons } from '@/lib/brandAssets';
+import { briefForbidsAbsoluteRails } from '@/lib/createLayoutContract';
 
 /**
  * Canonical web project paths + micro-ask patches.
@@ -73,7 +74,7 @@ function flatten(files: WebFileMap): WebFileMap {
   for (const [k, v] of Object.entries(files || {})) {
     if (!k || typeof v !== 'string') continue;
     const base = (k.split('/').pop() || k).toLowerCase();
-    if (base === 'ark-chat.json' || base === 'ark-meta.json') continue;
+    if (base === 'ark-chat.json' || base === 'nova-meta.json') continue;
     out[normalizePath(k)] = v;
   }
   return out;
@@ -162,7 +163,7 @@ export function previewServingPaths(files: WebFileMap): string[] {
   const paths = new Set<string>();
   let htmlPath = '';
   if (flat['index.html']?.trim()) htmlPath = 'index.html';
-  else if (flat['ark-preview.html']?.trim()) htmlPath = 'ark-preview.html';
+  else if (flat['nova-preview.html']?.trim()) htmlPath = 'nova-preview.html';
   else {
     htmlPath = Object.keys(flat).find(p => /\.html?$/i.test(p) && !isPlaceholderJunkPath(p)) || '';
   }
@@ -214,6 +215,7 @@ function escapeHtml(s: string) {
 
 function cssColor(name: string): string | null {
   if (/black|dark/i.test(name)) return '#000000';
+  if (/cream/i.test(name)) return '#f5f0e8';
   if (/white/i.test(name)) return '#ffffff';
   if (/blue/i.test(name)) return '#2563eb';
   if (/red/i.test(name)) return '#dc2626';
@@ -225,9 +227,43 @@ function cssColor(name: string): string | null {
   if (/pink/i.test(name)) return '#ec4899';
   if (/orange/i.test(name)) return '#f97316';
   if (/navy/i.test(name)) return '#1e3a8a';
-  if (/cream/i.test(name)) return '#fef3c7';
-  if (/gr[ae]y/i.test(name)) return '#6b7280';
+  // Soft/premium gray for backgrounds — mid slate reads harsh full-screen.
+  if (/gr[ae]y/i.test(name)) return '#e8e6e3';
   return null;
+}
+
+/** Lucide-ish stroke glyphs so surgical icons aren't identical circles. */
+function simpleUiIconSvg(id: string, ink: string): string {
+  const stroke = `fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
+  const body: Record<string, string> = {
+    search: `<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/>`,
+    menu: `<path d="M4 7h16M4 12h16M4 17h16"/>`,
+    settings: `<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.2 4.2l1.5 1.5M18.3 18.3l1.5 1.5M3 12h2M19 12h2M4.2 19.8l1.5-1.5M18.3 5.7l1.5-1.5"/>`,
+    user: `<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 3.8-5.5 7-5.5s5.8 2 7 5.5"/>`,
+    home: `<path d="M4 11.5 12 4l8 7.5"/><path d="M7 10.5V20h10v-9.5"/>`,
+    bag: `<path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>`,
+    bell: `<path d="M6 16h12l-1.2-2.2a6 6 0 0 1-1-3.3V9a3.8 3.8 0 1 0-7.6 0v1.5a6 6 0 0 1-1 3.3L6 16z"/><path d="M10 19a2 2 0 0 0 4 0"/>`,
+    heart: `<path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 7.2a3.8 3.8 0 0 1 7 3.6C19 15.6 12 20 12 20z"/>`,
+    cart: `<circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/><path d="M3 4h2l2.2 11h9.6L19 8H7"/>`,
+  };
+  const inner = body[id] || `<circle cx="12" cy="12" r="7"/><path d="M8 12h8"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" ${stroke}><title>${id}</title>${inner}</svg>\n`;
+}
+
+function parseLayoutCorner(t: string): 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | null {
+  const s = String(t || '');
+  if (/\btop[\s-]?left\b/i.test(s) || (/\btop\b/i.test(s) && /\bleft\b/i.test(s) && !/\bright\b/i.test(s))) return 'top-left';
+  if (/\btop[\s-]?right\b/i.test(s) || (/\btop\b/i.test(s) && /\bright\b/i.test(s))) return 'top-right';
+  if (/\bbottom[\s-]?left\b/i.test(s) || (/\bbottom\b/i.test(s) && /\bleft\b/i.test(s) && !/\bright\b/i.test(s))) return 'bottom-left';
+  if (/\bbottom[\s-]?right\b/i.test(s) || (/\bbottom\b/i.test(s) && /\bright\b/i.test(s))) return 'bottom-right';
+  return null;
+}
+
+function iconRailCornerCss(corner: string): string {
+  if (corner === 'top-right') return 'top:1.25rem;right:1.25rem;left:auto;bottom:auto;align-items:flex-end;';
+  if (corner === 'bottom-left') return 'top:auto;left:1.25rem;right:auto;bottom:1.25rem;';
+  if (corner === 'bottom-right') return 'top:auto;right:1.25rem;left:auto;bottom:1.25rem;align-items:flex-end;';
+  return 'top:1.25rem;left:1.25rem;right:auto;bottom:auto;';
 }
 
 /** Patch .app / .App / body / html,body,#root backgrounds to a solid color. */
@@ -751,10 +787,11 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\b(?:cinematic|movie[- ]?like|atmospheric|premium\s+background|website[- ]?fit|editorial\s+background|background\s+image)\b/i.test(t)) return true;
   if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal|brown|chocolate|sienna|pink|orange|navy|cream|gr[ae]y|yellow|purple)\b/i.test(t)) return true;
   if (/\b(solid|pure|just|blank)\b[\s\S]{0,24}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i.test(t)) return true;
-  if (/\b(?:change|set|make|turn|update|switch)\b[\s\S]{0,40}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(brown|black|white|blue|red|green|teal|pink|orange|navy|cream)\b/i.test(t)) return true;
+  if (/\b(?:change|set|make|turn|update|switch)\b[\s\S]{0,40}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(brown|black|white|blue|red|green|teal|pink|orange|navy|cream|gr[ae]y)\b/i.test(t)) return true;
   if (/\b(?:change|rename|set|update|make)\b[\s\S]{0,64}\b(?:name|title|heading|word|text)\b/i.test(t)) return true;
   if (looksLikeNameTextColorAsk(t) || looksLikeNameFontStyleAsk(t)) return true;
   if (/\b(?:move|put|place)\b[\s\S]{0,40}\b(?:name|title|word|text|it)\b[\s\S]{0,40}\b(?:top|bottom|left|right|corner|center|middle)\b/i.test(t)) return true;
+  if (/\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(?:icon|search|settings?|menu|user|profile)\b[\s\S]{0,48}\b(?:top|bottom|left|right|corner)\b/i.test(t)) return true;
   if (/\b(?:bold|italic|cursive|serif|sans|thin|light|skinny|professional)\b/i.test(t) && /\b(?:font|make|look|style|word|title|name|text)\b/i.test(t)) return true;
   if (/\b(?:put|add|place)\b[\s\S]{0,40}\b(?:word|text)\b/i.test(t)) return true;
   if (/\bword\b/i.test(t) && /\b(?:middle|center|screen)\b/i.test(t)) return true;
@@ -846,7 +883,7 @@ export function reactSurgicalMicroAskEdits(
     const wantsBgColor = Boolean(bgColorWord) && (
       /\bbackground\b/i.test(t)
       || (
-        /\b(?:change|set|make|turn|update|switch|add)\b[\s\S]{0,48}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(?:brown|black|white|blue|red|green|teal|pink|orange|navy|cream)\b/i.test(t)
+        /\b(?:change|set|make|turn|update|switch|add)\b[\s\S]{0,48}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(?:brown|black|white|blue|red|green|teal|pink|orange|navy|cream|gr[ae]y)\b/i.test(t)
         && !/\b(?:text|title|heading|h1|button|word|label|copy|name)\b/i.test(t)
       )
     );
@@ -986,8 +1023,11 @@ export function reactSurgicalMicroAskEdits(
       || namedIcons.length > 0;
     const searchNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*(?:bar|input|field))?\b/i.test(t);
     const bagNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\b(?:cart|bag|shopping)\b/i.test(t);
-    const wantsSearch = !searchNegated && (
-      /\bsearch\s*(?:bar|input|field)?\b/i.test(t)
+    // "move the search icon to the top right" is an icon move — not a search-bar ask.
+    const iconMoveAsk = /\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(?:search|settings?|menu|user|profile|home|bag|cart|bell)\s*icons?\b/i.test(t)
+      || /\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(?:the\s+)?(?:search|settings?|menu|user|profile)\s+icon\b/i.test(t);
+    const wantsSearch = !searchNegated && !iconMoveAsk && (
+      /\bsearch\s*(?:bar|input|field)\b/i.test(t)
       && /\b(?:top[\s-]?right|header|nav|corner)\b/i.test(t)
     );
     const wantsBag = !bagNegated && /\b(?:bag|cart|shopping)\b/i.test(t)
@@ -1098,7 +1138,9 @@ export function reactSurgicalMicroAskEdits(
       } else {
       const white = /\bwhite\b/i.test(t);
       const black = /\bblack\b/i.test(t) && !white;
-      const color = white ? '#fff' : black ? '#111' : '#fff';
+      const lightBg = /background\s*:\s*(?:#f[0-9a-f]{2,5}|#e[0-9a-f]{2,5}|#d[0-9a-f]{2,5}|#fff|cream|white)/i.test(css)
+        || /\b(?:cream|soft\s+gr[ae]y|premium\s+gr[ae]y|light\s+gr[ae]y)\b/i.test(t);
+      const color = white ? '#fff' : black ? '#111' : (lightBg ? '#1a1a1a' : '#fff');
       if (/className=["']center-word["']/i.test(app)) {
         // Update existing centered title in place.
         if (/<h1[^>]*className=["']center-word["'][^>]*>[\s\S]*?<\/h1>/i.test(app)) {
@@ -1131,6 +1173,11 @@ export function reactSurgicalMicroAskEdits(
             /(className=["'][Aa]pp["'][^>]*>)/i,
             `$1\n      <h1 className="center-word">${label}</h1>`,
           );
+        }
+        touchedApp = true;
+      } else if (app.length > 400 && /<(?:header|nav|main|section)\b/i.test(app)) {
+        if (/<h1\b/i.test(app)) {
+          app = app.replace(/(<h1\b[^>]*>)[\s\S]*?(<\/h1>)/i, `$1${label}$2`);
         }
         touchedApp = true;
       } else {
@@ -1204,25 +1251,32 @@ export default function App() {
       || /\bcream\b|\bwhite\b/i.test(t);
     const ink = lightCanvas ? '#1a1a1a' : '#ffffff';
 
-    // Company logo rail — accumulate named brands; never wipe cream.
+    // Company logo rail — skipped on marketing / full-bleed layouts (absolute rails destroy product UIs).
     const pendingBrandSvgs: Array<{ path: string; content: string }> = [];
-    if (namedBrands.length) {
+    const skipAbsoluteRails = briefForbidsAbsoluteRails(t);
+    if (namedBrands.length && !skipAbsoluteRails) {
       const missing = namedBrands.filter((b) => !new RegExp(`/logos/${b.id}\\.svg`, 'i').test(app));
       if (missing.length) {
+        const brandCorner = parseLayoutCorner(t) || 'top-left';
+        const brandRailClass = `brand-rail brand-rail--${brandCorner}`;
         const imgs = missing
-          .map((b) => `<img className="brand-mark" src="/logos/${b.id}.svg" alt="${b.label}" width="28" height="28" />`)
+          .map((b) => `<img className="brand-mark" data-brand="${b.id}" src="/logos/${b.id}.svg" alt="${b.label}" width="28" height="28" />`)
           .join('');
-        if (/className=["']brand-rail["']/i.test(app)) {
-          app = app.replace(/(className=["']brand-rail["'][^>]*>)/i, `$1${imgs}`);
+        if (/className=["'][^"']*brand-rail[^"']*["']/i.test(app)) {
+          app = app.replace(/(className=["'][^"']*brand-rail[^"']*["'][^>]*>)/i, `$1${imgs}`);
+          app = app.replace(
+            /className=["'][^"']*brand-rail[^"']*["']/i,
+            `className="${brandRailClass}"`,
+          );
         } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
           app = app.replace(
             /<div\s+className=["']app["']\s*\/>/i,
-            `<div className="app">\n      <div className="brand-rail" aria-label="Brand logos">${imgs}</div>\n    </div>`,
+            `<div className="app">\n      <div className="${brandRailClass}" aria-label="Brand logos">${imgs}</div>\n    </div>`,
           );
         } else if (/className=["']app["'][^>]*>/i.test(app)) {
           app = app.replace(
             /(className=["']app["'][^>]*>)/i,
-            `$1\n      <div className="brand-rail" aria-label="Brand logos">${imgs}</div>`,
+            `$1\n      <div className="${brandRailClass}" aria-label="Brand logos">${imgs}</div>`,
           );
         }
         touchedApp = true;
@@ -1235,9 +1289,20 @@ export default function App() {
             });
           }
         }
-        if (cssPath && !/\.brand-rail\b/.test(css)) {
-          css += `\n.brand-rail{position:absolute;top:1.35rem;left:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px)}`
-            + `\n.brand-mark{display:block;width:28px;height:28px;opacity:.95}\n`;
+        if (cssPath) {
+          if (!/\.brand-rail\b/.test(css)) {
+            css += `\n.brand-rail{position:absolute;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px);${iconRailCornerCss(brandCorner)}}`
+              + `\n.brand-rail--top-left{top:1.35rem;left:1.35rem;right:auto;bottom:auto}`
+              + `\n.brand-rail--top-right{top:1.35rem;right:1.35rem;left:auto;bottom:auto;justify-content:flex-end}`
+              + `\n.brand-rail--bottom-left{bottom:1.35rem;left:1.35rem;top:auto;right:auto}`
+              + `\n.brand-rail--bottom-right{bottom:1.35rem;right:1.35rem;top:auto;left:auto;justify-content:flex-end}`
+              + `\n.brand-mark{display:block;width:28px;height:28px;opacity:.95}\n`;
+          } else {
+            css = css.replace(
+              /\.brand-rail\s*\{[^}]*\}/i,
+              `.brand-rail{position:absolute;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px);${iconRailCornerCss(brandCorner)}}`,
+            );
+          }
           if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
             css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
           }
@@ -1246,41 +1311,85 @@ export default function App() {
       }
     }
 
-    // Toolbar icons — only fill existing nav-tools / icon-rail. Never stamp a floating
-    // icon-rail onto .app (that made every store look like the same black + mint shell).
+    // Toolbar icons — never inject absolute icon-rails on marketing / product-homepage layouts.
     const pendingIconSvgs: Array<{ path: string; content: string }> = [];
-    if (namedIcons.length) {
-      const missing = namedIcons.filter((ic) => !new RegExp(`/icons/${ic.id}\\.svg`, 'i').test(app));
-      if (missing.length) {
-        const imgs = missing
-          .map((ic) => `<img className="nav-icon" src="/icons/${ic.id}.svg" alt="${ic.label}" width="20" height="20" />`)
-          .join('');
-        let injected = false;
-        if (/className=["']icon-rail["']/i.test(app)) {
-          app = app.replace(/(className=["']icon-rail["'][^>]*>)/i, `$1${imgs}`);
-          injected = true;
-        } else if (/className=["']nav-tools["']/i.test(app)) {
-          app = app.replace(/(className=["']nav-tools["'][^>]*>)/i, `$1${imgs}`);
-          injected = true;
-        }
-        if (injected) {
-          touchedApp = true;
-          for (const ic of missing) {
-            const path = `public/icons/${ic.id}.svg`;
-            if (flat[path] == null) {
-              pendingIconSvgs.push({
-                path,
-                content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><title>${ic.label}</title><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg>\n`,
-              });
-            }
+    const defaultUiIcons = [
+      { id: 'search', label: 'search' },
+      { id: 'settings', label: 'settings' },
+      { id: 'menu', label: 'menu' },
+      { id: 'user', label: 'profile' },
+    ];
+    const iconSet = skipAbsoluteRails
+      ? []
+      : namedIcons.length
+      ? namedIcons.map((ic) => ({ id: ic.id, label: ic.label }))
+      : (wantsExtraIcon && !wantsLogo ? defaultUiIcons : []);
+    if (iconSet.length) {
+      const missing = iconSet.filter((ic) => !new RegExp(`/icons/${ic.id}\\.svg`, 'i').test(app));
+      const corner = parseLayoutCorner(t) || 'top-left';
+      const railClass = `icon-rail icon-rail--${corner}`;
+      if (missing.length || !/className=["'][^"']*icon-rail/i.test(app)) {
+        const imgs = (missing.length ? missing : iconSet)
+          .filter((ic, i, arr) => arr.findIndex((x) => x.id === ic.id) === i)
+          .filter((ic) => !new RegExp(`/icons/${ic.id}\\.svg`, 'i').test(app) || missing.some((m) => m.id === ic.id))
+          .map((ic) => `<img className="nav-icon" data-icon="${ic.id}" src="/icons/${ic.id}.svg" alt="${ic.label}" width="22" height="22" />`)
+          .join('\n        ');
+        if (imgs) {
+          let injected = false;
+          if (/className=["'][^"']*icon-rail[^"']*["']/i.test(app)) {
+            app = app.replace(/(className=["'][^"']*icon-rail[^"']*["'][^>]*>)/i, `$1\n        ${imgs}`);
+            // Keep rail corner in sync with the ask when present.
+            app = app.replace(
+              /className=["'][^"']*icon-rail[^"']*["']/i,
+              `className="${railClass}"`,
+            );
+            injected = true;
+          } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
+            app = app.replace(
+              /<div\s+className=["']app["']\s*\/>/i,
+              `<div className="app">\n      <div className="${railClass}" aria-label="Icons">\n        ${imgs}\n      </div>\n    </div>`,
+            );
+            injected = true;
+          } else if (/className=["']app["'][^>]*>/i.test(app)) {
+            app = app.replace(
+              /(className=["']app["'][^>]*>)/i,
+              `$1\n      <div className="${railClass}" aria-label="Icons">\n        ${imgs}\n      </div>`,
+            );
+            injected = true;
+          } else if (/className=["']nav-tools["']/i.test(app)) {
+            app = app.replace(/(className=["']nav-tools["'][^>]*>)/i, `$1${imgs}`);
+            injected = true;
           }
-          if (cssPath && !/\.icon-rail\b/.test(css) && /className=["']icon-rail["']/i.test(app)) {
-            css += `\n.icon-rail{position:absolute;top:1.35rem;right:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;max-width:min(92vw,520px)}`
-              + `\n.nav-icon{display:block;opacity:.92;width:20px;height:20px}\n`;
-            if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
-              css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+          if (injected) {
+            touchedApp = true;
+            for (const ic of missing.length ? missing : iconSet) {
+              const path = `public/icons/${ic.id}.svg`;
+              if (flat[path] == null && !pendingIconSvgs.some((p) => p.path === path)) {
+                pendingIconSvgs.push({ path, content: simpleUiIconSvg(ic.id, ink) });
+              }
             }
-            touchedCss = true;
+            if (cssPath) {
+              if (!/\.icon-rail\b/.test(css)) {
+                css += `\n.icon-rail{position:absolute;z-index:2;display:flex;flex-direction:column;gap:14px;${iconRailCornerCss(corner)}}`
+                  + `\n.icon-rail--top-left{top:1.25rem;left:1.25rem;right:auto;bottom:auto}`
+                  + `\n.icon-rail--top-right{top:1.25rem;right:1.25rem;left:auto;bottom:auto;align-items:flex-end}`
+                  + `\n.icon-rail--bottom-left{bottom:1.25rem;left:1.25rem;top:auto;right:auto}`
+                  + `\n.icon-rail--bottom-right{bottom:1.25rem;right:1.25rem;top:auto;left:auto;align-items:flex-end}`
+                  + `\n.nav-icon{display:block;opacity:.92;width:22px;height:22px}\n`;
+                touchedCss = true;
+              } else {
+                // Re-home existing rail corner class rules if ask names a corner.
+                css = css.replace(
+                  /\.icon-rail\s*\{[^}]*\}/i,
+                  `.icon-rail{position:absolute;z-index:2;display:flex;flex-direction:column;gap:14px;${iconRailCornerCss(corner)}}`,
+                );
+                touchedCss = true;
+              }
+              if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
+                css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+                touchedCss = true;
+              }
+            }
           }
         }
       }
@@ -1347,8 +1456,14 @@ export default function App() {
       /* handled below via out push when returning chrome edits */
     }
 
-    if (wantsExtraIcon && namedIcons.length === 0 && !(/nav-icon|\/icons\/menu\.svg/i.test(app) && /nav-left/i.test(app))) {
-      const icon = `<img className="nav-icon" src="/icons/menu.svg" alt="" width="20" height="20" />`;
+    // Legacy single menu stamp — only when no icon-rail was created above.
+    if (
+      wantsExtraIcon
+      && namedIcons.length === 0
+      && !/className=["'][^"']*icon-rail/i.test(app)
+      && !(/nav-icon|\/icons\/menu\.svg/i.test(app) && /nav-left/i.test(app))
+    ) {
+      const icon = `<img className="nav-icon" data-icon="menu" src="/icons/menu.svg" alt="" width="20" height="20" />`;
       if (/<\/div>\s*(?=<div className=["']nav-tools)/i.test(app) && /nav-left/i.test(app)) {
         app = app.replace(
           /(<div className=["']nav-left["'][^>]*>)([\s\S]*?)(<\/div>)/i,
@@ -1367,7 +1482,7 @@ export default function App() {
       } else if (/className=["']app["'][^>]*>/i.test(app) && !/nav-icon/i.test(app)) {
         app = app.replace(
           /(className=["']app["'][^>]*>)/i,
-          `$1\n      <img className="nav-icon corner-icon" src="/icons/menu.svg" alt="" width="20" height="20" />`,
+          `$1\n      <img className="nav-icon corner-icon" data-icon="menu" src="/icons/menu.svg" alt="" width="20" height="20" />`,
         );
       }
       touchedApp = true;
@@ -1375,6 +1490,9 @@ export default function App() {
         css += `\n.nav-icon{display:block;opacity:.92;width:20px;height:20px}`
           + `\n.corner-icon{position:absolute;top:1.65rem;left:4.75rem;z-index:2}\n`;
         touchedCss = true;
+      }
+      if (flat['public/icons/menu.svg'] == null && !pendingIconSvgs.some((p) => p.path === 'public/icons/menu.svg')) {
+        pendingIconSvgs.push({ path: 'public/icons/menu.svg', content: simpleUiIconSvg('menu', ink) });
       }
     }
 
@@ -1938,18 +2056,33 @@ export default function App() {
     }
   }
 
-  // Move centered name: top-left / top-right / bottom-left / bottom-right / center
+  // Move centered name: top-left / top-right / bottom-left / bottom-right / center / bottom-center
   if (
     /className=["']center-word["']/i.test(app)
     && /\b(?:move|put|place|shift)\b/i.test(t)
     && /\b(?:top|bottom|left|right|corner|center|middle)\b/i.test(t)
   ) {
-    const top = /\btop\b/i.test(t);
-    const bottom = /\bbottom\b/i.test(t);
-    const left = /\bleft\b/i.test(t);
-    const right = /\bright\b/i.test(t);
-    const recenter = /\b(?:center|centre|middle)\b/i.test(t) && !left && !right;
-    if (recenter || (!top && !bottom && !left && !right)) {
+    // Prefer the clause that names the title / Nightglass / center-word — not icon/logo moves in the same ask.
+    const nameClause = (
+      t.match(/\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(?:nightglass|center(?:ed)?\s+word|the\s+name|the\s+title|the\s+word)\b[\s\S]{0,48}\b(?:top[\s-]?left|top[\s-]?right|bottom[\s-]?left|bottom[\s-]?right|bottom\s+center|top\s+center|center|middle)\b/i)?.[0]
+      || t.match(/\b(?:move|put|place|shift)\b[\s\S]{0,24}\b(?:it|name|title|word)\b[\s\S]{0,40}\b(?:top|bottom|left|right|center|middle)\b/i)?.[0]
+      || ''
+    );
+    const scope = nameClause || t;
+    const top = /\btop\b/i.test(scope);
+    const bottom = /\bbottom\b/i.test(scope);
+    const left = /\bleft\b/i.test(scope);
+    const right = /\bright\b/i.test(scope);
+    const wantsCenter = /\b(?:center|centre|middle)\b/i.test(scope);
+    const bottomCenter = bottom && wantsCenter && !left && !right;
+    const recenter = wantsCenter && !left && !right && !top && !bottom;
+    // Skip if this ask is only about icons/logos and never mentions the name.
+    const nameTargeted = Boolean(nameClause)
+      || /\b(?:nightglass|center-word|the\s+name|the\s+title|the\s+word)\b/i.test(t)
+      || !/\b(?:icon|logo|netflix|search|settings|menu)\b/i.test(t);
+    if (!nameTargeted) {
+      /* icon/logo-only move — leave the name alone */
+    } else if (recenter || (!top && !bottom && !left && !right)) {
       if (/\.app\s*\{/i.test(css)) {
         css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
           let next = String(body || '');
@@ -1976,10 +2109,14 @@ export default function App() {
       }
       touchedCss = true;
     } else {
-      const y = top ? 'top:1.25rem;' : bottom ? 'bottom:1.25rem;' : 'top:50%;';
+      const y = bottomCenter || (bottom && !top)
+        ? 'bottom:1.25rem;'
+        : top ? 'top:1.25rem;' : 'top:50%;';
       const x = left ? 'left:1.25rem;' : right ? 'right:1.25rem;' : 'left:50%;';
       let transform = '';
-      if (!top && !bottom && left) transform = 'transform:translateY(-50%);';
+      if (bottomCenter || (wantsCenter && (top || bottom) && !left && !right)) {
+        transform = 'transform:translateX(-50%); left:50%;';
+      } else if (!top && !bottom && left) transform = 'transform:translateY(-50%);';
       else if (!top && !bottom && right) transform = 'transform:translateY(-50%);';
       else if (top && !left && !right) transform = 'transform:translateX(-50%); left:50%;';
       else if (bottom && !left && !right) transform = 'transform:translateX(-50%); left:50%;';
@@ -1987,6 +2124,9 @@ export default function App() {
       if (/\.app\s*\{/i.test(css)) {
         css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
           let next = String(body || '');
+          next = next
+            .replace(/align-items\s*:\s*[^;]+;?/gi, '')
+            .replace(/justify-content\s*:\s*[^;]+;?/gi, '');
           if (!/position\s*:/i.test(next)) next += ' position:relative;';
           return `.app {${next}}`;
         });
@@ -2009,6 +2149,155 @@ export default function App() {
         css += `\n.center-word{${posCss}}\n`;
       }
       touchedCss = true;
+    }
+  }
+
+  // Move named UI icons to layout corners (supports multiple clauses in one ask).
+  if (
+    /\b(?:move|put|place|shift)\b/i.test(t)
+    && /\b(?:icon|search|settings?|menu|user|profile|home|bag|cart|bell)\b/i.test(t)
+    && /\b(?:top|bottom|left|right|corner)\b/i.test(t)
+    && !/\b(?:float|drift|animat|slowly|around the screen)\b/i.test(t)
+  ) {
+    const moveRe = /\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(search|settings?|menu|user|profile|home|bag|cart|bell)\b[\s\S]{0,48}\b(top[\s-]?left|top[\s-]?right|bottom[\s-]?left|bottom[\s-]?right)\b/gi;
+    const moves: Array<{ iconId: string; corner: NonNullable<ReturnType<typeof parseLayoutCorner>> }> = [];
+    let mm: RegExpExecArray | null;
+    while ((mm = moveRe.exec(t)) != null) {
+      const iconId = String(mm[1] || '').toLowerCase()
+        .replace(/^settings?$/, 'settings')
+        .replace(/^profile$/, 'user');
+      const corner = parseLayoutCorner(mm[2] || '') || parseLayoutCorner(mm[0] || '');
+      if (iconId && corner) moves.push({ iconId, corner });
+    }
+    if (!moves.length) {
+      const corner = parseLayoutCorner(t);
+      const iconId = (
+        t.match(/\b(search|settings?|menu|user|profile|home|bag|cart|bell)\b/i)?.[1]
+        || ''
+      ).toLowerCase().replace(/^settings?$/, 'settings').replace(/^profile$/, 'user');
+      if (corner && iconId) moves.push({ iconId, corner });
+    }
+    if (moves.length && /nav-icon|icon-rail|\/icons\//i.test(app)) {
+      for (const { iconId, corner } of moves) {
+        const imgRe = new RegExp(
+          `<img\\b[^>]*?(?:data-icon=["']${iconId}["'][^>]*?src=["'][^"']*/icons/${iconId}\\.svg["']|src=["'][^"']*/icons/${iconId}\\.svg["'][^>]*?)[^>]*?/?>`,
+          'i',
+        );
+        const imgMatch = app.match(imgRe);
+        if (!imgMatch) continue;
+        let imgTag = imgMatch[0];
+        if (!/data-icon=/i.test(imgTag)) {
+          imgTag = imgTag.replace(/<img\b/i, `<img data-icon="${iconId}"`);
+        }
+        app = app.replace(imgRe, '');
+        app = app.replace(/<div className=["'][^"']*icon-rail[^"']*["'][^>]*>\s*<\/div>\s*/gi, '');
+        const targetRailRe = new RegExp(
+          `<div className=["'][^"']*icon-rail--${corner}[^"']*["'][^>]*>`,
+          'i',
+        );
+        if (targetRailRe.test(app)) {
+          app = app.replace(targetRailRe, (open) => `${open}\n        ${imgTag}`);
+        } else if (/className=["']app["'][^>]*>/i.test(app)) {
+          app = app.replace(
+            /(className=["']app["'][^>]*>)/i,
+            `$1\n      <div className="icon-rail icon-rail--${corner}" aria-label="Icons">\n        ${imgTag}\n      </div>`,
+          );
+        } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
+          app = app.replace(
+            /<div\s+className=["']app["']\s*\/>/i,
+            `<div className="app">\n      <div className="icon-rail icon-rail--${corner}" aria-label="Icons">\n        ${imgTag}\n      </div>\n    </div>`,
+          );
+        }
+        touchedApp = true;
+      }
+      if (touchedApp && cssPath) {
+        // Drop legacy absolute-right .icon-rail stamp that fights corner modifiers.
+        css = css.replace(
+          /\.icon-rail\s*\{[^}]*right\s*:\s*1\.35rem[^}]*\}/gi,
+          '',
+        );
+        if (!/\.icon-rail--top-left\b/.test(css)) {
+          css += `\n.icon-rail{position:absolute;z-index:2;display:flex;flex-direction:column;gap:14px}`
+            + `\n.icon-rail--top-left{top:1.25rem;left:1.25rem;right:auto;bottom:auto}`
+            + `\n.icon-rail--top-right{top:1.25rem;right:1.25rem;left:auto;bottom:auto;align-items:flex-end}`
+            + `\n.icon-rail--bottom-left{bottom:1.25rem;left:1.25rem;top:auto;right:auto}`
+            + `\n.icon-rail--bottom-right{bottom:1.25rem;right:1.25rem;top:auto;left:auto;align-items:flex-end}`
+            + `\n.nav-icon{display:block;opacity:.92;width:22px;height:22px}\n`;
+        }
+        if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
+          css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+        }
+        touchedCss = true;
+      }
+    }
+  }
+
+  // Move a brand logo rail / mark to a layout corner.
+  if (
+    /\b(?:move|put|place|shift)\b/i.test(t)
+    && /\b(?:logo|brand|netflix|youtube|hulu|discord|apple|spotify)\b/i.test(t)
+    && /\b(?:top|bottom|left|right|corner)\b/i.test(t)
+    && !/\b(?:float|drift|animat|slowly)\b/i.test(t)
+  ) {
+    const moveLogoRe = /\b(?:move|put|place|shift)\b[\s\S]{0,56}\b(?:the\s+)?(netflix|youtube|hulu|discord|apple|spotify|logo|brand)\b[\s\S]{0,40}\b(top[\s-]?left|top[\s-]?right|bottom[\s-]?left|bottom[\s-]?right)\b/gi;
+    const logoMoves: Array<{ brand: string; corner: NonNullable<ReturnType<typeof parseLayoutCorner>> }> = [];
+    let lm: RegExpExecArray | null;
+    while ((lm = moveLogoRe.exec(t)) != null) {
+      const brand = String(lm[1] || '').toLowerCase();
+      const corner = parseLayoutCorner(lm[2] || '');
+      if (corner) logoMoves.push({ brand, corner });
+    }
+    if (!logoMoves.length) {
+      const corner = parseLayoutCorner(t);
+      if (corner) logoMoves.push({ brand: 'logo', corner });
+    }
+    for (const { brand, corner } of logoMoves) {
+      const brandId = /^(logo|brand)$/i.test(brand)
+        ? (app.match(/\/logos\/([a-z0-9-]+)\.svg/i)?.[1] || '')
+        : brand;
+      if (!brandId && !/brand-rail|corner-logo|\/logos\//i.test(app)) continue;
+      // Re-home whole brand-rail when present.
+      if (/className=["'][^"']*brand-rail[^"']*["']/i.test(app)) {
+        app = app.replace(
+          /className=["'][^"']*brand-rail[^"']*["']/i,
+          `className="brand-rail brand-rail--${corner}"`,
+        );
+        touchedApp = true;
+      } else if (brandId) {
+        const imgRe = new RegExp(
+          `<img\\b[^>]*?(?:data-brand=["']${brandId}["'][^>]*?src=["'][^"']*/logos/${brandId}\\.svg["']|src=["'][^"']*/logos/${brandId}\\.svg["'][^>]*?)[^>]*?/?>`,
+          'i',
+        );
+        const imgMatch = app.match(imgRe);
+        if (imgMatch) {
+          let imgTag = imgMatch[0];
+          if (!/data-brand=/i.test(imgTag)) {
+            imgTag = imgTag.replace(/<img\b/i, `<img data-brand="${brandId}"`);
+          }
+          app = app.replace(imgRe, '');
+          if (/className=["']app["'][^>]*>/i.test(app)) {
+            app = app.replace(
+              /(className=["']app["'][^>]*>)/i,
+              `$1\n      <div className="brand-rail brand-rail--${corner}" aria-label="Brand logos">${imgTag}</div>`,
+            );
+          }
+          touchedApp = true;
+        }
+      }
+      if (touchedApp && cssPath) {
+        if (!/\.brand-rail--top-left\b/.test(css)) {
+          css += `\n.brand-rail{position:absolute;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px}`
+            + `\n.brand-rail--top-left{top:1.35rem;left:1.35rem;right:auto;bottom:auto}`
+            + `\n.brand-rail--top-right{top:1.35rem;right:1.35rem;left:auto;bottom:auto;justify-content:flex-end}`
+            + `\n.brand-rail--bottom-left{bottom:1.35rem;left:1.35rem;top:auto;right:auto}`
+            + `\n.brand-rail--bottom-right{bottom:1.35rem;right:1.35rem;top:auto;left:auto;justify-content:flex-end}`
+            + `\n.brand-mark{display:block;width:28px;height:28px;opacity:.95}\n`;
+        }
+        if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
+          css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+        }
+        touchedCss = true;
+      }
     }
   }
 
@@ -2454,6 +2743,54 @@ export function verifyMicroAskApplied(
     missing.push(`brand “${brandWanted}”`);
   }
 
+  // UI icon add / move — require the icon file ref and corner rail when asked.
+  {
+    const named = parseNamedUiIcons(t);
+    const wantsIcons = named.length > 0
+      || (/\bicons?\b/i.test(t) && /\b(?:add|put|place)\b/i.test(t));
+    if (wantsIcons && !/\b(?:move|shift)\b/i.test(t)) {
+      const ids = named.length
+        ? named.map((ic) => ic.id)
+        : ['search', 'settings', 'menu', 'user'];
+      for (const id of ids) {
+        if (!new RegExp(`/icons/${id}\\.svg`, 'i').test(app)) missing.push(`icon:${id}`);
+      }
+      if (!/icon-rail|nav-tools|nav-icon/i.test(app)) missing.push('icon-rail');
+    }
+    if (/\b(?:move|put|place|shift)\b/i.test(t) && /\b(?:icon|search|settings?|menu|user)\b/i.test(t)) {
+      const moveRe = /\b(?:move|put|place|shift)\b[\s\S]{0,48}\b(search|settings?|menu|user|profile|home|bag|cart|bell)\b[\s\S]{0,48}\b(top[\s-]?left|top[\s-]?right|bottom[\s-]?left|bottom[\s-]?right)\b/gi;
+      let mm: RegExpExecArray | null;
+      let any = false;
+      while ((mm = moveRe.exec(t)) != null) {
+        any = true;
+        const iconId = String(mm[1] || '').toLowerCase()
+          .replace(/^settings?$/, 'settings')
+          .replace(/^profile$/, 'user');
+        const corner = parseLayoutCorner(mm[2] || '');
+        if (!iconId || !corner) continue;
+        const inCornerRail = new RegExp(
+          `icon-rail--${corner}[\\s\\S]{0,500}/icons/${iconId}\\.svg`,
+          'i',
+        ).test(app);
+        if (!inCornerRail) missing.push(`move:${iconId}→${corner}`);
+      }
+      if (!any) {
+        const corner = parseLayoutCorner(t);
+        const iconId = (
+          t.match(/\b(search|settings?|menu|user|profile|home|bag|cart|bell)\b/i)?.[1]
+          || ''
+        ).toLowerCase().replace(/^settings?$/, 'settings').replace(/^profile$/, 'user');
+        if (corner && iconId) {
+          const inCornerRail = new RegExp(
+            `icon-rail--${corner}[\\s\\S]{0,500}/icons/${iconId}\\.svg`,
+            'i',
+          ).test(app);
+          if (!inCornerRail) missing.push(`move:${iconId}→${corner}`);
+        }
+      }
+    }
+  }
+
   const headline = (
     t.match(/(?:change|rename|set|make|update).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
     || t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
@@ -2688,6 +3025,11 @@ export default function App() {
 
 export function blankSolidColorFromAsk(ask: string): string | null {
   const t = String(ask || '');
+  // Full product / marketing / quiet-luxury creates are never a blank color wipe.
+  if (/\b(?:quiet[\s-]?luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|product\s+marketing|serif|orb|features?|footer|discover|cta)\b/i.test(t)
+    && !/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?))\b/i.test(t)) {
+    return null;
+  }
   // Follow-up asks that ADD content on an existing colored screen must not re-wipe to a blank shell.
   if (/\b(?:put|add|place|insert|write|show|center|centred)\b[\s\S]{0,64}\b(?:words?|text|title|headline|logo|icon|button|footer|nav|search|phrase|copy|wording)\b/i.test(t)) {
     return null;
@@ -2702,20 +3044,24 @@ export function blankSolidColorFromAsk(ask: string): string | null {
   if (/\b(?:white|black)\s+(?:words?|text|title|headline|copy|phrase)\b/i.test(t)) {
     return null;
   }
-  // "solid brown blank", "just a pure brown full-screen", "blank brown page", etc.
+  // "solid brown blank", "just a pure brown full-screen", "blank brown page",
+  // "basic website … solid black background … nothing else", etc.
   const word = (
-    t.match(/\b(?:solid|pure|just|blank|flat|full[- ]?(?:screen|viewport|window))\b[\s\S]{0,48}\b(brown|black|white|blue|red|green|teal|chocolate|sienna|pink|orange)\b/i)?.[1]
-    || t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange)\b[\s\S]{0,48}\b(?:blank|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome))\b/i)?.[1]
-    || t.match(/\bnothing but\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i)?.[1]
-    || t.match(/\bcover\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i)?.[1]
+    t.match(/\b(?:solid|pure|just|blank|flat|basic|full[- ]?(?:screen|viewport|window)|premium|soft)\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|chocolate|sienna|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
+    || t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b[\s\S]{0,48}\b(?:blank|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?))\b/i)?.[1]
+    || t.match(/\bnothing but\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
+    || t.match(/\bcover\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
     || ''
   );
   if (!word) return null;
+  // Prefer cream when both cream + white appear ("cream white").
+  const resolved = /\bcream\b/i.test(t) && /white/i.test(word) ? 'cream' : word;
   // Require blank/minimal intent so normal "brown accent" asks don't wipe the site.
-  if (!/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|stop there|no (?:nav|text|icons?|words?|ui|chrome)|just (?:a )?(?:solid|pure|flat)|full[- ]?(?:screen|viewport|window)|for now|empty otherwise)\b/i.test(t)) {
+  // Do NOT treat "full viewport" alone as blank — premium heroes use that phrase constantly.
+  if (!/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|stop there|no (?:nav|text|icons?|words?|ui|chrome|buttons?)|just (?:a )?(?:solid|pure|flat|basic)|for now|empty otherwise|premium\s+(?:cream|gr[ae]y)|soft\s+gr[ae]y)\b/i.test(t)) {
     return null;
   }
-  return cssColor(word) || null;
+  return cssColor(resolved) || null;
 }
 
 function stripSearchChromeFromIndexHtml(html: string): string {
@@ -2755,6 +3101,21 @@ export function finalizeWebEdits(
   // Full marketing / quiet-luxury creates: never let surgical center-word win over model/shell writes.
   const marketingCreate = /\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing)\b/i.test(ask)
     || (/\b(?:hero|footer|features?)\b/i.test(ask) && /\b(?:website|landing|marketing)\b/i.test(ask) && ask.length > 220);
+
+  // Blank solid color MUST win before cinematic / surgical — "just a solid black background,
+  // nothing else" was getting upgraded into a multi-stage cinema shell.
+  const blankSolidEarly = blankSolidColorFromAsk(ask);
+  if (blankSolidEarly) {
+    const out = [...viteSolidShellEdits(blankSolidEarly)];
+    const html0 = flat['index.html'] || cleaned.find((e) => /(?:^|\/)index\.html$/i.test(String(e.path || '').replace(/\\/g, '/')))?.content;
+    if (html0 && /NOVA-search|top-bar/i.test(html0)) {
+      out.push({ path: 'index.html', content: stripSearchChromeFromIndexHtml(html0) });
+    } else if (flat['index.html'] && /NOVA-search|top-bar/i.test(flat['index.html'])) {
+      out.push({ path: 'index.html', content: stripSearchChromeFromIndexHtml(flat['index.html']) });
+    }
+    return out;
+  }
+
   // Surgical add-word / logo / search asks must win before blank-shell wipe.
   const surgicalEarly = marketingCreate ? [] : reactSurgicalMicroAskEdits(files, message);
   if (surgicalEarly.length) {

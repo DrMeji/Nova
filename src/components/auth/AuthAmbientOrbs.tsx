@@ -210,8 +210,8 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
       }
     };
     syncReduceMotion();
-    window.addEventListener('ark:prefs-changed', syncReduceMotion);
-    return () => window.removeEventListener('ark:prefs-changed', syncReduceMotion);
+    window.addEventListener('nova:prefs-changed', syncReduceMotion);
+    return () => window.removeEventListener('nova:prefs-changed', syncReduceMotion);
   }, []);
 
   useEffect(() => {

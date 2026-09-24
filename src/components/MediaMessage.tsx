@@ -89,9 +89,9 @@ export function GeneratingPlaceholder({
     return (
       <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
         <span className="inline-flex items-center gap-1.5" aria-hidden>
-          <span className="ark-status-dot ark-status-dot-1" />
-          <span className="ark-status-dot ark-status-dot-2" />
-          <span className="ark-status-dot ark-status-dot-3" />
+          <span className="nova-status-dot nova-status-dot-1" />
+          <span className="nova-status-dot nova-status-dot-2" />
+          <span className="nova-status-dot nova-status-dot-3" />
         </span>
         <span className="min-w-0 flex-1 text-content-secondary text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere]">{shown}</span>
       </div>
@@ -402,12 +402,15 @@ export function MessageContent({
   live,
   onPromptChipPick,
   messageId,
+  tone = 'assistant',
 }: {
   content: string;
   live?: boolean;
   onPromptChipPick?: (prompt: string) => void;
   /** When set, live turn status is read from the status store (not message remounts). */
   messageId?: string;
+  /** User bubbles stay one text tone (no label/detail color split). */
+  tone?: 'user' | 'assistant';
 }) {
   const turnStatus = useChatTurnStatus(messageId);
   if (!content) {
@@ -429,7 +432,7 @@ export function MessageContent({
     if (onPromptChipPick && chips.length) {
       return <PromptChipsCard body={body} chips={chips} onPick={onPromptChipPick} />;
     }
-    return body ? <ChatMarkdown text={body} /> : null;
+    return body ? <ChatMarkdown text={body} tone={tone} /> : null;
   }
 
   if (isTraceMessage(content)) {
@@ -451,7 +454,7 @@ export function MessageContent({
 
   if (isChatAttachMessage(content)) {
     const rest = stripChatAttach(content);
-    if (rest && (/!\[[^\]]*\]\([^)]+\)/.test(rest) || rest.includes('ark-media:'))) {
+    if (rest && (/!\[[^\]]*\]\([^)]+\)/.test(rest) || rest.includes('nova-media:'))) {
       return (
         <div className="space-y-2">
           <AttachMessageBody content={content} />
@@ -481,9 +484,15 @@ export function MessageContent({
         && turnStatus.history
       ) || [];
       // Never flash the seed "Thinking…" once real create/edit work has started.
+      const lastStep = liveHistory[liveHistory.length - 1];
+      const lastLabel = typeof lastStep === 'string'
+        ? lastStep
+        : (lastStep && typeof lastStep === 'object' && 'label' in lastStep
+          ? String((lastStep as { label?: string }).label || '')
+          : '');
       const label = /^Thinking…?$/i.test(String(liveLabel))
         && liveHistory.length > 1
-        ? (liveHistory[liveHistory.length - 1] || 'Working…')
+        ? (lastLabel || 'Working…')
         : liveLabel;
       return <AgentProgressStatus label={label} history={liveHistory} />;
     }
@@ -494,7 +503,7 @@ export function MessageContent({
     return <GeneratingPlaceholder kind="chat" label="Working…" />;
   }
 
-  if (!content.includes('ark-media:') && !/!\[[^\]]*\]\([^)]+\)/.test(content)) {
+  if (!content.includes('nova-media:') && !/!\[[^\]]*\]\([^)]+\)/.test(content)) {
     const shown = usableAssistantText(content);
     if (!shown) {
       // Never flash canned greetings / empty usable text as the bubble body.
@@ -522,9 +531,40 @@ export function MessageContent({
 
   const onlyMedia = chunks.every(c => c.type === 'media' || !c.value.trim());
   const previewHint = /not a finished|motion still|offline fallback|real:\s*false|demo placeholder/i.test(content);
+  // Build/create turns keep an expandable step list while live. Settled plain chat
+  // never shows a leftover "Done" bar — that clutter is for long builds only.
+  const history = (
+    messageId
+    && turnStatus
+    && turnStatus.assistantId === messageId
+    && Array.isArray(turnStatus.history)
+  ) ? turnStatus.history : [];
+  const buildyHistory = history.some((step) => {
+    const label = typeof step === 'string' ? step : String(step?.label || '');
+    return /\b(?:build|craft|creating|writing|polish|coding|verif|scaffold|npm|design ·|copy ·|contract|folder)\b/i.test(label);
+  });
+  const liveGenerating = Boolean(live);
+  const finishedSteps = (
+    messageId
+    && turnStatus
+    && turnStatus.assistantId === messageId
+    && buildyHistory
+    && history.length > 1
+    && !liveGenerating
+    && !/^\(stopped\)$/i.test(String(content || '').trim())
+  ) ? {
+    ...turnStatus,
+    label: /^done$/i.test(String(turnStatus.label || '')) ? turnStatus.label : 'Done',
+  } : null;
 
   return (
     <div className={onlyMedia ? 'space-y-2' : 'space-y-3'}>
+      {finishedSteps ? (
+        <AgentProgressStatus
+          label={finishedSteps.label || 'Build steps'}
+          history={finishedSteps.history}
+        />
+      ) : null}
       {chunks.map((chunk, i) => {
         if (chunk.type === 'media') {
           const src = chunk.value;
@@ -537,8 +577,8 @@ export function MessageContent({
           ) {
             return <ResolvedMedia key={i} src={src} alt={alt} preview={previewHint} />;
           }
-          if (src.startsWith('ark-media:')) {
-            const id = src.slice('ark-media:'.length);
+          if (src.startsWith('nova-media:')) {
+            const id = src.slice('nova-media:'.length);
             return <ArkMediaImage key={i} id={id} alt={alt} preview={previewHint} />;
           }
           return (
@@ -559,7 +599,7 @@ export function MessageContent({
             </p>
           );
         }
-        return <ChatMarkdown key={i} text={text} />;
+        return <ChatMarkdown key={i} text={text} tone={tone} />;
       })}
     </div>
   );

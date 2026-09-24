@@ -9,12 +9,12 @@
  *   node chat.mjs --stream "Count to five"
  *   node chat.mjs --ollama "Hello via Ollama-shaped API"
  *
- * Optional: ARK_BRAIN_TOKEN=... ARK_BRAIN_URL=http://127.0.0.1:8787
+ * Optional: NOVA_BRAIN_TOKEN=... NOVA_BRAIN_URL=http://127.0.0.1:8787
  */
 
-const DISCOVERY_URL = process.env.ARK_BRAIN_URL || 'http://127.0.0.1:8787';
+const DISCOVERY_URL = process.env.NOVA_BRAIN_URL || 'http://127.0.0.1:8787';
 let BRAIN = DISCOVERY_URL;
-const TOKEN = process.env.ARK_BRAIN_TOKEN || '';
+const TOKEN = process.env.NOVA_BRAIN_TOKEN || '';
 
 function headers() {
   const h = { 'Content-Type': 'application/json' };

@@ -4,25 +4,25 @@
 
 @layer base {
   :root {
-    --ark-font: 'Inter', system-ui, -apple-system, sans-serif;
+    --nova-font: 'Inter', system-ui, -apple-system, sans-serif;
 
     /* Dark = pure black / gray (no navy, no blue) â€” RGB channels for Tailwind opacity */
-    --ark-navy-950: 0 0 0;
-    --ark-navy-900: 10 10 10;
-    --ark-navy-800: 23 23 23;
-    --ark-navy-700: 38 38 38;
-    --ark-navy-600: 64 64 64;
+    --nova-navy-950: 0 0 0;
+    --nova-navy-900: 10 10 10;
+    --nova-navy-800: 23 23 23;
+    --nova-navy-700: 38 38 38;
+    --nova-navy-600: 64 64 64;
 
-    --ark-accent-50: 250 250 250;
-    --ark-accent-100: 245 245 245;
-    --ark-accent-200: 229 229 229;
-    --ark-accent-300: 212 212 212;
-    --ark-accent-400: 163 163 163;
-    --ark-accent-500: 245 245 245;
-    --ark-accent-600: 212 212 212;
-    --ark-accent-700: 163 163 163;
-    --ark-accent-800: 82 82 82;
-    --ark-accent-900: 38 38 38;
+    --nova-accent-50: 250 250 250;
+    --nova-accent-100: 245 245 245;
+    --nova-accent-200: 229 229 229;
+    --nova-accent-300: 212 212 212;
+    --nova-accent-400: 163 163 163;
+    --nova-accent-500: 245 245 245;
+    --nova-accent-600: 212 212 212;
+    --nova-accent-700: 163 163 163;
+    --nova-accent-800: 82 82 82;
+    --nova-accent-900: 38 38 38;
 
     --color-surface: 10 10 10;
     --color-surface-hover: 23 23 23;
@@ -40,22 +40,22 @@
 
   .light {
     /* Light = soft cream (not pure white) */
-    --ark-navy-950: 250 245 235;
-    --ark-navy-900: 245 238 226;
-    --ark-navy-800: 238 230 216;
-    --ark-navy-700: 224 214 198;
-    --ark-navy-600: 196 184 166;
+    --nova-navy-950: 250 245 235;
+    --nova-navy-900: 245 238 226;
+    --nova-navy-800: 238 230 216;
+    --nova-navy-700: 224 214 198;
+    --nova-navy-600: 196 184 166;
 
-    --ark-accent-50: 23 23 23;
-    --ark-accent-100: 38 38 38;
-    --ark-accent-200: 64 64 64;
-    --ark-accent-300: 82 82 82;
-    --ark-accent-400: 64 64 64;
-    --ark-accent-500: 23 23 23;
-    --ark-accent-600: 10 10 10;
-    --ark-accent-700: 0 0 0;
-    --ark-accent-800: 0 0 0;
-    --ark-accent-900: 0 0 0;
+    --nova-accent-50: 23 23 23;
+    --nova-accent-100: 38 38 38;
+    --nova-accent-200: 64 64 64;
+    --nova-accent-300: 82 82 82;
+    --nova-accent-400: 64 64 64;
+    --nova-accent-500: 23 23 23;
+    --nova-accent-600: 10 10 10;
+    --nova-accent-700: 0 0 0;
+    --nova-accent-800: 0 0 0;
+    --nova-accent-900: 0 0 0;
 
     --color-surface: 252 247 238;
     --color-surface-hover: 240 232 218;
@@ -79,7 +79,7 @@
   }
 
   html {
-    font-family: var(--ark-font);
+    font-family: var(--nova-font);
     height: 100%;
     min-width: 0;
     overflow: hidden;
@@ -118,109 +118,153 @@
 }
 
 /* Chat keeps wheel/trackpad scroll; bar stays invisible (matches global hide). */
-.ark-scroll-quiet {
+.nova-scroll-quiet {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.ark-scroll-quiet::-webkit-scrollbar {
+.nova-scroll-quiet::-webkit-scrollbar {
   width: 0;
   height: 0;
   display: none;
 }
 
 @layer components {
-  .ark-input {
+  .nova-input {
     @apply w-full rounded-lg px-3.5 py-2.5 text-sm placeholder:text-content-tertiary transition-colors focus:outline-none focus:ring-1;
     background-color: rgb(var(--color-surface-hover));
     border: 1px solid rgb(var(--color-surface-border));
     color: rgb(var(--color-content-primary));
   }
-  .ark-input:focus {
+  .nova-input:focus {
     border-color: rgb(var(--color-accent));
     box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.35);
   }
 
-  .ark-btn-primary {
+  .nova-btn-primary {
     @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
     background-color: rgb(var(--color-accent));
     color: rgb(var(--color-accent-fg));
   }
-  .ark-btn-primary:hover {
+  .nova-btn-primary:hover {
     opacity: 0.9;
   }
-  .ark-btn-primary:active {
+  .nova-btn-primary:active {
     opacity: 0.8;
   }
 
-  .ark-btn-secondary {
+  .nova-btn-secondary {
     @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50;
     background-color: rgb(var(--color-surface-hover));
     border: 1px solid rgb(var(--color-surface-border));
     color: rgb(var(--color-content-primary));
   }
-  .ark-btn-secondary:hover {
+  .nova-btn-secondary:hover {
     background-color: rgb(var(--color-surface-active));
   }
 
-  .ark-btn-ghost {
+  .nova-btn-ghost {
     @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-3 py-2 rounded-lg transition-all duration-150;
     color: rgb(var(--color-content-secondary));
   }
-  .ark-btn-ghost:hover {
+  .nova-btn-ghost:hover {
     background-color: rgb(var(--color-surface-hover));
     color: rgb(var(--color-content-primary));
   }
 
-  .ark-card {
+  .nova-card {
     @apply rounded-xl;
     background-color: rgb(var(--color-surface-panel));
     border: 1px solid rgb(var(--color-surface-border));
   }
 
-  .ark-nav-item {
+  .nova-nav-item {
     @apply flex items-center gap-2 py-2 rounded-none text-sm font-medium transition-colors duration-150 cursor-pointer min-w-0 pl-0 pr-2;
     color: rgb(var(--color-content-secondary));
   }
-  .ark-nav-item:hover {
+  .nova-nav-item:hover {
     color: rgb(var(--color-content-primary));
     background-color: rgb(var(--color-surface-hover));
   }
-  .ark-nav-item.active {
-    background-color: rgb(var(--color-surface-active));
+  .nova-nav-item.active {
+    /* Inset active fill — soft rounded corners (no hard chamfer slash). */
+    background-color: transparent;
     color: rgb(var(--color-content-primary));
+    position: relative;
+    z-index: 0;
+  }
+  .nova-nav-item.active::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    left: 0.55rem;
+    right: 0.55rem;
+    top: 0.28rem;
+    bottom: 0.28rem;
+    background-color: rgb(var(--color-surface-active));
+    border-radius: 0.55rem;
+  }
+  .nova-nav-item.active:hover::before {
+    background-color: rgb(var(--color-surface-hover));
+  }
+  /*
+   * Purple heartbeat ONLY when a chat is still working AND you are not on that chat.
+   * Active/current tab stays gray (above). Done work clears this class.
+   */
+  .nova-nav-item.nova-nav-working-away {
+    position: relative;
+  }
+  .nova-nav-item.nova-nav-working-away::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    left: 0.55rem;
+    right: 0.55rem;
+    top: 0.28rem;
+    bottom: 0.28rem;
+    box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.55);
+    border-radius: 0.55rem;
+    animation: nova-nav-working-heartbeat 1.45s ease-in-out infinite;
+  }
+  .nova-nav-item.nova-nav-working-away .nova-nav-icon,
+  .nova-nav-item.nova-nav-working-away .nova-nav-icon svg {
+    color: rgb(167 139 250);
+  }
+  @keyframes nova-nav-working-heartbeat {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
   }
   /* Single attention color: sky. Lit icon means unread / finished / needs a look. */
-  .ark-nav-item.ark-nav-attention {
+  .nova-nav-item.nova-nav-attention {
     color: rgb(56 189 248);
   }
-  .ark-nav-item.ark-nav-attention .ark-nav-icon,
-  .ark-nav-item.ark-nav-attention .ark-nav-icon svg {
+  .nova-nav-item.nova-nav-attention .nova-nav-icon,
+  .nova-nav-item.nova-nav-attention .nova-nav-icon svg {
     color: rgb(56 189 248);
   }
-  .ark-nav-icon.text-sky-400,
-  .ark-nav-icon.text-sky-400 svg {
+  .nova-nav-icon.text-sky-400,
+  .nova-nav-icon.text-sky-400 svg {
     color: rgb(56 189 248);
   }
   /*
    * Icon plate matches collapsed rail width (4rem). Glyph is centered in that plate
    * open or closed, so icons never shift when the sidebar stretches.
    */
-  .ark-nav-icon {
+  .nova-nav-icon {
     @apply w-16 h-8 flex items-center justify-center shrink-0;
   }
-  .ark-nav-icon svg {
+  .nova-nav-icon svg {
     @apply w-4 h-4 shrink-0;
   }
-  .ark-nav-item-rail {
+  .nova-nav-item-rail {
     @apply !justify-start !px-0 !py-2 !min-h-[2.25rem] !gap-2 !pr-0;
   }
-  .ark-nav-label {
+  .nova-nav-label {
     @apply truncate transition-opacity duration-200 ease-out;
   }
-  .ark-nav-label-hide {
+  .nova-nav-label-hide {
     @apply opacity-0 pointer-events-none;
   }
-  .ark-sidebar-panel {
+  .nova-sidebar-panel {
     width: 16rem;
     min-width: 16rem;
     max-width: 16rem;
@@ -229,13 +273,13 @@
       min-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
       max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .ark-sidebar-panel.is-collapsed {
+  .nova-sidebar-panel.is-collapsed {
     width: 4rem;
     min-width: 4rem;
     max-width: 4rem;
   }
-  .reduce-motion .ark-sidebar-panel,
-  .reduce-motion .ark-nav-label {
+  .reduce-motion .nova-sidebar-panel,
+  .reduce-motion .nova-nav-label {
     transition: none !important;
   }
   @keyframes nova-mark-speak {
@@ -255,10 +299,10 @@
     animation: nova-mark-think 1.35s ease-in-out infinite;
     transform-origin: center center;
   }
-  .ark-nav-activity {
+  .nova-nav-activity {
     color: rgb(110 231 183);
   }
-  .ark-nav-activity:hover {
+  .nova-nav-activity:hover {
     color: rgb(167 243 208);
   }
   /* Settings modal rail — independent from main sidebar icon-plate layout */
@@ -589,14 +633,14 @@
 }
 
 /* VS Code–style code pane (Code workspace editor) */
-.ark-code-editor {
+.nova-code-editor {
   background: #1e1e1e;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 12.5px;
   line-height: 20px;
   color: #d4d4d4;
 }
-.ark-code-gutter {
+.nova-code-gutter {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -610,8 +654,8 @@
   border-right: 1px solid #2d2d2d;
   user-select: none;
 }
-.ark-code-highlight,
-.ark-code-input {
+.nova-code-highlight,
+.nova-code-input {
   position: absolute;
   top: 0;
   right: 0;
@@ -625,15 +669,15 @@
   tab-size: 2;
   overflow: auto;
 }
-.ark-code-highlight {
+.nova-code-highlight {
   pointer-events: none;
   color: #d4d4d4;
   scrollbar-width: none;
 }
-.ark-code-highlight::-webkit-scrollbar {
+.nova-code-highlight::-webkit-scrollbar {
   display: none;
 }
-.ark-code-input {
+.nova-code-input {
   background: transparent;
   color: transparent;
   caret-color: #ffffff;
@@ -641,19 +685,19 @@
   border: 0;
   resize: none;
 }
-.ark-tok-comment { color: #6a9955; }
-.ark-tok-string { color: #ce9178; }
-.ark-tok-keyword { color: #569cd6; }
-.ark-tok-number { color: #b5cea8; }
-.ark-tok-tag { color: #569cd6; }
-.ark-tok-attr { color: #9cdcfe; }
-.ark-tok-fn { color: #dcdcaa; }
-.ark-tok-type { color: #4ec9b0; }
-.ark-tok-punct { color: #808080; }
-.ark-tok-plain { color: #d4d4d4; }
+.nova-tok-comment { color: #6a9955; }
+.nova-tok-string { color: #ce9178; }
+.nova-tok-keyword { color: #569cd6; }
+.nova-tok-number { color: #b5cea8; }
+.nova-tok-tag { color: #569cd6; }
+.nova-tok-attr { color: #9cdcfe; }
+.nova-tok-fn { color: #dcdcaa; }
+.nova-tok-type { color: #4ec9b0; }
+.nova-tok-punct { color: #808080; }
+.nova-tok-plain { color: #d4d4d4; }
 
 /* Chat status dots — smooth overlapping wave (not one-at-a-time pops) */
-@keyframes ark-status-dot {
+@keyframes nova-status-dot {
   0%,
   100% {
     opacity: 0.3;
@@ -666,37 +710,37 @@
     background-color: rgb(226 232 240);
   }
 }
-.ark-status-dots {
+.nova-status-dots {
   /* Keep animation timeline stable across React label updates */
   contain: layout style;
 }
-.ark-status-dot {
+.nova-status-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 9999px;
   background-color: rgb(115 115 115);
-  animation: ark-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  animation: nova-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   will-change: transform, opacity;
   backface-visibility: hidden;
 }
-.ark-status-dot-1,
-.ark-status-dot:nth-child(1) {
+.nova-status-dot-1,
+.nova-status-dot:nth-child(1) {
   animation-delay: 0s;
 }
-.ark-status-dot-2,
-.ark-status-dot:nth-child(2) {
+.nova-status-dot-2,
+.nova-status-dot:nth-child(2) {
   animation-delay: 0.18s;
 }
-.ark-status-dot-3,
-.ark-status-dot:nth-child(3) {
+.nova-status-dot-3,
+.nova-status-dot:nth-child(3) {
   animation-delay: 0.36s;
 }
 
 /* Kill UI motion, but leave ambient orbs + chat status dots alone. */
-html.reduce-motion *:not(.auth-orb):not(.ark-status-dot),
-html.reduce-motion *:not(.auth-orb):not(.ark-status-dot)::before,
-html.reduce-motion *:not(.auth-orb):not(.ark-status-dot)::after {
+html.reduce-motion *:not(.auth-orb):not(.nova-status-dot),
+html.reduce-motion *:not(.auth-orb):not(.nova-status-dot)::before,
+html.reduce-motion *:not(.auth-orb):not(.nova-status-dot)::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
@@ -708,19 +752,19 @@ html.reduce-motion .auth-orb {
 }
 
 /* Status bubble must keep rippling even when Reduce motion is on. */
-html.reduce-motion .ark-status-dot {
-  animation: ark-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite !important;
+html.reduce-motion .nova-status-dot {
+  animation: nova-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite !important;
 }
-html.reduce-motion .ark-status-dot-1,
-html.reduce-motion .ark-status-dot:nth-child(1) {
+html.reduce-motion .nova-status-dot-1,
+html.reduce-motion .nova-status-dot:nth-child(1) {
   animation-delay: 0s !important;
 }
-html.reduce-motion .ark-status-dot-2,
-html.reduce-motion .ark-status-dot:nth-child(2) {
+html.reduce-motion .nova-status-dot-2,
+html.reduce-motion .nova-status-dot:nth-child(2) {
   animation-delay: 0.18s !important;
 }
-html.reduce-motion .ark-status-dot-3,
-html.reduce-motion .ark-status-dot:nth-child(3) {
+html.reduce-motion .nova-status-dot-3,
+html.reduce-motion .nova-status-dot:nth-child(3) {
   animation-delay: 0.36s !important;
 }
 

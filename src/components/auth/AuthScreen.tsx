@@ -90,7 +90,7 @@ export function AuthScreen() {
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void window.arkDesktop?.appMeta?.()
+    void window.novaDesktop?.appMeta?.()
       .then(meta => {
         // Dev / Open-NOVA-Build.bat only — never on packaged Setup.exe installs.
         setShowBypass(!meta?.isPackaged);
@@ -122,12 +122,12 @@ export function AuthScreen() {
         return;
       }
       // Configured email path failed — show that error only (do not stack local recovery unless unconfigured).
-      const unconfigured = /VITE_ARK_WEBSITE_ORIGIN|not configured/i.test(res.error);
+      const unconfigured = /VITE_NOVA_WEBSITE_ORIGIN|not configured/i.test(res.error);
       setError(res.error);
       if (!unconfigured) return;
       const forgotUrl = accountForgotPageUrl();
-      if (forgotUrl && window.arkDesktop?.openExternal) {
-        void window.arkDesktop.openExternal(forgotUrl);
+      if (forgotUrl && window.novaDesktop?.openExternal) {
+        void window.novaDesktop.openExternal(forgotUrl);
         setInfo('Opened the NOVA account site so you can reset there.');
         return;
       }
@@ -183,7 +183,7 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="h-full min-h-0 bg-ark-navy-950 flex relative overflow-hidden">
+    <div className="h-full min-h-0 bg-nova-navy-950 flex relative overflow-hidden">
       <AuthAmbientOrbs />
       <TypewriterHero />
 
@@ -193,9 +193,9 @@ export function AuthScreen() {
             <NovaMark className="w-10 h-10 text-content-primary mx-auto" title="NOVA" />
           </div>
 
-          <div className="rounded-2xl border border-surface-border bg-ark-navy-900 p-7 sm:p-8 shadow-2xl animate-slide-up">
+          <div className="rounded-2xl border border-surface-border bg-nova-navy-900 p-7 sm:p-8 shadow-2xl animate-slide-up">
             <div className="mb-6">
-              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-ark-navy-950 p-1">
+              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-nova-navy-950 p-1">
                 <button
                   type="button"
                   onClick={() => switchMode('signin')}
@@ -253,7 +253,7 @@ export function AuthScreen() {
                       value={fullName}
                       onChange={e => setFullName(e.target.value)}
                       placeholder="Your name"
-                      className="ark-input pl-10 h-12 rounded-xl"
+                      className="nova-input pl-10 h-12 rounded-xl"
                       autoComplete="name"
                       disabled={mode !== 'signup'}
                     />
@@ -269,7 +269,7 @@ export function AuthScreen() {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder="name@example.com"
-                  className="ark-input pl-10 h-12 rounded-xl"
+                  className="nova-input pl-10 h-12 rounded-xl"
                   autoComplete="email"
                 />
               </div>
@@ -284,7 +284,7 @@ export function AuthScreen() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder={mode === 'signup' ? 'Create a password' : 'Your password'}
-                  className="ark-input pl-10 pr-12 h-12 rounded-xl"
+                  className="nova-input pl-10 pr-12 h-12 rounded-xl"
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                 />
                 <button
@@ -321,7 +321,7 @@ export function AuthScreen() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-2 text-sm text-ark-accent-red bg-ark-accent-red/10 border border-ark-accent-red/20 rounded-xl px-3 py-2.5 mb-3">
+                <div className="flex items-start gap-2 text-sm text-nova-accent-red bg-nova-accent-red/10 border border-nova-accent-red/20 rounded-xl px-3 py-2.5 mb-3">
                   <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -333,7 +333,7 @@ export function AuthScreen() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading} className="ark-btn-primary w-full h-11 rounded-xl">
+              <button type="submit" disabled={loading} className="nova-btn-primary w-full h-11 rounded-xl">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {mode === 'signin' ? 'Sign in' : 'Create account'}
               </button>
@@ -344,7 +344,7 @@ export function AuthScreen() {
               <button
                 type="button"
                 className="underline hover:text-content-secondary"
-                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
+                onClick={() => void window.novaDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
               >
                 Terms of Service
               </button>
@@ -352,7 +352,7 @@ export function AuthScreen() {
               <button
                 type="button"
                 className="underline hover:text-content-secondary"
-                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
+                onClick={() => void window.novaDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
               >
                 Privacy Policy
               </button>
@@ -367,17 +367,17 @@ export function AuthScreen() {
                 type="button"
                 onClick={() => bypassLogin({ skipSetup: false })}
                 disabled={loading}
-                className="ark-btn-secondary h-11 rounded-xl px-2"
+                className="nova-btn-secondary h-11 rounded-xl px-2"
                 title="Dev only: sign in as guest, then run hardware setup"
               >
-                <Zap className="w-3.5 h-3.5 text-ark-accent-amber shrink-0" />
+                <Zap className="w-3.5 h-3.5 text-nova-accent-amber shrink-0" />
                 <span className="text-xs leading-tight text-left">Bypass + Setup</span>
               </button>
               <button
                 type="button"
                 onClick={() => bypassLogin({ skipSetup: true })}
                 disabled={loading}
-                className="ark-btn-secondary h-11 rounded-xl px-2"
+                className="nova-btn-secondary h-11 rounded-xl px-2"
                 title="Dev only: skip setup and go straight to the main app"
               >
                 <Zap className="w-3.5 h-3.5 text-sky-400 shrink-0" />

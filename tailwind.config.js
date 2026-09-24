@@ -5,29 +5,29 @@ export default {
   theme: {
     extend: {
       colors: {
-        ark: {
+        nova: {
           // Theme-aware neutrals (were navy/blue). Values flip via :root / .light CSS vars.
           navy: {
-            950: 'rgb(var(--ark-navy-950) / <alpha-value>)',
-            900: 'rgb(var(--ark-navy-900) / <alpha-value>)',
-            800: 'rgb(var(--ark-navy-800) / <alpha-value>)',
-            700: 'rgb(var(--ark-navy-700) / <alpha-value>)',
-            600: 'rgb(var(--ark-navy-600) / <alpha-value>)',
+            950: 'rgb(var(--nova-navy-950) / <alpha-value>)',
+            900: 'rgb(var(--nova-navy-900) / <alpha-value>)',
+            800: 'rgb(var(--nova-navy-800) / <alpha-value>)',
+            700: 'rgb(var(--nova-navy-700) / <alpha-value>)',
+            600: 'rgb(var(--nova-navy-600) / <alpha-value>)',
           },
           blue: {
-            50: 'rgb(var(--ark-accent-50) / <alpha-value>)',
-            100: 'rgb(var(--ark-accent-100) / <alpha-value>)',
-            200: 'rgb(var(--ark-accent-200) / <alpha-value>)',
-            300: 'rgb(var(--ark-accent-300) / <alpha-value>)',
-            400: 'rgb(var(--ark-accent-400) / <alpha-value>)',
-            500: 'rgb(var(--ark-accent-500) / <alpha-value>)',
-            600: 'rgb(var(--ark-accent-600) / <alpha-value>)',
-            700: 'rgb(var(--ark-accent-700) / <alpha-value>)',
-            800: 'rgb(var(--ark-accent-800) / <alpha-value>)',
-            900: 'rgb(var(--ark-accent-900) / <alpha-value>)',
+            50: 'rgb(var(--nova-accent-50) / <alpha-value>)',
+            100: 'rgb(var(--nova-accent-100) / <alpha-value>)',
+            200: 'rgb(var(--nova-accent-200) / <alpha-value>)',
+            300: 'rgb(var(--nova-accent-300) / <alpha-value>)',
+            400: 'rgb(var(--nova-accent-400) / <alpha-value>)',
+            500: 'rgb(var(--nova-accent-500) / <alpha-value>)',
+            600: 'rgb(var(--nova-accent-600) / <alpha-value>)',
+            700: 'rgb(var(--nova-accent-700) / <alpha-value>)',
+            800: 'rgb(var(--nova-accent-800) / <alpha-value>)',
+            900: 'rgb(var(--nova-accent-900) / <alpha-value>)',
           },
           accent: {
-            blue: 'rgb(var(--ark-accent-400) / <alpha-value>)',
+            blue: 'rgb(var(--nova-accent-400) / <alpha-value>)',
             green: '#3ecf8e',
             amber: '#f5a623',
             red: '#ef4444',

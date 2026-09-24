@@ -3,7 +3,11 @@
  */
 
 import { looksLikeSideQuestAsk } from '@/lib/webSearch';
-import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import {
+  looksLikeTalkBeforeCreateAsk,
+  looksLikeRequirementsAsk,
+  looksLikeGreenfieldKeepPlanning,
+} from '@/lib/chatIdeaIntent';
 
 /** True when files map has real source content (not empty studio sticky). */
 export function hasRealStudioFiles(files: Record<string, string> | null | undefined): boolean {
@@ -18,8 +22,8 @@ export function hasRealStudioFiles(files: Record<string, string> | null | undefi
 /** Detect pure greetings for prompt shaping (never a canned reply). */
 export function looksLikePureGreeting(message: string): boolean {
   const t = String(message || '')
-    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
-    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim()
     .replace(/[!?.…]+$/g, '')
@@ -41,8 +45,8 @@ export function looksLikeCapabilityOverviewAsk(message: string): boolean {
  */
 export function looksLikePlainChatAsk(message: string): boolean {
   const t = String(message || '')
-    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
-    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
   if (!t || t.length < 2) return false;
@@ -50,6 +54,23 @@ export function looksLikePlainChatAsk(message: string): boolean {
   if (looksLikePureGreeting(t)) return true;
   if (looksLikeCapabilityOverviewAsk(t)) return true;
   if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) return true;
+
+  // Continue-planning / fold extras into the plan — never studio Local scan.
+  if (looksLikeGreenfieldKeepPlanning(t)) return true;
+  if (/\bfold\s+(?:those|these|them|it|that)\s+into\s+the\s+plan\b/i.test(t)) return true;
+  if (/\b(?:add|want)\s+(?:three|3|two|2|more)\s+extras?\b/i.test(t)) return true;
+  if (/\bi\s+also\s+want\b/i.test(t) && /\b(?:button|undo|color|colors|feature|extras?)\b/i.test(t)) return true;
+  // Feasibility questions must stay plain chat (no @@@FILE dumps).
+  if (
+    /\?/i.test(t)
+    && (
+      /\b(?:is\s+(?:that|this|it)\s+actually\s+possible)\b/i.test(t)
+      || /\bpossible\s+to\s+build\b/i.test(t)
+      || /\b(?:how\s+long|feasible)\b/i.test(t)
+    )
+  ) {
+    return true;
+  }
 
   // Requirements / advice about building — still plain chat (no files).
   if (
@@ -183,9 +204,20 @@ export function scrubTalkFirstCodeBleed(text: string): string {
     '\n',
   );
 
+  // Raw CSS dumps (incl. ".nav-links li { … }" single-line rules).
+  body = body.replace(
+    /(?:^|\n)\s*(?:body|html|header|nav|footer|main|\.[\w-]+(?:\s+[\w.#:-]+)*)\s*\{[^{}]*\}/gim,
+    '\n',
+  );
+  body = body.replace(
+    /(?:^|\n)\s*(?:body|html|header|nav|footer|main|\.[\w-]+(?:\s+[\w.#:-]+)*)\s*\{[\s\S]*?\n\}/gim,
+    '\n',
+  );
+  body = body.replace(/(?:^|\n)\s*(?:color|background|font-size|margin|padding)\s*:[^;\n]+;?\s*/gim, '\n');
+
   // Cut off raw source dumps that start mid-prose (import / const app = / #include)
   const codeCut = body.search(
-    /\n(?:import\s+(?:express|react|mongoose|\{)|const\s+(?:app|express|router|server|User)\s*=|#include\s*<|from\s+flask\s+import|app\s*=\s*Flask\()/i,
+    /\n(?:import\s+(?:express|react|mongoose|\{)|const\s+(?:app|express|router|server|User)\s*=|#include\s*<|from\s+flask\s+import|app\s*=\s*Flask\(|(?:body|html)\s*\{)/i,
   );
   if (codeCut > 60) {
     const head = body.slice(0, codeCut).trim();
@@ -207,10 +239,355 @@ export function scrubTalkFirstCodeBleed(text: string): string {
     })
     .join('\n');
 
+  // Orphan lead-ins after code scrub ("Here's the basic HTML structure:") — drop empties.
+  body = body.replace(
+    /(?:^|\n)\s*(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css|structure|code|markup)(?:\s+for\s+(?:the\s+)?(?:homepage|page|site))?)\s*:?\s*(?=\n|$)/gim,
+    '\n',
+  );
+  // Trailing orphan lead-in with no body after (common talk stutter).
+  body = body.replace(
+    /\s*(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css|structure|code|markup)(?:\s+for\s+(?:the\s+)?(?:homepage|page|site))?)\s*:?\s*$/gim,
+    '',
+  );
+  body = body.replace(
+    /(?:^|\n)\s*(?:let(?:'s| us)\s+(?:go\s+ahead\s+and\s+)?(?:create|write|start\s+with)\s+(?:the\s+)?(?:html|css|structure))\b[^\n]*/gim,
+    '\n',
+  );
+  body = body.replace(
+    /\s*(?:we(?:'ll| will)\s+use\s+(?:html|css)(?:\s+and\s+(?:html|css))?[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  // Collapse duplicated consecutive sentences (model stutter / silentUpgrade flash).
+  body = collapseDuplicateSentences(body);
+
   body = body.replace(/\n{3,}/g, '\n\n').trim();
   // Never return fence-only crumbs — caller should keep lastGood / retry.
   if (isTalkFenceJunk(body)) return '';
+  // Lead-in-only leftovers after scrub → empty so caller can use plan fallback.
+  if (/^(?:here(?:'s| is)|let(?:'s| us)\s+(?:create|start))\b/i.test(body) && body.length < 120) {
+    return '';
+  }
   return body;
+}
+
+/** Collapse immediate duplicate sentences / phrases (stream retract leftovers). */
+export function collapseDuplicateSentences(text: string): string {
+  let body = String(text || '').replace(/\r\n/g, '\n');
+  // Exact duplicate consecutive lines
+  body = body.replace(/^(.*[^\n])\n+\1(\n|$)/gim, '$1$2');
+  // Same sentence glued twice on one line: "Foo. Foo." or "Foo: Foo:"
+  body = body.replace(/\b([A-Z][^.!?\n]{12,}[.!?:,])\s+\1/g, '$1');
+  // Short lead-in repeated: "Here's X: Here's X:"
+  body = body.replace(/\b((?:Here(?:'s| is)|Got it)[^.!\n]{8,60}:)\s+\1/gi, '$1');
+  return body.trim();
+}
+
+/**
+ * Truncated model tails like "? Or do you have any specific questions…" —
+ * leftover quiz closings with the real answer stripped away.
+ */
+export function looksLikeOrphanChatTail(text: string): boolean {
+  const t = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!t) return true;
+  if (t.length < 12) return true;
+  if (/^[?？]/.test(t)) return true;
+  if (/^(?:or|and)\s+(?:do\s+you|would\s+you|any)\b/i.test(t)) return true;
+  if (
+    t.length < 220
+    && /^(?:would you like|do you have|any (?:specific )?questions|let me know if|feel free to ask)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    t.length < 160
+    && /\?\s*$/.test(t)
+    && !/\n/.test(t)
+    && /(?:specific questions|changes in mind|more (?:info|detail)|anything else)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Homepage / apple.com-style planning reply when the model returns an orphan tail.
+ * Only call when the user ask is clearly a marketing/homepage brief.
+ */
+export function marketingHomepagePlanFallback(message: string): string {
+  const t = String(message || '');
+  const apple = /\bapple\.com\b|\biphone\b|\bairpods\b|\bipad\b/i.test(t);
+  const brand = apple ? 'Apple-style' : 'product';
+  return [
+    `Got it — an ${brand} homepage with a thin top nav, a huge phone hero, and colorful product bands.`,
+    '',
+    '1. **Header — Navigation**',
+    '- **Appearance:** thin full-width bar, near-black background, small centered links',
+    '- **Items:** logo mark, Store, Mac, iPad, iPhone, Watch, AirPods, Support, search and bag icons on the right',
+    '',
+    '2. **Hero — New phone**',
+    '- **Look:** full-bleed dark band, huge centered headline, short subcopy, two pill CTAs (Learn more / Buy)',
+    '- **Visual:** large product stage in the lower half — not a forest or ocean photo',
+    '- **Motion:** slow fade / drift on the product, no busy loops',
+    '',
+    '3. **Product bands**',
+    '- **Mac:** light gray band, product name, one line, Learn more + Buy, always visible',
+    '- **iPad:** soft blue or silver band, same rhythm',
+    '- **Watch:** contrasting band so the scroll feels like apple.com',
+    '- **AirPods:** final colorful band before the footer',
+    '',
+    '4. **Footer**',
+    '- **Links:** Store, Support, Privacy, Terms, Contact in quiet columns',
+    '',
+    'Overall: keep every band full-width and always on the page — never hide a product behind a nav click. White space and big type carry the premium feel.',
+    '',
+    'Which phone model should lead the hero, and do you want the bands black/white/light-gray like apple.com or more color?',
+  ].join('\n');
+}
+
+function looksLikeMarketingHomepageAsk(message: string): boolean {
+  return /\b(?:homepage|apple\.com|product\s+band|iphone|landing\s+page|marketing\s+(?:site|page))\b/i.test(
+    String(message || ''),
+  );
+}
+
+function looksLikeMarketStallAsk(message: string): boolean {
+  return /\b(?:stall|vendor|farmers?\s*market|weekend\s+market)\b/i.test(String(message || ''));
+}
+
+function looksLikeShelfBorrowAsk(message: string): boolean {
+  return /\b(?:shelf|borrow|book\s+lend|lend(?:ing)?|checkout)\b/i.test(String(message || ''));
+}
+
+/** Domain-scoped wrap-up when a planning reply ends on a bare list. */
+export function planningExitForDomain(contextAsk: string): { overall: string; question: string } {
+  const ctx = String(contextAsk || '');
+  if (looksLikeMarketStallAsk(ctx)) {
+    return {
+      overall:
+        'Overall: keep the first version tiny — one phone page that shows who is at which stall and what they sell, with a quick way to add or update a row. Nail that list before extras like maps or notifications.',
+      question:
+        'Who is this mainly for (you as organizer, or vendors too), and roughly how many stalls on a typical weekend?',
+    };
+  }
+  if (looksLikeMarketingHomepageAsk(ctx)) {
+    return {
+      overall:
+        'Overall: keep every band full-width and always on the page — never hide a product behind a nav click. White space and big type carry the premium feel.',
+      question:
+        'Which product should lead the hero, and do you want quiet black/white bands or more color?',
+    };
+  }
+  if (looksLikeShelfBorrowAsk(ctx)) {
+    return {
+      overall:
+        'Overall: keep v1 tiny — one list of items, who has them, and a simple check-in / check-out. Nail that loop before maps, notifications, or accounts.',
+      question: 'Who mainly uses this, and what is the one action that has to work first?',
+    };
+  }
+  return {
+    overall:
+      'Overall: keep the first version tiny — one core screen and one must-have action. Nail that before extras.',
+    question: 'Who is the main user, and what is the one action that has to work first?',
+  };
+}
+
+/**
+ * Planning fallback when the model returns an orphan tail.
+ * Domain-scoped so farmers-market / Apple copy never bleeds into unrelated chats.
+ */
+export function orphanChatPlanFallback(message: string): string {
+  const t = String(message || '');
+  if (looksLikeMarketingHomepageAsk(t)) return marketingHomepagePlanFallback(t);
+  if (looksLikeMarketStallAsk(t)) {
+    return [
+      'Got it — losing track of who is selling what at a weekend market is a real pain.',
+      'For a tiny phone page we can start with a stall list (number, vendor, what they sell, notes), a tap-to-update status during the day, and a quick end-of-day review.',
+      'Must-haves for v1: add/edit stalls, search or filter by name, mark busy or sold out. Later: map layout, favorites, share a link.',
+      'Who mainly uses this — you as organizer, or vendors too — and roughly how many stalls?',
+    ].join(' ');
+  }
+  if (looksLikeShelfBorrowAsk(t)) {
+    return [
+      'Got it — a simple borrow / return loop is a solid first slice.',
+      'For v1: a list of items, who has each one, and a check-in / check-out action. Later: reminders, categories, share links.',
+      'Who mainly uses this, and what is the one action that has to work first?',
+    ].join(' ');
+  }
+  return [
+    'Got it. Here is a fuller plan: who it is for, what to track, day-of flows, must-haves for a tiny v1 vs later ideas, and what “done” looks like.',
+    'Who is the main user, and what is the one action that has to work first?',
+  ].join(' ');
+}
+
+/**
+ * Fix unprofessional help openers: “We can help” → “I can help”.
+ * Keep collaborative “we” when talking about joint next steps.
+ */
+export function scrubHelpVoice(text: string): string {
+  let body = String(text || '');
+  if (!body.trim()) return body;
+  body = body.replace(
+    /\bWe can definitely help(?:\s+with\s+that)?\b/gi,
+    'I can definitely help with that',
+  );
+  body = body.replace(
+    /\bWe can help(?:\s+with\s+that)?[!.,]?\s*/gi,
+    (m) => (/with that/i.test(m) ? 'I can help with that. ' : 'I can help. '),
+  );
+  body = body.replace(
+    /\bWe(?:'ll| will) (?:definitely )?help\b/gi,
+    'I can help',
+  );
+  body = body.replace(
+    /^(?:Got it!?|Sure!?)\s+Let'?s tackle this problem head-on\./i,
+    'Got it — I can help tackle this.',
+  );
+  body = body.replace(
+    /\bWe can create a simple solution to help streamline this process\./gi,
+    'I can help map a simple way to streamline this.',
+  );
+  body = body.replace(
+    /^(?:Got it!?|Sure!?)\s+Let'?s (?:create|build|make) a simple solution[^.!?\n]*[.!]?\s*/i,
+    'Got it — I can help with that. ',
+  );
+  if (!/\n\nOverall:/i.test(body) && !/\?\s*$/.test(body.trim())) {
+    /* keep ensurePlanningExit separate */
+  }
+  return body.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * If a planning reply ends on a numbered/bullet line with no wrap-up, append a short overall exit.
+ * Pass `contextAsk` so wrap-up stays in the user’s domain (no stall/Apple bleed).
+ */
+export function ensurePlanningExit(text: string, contextAsk?: string): string {
+  let body = String(text || '').trim();
+  if (!body || body.length < 120) return body;
+  // Already has a closing question or overall wrap-up.
+  if (/\?\s*$/.test(body)) return body;
+  if (/\b(?:overall|in short|putting (?:this|it) together|simplest path|nail first|start with)\b/i.test(body.slice(-420))) {
+    return body;
+  }
+  const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  const endsOnList = /^(?:\d+[.)]\s+|[-*•]\s+)/.test(last)
+    || (/^[A-Z].{0,80}:/.test(last) && !/[.!?]$/.test(last));
+  if (!endsOnList && !/:\s*-\s+/.test(last)) return body;
+  const exit = planningExitForDomain(String(contextAsk || body));
+  return [
+    body.replace(/\s+$/g, ''),
+    '',
+    exit.overall,
+    '',
+    exit.question,
+  ].join('\n');
+}
+
+/**
+ * Strip aggressive “let’s set up Vite / pick a folder / proceed with creating”
+ * closers from talk-first replies. Small models often ignore system seeds.
+ */
+export function scrubBuildAggression(text: string): string {
+  let body = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!body) return body;
+
+  const cutTail = (re: RegExp) => {
+    const m = body.search(re);
+    if (m > 80) body = body.slice(0, m).trim();
+  };
+
+  // Whole closing paragraphs that push install / directory / Vite.
+  cutTail(
+    /\n+(?:Would you like (?:more information|to know more|any (?:specific )?questions)[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:\??\s*Or do you have any specific questions[^\n]*)/i,
+  );
+  cutTail(
+    /\n+(?:Let(?:'s| us) start by setting up[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:Let(?:'s| us)\s+(?:go\s+ahead\s+and\s+)?(?:create|write|start\s+with)\s+(?:the\s+)?(?:html|css|javascript|code|structure)[^\n]*(?:\n[\s\S]*)?)/i,
+  );
+  cutTail(
+    /\n+(?:Let(?:'s| us)\s+begin\s+by\s+creating\s+(?:the\s+)?(?:html|css)[^\n]*(?:\n[\s\S]*)?)/i,
+  );
+  cutTail(
+    /\n+(?:Here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css|structure)[^\n]*(?:\n[\s\S]*)?)/i,
+  );
+  // Mid-paragraph HTML/CSS build aggression (talk path must stay plan-only).
+  body = body.replace(
+    /\s*(?:Let(?:'s| us)\s+begin\s+by\s+creating\s+(?:the\s+)?(?:HTML|CSS)[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:creating\s+the\s+HTML\s+and\s+CSS\s+for\s+this\s+layout)[^.!?\n]*[.!]?\s*/gi,
+    ' ',
+  );
+  cutTail(
+    /\n+(?:If so,? we can start by setting up[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:What directory (?:would you like|should we)[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:We can start by setting up (?:a )?(?:basic )?(?:Vite|React)[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+
+  // Inline closers mid-paragraph
+  body = body.replace(
+    /\s*(?:Would you like to proceed with creating this (?:page|app|project|site|layout)\??)[^.!?\n]*(?:[.!?]\s*)?/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:Let(?:'s| us) start by setting up (?:a )?(?:basic )?(?:Vite\s*\+?\s*)?React[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:What directory (?:would you like|should we)[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:preferred directory where we should create this project)[^.!?\n]*[.!]?\s*/gi,
+    ' ',
+  );
+
+  // Cut tech-implementation dumps that small models tack onto planning replies.
+  cutTail(
+    /\n+(?:\d+\.\s*)?(?:\*{0,2})?(?:Technical Implementation|Implementation(?:\s+(?:Steps?|Considerations))?|Choose a Technology|Develop the Backend|Design the UI|Test and Iterate|Technology Stack|Testing and Deployment|Maintenance and Support|Storage Solution)\b[^\n]*(?:\n(?![A-Z*\d★])[^\n]*)*/i,
+  );
+  // If tech dump is mid-list, drop from that numbered step to end-of-list (keep later Overall if any).
+  body = body.replace(
+    /\n+(?:\d+\.\s*)?(?:Technical Implementation|Testing and Deployment|Maintenance and Support)\b[\s\S]*?(?=\n\nOverall:|\n\nWho is this mainly for|\n*$)/i,
+    '\n',
+  );
+  body = body.replace(
+    /\n*(?:\d+\.\s*)?(?:Technical Approach|Technical Implementation|Testing and Deployment|Maintenance and Support)\s*-?\s*/gi,
+    '\n',
+  );
+  cutTail(
+    /\n+(?:For simplicity,? we can use (?:a )?web-based solution|We’ll handle data storage|Let’s start with the basic list|To start,? we can create a basic prototype|We can use a simple web framework|We can use a simple web framework like|Would you like to proceed with building)[^\n]*(?:\n(?![A-Z*\d★])[^\n]*)*/i,
+  );
+  body = body.replace(
+    /\n*(?:\d+\.\s*)?(?:Choose a Technology|Develop the Backend|Design the UI|Test and Iterate|Technology Stack|Implementation Considerations)\s*:[^\n]*/gi,
+    '',
+  );
+  body = body.replace(
+    /\n*(?:\d+\.\s*)?(?:Technology Stack|Database|Authentication)\s*:[^\n]*(?:\n(?!\d+\.|\s*[-•])[^\n]*)*/gi,
+    '',
+  );
+  body = body.replace(
+    /\n*★?\s*\*{0,2}Next Steps?\*{0,2}:?[^\n]*(?:\n(?![A-Z*\d★•-])[^\n]*)*/i,
+    '',
+  );
+  body = body.replace(
+    /\s*Would you like to proceed with building[^.!?\n]*[.!]?\s*/gi,
+    ' ',
+  );
+  // Drop trailing orphan numbers like "7." with no body.
+  body = body.replace(/\n+\d+[.)]\s*$/g, '');
+
+  return body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 /** Strip false “empty project / attached files” openings from social replies. */

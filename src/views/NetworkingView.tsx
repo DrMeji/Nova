@@ -7,11 +7,11 @@ import { useAuth } from '@/context/AuthContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
-import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/arkSocial';
-import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
-import { isDevArkAlias } from '@/lib/arkDevAccount';
+import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/novaSocial';
+import { formatNovaId, isNovaUserId, lookupNovaUser, normalizeNovaId } from '@/lib/novaUserId';
+import { isDevNovaAlias } from '@/lib/novaDevAccount';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
-import { ArkAvatar } from '@/components/ArkAvatar';
+import { NovaAvatar } from '@/components/NovaAvatar';
 import { buildDemoNetworkPosts } from '@/lib/socialDemo';
 import { Modal } from '@/components/Modal';
 import { pushSidebarToast } from '@/lib/sidebarToast';
@@ -48,12 +48,12 @@ function persistSavedIds(ids: string[]) {
 }
 
 function ownerAvatarSrc(
-  ownerArkId: string,
-  myArkId: string,
-  contacts: { arkId: string; avatarUrl?: string }[],
+  ownerNovaId: string,
+  myNovaId: string,
+  contacts: { novaId: string; avatarUrl?: string }[],
 ): string | undefined {
-  if (ownerArkId && ownerArkId === myArkId) return getLocalPrefs().avatarDataUrl;
-  return contacts.find(c => c.arkId === ownerArkId)?.avatarUrl;
+  if (ownerNovaId && ownerNovaId === myNovaId) return getLocalPrefs().avatarDataUrl;
+  return contacts.find(c => c.novaId === ownerNovaId)?.avatarUrl;
 }
 
 function formatCount(n: number) {
@@ -96,8 +96,8 @@ export function NetworkingView() {
   const { user, profile } = useAuth();
   const { navigate } = useRouter();
   const { recent } = useRecentProjects();
-  const { contacts, inviteByArkId, refreshContacts } = useSocial();
-  const myArkId = profile?.ark_id || '';
+  const { contacts, inviteByNovaId, refreshContacts } = useSocial();
+  const myNovaId = profile?.nova_id || '';
   const [posts, setPosts] = useState<NetworkPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -116,7 +116,7 @@ export function NetworkingView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addBusy, setAddBusy] = useState(false);
   const [idSearchBusy, setIdSearchBusy] = useState(false);
-  const [idSearchHit, setIdSearchHit] = useState<{ arkId: string; displayName: string | null } | null>(null);
+  const [idSearchHit, setIdSearchHit] = useState<{ novaId: string; displayName: string | null } | null>(null);
   const [idSearchNote, setIdSearchNote] = useState('');
   const [projectType, setProjectType] = useState<ProjectTypeId>('all');
   const [platform, setPlatform] = useState<ProjectPlatformId>('all');
@@ -152,8 +152,8 @@ export function NetworkingView() {
 
   const refresh = async () => {
     setLoading(true);
-    const list = await listNetworkPosts({ userId: user?.id, myArkId });
-    const demos = buildDemoNetworkPosts(myArkId || '1110000');
+    const list = await listNetworkPosts({ userId: user?.id, myNovaId });
+    const demos = buildDemoNetworkPosts(myNovaId || '1110000');
     const real = list.filter(p => !String(p.id).startsWith('demo-'));
     setPosts([...demos, ...real]);
     setLoading(false);
@@ -161,35 +161,35 @@ export function NetworkingView() {
 
   useEffect(() => {
     void refresh();
-  }, [user?.id, myArkId]);
+  }, [user?.id, myNovaId]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const qId = normalizeArkId(query);
+    const qId = normalizeNovaId(query);
     const saved = new Set(savedIds);
     return posts.filter(p => {
-      if (tab === 'mine' && p.ownerArkId !== myArkId) return false;
+      if (tab === 'mine' && p.ownerNovaId !== myNovaId) return false;
       if (tab === 'saved' && !saved.has(p.id)) return false;
       if (tab === 'paid') {
         if (!p.paying) return false;
-        if (p.visibility !== 'public' && p.ownerArkId !== myArkId) return false;
+        if (p.visibility !== 'public' && p.ownerNovaId !== myNovaId) return false;
       }
-      if (tab === 'public' && p.visibility !== 'public' && p.ownerArkId !== myArkId) return false;
+      if (tab === 'public' && p.visibility !== 'public' && p.ownerNovaId !== myNovaId) return false;
       if (projectType !== 'all' && p.projectType && p.projectType !== projectType) return false;
       if (platform !== 'all' && p.platform && p.platform !== platform) return false;
       if (q) {
-        const hay = `${p.title} ${p.summary} ${p.details || ''} ${p.ownerName} ${p.categoryLabel || ''} ${p.ownerArkId}`.toLowerCase();
-        if (!hay.includes(q) && !(isArkUserId(qId) && p.ownerArkId === qId)) return false;
+        const hay = `${p.title} ${p.summary} ${p.details || ''} ${p.ownerName} ${p.categoryLabel || ''} ${p.ownerNovaId}`.toLowerCase();
+        if (!hay.includes(q) && !(isNovaUserId(qId) && p.ownerNovaId === qId)) return false;
       }
       return true;
     });
-  }, [posts, query, tab, myArkId, savedIds, projectType, platform]);
+  }, [posts, query, tab, myNovaId, savedIds, projectType, platform]);
 
   useEffect(() => {
     const raw = query.trim();
-    const id = normalizeArkId(raw);
-    const wantDev = isDevArkAlias(raw);
-    if ((!wantDev && !isArkUserId(id)) || (!wantDev && id === myArkId)) {
+    const id = normalizeNovaId(raw);
+    const wantDev = isDevNovaAlias(raw);
+    if ((!wantDev && !isNovaUserId(id)) || (!wantDev && id === myNovaId)) {
       setIdSearchHit(null);
       setIdSearchNote('');
       return;
@@ -197,17 +197,17 @@ export function NetworkingView() {
     let cancelled = false;
     setIdSearchBusy(true);
     setIdSearchNote('');
-    void lookupArkUser(wantDev ? 'DEV' : id).then((hit) => {
+    void lookupNovaUser(wantDev ? 'DEV' : id).then((hit) => {
       if (cancelled) return;
       setIdSearchBusy(false);
       if (hit) {
-        if (hit.arkId === myArkId) {
+        if (hit.novaId === myNovaId) {
           setIdSearchHit(null);
           setIdSearchNote('That’s your own account');
           return;
         }
         setIdSearchHit({
-          arkId: hit.arkId,
+          novaId: hit.novaId,
           displayName: wantDev ? 'DEV' : hit.displayName,
         });
       } else {
@@ -218,7 +218,7 @@ export function NetworkingView() {
     return () => {
       cancelled = true;
     };
-  }, [query, myArkId]);
+  }, [query, myNovaId]);
 
   const toggleSave = (postId: string, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
@@ -226,8 +226,8 @@ export function NetworkingView() {
       const saving = !prev.includes(postId);
       const next = saving ? [...prev, postId] : prev.filter(id => id !== postId);
       persistSavedIds(next);
-      if (myArkId) {
-        recordPostSave(postId, myArkId, saving);
+      if (myNovaId) {
+        recordPostSave(postId, myNovaId, saving);
         setEngagementTick(t => t + 1);
       }
       return next;
@@ -237,12 +237,12 @@ export function NetworkingView() {
   const selected = selectedId ? shown.find(p => p.id === selectedId) || posts.find(p => p.id === selectedId) : null;
 
   useEffect(() => {
-    if (!selectedId || !myArkId) return;
+    if (!selectedId || !myNovaId) return;
     const post = posts.find(p => p.id === selectedId);
     if (!post) return;
-    recordPostView(selectedId, myArkId, post.ownerArkId);
+    recordPostView(selectedId, myNovaId, post.ownerNovaId);
     setEngagementTick(t => t + 1);
-  }, [selectedId, myArkId, posts]);
+  }, [selectedId, myNovaId, posts]);
 
   const resetComposer = () => {
     setTitle('');
@@ -257,12 +257,12 @@ export function NetworkingView() {
   };
 
   const postWork = async () => {
-    if (!myArkId || !title.trim()) return;
+    if (!myNovaId || !title.trim()) return;
     setBusy(true);
-    const allowedIds = allowed.split(/[,\s]+/).map(normalizeArkId).filter(isArkUserId);
+    const allowedIds = allowed.split(/[,\s]+/).map(normalizeNovaId).filter(isNovaUserId);
     await publishNetworkPost({
       userId: user?.id,
-      ownerArkId: myArkId,
+      ownerNovaId: myNovaId,
       ownerName: profile?.display_name || 'NOVA user',
       title,
       summary,
@@ -271,7 +271,7 @@ export function NetworkingView() {
       paying: intent === 'help' && paying,
       visibility,
       githubUrl,
-      allowedArkIds: visibility === 'private' ? allowedIds : [],
+      allowedNovaIds: visibility === 'private' ? allowedIds : [],
       allowDiscussion: allowDiscussionPost,
       codeRequiresApproval: true,
     });
@@ -304,7 +304,7 @@ export function NetworkingView() {
             name,
             body,
             at: new Date().toISOString(),
-            senderArkId: myArkId || undefined,
+            senderNovaId: myNovaId || undefined,
           },
         ],
       };
@@ -330,7 +330,7 @@ export function NetworkingView() {
     if (!reportPost || !reportReason.trim()) return;
     setReportBusy(true);
     const who = reportPost.ownerName || 'NOVA user';
-    const id = formatArkId(reportPost.ownerArkId);
+    const id = formatNovaId(reportPost.ownerNovaId);
     pushLocalNotification({
       kind: 'report',
       title: 'Your report is being reviewed',
@@ -346,18 +346,18 @@ export function NetworkingView() {
   };
 
   const messageOwner = (post: NetworkPost) => {
-    if (!post.ownerArkId || post.ownerArkId === myArkId) return;
-    navigate({ name: 'message', peer: post.ownerArkId });
+    if (!post.ownerNovaId || post.ownerNovaId === myNovaId) return;
+    navigate({ name: 'message', peer: post.ownerNovaId });
   };
 
   const addOwner = async (post: NetworkPost) => {
-    if (!post.ownerArkId || post.ownerArkId === myArkId) return;
+    if (!post.ownerNovaId || post.ownerNovaId === myNovaId) return;
     setAddBusy(true);
     setNote('');
     try {
-      await inviteByArkId(post.ownerArkId, post.ownerName);
+      await inviteByNovaId(post.ownerNovaId, post.ownerName);
       await refreshContacts();
-      setNote(`Friend request sent to ${formatArkId(post.ownerArkId)}. They’ll appear after they accept.`);
+      setNote(`Friend request sent to ${formatNovaId(post.ownerNovaId)}. They’ll appear after they accept.`);
     } catch (err) {
       setNote(err instanceof Error ? err.message : 'Could not add that user.');
     }
@@ -369,9 +369,9 @@ export function NetworkingView() {
     setAddBusy(true);
     setIdSearchNote('');
     try {
-      await inviteByArkId(idSearchHit.arkId, idSearchHit.displayName || undefined);
+      await inviteByNovaId(idSearchHit.novaId, idSearchHit.displayName || undefined);
       await refreshContacts();
-      setIdSearchNote(`Friend request sent to ${formatArkId(idSearchHit.arkId)}. They’ll appear after they accept.`);
+      setIdSearchNote(`Friend request sent to ${formatNovaId(idSearchHit.novaId)}. They’ll appear after they accept.`);
     } catch (err) {
       setIdSearchNote(err instanceof Error ? err.message : 'Could not send friend request.');
     }
@@ -381,12 +381,12 @@ export function NetworkingView() {
   return (
     <>
       <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-        <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
+        <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-nova-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
           <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
             <GuestSocialBanner feature="networking" />
             {/* Centered toolbar. Search and filter pill match size */}
             <div className="mt-3 flex items-center justify-center gap-2.5 flex-wrap">
-              <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-ark-navy-950/70 border border-white/10 px-3">
+              <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-nova-navy-950/70 border border-white/10 px-3">
                 <Search className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
                 <input
                   value={query}
@@ -395,7 +395,7 @@ export function NetworkingView() {
                   className="flex-1 min-w-0 bg-transparent text-sm text-content-primary outline-none placeholder:text-content-tertiary"
                 />
               </div>
-              <div className="h-10 w-44 flex items-center justify-evenly rounded-full bg-ark-navy-950/70 border border-white/10 px-1">
+              <div className="h-10 w-44 flex items-center justify-evenly rounded-full bg-nova-navy-950/70 border border-white/10 px-1">
                 {([
                   { id: 'public' as const, label: 'Everyone', icon: Globe },
                   { id: 'paid' as const, label: 'Paid', icon: DollarSign },
@@ -441,7 +441,7 @@ export function NetworkingView() {
 
           <div className="shrink-0 px-5 sm:px-8 pb-4">
             <div className="w-full flex items-center justify-center gap-2 overflow-x-auto">
-              <div className="inline-flex items-center rounded-full border border-white/10 bg-ark-navy-950/60 p-1 shrink-0">
+              <div className="inline-flex items-center rounded-full border border-white/10 bg-nova-navy-950/60 p-1 shrink-0">
                 {PROJECT_TYPES.map(item => {
                   const active = projectType === item.id;
                   return (
@@ -464,7 +464,7 @@ export function NetworkingView() {
               <div
                 ref={platformRef}
                 role="listbox"
-                className="inline-flex items-center rounded-full border border-white/10 bg-ark-navy-950/60 p-1 shrink-0"
+                className="inline-flex items-center rounded-full border border-white/10 bg-nova-navy-950/60 p-1 shrink-0"
               >
                 <button
                   type="button"
@@ -516,7 +516,7 @@ export function NetworkingView() {
           <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 pb-6">
             <div className="w-full">
               {note && <p className="text-xs text-amber-200/90 mb-3">{note}</p>}
-              {(idSearchHit || idSearchBusy || idSearchNote) && (isArkUserId(normalizeArkId(query)) || isDevArkAlias(query)) && (
+              {(idSearchHit || idSearchBusy || idSearchNote) && (isNovaUserId(normalizeNovaId(query)) || isDevNovaAlias(query)) && (
                 <div className="mb-3 rounded-2xl border border-sky-500/25 bg-sky-500/5 px-4 py-3 flex items-center gap-3 flex-wrap">
                   {idSearchBusy ? (
                     <p className="text-sm text-content-tertiary flex items-center gap-2">
@@ -524,12 +524,12 @@ export function NetworkingView() {
                     </p>
                   ) : idSearchHit ? (
                     <>
-                      <ArkAvatar name={idSearchHit.displayName || idSearchHit.arkId} size="md" />
+                      <NovaAvatar name={idSearchHit.displayName || idSearchHit.novaId} size="md" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-content-primary">
                           {idSearchHit.displayName || 'NOVA user'}
                         </p>
-                        <p className="text-[11px] text-content-tertiary">NOVA ID {formatArkId(idSearchHit.arkId)}</p>
+                        <p className="text-[11px] text-content-tertiary">NOVA ID {formatNovaId(idSearchHit.novaId)}</p>
                         {idSearchNote ? <p className="text-[11px] text-amber-200/90 mt-1">{idSearchNote}</p> : null}
                       </div>
                       <button
@@ -555,7 +555,7 @@ export function NetworkingView() {
                 <div className="text-center py-16 text-content-tertiary">
                   <Globe className="w-6 h-6 mx-auto mb-2 opacity-70" />
                   <p className="text-sm">
-                    {isArkUserId(normalizeArkId(query)) || isDevArkAlias(query)
+                    {isNovaUserId(normalizeNovaId(query)) || isDevNovaAlias(query)
                       ? 'No posts from that NOVA ID yet. Use Add friend above if they were found.'
                       : tab === 'saved'
                         ? 'No saved projects yet. Bookmark a post to find it here.'
@@ -573,12 +573,12 @@ export function NetworkingView() {
                     const saveCount = getSaveCount(post.id);
                     const replies = discussionByPost[post.id] || [];
                     const replyCount = replies.length;
-                    const chatUnread = hasUnreadDiscussion(post.id, replies, myArkId);
+                    const chatUnread = hasUnreadDiscussion(post.id, replies, myNovaId);
                     const menuOpen = menuPostId === post.id;
                     return (
                       <div
                         key={post.id}
-                        className="relative w-full text-left rounded-2xl border border-surface-border bg-ark-navy-900/45 hover:bg-ark-navy-900/60 px-3.5 py-3.5 transition-colors"
+                        className="relative w-full text-left rounded-2xl border border-surface-border bg-nova-navy-900/45 hover:bg-nova-navy-900/60 px-3.5 py-3.5 transition-colors"
                       >
                         <button
                           type="button"
@@ -586,9 +586,9 @@ export function NetworkingView() {
                           className="w-full text-left"
                         >
                           <div className="flex items-start gap-2.5">
-                            <ArkAvatar
-                              name={post.ownerName || post.ownerArkId}
-                              src={ownerAvatarSrc(post.ownerArkId, myArkId, contacts)}
+                            <NovaAvatar
+                              name={post.ownerName || post.ownerNovaId}
+                              src={ownerAvatarSrc(post.ownerNovaId, myNovaId, contacts)}
                               size="md"
                             />
                             <div className="min-w-0 flex-1">
@@ -675,8 +675,8 @@ export function NetworkingView() {
                             <MoreVertical className="w-3.5 h-3.5" />
                           </button>
                           {menuOpen && (
-                            <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[8.5rem] rounded-xl border border-white/10 bg-ark-navy-900 shadow-xl overflow-hidden">
-                              {post.ownerArkId === myArkId && !String(post.id).startsWith('demo-') && (
+                            <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[8.5rem] rounded-xl border border-white/10 bg-nova-navy-900 shadow-xl overflow-hidden">
+                              {post.ownerNovaId === myNovaId && !String(post.id).startsWith('demo-') && (
                                 <button
                                   type="button"
                                   className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-white/[0.05]"
@@ -695,7 +695,7 @@ export function NetworkingView() {
                                   Delete
                                 </button>
                               )}
-                              {post.ownerArkId !== myArkId && (
+                              {post.ownerNovaId !== myNovaId && (
                                 <button
                                   type="button"
                                   className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-white/[0.05]"
@@ -738,9 +738,9 @@ export function NetworkingView() {
             <div className={`overflow-y-auto px-5 py-4 space-y-4 ${discussionOpen ? 'flex-1 min-w-0' : 'h-full'}`}>
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
-                  <ArkAvatar
-                    name={selected.ownerName || selected.ownerArkId}
-                    src={ownerAvatarSrc(selected.ownerArkId, myArkId, contacts)}
+                  <NovaAvatar
+                    name={selected.ownerName || selected.ownerNovaId}
+                    src={ownerAvatarSrc(selected.ownerNovaId, myNovaId, contacts)}
                     size="lg"
                     className="!h-12 !w-12 !text-xs"
                   />
@@ -759,7 +759,7 @@ export function NetworkingView() {
                     )}
                   </div>
                   <p className="text-[11px] text-content-tertiary mt-1">
-                    {selected.ownerName || 'NOVA user'} · {formatArkId(selected.ownerArkId)} · {timeAgo(selected.createdAt)}
+                    {selected.ownerName || 'NOVA user'} · {formatNovaId(selected.ownerNovaId)} · {timeAgo(selected.createdAt)}
                   </p>
                 </div>
               </div>
@@ -770,7 +770,7 @@ export function NetworkingView() {
                 <p className="text-sm text-content-primary/90 leading-relaxed whitespace-pre-wrap">{selected.details}</p>
               )}
               <div className="flex flex-wrap gap-2 pt-1">
-                {selected.ownerArkId !== myArkId && (
+                {selected.ownerNovaId !== myNovaId && (
                   <>
                     <button
                       type="button"
@@ -801,7 +801,7 @@ export function NetworkingView() {
                     Message
                   </button>
                 )}
-                {selected.ownerArkId !== myArkId && (
+                {selected.ownerNovaId !== myNovaId && (
                   <button
                     type="button"
                     disabled={Boolean(codeAsked[selected.id])}
@@ -812,7 +812,7 @@ export function NetworkingView() {
                     {codeAsked[selected.id] ? 'Approval requested' : 'Ask to view code'}
                   </button>
                 )}
-                {selected.ownerArkId === myArkId && !String(selected.id).startsWith('demo-') && (
+                {selected.ownerNovaId === myNovaId && !String(selected.id).startsWith('demo-') && (
                   <button
                     type="button"
                     className="text-xs text-rose-300 px-2"
@@ -829,7 +829,7 @@ export function NetworkingView() {
             </div>
 
             {discussionOpen && selected.allowDiscussion !== false && (
-              <div className="w-[min(100%,20rem)] shrink-0 flex flex-col min-h-0 bg-ark-navy-950/30 pl-1">
+              <div className="w-[min(100%,20rem)] shrink-0 flex flex-col min-h-0 bg-nova-navy-950/30 pl-1">
                 <div className="shrink-0 px-4 pt-4 pb-2 flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-content-primary">Post chat</p>
@@ -854,7 +854,7 @@ export function NetworkingView() {
                   ))}
                 </div>
                 <div className="shrink-0 px-3 pb-3 pt-1">
-                  <div className="flex items-center gap-1 rounded-full bg-ark-navy-950/70 border border-white/10 pl-3 pr-1 py-1">
+                  <div className="flex items-center gap-1 rounded-full bg-nova-navy-950/70 border border-white/10 pl-3 pr-1 py-1">
                     <input
                       value={discussionDraft}
                       onChange={e => setDiscussionDraft(e.target.value)}
@@ -899,7 +899,7 @@ export function NetworkingView() {
             <div className="rounded-xl bg-black/30 px-3.5 py-3 space-y-1">
               <p className="text-sm text-content-primary">{reportPost.ownerName || 'NOVA user'}</p>
               <p className="text-[11px] font-mono text-content-tertiary tracking-wider">
-                {formatArkId(reportPost.ownerArkId)}
+                {formatNovaId(reportPost.ownerNovaId)}
               </p>
               <p className="text-xs text-content-secondary pt-1">
                 Project: <span className="text-content-primary">{reportPost.title}</span>
@@ -1112,10 +1112,10 @@ export function NetworkingView() {
             </div>
             <button
               type="button"
-              aria-disabled={busy || !title.trim() || !myArkId}
+              aria-disabled={busy || !title.trim() || !myNovaId}
               onClick={() => {
                 if (busy) return;
-                if (!myArkId) {
+                if (!myNovaId) {
                   setNote('Sign in (or finish profile) so this post has an NOVA ID.');
                   return;
                 }
@@ -1126,7 +1126,7 @@ export function NetworkingView() {
                 void postWork();
               }}
               className={`ml-auto rounded-full bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium px-5 py-1.5 transition-colors ${
-                busy || !title.trim() || !myArkId ? 'opacity-40' : ''
+                busy || !title.trim() || !myNovaId ? 'opacity-40' : ''
               }`}
             >
               {busy ? 'Posting…' : 'Post'}
@@ -1139,14 +1139,14 @@ export function NetworkingView() {
               {contacts.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {contacts.map(c => {
-                    const on = allowed.split(/[,\s]+/).map(normalizeArkId).includes(c.arkId);
+                    const on = allowed.split(/[,\s]+/).map(normalizeNovaId).includes(c.novaId);
                     return (
                       <button
-                        key={c.arkId}
+                        key={c.novaId}
                         type="button"
                         onClick={() => {
-                          const ids = allowed.split(/[,\s]+/).map(normalizeArkId).filter(isArkUserId);
-                          const next = on ? ids.filter(id => id !== c.arkId) : [...ids, c.arkId];
+                          const ids = allowed.split(/[,\s]+/).map(normalizeNovaId).filter(isNovaUserId);
+                          const next = on ? ids.filter(id => id !== c.novaId) : [...ids, c.novaId];
                           setAllowed(next.join(', '));
                         }}
                         className={`rounded-full border px-2.5 py-1 text-[11px] ${

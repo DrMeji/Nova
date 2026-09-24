@@ -1,10 +1,8 @@
 /** Local sticky prefs for guest / offline UI (no cloud required). */
 
-const PREFS_KEY = 'ark:local-prefs';
-/** Older NOVA-prefixed key from the rebrand. Must stay distinct from PREFS_KEY. */
-const PREFS_KEY_LEGACY_NOVA = 'NOVA:local-prefs';
-const API_KEYS_KEY = 'ark:provider-api-keys';
-const API_KEYS_KEY_LEGACY_NOVA = 'NOVA:provider-api-keys';
+const PREFS_KEY = 'NOVA:local-prefs';
+const API_KEYS_KEY = 'NOVA:provider-api-keys';
+const PREFS_CHANGED_EVENT = 'nova:prefs-changed';
 
 export type AiModePref = 'automatic' | 'local_only' | 'cloud_when_available' | 'local_fallback';
 export type DensityPref = 'comfortable' | 'compact';
@@ -25,6 +23,8 @@ export type LocalPrefs = {
   activeChatId?: string;
   activeCoderId?: string;
   activeVisionId?: string;
+  /** Design / layout-contract brain (ensemble Design hop). */
+  activeDesignId?: string;
   /** Prefs schema version for migrations (never let stale toggles resurrect). */
   prefsVersion?: number;
   /** Last provider/model that actually answered (Settings → AI). */
@@ -109,7 +109,7 @@ export type LocalPrefs = {
    * Default off so first-time builds stay one-shot; power users can enable.
    */
   planApproveGate: boolean;
-  /** When true, create hops across multiple local/cloud models (slow). Default off. */
+  /** When true, create may use dual-load multi-model (legacy). Sequential ensemble always runs when chat+coder are ready. */
   multiModelCreate: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
   agentLoopCommitOnSuccess: boolean;
@@ -160,7 +160,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   streamResponses: true,
   rememberContext: true,
   ggufTemperature: 0.55,
-  ggufNPredict: 4096,
+  ggufNPredict: 6144,
   huntInternetModels: true,
   autoInstallHuntModels: true,
   shareUsageStats: false,
@@ -180,7 +180,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   agentExecutionMode: 'allowlist',
   agentLoopEnabled: true,
   agentLoopInWorkspace: false,
-  agentLoopMaxSteps: 24,
+  agentLoopMaxSteps: 32,
   agentLoopOnCreate: true,
   agentLoopOnEdit: true,
   planApproveGate: false,
@@ -197,21 +197,14 @@ const DEFAULT_PREFS: LocalPrefs = {
 
 export function getLocalPrefs(): LocalPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_KEY)
-      || localStorage.getItem(PREFS_KEY_LEGACY_NOVA);
+    const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
     if (typeof merged.voiceInputAuto !== 'boolean') merged.voiceInputAuto = true;
     if (typeof merged.voiceOutputAuto !== 'boolean') merged.voiceOutputAuto = true;
-    if (typeof merged.ggufNPredict === 'number' && merged.ggufNPredict < 4096) {
-      merged.ggufNPredict = 4096;
+    if (typeof merged.ggufNPredict === 'number' && merged.ggufNPredict < 6144) {
+      merged.ggufNPredict = 6144;
     }
-    // Brand rename: legacy ark-* model ids → NOVA-*
-    if (merged.defaultModelId === 'ark-auto') merged.defaultModelId = 'NOVA-auto';
-    if (merged.defaultCodeModelId === 'ark-auto') merged.defaultCodeModelId = 'NOVA-auto';
-    if (merged.defaultModelId === 'ark-image-core') merged.defaultModelId = 'NOVA-image-core';
-    if (merged.defaultModelId === 'ark-video-core') merged.defaultModelId = 'NOVA-video-core';
-    if (merged.defaultModelId === 'ark-core') merged.defaultModelId = 'NOVA-core';
     if (typeof merged.orbBlurPx !== 'number' || Number.isNaN(merged.orbBlurPx)) {
       merged.orbBlurPx = 7;
     } else {
@@ -248,7 +241,7 @@ export function getLocalPrefs(): LocalPrefs {
 /** True when a prefs blob is actually stored (not just in-memory defaults). */
 export function hasStoredLocalPrefs(): boolean {
   try {
-    return Boolean(localStorage.getItem(PREFS_KEY) || localStorage.getItem(PREFS_KEY_LEGACY_NOVA));
+    return Boolean(localStorage.getItem(PREFS_KEY));
   } catch {
     return false;
   }
@@ -273,8 +266,7 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
     // on the next sync. Only persist grants when already stored or explicitly patched.
     let existing: Record<string, unknown> = {};
     try {
-      const raw = localStorage.getItem(PREFS_KEY)
-        || localStorage.getItem(PREFS_KEY_LEGACY_NOVA);
+      const raw = localStorage.getItem(PREFS_KEY);
       if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       existing = {};
@@ -286,18 +278,16 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
       }
     }
     localStorage.setItem(PREFS_KEY, JSON.stringify(toStore));
-    // Drop the legacy rebrand key if it still exists.
-    try {
-      localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
-    } catch {
+        try {
+          } catch {
       /* ignore */
     }
   } catch {
     /* quota / private mode — still return next so UI can update this session */
   }
   try {
-    window.dispatchEvent(new CustomEvent('ark:prefs-changed', { detail: next }));
-  } catch {
+    window.dispatchEvent(new CustomEvent(PREFS_CHANGED_EVENT, { detail: next }));
+      } catch {
     /* ignore */
   }
   return next;
@@ -312,8 +302,7 @@ let keysEncrypted = false;
 
 function readLegacyLocalKeys(): ProviderKeyMap {
   try {
-    const raw = localStorage.getItem(API_KEYS_KEY)
-      || localStorage.getItem(API_KEYS_KEY_LEGACY_NOVA);
+    const raw = localStorage.getItem(API_KEYS_KEY);
     if (!raw) return {};
     return JSON.parse(raw) as ProviderKeyMap;
   } catch {
@@ -327,27 +316,25 @@ function writeLegacyLocalKeys(map: ProviderKeyMap) {
 }
 
 async function persistProviderKeys(map: ProviderKeyMap) {
-  if (window.arkDesktop?.secretsSave) {
-    const res = await window.arkDesktop.secretsSave(map);
+  if (window.novaDesktop?.secretsSave) {
+    const res = await window.novaDesktop.secretsSave(map);
     if (res && res.ok === false) {
       throw new Error(res.error || 'Could not save API keys securely');
     }
     try {
       localStorage.removeItem(API_KEYS_KEY);
-      localStorage.removeItem(API_KEYS_KEY_LEGACY_NOVA);
-    } catch {
+          } catch {
       /* ignore */
     }
     return;
   }
   // Desktop shell without vault = refuse (never write keys into localStorage).
-  if (window.arkDesktop) {
+  if (window.novaDesktop) {
     throw new Error('Secure key vault unavailable — API keys cannot be saved unsafely.');
   }
   writeLegacyLocalKeys(map);
   try {
-    localStorage.removeItem(API_KEYS_KEY_LEGACY_NOVA);
-  } catch {
+      } catch {
     /* ignore */
   }
 }
@@ -357,16 +344,16 @@ export async function hydrateProviderApiKeys(): Promise<{
   encrypted: boolean;
   count: number;
 }> {
-  if (window.arkDesktop?.secretsLoad) {
-    const res = await window.arkDesktop.secretsLoad();
+  if (window.novaDesktop?.secretsLoad) {
+    const res = await window.novaDesktop.secretsLoad();
     const legacy = readLegacyLocalKeys();
     const merged: ProviderKeyMap = { ...legacy };
     const status = (res.ok && res.keyStatus) ? res.keyStatus : {};
-    if (window.arkDesktop.secretsGetKey) {
+    if (window.novaDesktop.secretsGetKey) {
       for (const [id, set] of Object.entries(status)) {
         if (!set) continue;
         try {
-          const row = await window.arkDesktop.secretsGetKey(id);
+          const row = await window.novaDesktop.secretsGetKey(id);
           if (row.ok && row.key) merged[id] = row.key;
         } catch {
           /* skip broken key */

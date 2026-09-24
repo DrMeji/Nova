@@ -17,7 +17,7 @@ function joinPath(root: string, name: string): string {
 }
 
 async function pathStat(targetPath: string) {
-  return window.arkDesktop?.pathStat?.(targetPath);
+  return window.novaDesktop?.pathStat?.(targetPath);
 }
 
 export type DeleteFileChatOutcome =
@@ -136,15 +136,15 @@ export async function deleteFileOnDisk(opts: {
   projectId?: string | null;
   relPath?: string | null;
 }): Promise<{ ok: boolean; path?: string; error?: string }> {
-  if (opts.projectId && opts.relPath && window.arkDesktop?.workspaceDeletePath) {
-    const viaWorkspace = await window.arkDesktop.workspaceDeletePath({
+  if (opts.projectId && opts.relPath && window.novaDesktop?.workspaceDeletePath) {
+    const viaWorkspace = await window.novaDesktop.workspaceDeletePath({
       projectId: opts.projectId,
       relPath: opts.relPath,
     });
     if (viaWorkspace.ok) return viaWorkspace;
   }
-  if (window.arkDesktop?.workspaceDeleteFolder) {
-    return window.arkDesktop.workspaceDeleteFolder({ targetPath: opts.filePath });
+  if (window.novaDesktop?.workspaceDeleteFolder) {
+    return window.novaDesktop.workspaceDeleteFolder({ targetPath: opts.filePath });
   }
   return { ok: false, error: 'Delete is only available in the desktop app.' };
 }
@@ -213,11 +213,11 @@ export async function handleAddFileChatRequest(opts: {
     };
   }
 
-  if (!window.arkDesktop?.workspaceWriteFile) {
+  if (!window.novaDesktop?.workspaceWriteFile) {
     return { kind: 'reply', text: 'File create is only available in the desktop app.' };
   }
 
-  const written = await window.arkDesktop.workspaceWriteFile({
+  const written = await window.novaDesktop.workspaceWriteFile({
     targetPath: fullPath,
     content: typeof content === 'string' ? content : '',
   });
@@ -225,8 +225,8 @@ export async function handleAddFileChatRequest(opts: {
     return { kind: 'reply', text: written.error || `Could not create \`${wantFile}\`.` };
   }
 
-  if (workspaceProjectId && window.arkDesktop?.projectWrite) {
-    await window.arkDesktop.projectWrite({
+  if (workspaceProjectId && window.novaDesktop?.projectWrite) {
+    await window.novaDesktop.projectWrite({
       projectId: workspaceProjectId,
       projectName: workspaceName || undefined,
       files: { [wantFile]: typeof content === 'string' ? content : '' },
@@ -297,10 +297,10 @@ export async function handleRenameFileChatRequest(opts: {
   }
 
   const toPath = joinPath(pathDirname(fromPath), wantTo);
-  if (!window.arkDesktop?.workspaceRenamePath) {
+  if (!window.novaDesktop?.workspaceRenamePath) {
     return { kind: 'reply', text: 'Rename is only available in the desktop app.' };
   }
-  const renamed = await window.arkDesktop.workspaceRenamePath({
+  const renamed = await window.novaDesktop.workspaceRenamePath({
     fromPath,
     toPath,
   });
@@ -342,7 +342,7 @@ export async function handleReadFileChatRequest(opts: {
   }
 
   if (stickyTarget?.kind === 'file' && namesRoughlyMatch(stickyTarget.name, wantFile)) {
-    const read = await window.arkDesktop?.readTextFile?.({ path: stickyTarget.path, maxBytes: 120_000 });
+    const read = await window.novaDesktop?.readTextFile?.({ path: stickyTarget.path, maxBytes: 120_000 });
     if (read?.ok && read.text != null) {
       const preview = read.text.length > 8000
         ? `${read.text.slice(0, 8000)}\n\n…(truncated)`
@@ -371,7 +371,7 @@ export async function handleReadFileChatRequest(opts: {
   }
 
   for (const candidatePath of [...new Set(candidatePaths)]) {
-    const read = await window.arkDesktop?.readTextFile?.({ path: candidatePath, maxBytes: 120_000 });
+    const read = await window.novaDesktop?.readTextFile?.({ path: candidatePath, maxBytes: 120_000 });
     if (!read?.ok) continue;
     if (read.binary) {
       return {

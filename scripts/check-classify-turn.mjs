@@ -67,6 +67,13 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   check('Twitch exploratory ask → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
 }
 {
+  const ask =
+    "Hey, I organize a weekend farmers market stalls and keep losing track of who's selling what. Think of a tiny phone page";
+  const r = classifyTurn(ask);
+  check('farmers market problem sketch → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
+  check('farmers market talk-before-create', r.reason === 'talk-before-create', r.reason);
+}
+{
   const r = classifyTurn('Build me a Discord-like chat app called Nightcord');
   check('named Discord clone build → create', r.kind === 'create', `${r.kind} ${r.reason}`);
 }
@@ -93,6 +100,14 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
     pendingBrief: 'A Discord-like chat app called Nightcord with servers channels and a chat pane.',
   });
   check('ok start building with pending → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
+{
+  // Bare go-build with no pending store — rebuild brief from prior user turns.
+  const prior =
+    'I want a dive-log web app called ReefLog with a trip list, depth chart, and add-entry form for weekend dives.';
+  const bare = classifyTurn('ok start building', { recentUserLines: [prior] });
+  check('ok start building with thread brief → create', bare.kind === 'create', `${bare.kind} ${bare.reason}`);
+  check('thread brief create name', /reef/i.test(String(bare.createName || '')), bare.createName);
 }
 {
   // Bound folder: "start building" without brand-new stays polish, not a second project.

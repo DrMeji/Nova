@@ -51,8 +51,8 @@ async function pathLooksReal(absPath: string | null | undefined): Promise<boolea
   const p = String(absPath || '').trim();
   if (!p) return false;
   try {
-    const stat = await window.arkDesktop?.workspaceStatPath?.(p)
-      || await window.arkDesktop?.pathStat?.(p);
+    const stat = await window.novaDesktop?.workspaceStatPath?.(p)
+      || await window.novaDesktop?.pathStat?.(p);
     return Boolean(stat?.ok && (stat.isDirectory !== false));
   } catch {
     return false;

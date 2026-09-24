@@ -11,7 +11,7 @@ import {
   startEngine,
   stopEngine,
   type ArkEngineStatus,
-} from '@/lib/arkEngine';
+} from '@/lib/novaEngine';
 import {
   cancelEngineDownload,
   dismissEngineDownloadError,
@@ -24,7 +24,7 @@ import {
   startEngineDownload,
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
-import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { classifyErrorMessage } from '@/lib/errors';
@@ -50,7 +50,7 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Globe, Trash2, Eye,
+  Code, Brain, Globe, Trash2, Eye, Sparkles,
 } from 'lucide-react';
 
 import {
@@ -59,8 +59,13 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
-
+import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/novaModelHunt';
+import {
+  assessModelDownloadFit,
+  findSimilarRecommendedModel,
+  type ModelFitAssessment,
+  type SimilarModelPick,
+} from '@/lib/modelCompat';
 import { ENGINE_UI_CATALOG, type EngineUiModel } from '@/lib/engineCatalogUi';
 
 type TabId = 'overview' | 'speed' | 'hardware' | 'storage' | 'advanced';
@@ -89,6 +94,7 @@ function FreeBadge() {
 const LOCAL_CATEGORY_META: Record<CatalogModel['category'], { title: string; icon: typeof Code }> = {
   general: { title: 'General', icon: Boxes },
   coding: { title: 'Coding', icon: Code },
+  design: { title: 'Design', icon: Sparkles },
   reasoning: { title: 'Reasoning', icon: Brain },
   fast: { title: 'Fast', icon: Zap },
   vision: { title: 'Vision', icon: Eye },
@@ -171,7 +177,7 @@ function ModelGrid({ children }: { children: ReactNode }) {
 
 function StatusDot({ on }: { on: boolean }) {
   return (
-    <span className={`w-2 h-2 rounded-full shrink-0 ${on ? 'bg-ark-accent-green' : 'bg-content-tertiary'}`} />
+    <span className={`w-2 h-2 rounded-full shrink-0 ${on ? 'bg-nova-accent-green' : 'bg-content-tertiary'}`} />
   );
 }
 
@@ -215,6 +221,8 @@ export function LocalAI() {
     category?: string;
     detail?: string;
     hunt?: HuntedModel;
+    fit?: ModelFitAssessment | null;
+    recommended?: SimilarModelPick | null;
   } | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
 
@@ -413,7 +421,7 @@ export function LocalAI() {
       });
   };
 
-  const runDownload = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel }) => {
+  const runDownload = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel; category?: string }) => {
     if (isEngineDownloading(model.id)) return;
     void engineDiskSpace().then(disk => {
       const needGb = model.sizeGb * 1.15;
@@ -455,6 +463,33 @@ export function LocalAI() {
 
   const downloadModel = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel; category?: string; detail?: string }) => {
     if (isEngineDownloading(model.id)) return;
+    const fit = assessModelDownloadFit(model.sizeGb, hw);
+    const candidates = [
+      ...CATALOG.map(m => ({
+        id: m.id,
+        name: m.name,
+        sizeGb: m.sizeGb,
+        category: m.category,
+        preferred: m.category === 'design' || /coder-7b|llama32-3b|qwen25-7b/.test(m.id),
+      })),
+      ...hunted.map(m => ({
+        id: m.id,
+        name: m.name,
+        sizeGb: m.sizeGb,
+        category: m.category,
+        preferred: false,
+      })),
+    ];
+    const recommended = findSimilarRecommendedModel(
+      {
+        id: model.id,
+        name: model.name,
+        sizeGb: model.sizeGb,
+        category: model.category ?? model.hunt?.category,
+      },
+      candidates,
+      hw,
+    );
     setDownloadConfirm({
       id: model.id,
       name: model.name,
@@ -462,6 +497,8 @@ export function LocalAI() {
       category: model.category ?? model.hunt?.category,
       detail: model.detail ?? model.hunt?.detail,
       hunt: model.hunt,
+      fit,
+      recommended,
     });
   };
 
@@ -563,7 +600,7 @@ export function LocalAI() {
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Engine</h1>
               {statusNote ? (
                 classifyErrorMessage(statusNote).code !== 'UNKNOWN'
-                  ? <div className="mt-2"><ArkErrorInline message={statusNote} /></div>
+                  ? <div className="mt-2"><NovaErrorInline message={statusNote} /></div>
                   : <p className="mt-1 text-xs text-content-tertiary">{statusNote}</p>
               ) : null}
               <button
@@ -579,7 +616,7 @@ export function LocalAI() {
               onClick={toggleEngine}
               className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm shrink-0 transition-colors ${
                 engineRunning
-                  ? 'bg-surface-hover text-ark-accent-red hover:bg-surface-hover/80'
+                  ? 'bg-surface-hover text-nova-accent-red hover:bg-surface-hover/80'
                   : 'text-[rgb(var(--color-accent-fg))]'
               }`}
               style={!engineRunning ? { backgroundColor: 'rgb(var(--color-accent))' } : undefined}
@@ -667,7 +704,7 @@ export function LocalAI() {
                     </span>
                   </span>
                   <span className={`inline-flex items-center gap-1.5 text-xs shrink-0 ${
-                    engineRunning ? 'text-ark-accent-green' : 'text-content-tertiary'
+                    engineRunning ? 'text-nova-accent-green' : 'text-content-tertiary'
                   }`}>
                     <StatusDot on={engineRunning} />
                     {engineRunning ? 'Loaded' : 'Idle'}
@@ -708,7 +745,7 @@ export function LocalAI() {
                             ? `Downloading… ${pct}%`
                             : `Downloading… ${pct}%`;
                       return (
-                        <div key={id} className="rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
+                        <div key={id} className="rounded-xl border border-surface-border bg-nova-navy-900/40 px-3 py-2.5">
                           <div className="flex items-center justify-between text-xs mb-1.5 gap-2">
                             <span className="text-content-secondary truncate">{id}</span>
                             <span className="flex items-center gap-2 shrink-0">
@@ -727,7 +764,7 @@ export function LocalAI() {
                           </div>
                           {downloadErrorMap[id] ? (
                             <div className="mt-1.5">
-                              <ArkErrorInline message={downloadErrorMap[id]} />
+                              <NovaErrorInline message={downloadErrorMap[id]} />
                               <div className="flex items-center gap-2 mt-1.5">
                                 <button
                                   type="button"
@@ -968,7 +1005,7 @@ export function LocalAI() {
                         <span className="text-xs text-content-tertiary">RTT {formatMs(host.rttMs)}</span>
                       )}
                       {host.ok && host.id === speedSample?.preferredHost && (
-                        <span className="text-xs text-ark-accent-green">fastest</span>
+                        <span className="text-xs text-nova-accent-green">fastest</span>
                       )}
                     </div>
                   ))}
@@ -979,7 +1016,7 @@ export function LocalAI() {
                         preloadPlan.rating === 'slow'
                           ? 'text-amber-400'
                           : preloadPlan.rating === 'fast'
-                            ? 'text-ark-accent-green'
+                            ? 'text-nova-accent-green'
                             : 'text-content-primary'
                       }`}>
                         {preloadPlan.ratingLabel}
@@ -1057,7 +1094,7 @@ export function LocalAI() {
                     {sortedApiProbes.map(probe => (
                       <div key={probe.id} className="flex items-center gap-3 py-3 px-1">
                         <span className="w-40 shrink-0 text-sm text-content-secondary">{probe.name}</span>
-                        <span className={`text-sm tabular-nums ${probe.ok ? 'text-ark-accent-green' : 'text-amber-400'}`}>
+                        <span className={`text-sm tabular-nums ${probe.ok ? 'text-nova-accent-green' : 'text-amber-400'}`}>
                           {probe.ok ? formatMs(probe.ms) : probe.error || 'Failed'}
                         </span>
                         {probe.ok && (
@@ -1167,10 +1204,10 @@ export function LocalAI() {
                       <Download className="w-3.5 h-3.5" />
                       Import GGUF
                     </button>
-                    {engineMeta?.modelsDir && window.arkDesktop?.openPath && (
+                    {engineMeta?.modelsDir && window.novaDesktop?.openPath && (
                       <button
                         type="button"
-                        onClick={() => void window.arkDesktop?.openPath?.(engineMeta.modelsDir)}
+                        onClick={() => void window.novaDesktop?.openPath?.(engineMeta.modelsDir)}
                         className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3 py-1.5 text-xs text-content-primary hover:bg-surface-hover/80"
                       >
                         <FolderOpen className="w-3.5 h-3.5" />
@@ -1198,13 +1235,13 @@ export function LocalAI() {
                     }
                     void (async () => {
                       for (const f of files) {
-                        const p = window.arkDesktop?.getPathForFile?.(f)
+                        const p = window.novaDesktop?.getPathForFile?.(f)
                           || (f as File & { path?: string }).path;
-                        if (!p || !window.arkDesktop?.engineImportGguf) {
+                        if (!p || !window.novaDesktop?.engineImportGguf) {
                           setStatusNote('Drag-drop import needs the desktop app');
                           return;
                         }
-                        const status = await window.arkDesktop.engineImportGguf(p);
+                        const status = await window.novaDesktop.engineImportGguf(p);
                         applyEngine(status);
                       }
                       setStatusNote(`Imported ${files.length} GGUF file(s)`);
@@ -1279,9 +1316,9 @@ export function LocalAI() {
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!window.arkDesktop?.modelsDirPick) return;
+                      if (!window.novaDesktop?.modelsDirPick) return;
                       try {
-                        const res = await window.arkDesktop.modelsDirPick();
+                        const res = await window.novaDesktop.modelsDirPick();
                         if (res?.canceled) return;
                         if (res?.ok === false && res.error) {
                           setStatusNote(res.error);
@@ -1303,8 +1340,8 @@ export function LocalAI() {
                     type="button"
                     disabled={!engineMeta?.modelsDirIsCustom}
                     onClick={async () => {
-                      if (!window.arkDesktop?.modelsDirReset) return;
-                      await window.arkDesktop.modelsDirReset();
+                      if (!window.novaDesktop?.modelsDirReset) return;
+                      await window.novaDesktop.modelsDirReset();
                       const next = await getEngineStatus();
                       applyEngine(next);
                       setStatusNote('Models folder reset to default');
@@ -1313,10 +1350,10 @@ export function LocalAI() {
                   >
                     Use default
                   </button>
-                  {engineMeta?.modelsDir && window.arkDesktop?.openPath && (
+                  {engineMeta?.modelsDir && window.novaDesktop?.openPath && (
                     <button
                       type="button"
-                      onClick={() => void window.arkDesktop?.openPath?.(engineMeta.modelsDir)}
+                      onClick={() => void window.novaDesktop?.openPath?.(engineMeta.modelsDir)}
                       className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors"
                     >
                       Open folder
@@ -1375,12 +1412,31 @@ export function LocalAI() {
           sizeLabel={`${downloadConfirm.sizeGb.toFixed(1)} GB`}
           category={downloadConfirm.category}
           detail={downloadConfirm.detail}
+          fit={downloadConfirm.fit}
+          recommended={downloadConfirm.recommended}
           onCancel={() => setDownloadConfirm(null)}
           onConfirm={() => {
             const pending = downloadConfirm;
             setDownloadConfirm(null);
             runDownload(pending);
           }}
+          onConfirmRecommended={
+            downloadConfirm.recommended
+              ? () => {
+                  const alt = downloadConfirm.recommended!;
+                  const huntAlt = hunted.find(h => h.id === alt.id);
+                  const cat = CATALOG.find(c => c.id === alt.id);
+                  setDownloadConfirm(null);
+                  runDownload({
+                    id: alt.id,
+                    name: alt.name,
+                    sizeGb: alt.sizeGb,
+                    hunt: huntAlt,
+                    category: alt.category || cat?.category,
+                  });
+                }
+              : undefined
+          }
         />
       )}
     </div>

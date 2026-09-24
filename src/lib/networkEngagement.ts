@@ -5,7 +5,7 @@ export type DiscussionMessage = {
   name: string;
   body: string;
   at: string;
-  senderArkId?: string;
+  senderNovaId?: string;
 };
 
 const VIEWERS_KEY = 'NOVA:network-post-viewers';
@@ -51,8 +51,8 @@ export function saveDiscussions(data: Record<string, DiscussionMessage[]>) {
 }
 
 /** Unique viewers per post — owner re-opens never count. */
-export function recordPostView(postId: string, viewerArkId: string, ownerArkId: string): number {
-  if (!postId || !viewerArkId || viewerArkId === ownerArkId) return getViewCount(postId);
+export function recordPostView(postId: string, viewerArkId: string, ownerNovaId: string): number {
+  if (!postId || !viewerArkId || viewerArkId === ownerNovaId) return getViewCount(postId);
   const map = readMap<string[]>(VIEWERS_KEY);
   const set = new Set(map[postId] || []);
   set.add(viewerArkId);
@@ -97,9 +97,9 @@ export function markDiscussionRead(postId: string, messageCount: number) {
 export function hasUnreadDiscussion(
   postId: string,
   messages: DiscussionMessage[],
-  myArkId: string,
+  myNovaId: string,
 ): boolean {
   const read = getDiscussionReadCount(postId);
   if (messages.length <= read) return false;
-  return messages.slice(read).some(m => m.senderArkId && m.senderArkId !== myArkId);
+  return messages.slice(read).some(m => m.senderNovaId && m.senderNovaId !== myNovaId);
 }

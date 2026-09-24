@@ -2,8 +2,8 @@
  * Strip accidental NOVA self-leaks from model replies on packaged installs.
  */
 
-import { isArkDevSession, isArkPackagedApp } from '@/lib/arkRuntime';
-import { arkSelfHarmBlockedReply } from '@/lib/arkSelfGuard';
+import { isNovaDevSession, isArkPackagedApp } from '@/lib/novaRuntime';
+import { arkSelfHarmBlockedReply } from '@/lib/novaSelfGuard';
 
 const LEAK_PATTERNS: RegExp[] = [
   /require\s*\(\s*['"]electron['"]\s*\)/,
@@ -24,7 +24,7 @@ export function redactArkSelfLeak(text: string): string {
     .replace(/\.\s*\./g, '.')
     .replace(/ {2,}/g, ' ');
 
-  if (isArkDevSession() || !isArkPackagedApp()) return raw.trim();
+  if (isNovaDevSession() || !isArkPackagedApp()) return raw.trim();
 
   let hit = false;
   for (const re of LEAK_PATTERNS) {

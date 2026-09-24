@@ -11,7 +11,7 @@ import {
   subscribeEngineDownloads,
   type EngineDownloadJob,
 } from '@/lib/engineDownloads';
-import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { ROTATION_NOTE_EVENT } from '@/lib/modelRotation';
 import { SIDEBAR_TOAST_EVENT, type SidebarToastDetail } from '@/lib/sidebarToast';
 import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
@@ -77,7 +77,7 @@ export function JobsStrip({
   }, []);
 
   useEffect(() => {
-    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+    const unsub = window.novaDesktop?.onUpdateProgress?.((payload) => {
       const status = String(payload?.status || '');
       const percent = typeof payload?.percent === 'number' ? payload.percent : 0;
       const message = payload?.message || payload?.error || '';
@@ -121,7 +121,7 @@ export function JobsStrip({
       <>
         <div className="mb-2 flex flex-col items-center gap-1.5 px-1">
           <div
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-ark-navy-950/95"
+            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-nova-navy-950/95"
             title={downloading[0] ? `Downloading ${jobRoleLabel(downloading[0])} (${topPct}%)` : 'Download'}
             aria-label={`Download ${topPct} percent`}
           >
@@ -163,8 +163,8 @@ export function JobsStrip({
 
   const shell =
     variant === 'sidebar'
-      ? 'mb-2 rounded-xl border border-white/[0.08] bg-ark-navy-950/95 px-3 py-2.5 space-y-2'
-      : 'shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2.5 space-y-2';
+      ? 'mb-2 rounded-xl border border-white/[0.08] bg-nova-navy-950/95 px-3 py-2.5 space-y-2'
+      : 'shrink-0 border-t border-surface-border bg-nova-navy-950/95 px-3 py-2.5 space-y-2';
 
   return (
     <>
@@ -191,7 +191,7 @@ export function JobsStrip({
                 ) : null}
                 <div className="min-w-0 flex-1">
                   {job.error ? (
-                    <ArkErrorInline message={job.error} />
+                    <NovaErrorInline message={job.error} />
                   ) : (
                     <div className="flex items-baseline justify-between gap-2 min-w-0">
                       <p className="text-content-secondary truncate">

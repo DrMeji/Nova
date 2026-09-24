@@ -37,7 +37,7 @@ Owner checklist before inviting testers. Mark each row after it is **Run** in th
 |----------|--------|
 | [ ] | Deploy `website/` (see `website/README.md`) |
 | [ ] | Supabase Auth → Redirect URLs include `https://YOUR-SITE/account/reset` and `https://YOUR-SITE/**` |
-| [ ] | Desktop build has `VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` |
+| [ ] | Desktop build has `VITE_NOVA_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` |
 | [ ] | Website deploy has `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` |
 | [ ] | Forgot password → real inbox → `/account/reset` → sign in on desktop |
 

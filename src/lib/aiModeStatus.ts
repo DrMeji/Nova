@@ -4,7 +4,7 @@
 
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { hasAnyCloudChatKey } from '@/lib/cloudChat';
-import { getEngineStatus } from '@/lib/arkEngine';
+import { getEngineStatus } from '@/lib/novaEngine';
 
 export type AiModeLabel = 'Local' | 'Hybrid' | 'Cloud' | 'Degraded' | 'Offline';
 

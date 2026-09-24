@@ -12,7 +12,7 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem('ark-theme');
+    const saved = localStorage.getItem('nova-theme');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
   });
 
@@ -25,7 +25,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.classList.add('dark');
       root.classList.remove('light');
     }
-    localStorage.setItem('ark-theme', theme);
+    localStorage.setItem('nova-theme', theme);
   }, [theme]);
 
   const toggleTheme = () => setThemeState(prev => prev === 'dark' ? 'light' : 'dark');

@@ -62,6 +62,7 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
     }
   }
   if (/\*\*CSS\b|```(?:jsx|css|tsx)?\s*$/m.test(s) || /This completes the initial implementation/i.test(s)) return true;
+  if (/This enhanced version includes/i.test(s) || /\nThis (?:version|component|file) (?:includes|adds|creates)/i.test(s)) return true;
   // useState without importing React hooks — Preview will white-screen.
   if (/\buseState\s*\(/.test(s) && !/\bimport\s+/.test(s) && !/\bfrom\s+['"]react['"]/.test(s)) return true;
   // JSX attribute-as-child bug: onClick={...}\n  Play\n</button>
@@ -107,6 +108,36 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
     return true;
   }
   return false;
+}
+
+/**
+ * Detect TS-only syntax that crashes Vite when written into .jsx/.js (not .tsx).
+ * Common local-coder failure: `const App: React.FC = () => {`.
+ */
+export function jsxSourceHasTypeScriptOnlySyntax(source: string | undefined | null): boolean {
+  const s = String(source || '');
+  if (!s.trim()) return false;
+  if (/:\s*React\.FC\b/.test(s) || /\bReact\.FC\s*</.test(s)) return true;
+  if (/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*React\.FC\b/.test(s)) return true;
+  if (/^(?:export\s+)?(?:type|interface)\s+[A-Za-z_$]/m.test(s)) return true;
+  if (/\bas\s+const\b/.test(s)) return true;
+  if (/\buse(?:State|Ref|Memo|Callback|Reducer)\s*</.test(s)) return true;
+  // `const App: Something =` / `function foo(x: string)` — not valid JS.
+  if (/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*[A-Za-z_$][\w$.]*\s*=/.test(s)) return true;
+  if (/\(\s*[A-Za-z_$][\w$]*\s*:\s*(?:string|number|boolean|any|unknown|void|React\.)/.test(s)) return true;
+  return false;
+}
+
+/** Strip the common TS-in-JSX crashers so Live can boot (heal before Preview Ready). */
+export function stripIllegalTsFromJsx(source: string | undefined | null): string {
+  let s = String(source || '');
+  if (!s) return s;
+  s = s.replace(/:\s*React\.FC(?:\s*<[^>]*>)?/g, '');
+  s = s.replace(/\bReact\.FC(?:\s*<[^>]*>)?\s*=/g, '=');
+  s = s.replace(/\bas\s+const\b/g, '');
+  s = s.replace(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$.<>|\s]*(?=\s*=)/g, '$1 $2');
+  s = s.replace(/\buse(State|Ref|Memo|Callback|Reducer)\s*<[^>]*>\s*\(/g, 'use$1(');
+  return s;
 }
 
 /** True when App/CSS source was cut off mid-write (common local-model failure). */
@@ -229,10 +260,10 @@ export function looksLikePlayableCanvasGame(summary: string, title = ''): boolea
     return false;
   }
   return (
-    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter|fps|first[\s-]?person|shooter|pong|paddle\s+ball)\b/.test(t)
+    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter|fps|first[\s-]?person|shooter|pong|paddle\s+ball|platformer|rpg|roguelike|tower\s+defense|endless\s+runner)\b/.test(t)
     || (
       /\bgame\b/.test(t)
-      && /\b(?:score|lives?|shoot(?:ing)?|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship|weapons?|enemies|hitscan|crosshair|muzzle|paddle|ball|reset)\b/.test(t)
+      && /\b(?:score|lives?|shoot(?:ing)?|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship|weapons?|enemies|hitscan|crosshair|muzzle|paddle|ball|reset|jump|levels?)\b/.test(t)
     )
     // Rebuild briefs often list mechanics without the word "game".
     || (
@@ -252,8 +283,22 @@ export function looksLikeChromeDinoGame(summary: string, title = ''): boolean {
 /** Interactive 3D / viewport modeling tool — not a marketing site. */
 export function looksLikeSpatialApp(summary: string, title = ''): boolean {
   const t = `${stripSkillNoise(summary)} ${title}`.toLowerCase();
-  if (/\b(3d|three\.?js|webgl|babylon|modeling\s+app|modeler|viewport|blender[-\s]?like|mesh\s+editor)\b/.test(t)) {
-    return /\b(app|editor|tool|scene|cube|sphere|mesh|viewport|canvas|orbit|model)\b/.test(t) || /\b3d\b/.test(t);
+  // Layout-inspiration copy ("first viewport", apple.com bands) is NOT a 3D app.
+  if (
+    /\b(?:apple\.com|full[- ]?bleed|product\s+band|landing\s+page|home\s*page|marketing)\b/.test(t)
+    && !/\b(?:three\.?js|webgl|babylon|modeling\s+app|modeler|mesh\s+editor|blender)\b/.test(t)
+  ) {
+    return false;
+  }
+  // Real 3D stack / modeler asks only — bare "viewport" is CSS/layout jargon.
+  if (/\b(?:three\.?js|webgl|babylon|modeling\s+app|modeler|mesh\s+editor|blender[-\s]?like)\b/.test(t)) {
+    return true;
+  }
+  if (/\b3d\b/.test(t) && /\b(?:app|editor|tool|scene|cube|sphere|mesh|canvas|orbit|model)\b/.test(t)) {
+    return true;
+  }
+  if (/\bviewport\b/.test(t) && /\b(?:3d|orbit|mesh|webgl|three|babylon)\b/.test(t)) {
+    return true;
   }
   return false;
 }

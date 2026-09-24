@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import { ArkRunnerGame } from '@/components/fun/ArkRunnerGame';
+import { NovaRunnerGame } from '@/components/fun/NovaRunnerGame';
 import {
   getEngineDownloadJobs,
   subscribeEngineDownloads,
@@ -147,19 +147,19 @@ export function PlayWhileDownloading({
         className="relative z-10 w-full max-w-6xl grid grid-cols-1 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)] gap-4 sm:gap-6 items-stretch pointer-events-auto"
         onClick={e => e.stopPropagation()}
       >
-        <section className="rounded-2xl border border-white/10 bg-ark-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
-          <div className="flex items-center px-4 h-11 border-b border-white/[0.08] shrink-0 bg-ark-navy-950">
+        <section className="rounded-2xl border border-white/10 bg-nova-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center px-4 h-11 border-b border-white/[0.08] shrink-0 bg-nova-navy-950">
             <h2 id="NOVA-play-title" className="text-[13px] font-medium text-content-primary">
               NOVA Runner
             </h2>
           </div>
-          <div className="flex-1 min-h-0 px-3 pb-3 pt-2 bg-ark-navy-950">
-            <ArkRunnerGame active={open} compact />
+          <div className="flex-1 min-h-0 px-3 pb-3 pt-2 bg-nova-navy-950">
+            <NovaRunnerGame active={open} compact />
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-ark-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
-          <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.08] shrink-0 bg-ark-navy-950">
+        <section className="rounded-2xl border border-white/10 bg-nova-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.08] shrink-0 bg-nova-navy-950">
             <p className="text-[13px] font-medium text-content-primary">
               {complete ? 'Install complete' : 'Background install'}
             </p>
@@ -173,7 +173,7 @@ export function PlayWhileDownloading({
             </button>
           </div>
 
-          <div className="flex-1 flex flex-col justify-center px-5 sm:px-6 py-6 gap-5 bg-ark-navy-950">
+          <div className="flex-1 flex flex-col justify-center px-5 sm:px-6 py-6 gap-5 bg-nova-navy-950">
             <div className="space-y-1.5">
               <p className={`text-[11px] font-medium ${complete ? 'text-emerald-300/90' : 'text-sky-300/90'}`}>
                 {phaseLabel}
@@ -207,7 +207,7 @@ export function PlayWhileDownloading({
 
             <button
               type="button"
-              className="ark-btn-primary h-10 px-5 rounded-xl text-sm w-full mt-1"
+              className="nova-btn-primary h-10 px-5 rounded-xl text-sm w-full mt-1"
               onClick={onClose}
             >
               {complete ? 'Back to Models' : 'Close game'}

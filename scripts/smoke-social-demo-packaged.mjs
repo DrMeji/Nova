@@ -1,5 +1,5 @@
 /**
- * Packaged / Node (no arkDesktop) must not ship Maya Chen demo social data.
+ * Packaged / Node (no novaDesktop) must not ship Maya Chen demo social data.
  * npm run smoke:social-demo
  */
 const storage = {
@@ -13,7 +13,7 @@ globalThis.window = {
   addEventListener: () => {},
   removeEventListener: () => {},
   // Retail-shaped: packaged install
-  arkDesktop: { isPackaged: true },
+  novaDesktop: { isPackaged: true },
 };
 
 const {
@@ -23,7 +23,7 @@ const {
   buildDemoThread,
   buildDemoGroups,
   buildDemoNotifications,
-  DEMO_UNREAD_ARK_IDS,
+  DEMO_UNREAD_NOVA_IDS,
 } = await import('../src/lib/socialDemo.ts');
 
 let failed = 0;
@@ -40,7 +40,7 @@ check('contacts empty', buildDemoContacts().length === 0);
 check('thread empty', buildDemoThread('1110000', '2220000').length === 0);
 check('groups empty', buildDemoGroups('1110000').length === 0);
 check('notifications empty', buildDemoNotifications().length === 0);
-check('unread ids empty', DEMO_UNREAD_ARK_IDS.length === 0);
+check('unread ids empty', DEMO_UNREAD_NOVA_IDS.length === 0);
 
 if (failed) {
   console.error(`\n${failed} social-demo packaged check(s) failed`);

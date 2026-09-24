@@ -11,13 +11,13 @@ import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, getProviderApiKeys, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { resolvePreferredCloudProvider, hasAnyCloudChatKey } from '@/lib/cloudChat';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
-import { tipAt, tipStartIndex } from '@/lib/arkTips';
+import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
+import { tipAt, tipStartIndex } from '@/lib/novaTips';
 import { RotatingTip } from '@/components/RotatingTip';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import {
   BACKUP_DOWNLOAD_EVENT,
-} from '@/lib/arkHuntBootstrap';
+} from '@/lib/novaHuntBootstrap';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -62,7 +62,7 @@ import {
 } from '@/lib/projectInspect';
 import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
-import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/arkGitClient';
+import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/novaGitClient';
 import { verifyGitHubToken, type GitHubRepo } from '@/lib/github';
 import {
   MEDIA_GEN_STAGES,
@@ -76,7 +76,7 @@ import {
   needsImageBrief,
   parseImageRequest,
 } from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
 import {
   executionModeLabel,
   getAgentExecutionMode,
@@ -111,25 +111,25 @@ import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessa
 import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
-import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
+import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
 import {
   formatSkillsForPrompt,
   resolveSkillsForBrief,
   skillNamesLabel,
   type NovaSkillPack,
 } from '@/lib/novaSkills';
-import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/arkQuickEdit';
-import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
+import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/novaQuickEdit';
+import { beginChatInflight, endChatInflight, hasChatInflight, isChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import {
   arkSelfHarmBlockedReply,
   isArkProtectedPathOnDisk,
   looksLikeArkSelfHarmAsk,
-} from '@/lib/arkSelfGuard';
+} from '@/lib/novaSelfGuard';
 import {
   harmfulContentBlockedReply,
   looksLikeHarmfulContentAsk,
-} from '@/lib/arkContentSafety';
+} from '@/lib/novaContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
 import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
@@ -148,7 +148,7 @@ import {
   runMcpAutoToolLoop,
   looksLikeArkCapabilityAsk,
   formatArkCapabilitiesHelp,
-} from '@/lib/arkMcp';
+} from '@/lib/novaMcp';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
@@ -219,6 +219,7 @@ import type { ClassifyTurnResult } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
   setChatTurnStatus,
+  forgetFinishedChatTurnStatus,
 } from '@/lib/chatTurnStatusStore';
 import { consumePendingStudioBind, readPendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
@@ -250,8 +251,8 @@ import { DeleteFileModal } from '@/components/DeleteFileModal';
 import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
-import { ArkErrorInline } from '@/components/ArkErrorInline';
-import { ArkMark } from '@/components/ArkMark';
+import { NovaErrorInline } from '@/components/NovaErrorInline';
+import { NovaMark } from '@/components/NovaMark';
 import {
   planMultiModelWebsiteTeam,
   formatMultiModelAttribution,
@@ -346,7 +347,7 @@ import {
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
   Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff,
 } from 'lucide-react';
-import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/novaEngine';
 import { runMediaChatTurn } from '@/lib/chatMediaTurn';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
 import { cleanProductTitle, looksLikeSpatialApp, looksLikePlayableCanvasGame, looksLikeFpsGame } from '@/lib/freshSpaFromBrief';
@@ -462,6 +463,20 @@ export function useAIChatController() {
     );
     return defaultModelForKind(kind);
   });
+  // One-shot: chat is Multimodal-only — clear stale manual chat pins so Auto owns routing.
+  useEffect(() => {
+    try {
+      const prefs = getLocalPrefs();
+      const patch: Record<string, unknown> = {};
+      if (prefs.defaultModelId !== 'NOVA-auto') patch.defaultModelId = 'NOVA-auto';
+      if (prefs.lastChatModelId) patch.lastChatModelId = undefined;
+      if (prefs.aiMode !== 'automatic') patch.aiMode = 'automatic';
+      if (prefs.autoFailover !== true) patch.autoFailover = true;
+      if (Object.keys(patch).length) setLocalPrefs(patch as never);
+    } catch { /* ignore */ }
+    setActiveModel((prev) => (prev.kind === 'chat' ? defaultModelForKind('chat') : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
+  }, []);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
@@ -601,6 +616,39 @@ export function useAIChatController() {
     if (!t) return;
     void sendMessageRef.current(t);
   };
+  /** Try again: replace the assistant reply in place — no new user bubble. */
+  const regeneratePendingRef = useRef(false);
+  const regenerateReply = (assistantId: string) => {
+    if (generatingRef.current) return;
+    const msgs = messagesRef.current;
+    const aIdx = msgs.findIndex((m) => m.id === assistantId);
+    if (aIdx < 0 || msgs[aIdx]?.role !== 'assistant') return;
+    let uIdx = -1;
+    for (let i = aIdx - 1; i >= 0; i -= 1) {
+      if (msgs[i]?.role === 'user') {
+        uIdx = i;
+        break;
+      }
+    }
+    if (uIdx < 0) return;
+    const prompt = String(msgs[uIdx].content || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+    if (!prompt) return;
+    try {
+      forgetFinishedChatTurnStatus(assistantId);
+    } catch { /* ignore */ }
+    // Keep through the user ask; drop this assistant and anything after it.
+    const kept = msgs.slice(0, uIdx + 1);
+    messagesRef.current = kept;
+    setMessages(kept);
+    const chatId = routeChatIdRef.current || persistChatIdRef.current;
+    if (chatId) {
+      try {
+        persistModeThread(mode, kept, { chatId });
+      } catch { /* ignore */ }
+    }
+    regeneratePendingRef.current = true;
+    void sendMessageRef.current(prompt);
+  };
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
   /** Per-chat generation ids — sending in chat B must not abort chat A's create. */
@@ -622,7 +670,7 @@ export function useAIChatController() {
   const threadBrainRef = useRef<ThreadBrain | null>(threadBrain);
   const [setupNote, setSetupNote] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('ark:setup-brain-note');
+      return localStorage.getItem('NOVA:setup-brain-note');
     } catch {
       return null;
     }
@@ -1186,7 +1234,11 @@ export function useAIChatController() {
     }
     setMode(next);
     const kind = kindForMode(next);
-    setActiveModel(prevModel => (prevModel.kind === kind ? prevModel : defaultModelForKind(kind)));
+    // Chat is always Multimodal; never keep a manually pinned local/cloud chat brain.
+    setActiveModel(prevModel => {
+      if (kind === 'chat') return defaultModelForKind('chat');
+      return prevModel.kind === kind ? prevModel : defaultModelForKind(kind);
+    });
   }, [route, navigate]);
 
   // Image / Video routes are retired — bounce to plain Chat. Voice stays.
@@ -1359,11 +1411,11 @@ export function useAIChatController() {
           const switchChatId = route.chatId;
           void (async () => {
             if (hadPreview) {
-              void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+              void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
             }
             await rebindStudioForChat(switchChatId);
             const root = chatStudioDiskRootRef.current;
-            if (root && window.arkDesktop?.readTextFile) {
+            if (root && window.novaDesktop?.readTextFile) {
               try {
                 const hydrated = await loadPreviewFilesFromDisk(root);
                 if (Object.keys(hydrated).length) {
@@ -1437,7 +1489,8 @@ export function useAIChatController() {
         }
 
         const liveGenHere = Boolean(
-          generatingRef.current && activeGenChatIdRef.current === switchChatId,
+          (generatingRef.current && activeGenChatIdRef.current === switchChatId)
+          || isChatInflight(switchChatId),
         );
         if (liveGenHere) {
           // Mid-build return: restore this chat's saved studio — do not steal another thread's live refs.
@@ -1451,12 +1504,12 @@ export function useAIChatController() {
           }
         } else {
           if (hadPreview) {
-            void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+            void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
           }
           await rebindStudioForChat(switchChatId);
           // Warm file binding from disk so Preview/Code are ready — do not open Localhost.
           const root = chatStudioDiskRootRef.current;
-          if (root && window.arkDesktop?.readTextFile) {
+          if (root && window.novaDesktop?.readTextFile) {
             try {
               const hydrated = await loadPreviewFilesFromDisk(root);
               if (Object.keys(hydrated).length && (!routeChatIdRef.current || routeChatIdRef.current === switchChatId)) {
@@ -1488,10 +1541,19 @@ export function useAIChatController() {
             ? JSON.parse(rawInflight) as { chatId?: string; mode?: string; startedAt?: number }
             : null;
           const stale = Boolean(inflight?.startedAt && Date.now() - inflight.startedAt > 180_000);
+          // Inflight map is source of truth across Chat↔Voice / Settings hops.
           const liveHere = Boolean(
-            generatingRef.current && activeGenChatIdRef.current === switchChatId,
+            (generatingRef.current && activeGenChatIdRef.current === switchChatId)
+            || isChatInflight(switchChatId),
           );
-          if (!liveHere) {
+          if (liveHere) {
+            const last = messagesRef.current[messagesRef.current.length - 1];
+            if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
+              activeGenChatIdRef.current = switchChatId;
+              generatingRef.current = true;
+              setGenerating(true);
+            }
+          } else {
             const stuckChat = messagesRef.current.some(
               m => m.role === 'assistant' && String(m.content || '').startsWith('__generating__:chat:'),
             );
@@ -1499,31 +1561,30 @@ export function useAIChatController() {
               if (stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
                 sessionStorage.removeItem('NOVA:inflight-media');
               }
-              setMessages(prev => {
-                const next = prev.map(m => (
-                  m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
-                    ? { ...m, content: '(interrupted. send again)' }
-                    : m
-                ));
-                messagesRef.current = next;
-                persistModeThread(mode, next, { chatId: switchChatId });
-                return next;
-              });
-              generatingRef.current = false;
-              setGenerating(false);
-            }
-          } else if (inflight?.chatId === switchChatId) {
-            const last = messagesRef.current[messagesRef.current.length - 1];
-            if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
-              activeGenChatIdRef.current = switchChatId;
-              generatingRef.current = true;
-              setGenerating(true);
+              // Never flip to interrupted while this chat still has work in flight.
+              if (!isChatInflight(switchChatId)) {
+                setMessages(prev => {
+                  const next = prev.map(m => (
+                    m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+                      ? { ...m, content: '(interrupted. send again)' }
+                      : m
+                  ));
+                  messagesRef.current = next;
+                  persistModeThread(mode, next, { chatId: switchChatId });
+                  return next;
+                });
+                generatingRef.current = false;
+                setGenerating(false);
+              }
             }
           }
         } catch {
           /* ignore */
         }
-        setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === switchChatId));
+        setGenerating(Boolean(
+          (generatingRef.current && activeGenChatIdRef.current === switchChatId)
+          || isChatInflight(switchChatId),
+        ));
         setLoading(false);
         setThreadSwitching(false);
         requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
@@ -1577,7 +1638,7 @@ export function useAIChatController() {
     setCodePillSticky(false);
     lastStudioIntentRef.current = null;
     lastFindingsRef.current = [];
-    void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+    void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
     // Drop any pending create brief so a new chat cannot inherit the previous idea.
     try {
       const staleId = persistChatIdRef.current || routeChatIdRef.current;
@@ -1615,7 +1676,17 @@ export function useAIChatController() {
           // Provider keys are hydrated asynchronously from the desktop vault.
           // Re-resolve the picker after that event so a saved cloud preference
           // does not remain stuck on a blank/invalid model.
-          setActiveModel(defaultModelForKind(activeModelRef.current.kind));
+          setActiveModel((prev) => {
+            // Do not clobber a create-craft pin (Coder) with chat Instruct on focus/capacity refresh.
+            const id = String(prev?.id || '');
+            if (/coder|starcoder|codestral|codellama|devstral|deepseek-coder|uigen/i.test(id)) {
+              return prev;
+            }
+            if (String(prev?.detail || '').includes('create craft') || /·\s*(?:craft|verify|design|copy)/i.test(String(prev?.detail || ''))) {
+              return prev;
+            }
+            return defaultModelForKind(activeModelRef.current.kind);
+          });
         }
       });
     };
@@ -1696,14 +1767,9 @@ export function useAIChatController() {
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
           setEngineReadyIds(readyIds);
-          // Resolve a saved local preference against the real Engine row.
-          // Before status loads it is only a placeholder, which made an
-          // installed model look absent from the connected picker.
+          // Chat stays on Nova Multimodal — installed models feed Auto, not a pinned pill.
           setActiveModel(prev => {
-            if (prev.kind !== 'chat' || prev.source !== 'local' || prev.id.startsWith('ollama:')) return prev;
-            const installed = ready.find(m => m.id === prev.id);
-            if (installed) return installed;
-            if (!readyIds.has(prev.id)) {
+            if (prev.kind === 'chat') {
               return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') || prev;
             }
             return prev;
@@ -1878,12 +1944,18 @@ export function useAIChatController() {
     generatingRef.current = false;
     activeGenChatIdRef.current = null;
     try {
+      clearChatTurnStatus();
+    } catch { /* ignore */ }
+    try {
       sessionStorage.removeItem('NOVA:inflight-media');
     } catch {
       /* ignore */
     }
     // Pair every beginChatInflight — Stop used to leave App thinking Chat was busy forever.
-    while (hasChatInflight()) endChatInflight();
+    // Always end this chat only — never drain another thread's inflight.
+    const stopChatId = originGenChatId || routeChatIdRef.current || persistChatIdRef.current;
+    if (stopChatId) endChatInflight(stopChatId);
+    else while (hasChatInflight()) endChatInflight();
     setGenerating(false);
     const stopPatch = (list: ChatMessage[]) => list.map(m => (
       m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
@@ -1962,8 +2034,8 @@ export function useAIChatController() {
       const shouldOpenOverlay = detail.openOverlay !== false;
       void (async () => {
         try {
-          if (detail.projectId && window.arkDesktop?.projectRead) {
-            const read = await window.arkDesktop.projectRead(detail.projectId);
+          if (detail.projectId && window.novaDesktop?.projectRead) {
+            const read = await window.novaDesktop.projectRead(detail.projectId);
             if (read?.ok && read.files && Object.keys(read.files).length) {
               const files = read.files as Record<string, string>;
               setChatStudioFiles(files);
@@ -2080,7 +2152,7 @@ export function useAIChatController() {
       return;
     }
     try {
-      const res = await window.arkDesktop?.openPath?.(root);
+      const res = await window.novaDesktop?.openPath?.(root);
       if (res === true || (res && typeof res === 'object' && res.ok)) {
         setDropHint(null);
         return;
@@ -2133,7 +2205,7 @@ export function useAIChatController() {
       if (existing && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(existing)) {
         setPreviewUrl(existing);
         try {
-          await window.arkDesktop?.previewOpenWindow?.({
+          await window.novaDesktop?.previewOpenWindow?.({
             url: existing,
             title: studioPathBasename(root) || createJob.name || 'Preview',
             projectId: previewWindowIdForChat(chatId),
@@ -2154,7 +2226,7 @@ export function useAIChatController() {
         setPreviewUrl(attached.url);
         previewUrlRef.current = attached.url;
         try {
-          await window.arkDesktop?.previewOpenWindow?.({
+          await window.novaDesktop?.previewOpenWindow?.({
             url: attached.url,
             title: studioPathBasename(root) || createJob?.name || 'Preview',
             projectId: previewWindowIdForChat(chatId),
@@ -2307,7 +2379,7 @@ export function useAIChatController() {
       }]);
       return;
     }
-    const read = await window.arkDesktop?.projectRead?.(project.id);
+    const read = await window.novaDesktop?.projectRead?.(project.id);
     if (read?.ok && read.files && Object.keys(read.files || {}).length) {
       setChatStudioFiles(read.files as Record<string, string>);
       chatStudioFilesRef.current = read.files as Record<string, string>;
@@ -2534,14 +2606,14 @@ export function useAIChatController() {
     error?: string;
     catalogOnly?: boolean;
   }> => {
-    if (!window.arkDesktop?.projectImportFolder && !window.arkDesktop?.workspaceOpenRoot) {
+    if (!window.novaDesktop?.projectImportFolder && !window.novaDesktop?.workspaceOpenRoot) {
       attachInputRef.current?.click();
       return { ok: false, error: 'Folder open is only available in the desktop app.' };
     }
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
     const wantImport = opts?.mode === 'import';
     // Prefer path bind: keep context light until Agent/tools need a file.
-    const useInPlace = !wantImport && Boolean(window.arkDesktop?.workspaceOpenRoot);
+    const useInPlace = !wantImport && Boolean(window.novaDesktop?.workspaceOpenRoot);
     setAttachUploading(useInPlace ? 'Binding folder path…' : 'Opening folder…');
     setAttachBusy(true);
     setDropHint(null);
@@ -2553,12 +2625,12 @@ export function useAIChatController() {
     window.addEventListener('NOVA:project-import-progress', onProg);
     try {
       const res = useInPlace
-        ? await window.arkDesktop?.workspaceOpenRoot?.({
+        ? await window.novaDesktop?.workspaceOpenRoot?.({
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
           catalogOnly: true,
         })
-        : await window.arkDesktop?.projectImportFolder?.({
+        : await window.novaDesktop?.projectImportFolder?.({
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
         });
@@ -2568,7 +2640,7 @@ export function useAIChatController() {
           const filePath = String((res as { path: string }).path);
           const base = (res as { name?: string }).name || filePath.split(/[/\\]/).pop() || 'file';
           if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
-            const data = await window.arkDesktop.readDataUrl?.(filePath);
+            const data = await window.novaDesktop.readDataUrl?.(filePath);
             if (data?.ok && data.dataUrl) {
               const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
               rememberThumb(id, data.dataUrl);
@@ -2576,7 +2648,7 @@ export function useAIChatController() {
               return { ok: true };
             }
           }
-          const read = await window.arkDesktop.readTextFile?.({ path: filePath });
+          const read = await window.novaDesktop.readTextFile?.({ path: filePath });
           const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
           setChatStudioFiles({ [base]: text });
           chatStudioFilesRef.current = { [base]: text };
@@ -2712,7 +2784,7 @@ export function useAIChatController() {
       setDropHint('Paste a folder path, or choose Browse…');
       return;
     }
-    const stat = await window.arkDesktop?.workspaceStatPath?.(typed);
+    const stat = await window.novaDesktop?.workspaceStatPath?.(typed);
     if (!stat?.ok || !stat.path) {
       setDropHint(stat?.error || 'That path was not found.');
       return;
@@ -2720,7 +2792,7 @@ export function useAIChatController() {
     if (!stat.isDirectory) {
       // Single file: bind its parent folder, keep the file as a light attach.
       const parent = typed.replace(/[/\\][^/\\]+$/, '');
-      const parentStat = await window.arkDesktop?.workspaceStatPath?.(parent);
+      const parentStat = await window.novaDesktop?.workspaceStatPath?.(parent);
       if (parentStat?.ok && parentStat.isDirectory && parentStat.path) {
         await openFolderInChat(parentStat.path, { mode: 'path' });
         setPathBindOpen(false);
@@ -2751,7 +2823,7 @@ export function useAIChatController() {
   const attachImagesFromPaths = async (paths: string[]) => {
     const next: { id: string; name: string; dataUrl: string }[] = [];
     for (const abs of paths.slice(0, 4)) {
-      const data = await window.arkDesktop?.readDataUrl?.(abs);
+      const data = await window.novaDesktop?.readDataUrl?.(abs);
       if (data?.ok && data.dataUrl?.startsWith('data:image/')) {
         const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
         rememberThumb(id, data.dataUrl);
@@ -2778,7 +2850,7 @@ export function useAIChatController() {
       await attachImagesFromPaths([abs]);
       return;
     }
-    const read = await window.arkDesktop?.readTextFile?.({ path: abs });
+    const read = await window.novaDesktop?.readTextFile?.({ path: abs });
     const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
     setChatStudioFiles({ [base]: text });
     chatStudioFilesRef.current = { [base]: text };
@@ -2826,11 +2898,11 @@ export function useAIChatController() {
 
   /** Native OS photo picker (Windows File Explorer). */
   const pickPhotosIntoChat = async () => {
-    if (!window.arkDesktop?.pickFiles) {
+    if (!window.novaDesktop?.pickFiles) {
       attachInputRef.current?.click();
       return;
     }
-    const res = await window.arkDesktop.pickFiles({ imagesOnly: true });
+    const res = await window.novaDesktop.pickFiles({ imagesOnly: true });
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachImagesFromPaths(res.paths);
     ignoreEnterUntilRef.current = Date.now() + 600;
@@ -2838,18 +2910,18 @@ export function useAIChatController() {
 
   /** Native OS file picker. shows files inside folders. */
   const pickFilesIntoChat = async () => {
-    if (!window.arkDesktop?.pickFiles) {
+    if (!window.novaDesktop?.pickFiles) {
       attachInputRef.current?.click();
       return;
     }
-    const res = await window.arkDesktop.pickFiles();
+    const res = await window.novaDesktop.pickFiles();
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachFilesFromPaths(res.paths);
   };
 
   const runEphemeralVoiceTurn = async (rawContent: string) => {
     const pinnedModel = activeModelRef.current;
-    const isTap = !rawContent.trim() || rawContent === '<!--ark-voice-turn-->';
+    const isTap = !rawContent.trim() || rawContent === '<!--nova-voice-turn-->';
     const typed = isTap ? '' : rawContent.trim();
 
     const finishVoice = async (phase: VoiceSessionPhase, speak?: string) => {
@@ -2955,7 +3027,7 @@ export function useAIChatController() {
       || voicePhase === 'thinking'
       || voicePhase === 'speaking';
     if (busy) return;
-    void sendMessageRef.current('<!--ark-voice-turn-->');
+    void sendMessageRef.current('<!--nova-voice-turn-->');
   }, [user, mode, generating, voicePhase]);
 
   const handleSend = () => {
@@ -2973,7 +3045,7 @@ export function useAIChatController() {
         || voicePhase === 'thinking'
         || voicePhase === 'speaking';
       if (busy) return;
-      void sendMessageRef.current(input.trim() || '<!--ark-voice-turn-->');
+      void sendMessageRef.current(input.trim() || '<!--nova-voice-turn-->');
       setInput('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
@@ -3014,7 +3086,7 @@ export function useAIChatController() {
     if (userTyped) {
       parts.push(content);
     } else if (chatAttaches.length) {
-      parts.push('<!--ark-auto-read-->');
+      parts.push('<!--nova-auto-read-->');
     } else if (hasStudio && !userTyped && !images.length) {
       // Bound path with Enter and no text — nudge them to type an ask.
       setDropHint('Path is bound. Type what you want changed, then press Enter.');
@@ -3030,7 +3102,7 @@ export function useAIChatController() {
       parts.push(content);
     }
     if (images.length) {
-      parts.push(...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](ark-media:${img.id})`));
+      parts.push(...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](nova-media:${img.id})`));
     }
     content = parts.join('\n\n');
     setPendingImages([]);
@@ -3121,6 +3193,7 @@ export function useAIChatController() {
     pendingFileDeleteRef,
     pendingFolderClarifyRef,
     pendingProjectDeleteRef,
+    regeneratePendingRef,
     persistChatIdRef,
     persistModeThread,
     persistStudioSnapshot,
@@ -3424,6 +3497,7 @@ export function useAIChatController() {
     toggleComposerDictation,
     tokenRatio,
     tryStartTurn,
+    regenerateReply,
     unpickAutoSticky,
     user,
     videoDurationSec,

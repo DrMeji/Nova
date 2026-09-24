@@ -15,8 +15,8 @@ import { DeleteFileModal } from '@/components/DeleteFileModal';
 import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
 import { ComposerPlusMenu } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
-import { ArkErrorInline } from '@/components/ArkErrorInline';
-import { ArkMark } from '@/components/ArkMark';
+import { NovaErrorInline } from '@/components/NovaErrorInline';
+import { NovaMark } from '@/components/NovaMark';
 import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
 import { ChatCodeOverlay } from '@/components/ChatCodeOverlay';
 import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
@@ -24,7 +24,7 @@ import { FIRST_RUN_KIND_CHIPS } from '@/lib/chatTurnHandlers';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
-import { formatReplyElapsed } from '@/lib/speedTest';
+import { formatReplyElapsed, shortReplyModelLabel } from '@/lib/speedTest';
 import { attachKey } from '@/lib/chatAttach';
 import { loadChatStudio, studioPathBasename } from '@/lib/chatStudioStore';
 import { getApplySnapshot, clearApplySnapshot, snapshotToRevertBlocks } from '@/lib/chatApplySnapshotStore';
@@ -33,13 +33,13 @@ import { setLocalPrefs, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { autoEquippedCaption, autoRingDetail } from '@/lib/threadBrain';
-import { probeLiveCapacity } from '@/lib/arkCapacity';
-import { setEngineModel } from '@/lib/arkEngine';
+import { probeLiveCapacity } from '@/lib/novaCapacity';
+import { setEngineModel } from '@/lib/novaEngine';
 import {
   Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check,
   Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw,
+  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
 } from 'lucide-react';
 import {
   ChatModeTabs,
@@ -120,6 +120,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const handleSend = props.handleSend;
   const handleStop = props.handleStop;
   const handleVoiceActivate = props.handleVoiceActivate;
+  const regenerateReply = props.regenerateReply;
   const ignoreEnterUntilRef = props.ignoreEnterUntilRef;
   const imageInputRef = props.imageInputRef;
   const input = props.input;
@@ -209,7 +210,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const voicePhase = props.voicePhase;
   const workspaceBadgeLabel = props.workspaceBadgeLabel;
 
-  // Code overlay opens only from the Code pill (openCodeWorkspace) — never auto-open on build.
+  // Code overlay auto-opens when create/build starts (NOVA:open-code-overlay) so you can watch live.
 
   const applyIdea = (label: string) => {
     setInput(label);
@@ -253,7 +254,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
     ? createPortal(
       <div
         ref={modelMenuRef}
-        className="w-72 max-h-[min(22rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/50 py-1.5"
+        className="w-72 max-h-[min(22rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-surface-border bg-nova-navy-900 shadow-2xl shadow-black/50 py-1.5"
         style={{
           position: 'fixed',
           left: menuPos.left,
@@ -285,7 +286,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
                 <span className="w-7 h-7 flex items-center justify-center shrink-0 text-content-primary">
-                  <ArkMark className="w-6 h-6" />
+                  <NovaMark className="w-6 h-6" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
@@ -293,7 +294,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                     {autoEquippedCaption(threadBrain) || 'Multi-model · including vision for builds'}
                   </span>
                 </span>
-                {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
+                {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
               </button>
             ))}
             <div className="my-1.5 border-t border-surface-border" />
@@ -330,7 +331,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
-                {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
+                {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
               </button>
             ))}
           </>
@@ -432,7 +433,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
-                {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
+                {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
               </button>
             ))}
           </>
@@ -555,7 +556,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
               {pendingImages.map(img => (
                 <span
                   key={img.id}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-ark-navy-900/80 pl-1 pr-1.5 py-1 text-[10px] text-content-secondary"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-nova-navy-900/80 pl-1 pr-1.5 py-1 text-[10px] text-content-secondary"
                 >
                   <img src={img.dataUrl} alt="" className="w-8 h-8 rounded-md object-cover" />
                   <span className="max-w-[7rem] truncate">{img.name}</span>
@@ -614,7 +615,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
             </p>
           )}
           {pathBindOpen && (
-            <div className="mb-2 w-full min-w-0 box-border rounded-xl border border-surface-border bg-ark-navy-900/90 px-2 py-1.5">
+            <div className="mb-2 w-full min-w-0 box-border rounded-xl border border-surface-border bg-nova-navy-900/90 px-2 py-1.5">
               <div className="flex items-center gap-1.5 min-w-0">
                 <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/90" />
                 <input
@@ -645,7 +646,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 <button
                   type="button"
                   onClick={() => void bindTypedPath()}
-                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-ark-navy-950 hover:bg-amber-400"
+                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-nova-navy-950 hover:bg-amber-400"
                 >
                   Bind
                 </button>
@@ -662,7 +663,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           )}
           <div
             data-ark-composer="1"
-            className={`w-full min-w-0 flex flex-col border border-surface-border bg-ark-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
+            className={`w-full min-w-0 flex flex-col border border-surface-border bg-nova-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
               mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
           >
@@ -691,14 +692,14 @@ export function AIChatFrame(props: AIChatFrameProps) {
               </div>
               <ul className="space-y-1.5" key={queueTick}>
                 {pendingQueueRef.current.map((q, idx) => (
-                  <li key={q.id} className="rounded-md border border-amber-500/20 bg-ark-navy-950/40 px-2 py-1.5">
+                  <li key={q.id} className="rounded-md border border-amber-500/20 bg-nova-navy-950/40 px-2 py-1.5">
                     {editingQueueId === q.id ? (
                       <div className="flex flex-col gap-1.5">
                         <textarea
                           value={editingQueueText}
                           onChange={e => setEditingQueueText(e.target.value)}
                           rows={2}
-                          className="w-full resize-none rounded-md border border-amber-500/30 bg-ark-navy-950 px-2 py-1 text-[12px] text-content-primary outline-none focus:border-amber-400/50"
+                          className="w-full resize-none rounded-md border border-amber-500/30 bg-nova-navy-950 px-2 py-1 text-[12px] text-content-primary outline-none focus:border-amber-400/50"
                         />
                         <div className="flex justify-end gap-1.5">
                           <button
@@ -714,7 +715,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           </button>
                           <button
                             type="button"
-                            className="rounded-md bg-amber-500/90 px-2.5 py-0.5 font-medium text-ark-navy-950 hover:bg-amber-400"
+                            className="rounded-md bg-amber-500/90 px-2.5 py-0.5 font-medium text-nova-navy-950 hover:bg-amber-400"
                             onClick={() => {
                               const text = editingQueueText.trim();
                               if (!text) return;
@@ -903,14 +904,23 @@ export function AIChatFrame(props: AIChatFrameProps) {
             {(mode === 'general' || mode === 'code')
               && chatStudioDiskRoot
               && !generating
-              && createJobLive?.status === 'ready'
+              && (
+                createJobLive?.status === 'ready'
+                || Boolean(previewUrl)
+                // After Preview Ready reply, job may drop off the store — still offer Live.
+                || (
+                  createJobLive?.status !== 'writing'
+                  && createJobLive?.status !== 'npm'
+                  && Object.keys(chatStudioFiles).some((p) => /App\.(tsx|jsx)$/i.test(p) || /index\.html$/i.test(p))
+                )
+              )
               ? (
               <button
                 type="button"
                 onClick={() => void openProjectPreview()}
                 className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
                 title={
-                  createJobLive.previewUrl
+                  createJobLive?.previewUrl
                     ? `Open Live (${createJobLive.previewUrl})`
                     : previewUrl
                       ? `Open Live (${previewUrl})`
@@ -940,36 +950,43 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
               ) : null}
-              <button
-                ref={modelButtonRef}
-                type="button"
-                onClick={() => setModelMenuOpen(o => !o)}
-                className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[11.5rem]"
-                title={`Active model · ${
-                  activeModel.source === 'auto'
-                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'Nova Multimodal · multi-model routing')
-                    : activeModel.name
-                }`}
-                aria-label="Select model"
-                aria-expanded={modelMenuOpen}
-              >
-                {mode === 'image' ? (
-                  <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                ) : mode === 'video' ? (
-                  <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                ) : activeModel.source !== 'auto' ? (
-                  <ModelSourceIcon className={`w-3.5 h-3.5 shrink-0 ${
-                    activeModel.source === 'local' ? 'text-emerald-400' : 'text-sky-400'
-                  }`} />
-                ) : null}
-                <span className="font-medium truncate">
-                  {activeModel.source === 'auto'
-                    ? autoModelLabel
-                    : activeModel.name}
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {modelMenu}
+              {/* Chat: locked to Nova Multimodal (Auto). Image/video keep a picker. */}
+              {mode === 'image' || mode === 'video' ? (
+                <>
+                  <button
+                    ref={modelButtonRef}
+                    type="button"
+                    onClick={() => setModelMenuOpen(o => !o)}
+                    className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-nova-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[11.5rem]"
+                    title={`Active model · ${activeModel.name}`}
+                    aria-label="Select model"
+                    aria-expanded={modelMenuOpen}
+                  >
+                    {mode === 'image' ? (
+                      <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    ) : (
+                      <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    )}
+                    <span className="font-medium truncate">{activeModel.name}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {modelMenu}
+                </>
+              ) : (
+                <div
+                  className="inline-flex items-center rounded-full border border-surface-border bg-nova-navy-800 px-2.5 py-1 text-xs text-content-primary max-w-[12.5rem]"
+                  title={
+                    threadBrain
+                      ? `Nova Multimodal · currently using ${autoEquippedCaption(threadBrain) || autoModelLabel}`
+                      : 'Nova Multimodal · Auto picks the best chat or coder brain per turn'
+                  }
+                  aria-label="Nova Multimodal — automatic model routing"
+                >
+                  <span className="font-medium truncate">
+                    {autoModelLabel === 'Multimodal' ? 'Multimodal' : autoModelLabel}
+                  </span>
+                </div>
+              )}
 
               {generating && (
                 <button
@@ -1129,7 +1146,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           {uploadLabel && (
             <button
               type="button"
-              className="aspect-square rounded-2xl border border-dashed border-surface-border bg-ark-navy-900/50 hover:bg-surface-hover transition-colors flex flex-col items-center justify-center gap-2 text-content-secondary hover:text-content-primary"
+              className="aspect-square rounded-2xl border border-dashed border-surface-border bg-nova-navy-900/50 hover:bg-surface-hover transition-colors flex flex-col items-center justify-center gap-2 text-content-secondary hover:text-content-primary"
               onClick={() => void pickPhotosIntoChat()}
             >
               <Upload className="w-6 h-6" />
@@ -1148,7 +1165,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           ))}
         </div>
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-ark-navy-950 via-ark-navy-950/75 to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-nova-navy-950 via-nova-navy-950/75 to-transparent"
           aria-hidden="true"
         />
       </div>
@@ -1164,7 +1181,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
         }`}
         aria-hidden={!dragOverChat}
       >
-        <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
+        <div className="rounded-2xl border border-sky-400/40 bg-nova-navy-900/95 px-6 py-4 text-center shadow-xl">
           <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
         </div>
       </div>
@@ -1265,7 +1282,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                             mode: 'image',
                             creationId: c.id,
                           })}
-                          className="aspect-square rounded-xl overflow-hidden border border-surface-border bg-ark-navy-900"
+                          className="aspect-square rounded-xl overflow-hidden border border-surface-border bg-nova-navy-900"
                           title={c.title || c.prompt}
                         >
                           {c.dataUrl ? (
@@ -1346,6 +1363,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           <MessageContent
                             content={msg.content}
                             live={false}
+                            tone="user"
                             onPromptChipPick={(prompt) => tryStartTurn(prompt)}
                           />
                         </div>
@@ -1368,7 +1386,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                                 }).catch(() => undefined);
                               }}
                             >
-                              {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                              {copied ? <Check className="w-3.5 h-3.5 text-nova-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
                             </button>
                           );
                         })()}
@@ -1402,7 +1420,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                       if (isAssistant && isLikelyErrorMessage(msg.content)) {
                         const errorInfo = classifyErrorMessage(msg.content);
                         return (
-                          <ArkErrorInline
+                          <NovaErrorInline
                             message={msg.content}
                             onAction={errorInfo.code === 'KEY_MISSING' ? () => setFreeKeyOpen(true) : undefined}
                           />
@@ -1441,9 +1459,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
                       if (!showReplyMeta) return null;
                       const copied = copiedMsgId === msg.id;
                       const timeBit = typeof msg.elapsed_ms === 'number' && msg.elapsed_ms >= 0
-                        ? `Responded in ${formatReplyElapsed(msg.elapsed_ms)}`
-                        : 'Responded';
-                      const modelBit = String(msg.provider_used || '').trim() || 'NOVA';
+                        ? formatReplyElapsed(msg.elapsed_ms)
+                        : '';
+                      const modelBit = shortReplyModelLabel(msg.provider_used);
                       const chatId = routeChatIdRef.current || persistChatIdRef.current || '';
                       const snap = chatId ? getApplySnapshot(chatId) : null;
                       // Undo only on the assistant bubble that produced the last apply.
@@ -1482,14 +1500,16 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           }
                         })();
                       };
+                      const iconBtn =
+                        'inline-flex items-center justify-center rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-white/[0.04] transition-colors disabled:opacity-40';
                       return (
-                        <div className="mt-2 flex items-center gap-2 text-[11px] text-content-tertiary tabular-nums">
+                        <div className="mt-2.5 flex items-center gap-0.5 text-[11px] text-content-tertiary tabular-nums">
                           {showUndo ? (
                             <button
                               type="button"
                               title="Undo last edit"
                               aria-label="Undo last edit"
-                              className="inline-flex shrink-0 items-center justify-center p-0.5 text-content-tertiary hover:text-content-secondary"
+                              className={iconBtn}
                               onClick={runUndo}
                             >
                               <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
@@ -1497,9 +1517,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           ) : null}
                           <button
                             type="button"
-                            title={copied ? 'Copied' : 'Copy response'}
+                            title={copied ? 'Copied' : 'Copy'}
                             aria-label={copied ? 'Copied' : 'Copy response'}
-                            className="inline-flex items-center justify-center rounded-md p-0.5 text-content-tertiary hover:text-content-secondary"
+                            className={iconBtn}
                             onClick={() => {
                               void navigator.clipboard.writeText(raw).then(() => {
                                 setCopiedMsgId(msg.id);
@@ -1509,13 +1529,53 @@ export function AIChatFrame(props: AIChatFrameProps) {
                               }).catch(() => undefined);
                             }}
                           >
-                            {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copied ? <Check className="w-3.5 h-3.5 text-nova-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
-                          <span className="min-w-0 truncate">
-                            {timeBit}
-                            {' · '}
-                            {modelBit}
-                          </span>
+                          <button
+                            type="button"
+                            title="Try again"
+                            aria-label="Try again"
+                            className={iconBtn}
+                            disabled={generating}
+                            onClick={() => {
+                              if (generating) return;
+                              regenerateReply?.(msg.id);
+                            }}
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Share"
+                            aria-label="Share response"
+                            className={iconBtn}
+                            onClick={() => {
+                              void (async () => {
+                                try {
+                                  if (typeof navigator.share === 'function') {
+                                    await navigator.share({ text: raw });
+                                    return;
+                                  }
+                                } catch { /* fall through to clipboard */ }
+                                try {
+                                  await navigator.clipboard.writeText(raw);
+                                  setCopiedMsgId(msg.id);
+                                  window.setTimeout(() => {
+                                    setCopiedMsgId(prev => (prev === msg.id ? null : prev));
+                                  }, 1600);
+                                } catch { /* ignore */ }
+                              })();
+                            }}
+                          >
+                            <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
+                          </button>
+                          {(timeBit || modelBit) ? (
+                            <span className="ml-1.5 min-w-0 truncate text-content-tertiary/90">
+                              {timeBit}
+                              {timeBit && modelBit ? ' · ' : ''}
+                              {modelBit}
+                            </span>
+                          ) : null}
                         </div>
                       );
                     })()}
@@ -1584,7 +1644,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 onClick={jumpToBottom}
                 title="Jump to latest"
                 aria-label="Jump to latest message"
-                className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full border border-white/10 bg-ark-navy-950/75 text-content-tertiary/80 hover:text-content-secondary hover:bg-ark-navy-900/95 hover:border-white/20 backdrop-blur-sm flex items-center justify-center opacity-55 hover:opacity-100 transition-opacity shadow-sm"
+                className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full border border-white/10 bg-nova-navy-950/75 text-content-tertiary/80 hover:text-content-secondary hover:bg-nova-navy-900/95 hover:border-white/20 backdrop-blur-sm flex items-center justify-center opacity-55 hover:opacity-100 transition-opacity shadow-sm"
               >
                 <ChevronDown className="w-4 h-4" />
               </button>
@@ -1604,7 +1664,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   type="button"
                   className="shrink-0 text-amber-300/80 hover:text-amber-100"
                   onClick={() => {
-                    try { localStorage.removeItem('ark:setup-brain-note'); } catch { /* ignore */ }
+                    try { localStorage.removeItem('NOVA:setup-brain-note'); } catch { /* ignore */ }
                     setSetupNote(null);
                   }}
                 >
@@ -1642,10 +1702,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
           }
           const root = chatStudioDiskRootRef.current;
           const pid = chatStudioProjectIdRef.current;
-          if (root && window.arkDesktop?.workspaceWriteFile) {
+          if (root && window.novaDesktop?.workspaceWriteFile) {
             const sep = root.includes('\\') ? '\\' : '/';
             const full = `${root.replace(/[/\\]+$/, '')}${sep}${path.replace(/\//g, sep)}`;
-            void window.arkDesktop.workspaceWriteFile({
+            void window.novaDesktop.workspaceWriteFile({
               targetPath: full,
               content,
             });

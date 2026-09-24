@@ -13,7 +13,7 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/arkEngine';
+import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/novaEngine';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { useRouter } from '@/context/RouterContext';
@@ -50,14 +50,22 @@ import {
   type OllamaModel,
 } from '@/lib/ollamaOptional';
 import { FREE_SOURCES } from '@/lib/freeSources';
-import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
-import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { huntModelsForPc, huntModelsByQuery, huntSourceBadge, type HuntedModel } from '@/lib/novaModelHunt';
+import {
+  assessModelDownloadFit,
+  findSimilarRecommendedModel,
+  type ModelFitAssessment,
+  type SimilarModelPick,
+} from '@/lib/modelCompat';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
 import { isWeakCoderId } from '@/lib/brainRoles';
 import { getBrainProfile, assertCoderAllowed } from '@/lib/brainProfile';
+import { assessEnsembleReadiness, type EnsembleReadiness } from '@/lib/ensembleReadiness';
+import { hardwareCoderRecommendation } from '@/lib/brainRoles';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { providerKeyUrl } from '@/lib/providerKeyUrls';
 
-type TabId = 'for-pc' | 'local' | 'cloud';
+type TabId = 'for-pc' | 'local' | 'cloud' | 'build-team';
 type Tier = 'free' | 'pro';
 type FitKind = 'quality' | 'balanced' | 'performance';
 
@@ -66,7 +74,7 @@ type LocalModel = {
   name: string;
   description: string;
   size: string;
-  category: 'coding' | 'general' | 'reasoning' | 'vision' | 'image' | 'video' | 'fast';
+  category: 'coding' | 'design' | 'general' | 'reasoning' | 'vision' | 'image' | 'video' | 'fast';
   tiers: Tier[];
   recommended?: boolean;
   tone: string;
@@ -93,6 +101,7 @@ export type CloudModel = {
   provider: string;
   category: 'chat' | 'coding' | 'reasoning' | 'vision' | 'image' | 'video' | 'fast';
   tiers: Tier[];
+  recommended?: boolean;
   tone: string;
   initial: string;
 };
@@ -106,6 +115,9 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'codellama-13b', name: 'Code Llama 13B', description: 'Meta coding model for generation and completion.', size: '7.4 GB', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-purple-800', initial: 'CL' },
   { id: 'starcoder2-7b', name: 'StarCoder2 7B', description: 'Code focused model trained on many languages.', size: '4.3 GB', category: 'coding', tiers: ['free'], tone: 'from-amber-500 to-orange-700', initial: 'Sc' },
   { id: 'codestral-22b', name: 'Codestral 22B', description: 'Mistral coding model for larger local setups.', size: '13 GB', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Cs' },
+
+  // Design — LayoutContract / UI composition (ensemble Design hop)
+  { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', description: 'UI-specialist Design brain — layout rhythm for the Layout Contract hop. Auto-routes as Design when ready.', size: '2.5 GB', category: 'design', tiers: ['free'], recommended: true, tone: 'from-rose-400 to-orange-600', initial: 'UI' },
 
   // General
   { id: 'llama32-3b', name: 'Llama 3.2 3B', description: 'Light general chat for everyday use.', size: '2.0 GB', category: 'general', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-indigo-700', initial: 'L3' },
@@ -130,7 +142,7 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'moondream2', name: 'Moondream 2', description: 'Tiny vision model for quick image captions (local VL — coming soon).', size: '1.7 GB', category: 'vision', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'Md' },
 
   // Image generation (Image tab)
-  { id: 'NOVA-image-core', name: 'NOVA Image Core', description: 'Free Pollinations images; uses local SD when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
+  { id: 'NOVA-image-core', name: 'NOVA Image Core', description: 'Uses Hugging Face FLUX when keyed, then local SD/FLUX. Pollinations disabled.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-400 to-orange-700', initial: 'AI' },
   { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via NOVA Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo (Local)', description: 'Fast on-device drafts via NOVA Engine. ~6.9 GB.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
   { id: 'flux-schnell-local', name: 'FLUX.1 Schnell (Local)', description: 'On-device FLUX via NOVA Engine (~13 GB: model + VAE + CLIP + T5).', size: '13 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
@@ -155,6 +167,7 @@ const LOCAL_MODELS: LocalModel[] = [
 const LOCAL_CATEGORY_META: Record<LocalModel['category'], { title: string; icon: typeof Code }> = {
   general: { title: 'General', icon: Boxes },
   coding: { title: 'Coding', icon: Code },
+  design: { title: 'Design', icon: Sparkles },
   reasoning: { title: 'Reasoning', icon: Brain },
   fast: { title: 'Fast', icon: Zap },
   vision: { title: 'Vision', icon: Eye },
@@ -203,7 +216,6 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'xai-chat-2', name: 'xAI Chat 2', description: 'xAI chat model for general work.', provider: 'xAI', category: 'chat', tiers: ['free', 'pro'], tone: 'from-zinc-400 to-black', initial: 'xA' },
   { id: 'hf-llama-31', name: 'Llama 3.1 8B (HF)', description: 'Open chat via Hugging Face Inference.', provider: 'Hugging Face', category: 'chat', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF' },
   { id: 'nvidia-llama-31', name: 'Llama 3.1 8B (NIM)', description: 'NVIDIA NIM hosted Llama for coding and chat.', provider: 'NVIDIA', category: 'chat', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV' },
-  { id: 'hf-flux-schnell', name: 'FLUX.1 schnell (HF)', description: 'Fast free-key images via Hugging Face.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], tone: 'from-yellow-400 to-orange-700', initial: 'FX' },
 
   // Coding
   { id: 'claude-sonnet-code', name: 'Claude Sonnet (Coding)', description: 'Excellent for code edits and agent work.', provider: 'Anthropic', category: 'coding', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'CC' },
@@ -230,13 +242,14 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'llama-vision-cloud', name: 'Llama 3.2 Vision', description: 'Open vision model via cloud hosts.', provider: 'Together AI', category: 'vision', tiers: ['free', 'pro'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
 
   // Image generation
-  { id: 'NOVA-pollinations', name: 'NOVA Image (Pollinations)', description: 'Free no-key images. Wired into Image tab by default.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po' },
+  { id: 'NOVA-pollinations', name: 'NOVA Image (Pollinations)', description: 'Retired. Disabled in NOVA — use Hugging Face FLUX or a local image model.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-zinc-500 to-zinc-800', initial: 'Po' },
   { id: 'dall-e-3', name: 'DALL·E 3', description: 'Image generation from OpenAI.', provider: 'OpenAI', category: 'image', tiers: ['pro'], tone: 'from-pink-500 to-rose-800', initial: 'D3' },
   { id: 'imagen-3', name: 'Imagen 3', description: 'Google image generation.', provider: 'Google', category: 'image', tiers: ['pro'], tone: 'from-sky-400 to-blue-700', initial: 'Im' },
   { id: 'flux-pro', name: 'FLUX Pro', description: 'High quality image generation.', provider: 'Together AI', category: 'image', tiers: ['pro'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
   { id: 'flux-schnell', name: 'FLUX Schnell', description: 'Fast image drafts and iterations.', provider: 'Fireworks AI', category: 'image', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-pink-700', initial: 'FS' },
   { id: 'sdxl', name: 'Stable Diffusion XL', description: 'Open image model via cloud hosts.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
-  { id: 'hf-flux-free', name: 'FLUX (HF Inference)', description: 'Free-tier friendly FLUX via Hugging Face when keyed.', provider: 'Hugging Face', category: 'image', tiers: ['free'], tone: 'from-yellow-400 to-orange-700', initial: 'HF' },
+  { id: 'hf-flux-free', name: 'FLUX (HF Inference)', description: 'Primary free-key image path via your Hugging Face token.', provider: 'Hugging Face', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-400 to-orange-700', initial: 'HF' },
+  { id: 'hf-flux-schnell', name: 'FLUX.1 schnell (HF)', description: 'Fast free-key images via Hugging Face.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], recommended: true, tone: 'from-yellow-400 to-orange-700', initial: 'FX' },
 
   // Coding free extras
   { id: 'or-llama-free', name: 'Llama 3.3 70B (OpenRouter Free)', description: 'Free OpenRouter coding/chat route when available.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-400 to-indigo-700', initial: 'OR' },
@@ -317,6 +330,7 @@ function liveEnabledCloudIds() {
 
 const CATEGORY_LABEL: Record<string, string> = {
   coding: 'Coding',
+  design: 'Design',
   general: 'General',
   reasoning: 'Reasoning',
   vision: 'Vision',
@@ -481,13 +495,181 @@ export type ModelsViewProps = {
   hideChrome?: boolean;
 };
 
+function BuildTeamPanel({
+  installed,
+  installing,
+  installProgress,
+  onInstall,
+  onCancel,
+  onDelete,
+}: {
+  installed: Set<string>;
+  installing: Set<string>;
+  installProgress: Record<string, number>;
+  onInstall: (id: string) => void;
+  onCancel: (id: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  const [team, setTeam] = useState<EnsembleReadiness | null>(null);
+  const [ramHint, setRamHint] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [status, profile] = await Promise.all([getEngineStatus(), getBrainProfile()]);
+        if (cancelled) return;
+        setTeam(assessEnsembleReadiness(status.models, {
+          ramGb: profile.ramGB,
+          maxCoderParamsB: profile.maxCoderParamsB,
+        }));
+        setRamHint(hardwareCoderRecommendation(profile.ramGB));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [installed]);
+
+  const roleModels = useMemo(() => {
+    const byRole: Record<'chat' | 'coder' | 'design' | 'vision', LocalModel[]> = {
+      chat: LOCAL_MODELS.filter(m => m.category === 'general' || m.category === 'fast'),
+      coder: LOCAL_MODELS.filter(m => m.category === 'coding'),
+      design: LOCAL_MODELS.filter(m => m.category === 'design' || m.id === 'uigen-fx-4b'),
+      vision: LOCAL_MODELS.filter(m => m.category === 'vision'),
+    };
+    for (const key of Object.keys(byRole) as Array<keyof typeof byRole>) {
+      byRole[key] = sortModelsByCategoryThenSizeDesc(
+        byRole[key].filter(m => isEngineDownloadable(m.id)),
+      );
+    }
+    return byRole;
+  }, []);
+
+  const missingInstalls = (team?.roles || [])
+    .filter((r) => r.status === 'missing' && r.role !== 'vision')
+    .map((r) => ({ id: r.recommendedId, name: r.recommendedId, role: r.role }));
+
+  return (
+    <div className="space-y-10">
+      <section>
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-content-primary">Build team</h2>
+            <p className="text-sm text-content-tertiary mt-1">
+              Chat + Design + Coder work together on creates. {ramHint}
+            </p>
+          </div>
+          {missingInstalls.length > 0 && (
+            <button
+              type="button"
+              className="nova-btn-primary h-8 px-3 rounded-lg text-xs shrink-0"
+              onClick={() => {
+                for (const m of missingInstalls.slice(0, 3)) {
+                  onInstall(m.id);
+                }
+              }}
+            >
+              Install recommended team
+            </button>
+          )}
+        </div>
+
+        {!team ? (
+          <p className="text-sm text-content-tertiary">Checking engines…</p>
+        ) : (
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            {team.roles.map((r) => (
+              <li
+                key={r.role}
+                className="flex items-center justify-between gap-2 rounded-xl border border-surface-border/80 bg-surface-hover/30 px-3 py-2.5"
+              >
+                <span className="min-w-0">
+                  <span className="font-medium text-content-primary capitalize">{r.role}</span>
+                  <span className="block text-content-tertiary truncate mt-0.5">{r.name}</span>
+                  <span className="block text-content-tertiary/80 mt-0.5 leading-snug">{r.why}</span>
+                </span>
+                <span className={
+                  r.status === 'ready' ? 'text-emerald-400 shrink-0'
+                    : r.status === 'fallback' ? 'text-amber-300 shrink-0'
+                      : 'text-rose-300 shrink-0'
+                }
+                >
+                  {r.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {(['chat', 'coder', 'design', 'vision'] as const).map((role) => {
+        const models = roleModels[role];
+        if (!models.length) return null;
+        const title =
+          role === 'chat' ? 'Chat'
+            : role === 'coder' ? 'Coder'
+              : role === 'design' ? 'Design'
+                : 'Vision';
+        return (
+          <section key={role}>
+            <div className="flex items-center gap-2 mb-4">
+              {role === 'chat' ? <Brain className="w-4 h-4 text-content-secondary" />
+                : role === 'coder' ? <Code className="w-4 h-4 text-content-secondary" />
+                  : role === 'design' ? <Sparkles className="w-4 h-4 text-content-secondary" />
+                    : <Eye className="w-4 h-4 text-content-secondary" />}
+              <h2 className="text-base font-semibold text-content-primary">{title}</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+              {models.map((model) => {
+                const isOn = installed.has(model.id);
+                const isBusy = installing.has(model.id);
+                return (
+                  <div
+                    key={model.id}
+                    className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                  >
+                    <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                        <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                        <TierBadges tiers={model.tiers} />
+                        {model.recommended ? (
+                          <span className="inline-flex items-center rounded-full bg-sky-500/15 text-sky-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                            Recommended
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                        {model.size} · {model.description}
+                      </span>
+                    </span>
+                    <ModelInstallControl
+                      modelId={model.id}
+                      name={model.name}
+                      isOn={isOn}
+                      isBusy={isBusy}
+                      progress={installProgress[model.id]}
+                      onInstall={() => onInstall(model.id)}
+                      onCancel={() => onCancel(model.id)}
+                      onDelete={() => onDelete(model.id, model.name)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {}) {
   const { route, navigate } = useRouter();
   const [tab, setTab] = useState<TabId>(() => {
     if (embedTab) return embedTab;
     if (route.name !== 'models') return 'for-pc';
     const t = route.tab;
-    if (t === 'local' || t === 'cloud' || t === 'for-pc') return t;
+    if (t === 'local' || t === 'cloud' || t === 'for-pc' || t === 'build-team') return t;
     return 'for-pc';
   });
   const [query, setQuery] = useState('');
@@ -511,6 +693,8 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [ollamaNote, setOllamaNote] = useState('');
   const [hunted, setHunted] = useState<HuntedModel[]>([]);
+  const [queryHunted, setQueryHunted] = useState<HuntedModel[]>([]);
+  const [queryHuntBusy, setQueryHuntBusy] = useState(false);
   const [huntNote, setHuntNote] = useState('');
   const [huntBusy, setHuntBusy] = useState(false);
   const [liveCapacity, setLiveCapacity] = useState<LiveCapacity | null>(null);
@@ -519,9 +703,12 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
     id: string;
     name: string;
     sizeLabel?: string;
+    sizeGb?: number;
     category?: string;
     detail?: string;
     hunt?: HuntedModel;
+    fit?: ModelFitAssessment | null;
+    recommended?: SimilarModelPick | null;
   } | null>(null);
   const prevInstalledRef = useRef<Set<string>>(new Set());
 
@@ -537,6 +724,9 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
       } else {
         setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
       }
+    } else if (cat === 'design') {
+      setLocalPrefs({ activeDesignId: id });
+      setOllamaNote(`${model?.name || id} pinned as Design brain for Layout Contract hops.`);
     } else {
       setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
     }
@@ -571,7 +761,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
     }
     if (route.name !== 'models') return;
     const t = route.tab;
-    if (t === 'local' || t === 'cloud' || t === 'for-pc') setTab(t);
+    if (t === 'local' || t === 'cloud' || t === 'for-pc' || t === 'build-team') setTab(t);
     else setTab('for-pc');
   }, [route, embedTab]);
 
@@ -696,6 +886,35 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   useEffect(() => {
     void runHunt();
   }, [runHunt]);
+
+  // Free-text online hunt — any GGUF, not limited to the curated PC list.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setQueryHunted([]);
+      setQueryHuntBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setQueryHuntBusy(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const info = hw.accurate ? hw : await getAccurateHardware(true);
+          const found = await huntModelsByQuery(q, info, { limit: 14 });
+          if (!cancelled) setQueryHunted(found);
+        } catch {
+          if (!cancelled) setQueryHunted([]);
+        } finally {
+          if (!cancelled) setQueryHuntBusy(false);
+        }
+      })();
+    }, 420);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, hw]);
 
   useEffect(() => {
     if (!ollamaOn) {
@@ -842,27 +1061,28 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   const filteredFit = useMemo(() => {
     const match = (m: LocalModel) => modelMatchesQuery(m, q);
 
-    // Default: only hardware-fit installable models. Searching also surfaces discovery-only.
+    // Searching: show every catalog hit (including Design / stretch), not only fit tiers.
     if (q) {
       const hits = LOCAL_MODELS.filter(match);
       const installable = hits.filter(m => isEngineDownloadable(m.id));
       const discovery = hits.filter(m => !isEngineDownloadable(m.id));
       const fit = installable.filter(m => canRunOnPc(m, pcClass, ramGb));
       const stretch = installable.filter(m => !canRunOnPc(m, pcClass, ramGb));
+      const allHits = sortModelsByCategoryThenSizeDesc([
+        ...fit,
+        ...stretch,
+        ...discovery,
+      ]);
       return {
-        quality: sortModelsByCategoryThenSizeDesc([
-          ...fit.filter(m => m.category !== 'fast').slice(0, 8),
-          ...stretch.slice(0, 4),
-          ...discovery.slice(0, 6),
-        ]),
+        quality: allHits,
         balanced: sortModelsByCategoryThenSizeDesc(
           fit.filter(m => {
             const gb = modelSizeGb(m);
             return gb >= 2 && gb < 12;
-          }).slice(0, 10),
+          }),
         ),
         performance: sortModelsByCategoryThenSizeDesc(
-          [...fit].sort((a, b) => modelSizeGb(a) - modelSizeGb(b)).slice(0, 10),
+          [...fit].sort((a, b) => modelSizeGb(a) - modelSizeGb(b)),
         ),
       };
     }
@@ -873,6 +1093,35 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
       performance: sortModelsByCategoryThenSizeDesc(fitLists.performance.filter(match)),
     };
   }, [fitLists, q, pcClass, ramGb]);
+
+  const catalogSearchHits = useMemo(() => {
+    if (!q) return [] as LocalModel[];
+    return sortModelsByCategoryThenSizeDesc(
+      LOCAL_MODELS.filter(m => m.category !== 'image' && m.category !== 'video' && modelMatchesQuery(m, q)),
+    );
+  }, [q]);
+
+  const onlineSearchHits = useMemo(() => {
+    if (!q) return hunted;
+    const nq = normalizeModelSearch(q);
+    const tokens = nq.split(' ').filter(Boolean);
+    const matchHunt = (m: HuntedModel) => {
+      const hay = normalizeModelSearch([m.id, m.name, m.repo, m.detail, m.category].join(' '));
+      if (hay.includes(nq) || m.name.toLowerCase().includes(q) || m.repo.toLowerCase().includes(q)) return true;
+      return tokens.length > 0 && tokens.every(t => hay.includes(t));
+    };
+    const fromPcList = hunted.filter(matchHunt);
+    // Prefer query-specific hunt; merge unique repos.
+    const merged: HuntedModel[] = [];
+    const seen = new Set<string>();
+    for (const row of [...queryHunted, ...fromPcList]) {
+      const key = row.repo.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+    }
+    return merged;
+  }, [q, hunted, queryHunted]);
 
   const localCategories = useMemo(() => {
     return LOCAL_CATEGORIES.map(cat => ({
@@ -996,6 +1245,9 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
           activeChatId: opts.downloadId,
         });
         setOllamaNote(`${opts.downloadName} will be chat-only — too small for the coder role.`);
+      } else if (opts.category === 'design') {
+        setLocalPrefs({ activeDesignId: opts.downloadId });
+        setOllamaNote(`${opts.downloadName} will be the Design brain for create Layout Contracts.`);
       } else {
         setLocalPrefs({
           defaultModelId: opts.downloadId,
@@ -1052,30 +1304,92 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
     });
   };
 
+  const buildDownloadConfirm = (opts: {
+    id: string;
+    name: string;
+    sizeGb: number;
+    sizeLabel?: string;
+    category?: string;
+    detail?: string;
+    hunt?: HuntedModel;
+  }) => {
+    const fit = assessModelDownloadFit(opts.sizeGb, hw);
+    const candidates = [
+      ...LOCAL_MODELS
+        .filter(m => isEngineDownloadable(m.id) && m.category !== 'image' && m.category !== 'video')
+        .map(m => ({
+          id: m.id,
+          name: m.name,
+          sizeGb: modelSizeGb(m),
+          category: m.category,
+          preferred: Boolean(m.recommended),
+        })),
+      ...hunted.map(m => ({
+        id: m.id,
+        name: m.name,
+        sizeGb: m.sizeGb,
+        category: m.category,
+        preferred: false,
+      })),
+      ...queryHunted.map(m => ({
+        id: m.id,
+        name: m.name,
+        sizeGb: m.sizeGb,
+        category: m.category,
+        preferred: false,
+      })),
+    ];
+    const recommended = findSimilarRecommendedModel(
+      {
+        id: opts.id,
+        name: opts.name,
+        sizeGb: opts.sizeGb,
+        category: opts.category,
+      },
+      candidates,
+      hw,
+    );
+    return {
+      id: opts.id,
+      name: opts.name,
+      sizeLabel: opts.sizeLabel || `${opts.sizeGb.toFixed(1)} GB`,
+      sizeGb: opts.sizeGb,
+      category: opts.category,
+      detail: opts.detail,
+      hunt: opts.hunt,
+      fit,
+      recommended,
+    };
+  };
+
   const requestInstall = (id: string, hunt?: HuntedModel) => {
     if (installed.has(id) || isEngineDownloading(id)) return;
     if (hunt) {
-      setDownloadConfirm({
+      setDownloadConfirm(buildDownloadConfirm({
         id: hunt.id,
         name: hunt.name,
+        sizeGb: hunt.sizeGb,
         sizeLabel: `${hunt.sizeGb.toFixed(1)} GB`,
         category: hunt.category,
         detail: hunt.detail,
         hunt,
-      });
+      }));
       return;
     }
     if (!isEngineDownloadable(id)) {
-      setOllamaNote('Not downloadable in NOVA Engine yet. search shows discovery only.');
+      setOllamaNote('Not downloadable in NOVA Engine yet. Search shows discovery only.');
       return;
     }
     const model = LOCAL_MODELS.find(m => m.id === id);
-    setDownloadConfirm({
+    const sizeGb = modelSizeGb(model || { size: '0' });
+    setDownloadConfirm(buildDownloadConfirm({
       id,
       name: model?.name || id,
+      sizeGb,
       sizeLabel: model?.size,
       category: model?.category,
-    });
+      detail: model?.description,
+    }));
   };
 
   const toggleInstall = (id: string, hunt?: HuntedModel) => {
@@ -1145,6 +1459,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                   { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
                   { id: 'local' as const, label: 'Local AI', icon: Cpu },
                   { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
+                  { id: 'build-team' as const, label: 'Build team', icon: Boxes },
                 ]).map(t => (
                   <button
                     key={t.id}
@@ -1164,16 +1479,18 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
-                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="Search models"
-                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
-                />
-              </div>
+              {tab !== 'build-team' ? (
+                <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
+                  <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Search models"
+                    className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1213,105 +1530,177 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                 </button>
               </div>
 
-              {hunted.length > 0 && (
+              {(onlineSearchHits.length > 0 || queryHuntBusy || (q && huntNote)) && (
                 <section className="mb-10">
                   <div className="flex items-center gap-2 mb-4">
                     <Globe className="w-4 h-4 text-content-secondary" />
-                    <h2 className="text-base font-semibold text-content-primary">Found online for this PC</h2>
+                    <h2 className="text-base font-semibold text-content-primary">
+                      {q ? 'Found online' : 'Found online for this PC'}
+                    </h2>
+                    {queryHuntBusy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />
+                    ) : null}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                    {hunted.map(model => {
-                      const isOn = installed.has(model.id);
-                      const isBusy = installing.has(model.id);
-                      return (
-                        <div
-                          key={model.id}
-                          className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
-                        >
-                          <BrandMark
-                            id={model.id}
-                            name={model.name}
-                            initial={huntSourceBadge(model.source)}
-                            tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-2 min-w-0 flex-wrap">
-                              <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
-                              <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-[10px] font-medium leading-none">
-                                Online
+                  {onlineSearchHits.length === 0 && queryHuntBusy ? (
+                    <p className="text-sm text-content-tertiary">Searching Hugging Face and ModelScope…</p>
+                  ) : onlineSearchHits.length === 0 && q ? (
+                    <p className="text-sm text-content-tertiary">No online GGUF matches yet. Catalog matches appear below when available.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                      {onlineSearchHits.map(model => {
+                        const isOn = installed.has(model.id);
+                        const isBusy = installing.has(model.id);
+                        return (
+                          <div
+                            key={model.id}
+                            className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                          >
+                            <BrandMark
+                              id={model.id}
+                              name={model.name}
+                              initial={huntSourceBadge(model.source)}
+                              tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                                <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                                <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                  Online
+                                </span>
+                                {model.oversize ? (
+                                  <span className="inline-flex items-center rounded-full bg-amber-500/15 text-amber-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                    Large for this PC
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                                {model.detail}
                               </span>
                             </span>
-                          </span>
-                          <ModelInstallControl
-                            modelId={model.id}
-                            name={model.name}
-                            isOn={isOn}
-                            isBusy={isBusy}
-                            progress={installProgress[model.id]}
-                            onInstall={() => toggleInstall(model.id, model)}
-                            onCancel={() => cancelInstall(model.id)}
-                            onDelete={() => removeInstall(model.id, model.name)}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                            <ModelInstallControl
+                              modelId={model.id}
+                              name={model.name}
+                              isOn={isOn}
+                              isBusy={isBusy}
+                              progress={installProgress[model.id]}
+                              onInstall={() => toggleInstall(model.id, model)}
+                              onCancel={() => cancelInstall(model.id)}
+                              onDelete={() => removeInstall(model.id, model.name)}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </section>
               )}
 
               <div className="space-y-10">
-                {FIT_SECTIONS.map(section => {
-                  const models = filteredFit[section.id];
-                  return (
-                    <section key={section.id}>
-                      <div className="flex items-center gap-2 mb-4">
-                        <section.icon className="w-4 h-4 text-content-secondary" />
-                        <h2 className="text-base font-semibold text-content-primary">{section.title}</h2>
-                      </div>
-                      {models.length === 0 ? (
-                        <p className="text-sm text-content-tertiary">No matches.</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                          {models.map(model => {
-                            const isOn = installed.has(model.id);
-                            const isBusy = installing.has(model.id);
-                            return (
-                              <div
-                                key={`${section.id}-${model.id}`}
-                                className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
-                              >
-                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
-                                <span className="min-w-0 flex-1">
-                                  <span className="flex items-center gap-2 min-w-0 flex-wrap">
-                                    <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
-                                    <TierBadges tiers={model.tiers} />
-                                  </span>
-                                  <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                    {categoryDisplayLabel(model.category, model.id)} · {model.size}
-                                  </span>
+                {q ? (
+                  <section>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Sparkles className="w-4 h-4 text-content-secondary" />
+                      <h2 className="text-base font-semibold text-content-primary">Matching catalog</h2>
+                    </div>
+                    {catalogSearchHits.length === 0 ? (
+                      <p className="text-sm text-content-tertiary">No catalog matches for this search.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                        {catalogSearchHits.map(model => {
+                          const isOn = installed.has(model.id);
+                          const isBusy = installing.has(model.id);
+                          return (
+                            <div
+                              key={`search-${model.id}`}
+                              className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                            >
+                              <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                                  <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                                  <TierBadges tiers={model.tiers} />
+                                  {model.recommended ? (
+                                    <span className="inline-flex items-center rounded-full bg-sky-500/15 text-sky-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                      Recommended
+                                    </span>
+                                  ) : null}
                                 </span>
-                                <ModelInstallControl
-                                  modelId={model.id}
-                                  name={model.name}
-                                  isOn={isOn}
-                                  isBusy={isBusy}
-                                  progress={installProgress[model.id]}
-                                  onInstall={() => toggleInstall(model.id)}
-                                  onCancel={() => cancelInstall(model.id)}
-                                  onDelete={() => removeInstall(model.id, model.name)}
-                                />
-                              </div>
-                            );
-                          })}
+                                <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                                  {categoryDisplayLabel(model.category, model.id)} · {model.size}
+                                </span>
+                              </span>
+                              <ModelInstallControl
+                                modelId={model.id}
+                                name={model.name}
+                                isOn={isOn}
+                                isBusy={isBusy}
+                                progress={installProgress[model.id]}
+                                onInstall={() => toggleInstall(model.id)}
+                                onCancel={() => cancelInstall(model.id)}
+                                onDelete={() => removeInstall(model.id, model.name)}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                ) : (
+                  FIT_SECTIONS.map(section => {
+                    const models = filteredFit[section.id];
+                    return (
+                      <section key={section.id}>
+                        <div className="flex items-center gap-2 mb-4">
+                          <section.icon className="w-4 h-4 text-content-secondary" />
+                          <h2 className="text-base font-semibold text-content-primary">{section.title}</h2>
                         </div>
-                      )}
-                    </section>
-                  );
-                })}
+                        {models.length === 0 ? (
+                          <p className="text-sm text-content-tertiary">No matches.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                            {models.map(model => {
+                              const isOn = installed.has(model.id);
+                              const isBusy = installing.has(model.id);
+                              return (
+                                <div
+                                  key={`${section.id}-${model.id}`}
+                                  className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                                >
+                                  <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                                      <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                                      <TierBadges tiers={model.tiers} />
+                                    </span>
+                                    <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                                      {categoryDisplayLabel(model.category, model.id)} · {model.size}
+                                    </span>
+                                  </span>
+                                  <ModelInstallControl
+                                    modelId={model.id}
+                                    name={model.name}
+                                    isOn={isOn}
+                                    isBusy={isBusy}
+                                    progress={installProgress[model.id]}
+                                    onInstall={() => toggleInstall(model.id)}
+                                    onCancel={() => cancelInstall(model.id)}
+                                    onDelete={() => removeInstall(model.id, model.name)}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })
+                )}
 
-                {filteredFit.quality.length === 0 &&
-                  filteredFit.balanced.length === 0 &&
-                  filteredFit.performance.length === 0 && <EmptySearch />}
+                {q
+                  && catalogSearchHits.length === 0
+                  && onlineSearchHits.length === 0
+                  && !queryHuntBusy
+                  && <EmptySearch />}
               </div>
             </>
           ) : tab === 'local' ? (
@@ -1401,7 +1790,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                 {localCategories.length === 0 && <EmptySearch />}
               </div>
             </>
-          ) : (
+          ) : tab === 'cloud' ? (
             <>
               {!q && (
                 <section className="mb-10">
@@ -1445,7 +1834,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                     </div>
                   )}
                   {ollamaOn && ollamaModels.length > 0 && (
-                    <div className="mt-4 rounded-2xl border border-surface-border bg-ark-navy-900/40 px-4 py-3">
+                    <div className="mt-4 rounded-2xl border border-surface-border bg-nova-navy-900/40 px-4 py-3">
                       <p className="text-xs font-semibold text-content-secondary mb-2">Ollama models</p>
                       <div className="flex flex-wrap gap-1.5">
                         {ollamaModels.slice(0, 12).map(m => (
@@ -1548,7 +1937,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                               provider.availability !== 'live' && provider.id !== 'ollama'
                                 ? 'text-content-tertiary cursor-not-allowed'
                                 : isOn
-                                  ? 'bg-surface-hover text-ark-accent-green'
+                                  ? 'bg-surface-hover text-nova-accent-green'
                                   : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                             }`}
                             title={
@@ -1645,7 +2034,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                                 avail !== 'live'
                                   ? 'text-content-tertiary cursor-not-allowed'
                                   : isOn
-                                    ? 'bg-surface-hover text-ark-accent-green'
+                                    ? 'bg-surface-hover text-nova-accent-green'
                                     : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                               }`}
                               title={avail !== 'live' ? 'Coming soon' : isOn ? 'On' : 'Enable'}
@@ -1690,6 +2079,15 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                 )}
               </div>
             </>
+          ) : (
+            <BuildTeamPanel
+              installed={installed}
+              installing={installing}
+              installProgress={installProgress}
+              onInstall={(id) => toggleInstall(id)}
+              onCancel={(id) => cancelInstall(id)}
+              onDelete={(id, name) => removeInstall(id, name)}
+            />
           )}
         </div>
       </div>
@@ -1700,22 +2098,41 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
           sizeLabel={downloadConfirm.sizeLabel}
           category={downloadConfirm.category}
           detail={downloadConfirm.detail}
+          fit={downloadConfirm.fit}
+          recommended={downloadConfirm.recommended}
           onCancel={() => setDownloadConfirm(null)}
           onConfirm={() => {
             const pending = downloadConfirm;
             setDownloadConfirm(null);
             executeInstall(pending);
           }}
+          onConfirmRecommended={
+            downloadConfirm.recommended
+              ? () => {
+                  const alt = downloadConfirm.recommended!;
+                  const huntAlt =
+                    hunted.find(h => h.id === alt.id)
+                    || queryHunted.find(h => h.id === alt.id);
+                  setDownloadConfirm(null);
+                  executeInstall({
+                    id: alt.id,
+                    name: alt.name,
+                    category: alt.category,
+                    hunt: huntAlt,
+                  });
+                }
+              : undefined
+          }
         />
       )}
 
       {connectTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-nova-navy-950/70 backdrop-blur-md"
           onClick={() => setConnectTarget(null)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-surface-border bg-ark-navy-900 p-6 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-surface-border bg-nova-navy-900 p-6 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -1734,7 +2151,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
               value={apiKeyDraft}
               onChange={e => setApiKeyDraft(e.target.value)}
               placeholder="sk-… or provider token"
-              className="ark-input"
+              className="nova-input"
               autoFocus
             />
             {providerKeyUrl(connectTarget.id) ? (
@@ -1748,14 +2165,14 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
               </button>
             ) : null}
             <div className="flex gap-2 mt-5">
-              <button type="button" onClick={() => setConnectTarget(null)} className="ark-btn-secondary flex-1">
+              <button type="button" onClick={() => setConnectTarget(null)} className="nova-btn-secondary flex-1">
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={() => void saveConnect()}
                 disabled={!apiKeyDraft.trim() || connectBusy}
-                className="ark-btn-primary flex-1 disabled:opacity-40"
+                className="nova-btn-primary flex-1 disabled:opacity-40"
               >
                 {connectBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                 {connectBusy ? 'Saving…' : 'Save & connect'}

@@ -274,11 +274,17 @@ export function mergeBriefNpmDependencies(
   };
   const t = String(brief || '').toLowerCase();
   let changed = false;
-  if (/\b(3d|three\.?js|webgl|babylon|modeler|modeling\s+app|viewport|blender)\b/.test(t)) {
+  if (/\b(3d|three\.?js|webgl|babylon|modeler|modeling\s+app|viewport|blender|mesh\s+editor)\b/.test(t)) {
     if (!deps.three) {
       deps.three = '^0.170.0';
       changed = true;
     }
+  }
+  // Canvas / arcade games stay on stock React — no extra deps required.
+  // FPS / pointer-lock briefs also stay dependency-light (vanilla canvas).
+  if (/\b(?:babylon\.?js|@babylonjs)\b/.test(t) && !deps['@babylonjs/core']) {
+    deps['@babylonjs/core'] = '^7.0.0';
+    changed = true;
   }
   if (!changed) return files;
   pkg.dependencies = deps;

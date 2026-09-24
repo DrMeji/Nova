@@ -88,8 +88,8 @@ export function FreeKeyWizard({
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/60" aria-label="Close" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-surface-border bg-ark-navy-950 shadow-2xl max-h-[85vh] overflow-y-auto">
-        <div className="sticky top-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-border bg-ark-navy-950/95 backdrop-blur">
+      <div className="relative w-full max-w-lg rounded-2xl border border-surface-border bg-nova-navy-950 shadow-2xl max-h-[85vh] overflow-y-auto">
+        <div className="sticky top-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-border bg-nova-navy-950/95 backdrop-blur">
           <div className="flex items-center gap-2 min-w-0">
             <KeyRound className="w-4 h-4 text-sky-400 shrink-0" />
             <h2 className="text-base font-semibold text-content-primary">Connect a free key</h2>
@@ -124,11 +124,11 @@ export function FreeKeyWizard({
                   value={drafts[p.id] || ''}
                   onChange={e => setDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                   placeholder={saved[p.id] ? 'Paste new key to replace' : 'Paste API key'}
-                  className="ark-input flex-1 text-sm"
+                  className="nova-input flex-1 text-sm"
                 />
                 <button
                   type="button"
-                  className="ark-btn-primary shrink-0"
+                  className="nova-btn-primary shrink-0"
                   disabled={busyId === p.id || !(drafts[p.id] || '').trim()}
                   onClick={() => void saveOne(p.id)}
                 >
@@ -156,7 +156,7 @@ export function FreeKeyWizard({
         </div>
 
         <div className="px-5 pb-5">
-          <button type="button" className="ark-btn-secondary w-full" onClick={onClose}>
+          <button type="button" className="nova-btn-secondary w-full" onClick={onClose}>
             Done
           </button>
         </div>

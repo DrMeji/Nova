@@ -100,9 +100,9 @@ jobs:
         shell: pwsh
         env:
           # Cross-repo publish requires a PAT with repo scope on DrMeji/Nova.
-          GH_TOKEN: ${{ secrets.ARK_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.NOVA_PUBLIC_RELEASE_TOKEN }}
         run: |
           if (-not $env:GH_TOKEN) {
-            throw "Missing secret ARK_PUBLIC_RELEASE_TOKEN (PAT that can create releases on DrMeji/Nova)."
+            throw "Missing secret NOVA_PUBLIC_RELEASE_TOKEN (PAT that can create releases on DrMeji/Nova)."
           }
           pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Nova')

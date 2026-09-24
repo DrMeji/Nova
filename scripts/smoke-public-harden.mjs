@@ -49,14 +49,14 @@ saveChatStudio('pub-a', {
   files: { 'src/App.jsx': 'a' },
   projectId: 'a',
   name: 'Ovenfold',
-  diskRoot: 'C:\\ARK\\Projects\\Ovenfold',
+  diskRoot: 'C:\\NOVA\\Projects\\Ovenfold',
   previewUrl: 'http://127.0.0.1:5201',
 });
 saveChatStudio('pub-b', {
   files: { 'src/App.jsx': 'b' },
   projectId: 'b',
   name: 'Watchlane',
-  diskRoot: 'C:\\ARK\\Projects\\Watchlane',
+  diskRoot: 'C:\\NOVA\\Projects\\Watchlane',
   previewUrl: 'http://127.0.0.1:5202',
 });
 const a = getBoundStudio('pub-a');
@@ -96,10 +96,10 @@ check('.env.example allowed', isSandboxBlockedPath('.env.example') === false);
 check('path escape .. blocked', isSandboxBlockedPath('../other/.env') === true);
 check('src/App.jsx allowed', isSandboxBlockedPath('src/App.jsx') === false);
 
-const projectsSrc = fs.readFileSync(path.join(root, 'electron/arkProjects.cjs'), 'utf8');
+const projectsSrc = fs.readFileSync(path.join(root, 'electron/novaProjects.cjs'), 'utf8');
 check('writeGrantedFile blocks .env', /Writing \.env secret files is blocked/.test(projectsSrc));
 
-const exec = require(path.join(root, 'electron/arkAgentExec.cjs'));
+const exec = require(path.join(root, 'electron/novaAgentExec.cjs'));
 const winget = exec.commandAllowed('winget install NodeJS.NodeJS', 'run_all', true);
 check('winget blocked', winget.ok === false);
 check('stopAllPreviews exported', typeof exec.stopAllPreviews === 'function');
@@ -108,7 +108,7 @@ check('stopAllPreviews clears', exec.stopAllPreviews().ok === true);
 const mainSrc = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
 check('before-quit calls stopAllPreviews', /stopAllPreviews\(\)/.test(mainSrc));
 
-const ggufSrc = fs.readFileSync(path.join(root, 'electron/arkGguf.cjs'), 'utf8');
+const ggufSrc = fs.readFileSync(path.join(root, 'electron/novaGguf.cjs'), 'utf8');
 check('cancel scopedChatMiss', /scopedChatMiss/.test(ggufSrc));
 const stopSrc = fs.readFileSync(path.join(root, 'src/views/aichat/useAIChatController.ts'), 'utf8');
 check('handleStop chatId', /engineGenerateCancel\(originGenChatId \? \{ chatId: originGenChatId \}/.test(stopSrc));

@@ -15,8 +15,8 @@ export type ChatAttachMeta = {
   catalogOnly?: boolean;
 };
 
-const MARKER_RE = /<!--ark-attach:([\s\S]*?)-->/g;
-const MARKER_ONE = /<!--ark-attach:([\s\S]*?)-->/;
+const MARKER_RE = /<!--nova-attach:([\s\S]*?)-->/g;
+const MARKER_ONE = /<!--nova-attach:([\s\S]*?)-->/;
 
 export function encodeChatAttach(meta: ChatAttachMeta): string {
   const payload: ChatAttachMeta = {
@@ -28,7 +28,7 @@ export function encodeChatAttach(meta: ChatAttachMeta): string {
   if (meta.id) payload.id = String(meta.id).slice(0, 64);
   if (meta.mediaId) payload.mediaId = String(meta.mediaId).slice(0, 80);
   if (meta.catalogOnly) payload.catalogOnly = true;
-  return `<!--ark-attach:${JSON.stringify(payload)}-->`;
+  return `<!--nova-attach:${JSON.stringify(payload)}-->`;
 }
 
 export function encodeChatAttaches(metas: ChatAttachMeta[]): string {

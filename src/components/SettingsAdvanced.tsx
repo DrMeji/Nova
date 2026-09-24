@@ -19,8 +19,8 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatArkId } from '@/lib/arkUserId';
-import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { formatNovaId } from '@/lib/novaUserId';
+import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
 import { getHardwareClass, getAccurateHardware } from '@/lib/api';
 import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
@@ -35,7 +35,7 @@ import {
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isArkDevSession } from '@/lib/arkRuntime';
+import { isNovaDevSession } from '@/lib/novaRuntime';
 import {
   Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
@@ -45,7 +45,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
   const {
     activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
     flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, scheduleAccountDeletion, cancelAccountDeletion,
+    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
@@ -110,16 +110,16 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                     <div className="flex flex-wrap gap-2 pt-1">
                       <button
                         type="button"
-                        className="ark-btn-secondary text-xs"
+                        className="nova-btn-secondary text-xs"
                         onClick={() => {
-                          void window.arkDesktop?.openPath?.(engineStatus.modelsDir!);
+                          void window.novaDesktop?.openPath?.(engineStatus.modelsDir!);
                         }}
                       >
                         Open folder
                       </button>
                       <button
                         type="button"
-                        className="ark-btn-secondary text-xs"
+                        className="nova-btn-secondary text-xs"
                         onClick={() => {
                           onClose?.();
                           navigate({ name: 'local-ai' });
@@ -167,14 +167,14 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="ark-btn-secondary"
+                    className="nova-btn-secondary"
                     disabled={cacheBusy}
                     onClick={() => void runClearAppCaches()}
                   >
                     <Trash2 className="w-4 h-4" />
                     {cacheBusy ? 'Clearing…' : 'Clear cache'}
                   </button>
-                  <button type="button" className="ark-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
+                  <button type="button" className="nova-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
                     Manage models
                   </button>
                 </div>
@@ -239,7 +239,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
           {activeSection === 'updates' && (
             <SettingsSection title="Update">
               <div className="space-y-5">
-                <div className="rounded-3xl border border-surface-border bg-ark-navy-900 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
+                <div className="rounded-3xl border border-surface-border bg-nova-navy-900 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">NOVA v{appVersion}</p>
@@ -259,19 +259,19 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                         title="Open NOVA on GitHub"
                         aria-label="Open NOVA on GitHub"
                         onClick={() =>
-                          void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')
+                          void window.novaDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')
                         }
                         className="h-10 w-10 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center transition-colors"
                       >
                         <Github className="w-5 h-5" />
                       </button>
-                      {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !isArkDevSession() ? (
+                      {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !isNovaDevSession() ? (
                         <button
                           type="button"
                           onClick={downloadUpdate}
                           disabled={downloadingUpdate}
                           title="Download and install the latest NOVA"
-                          className="ark-btn-primary !rounded-full"
+                          className="nova-btn-primary !rounded-full"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Updating…' : 'Update'}
@@ -281,7 +281,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                           type="button"
                           onClick={checkForUpdates}
                           disabled={checkingUpdates || downloadingUpdate}
-                          className="ark-btn-secondary !rounded-full"
+                          className="nova-btn-secondary !rounded-full"
                         >
                           {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                           {checkingUpdates ? 'Checking…' : 'Check for update'}
@@ -321,7 +321,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                   value={prefs.launchOnStartup}
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
-                    void window.arkDesktop?.loginItemSet?.(v).then((r: any) => {
+                    void window.novaDesktop?.loginItemSet?.(v).then((r: any) => {
                       if (r?.devBlocked && v) {
                         patchPrefs({ launchOnStartup: false });
                         setSavedFlash('Launch at startup is unavailable in a development build');

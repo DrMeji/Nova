@@ -30,7 +30,7 @@ Master list of things not done yet, half-done, or parked.
 4. Live name sync — re-test when inviting
 
 ### Chat / AI
-5–14. ~~Prior chat / MCP / Update items~~ — **Wave 1 (0.1.218):** one early dispatch with create/delete/open/cmd hosts; no `classifyTurn` in AIChat; no `runArkAgentLoop` / `answerStudio` in AIChat. **Still open:** mid-ladder hydrate→edit→chat; AIChat ≤2k; verifyAsk on every apply site; single PreviewSession; Electron job queue.
+5–14. ~~Prior chat / MCP / Update items~~ — **Wave 1 (0.1.218):** one early dispatch with create/delete/open/cmd hosts; no `classifyTurn` in AIChat; no `runNovaAgentLoop` / `answerStudio` in AIChat. **Still open:** mid-ladder hydrate→edit→chat; AIChat ≤2k; verifyAsk on every apply site; single PreviewSession; Electron job queue.
 
 ### Onboarding / Settings UX
 15–20. ~~Prior onboarding / plugins~~ ✅
@@ -64,6 +64,6 @@ Master list of things not done yet, half-done, or parked.
 
 ## Rule of thumb
 
-1. **Remaining hard items:** Windows signing cert (purchase), mark `docs/SUPABASE-APPLY-CHECKLIST.md` applied on hosted Supabase, deploy `website/` + set `VITE_ARK_WEBSITE_ORIGIN` for live email reset, optional custom SMTP
+1. **Remaining hard items:** Windows signing cert (purchase), mark `docs/SUPABASE-APPLY-CHECKLIST.md` applied on hosted Supabase, deploy `website/` + set `VITE_NOVA_WEBSITE_ORIGIN` for live email reset, optional custom SMTP
 2. **Create / edit:** keep live-regressing cafe → Preview → micro-edit → second-chat isolation → interactive depth → App twins → mid-build switch → no-brain honesty
 3. **Do not revive (unless product asks):** Image generation, Video generation, Call/WebRTC, Testers/Beta settings, custom profile photo upload — keep removed. Code leftovers stay unreachable; prefer delete over revive.

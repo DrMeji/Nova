@@ -27,9 +27,9 @@ export function ParkedNotice({ feature }: { feature: ParkedFeature }) {
   const subtitle = SUBTITLE[feature] || 'Coming Soon';
   return (
     <div className="h-full w-full relative overflow-hidden">
-      <div className="absolute inset-0 bg-ark-navy-950/60 backdrop-blur-md" />
+      <div className="absolute inset-0 bg-nova-navy-950/60 backdrop-blur-md" />
       <div className="absolute inset-0 flex items-center justify-center p-8 z-10">
-        <div className="max-w-xs w-full text-center space-y-4 rounded-2xl border border-surface-border bg-ark-navy-900/90 shadow-2xl px-8 py-10">
+        <div className="max-w-xs w-full text-center space-y-4 rounded-2xl border border-surface-border bg-nova-navy-900/90 shadow-2xl px-8 py-10">
           <div className="w-12 h-12 mx-auto rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
             <Clock className="w-5 h-5 text-sky-400" />
           </div>

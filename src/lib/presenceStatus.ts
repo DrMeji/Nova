@@ -68,7 +68,7 @@ export function formatActivityAge(iso: string | undefined | null): string {
 }
 
 /** Demo statuses for Message contacts (preview). */
-export function demoPresenceFor(arkId: string): PresenceStatus {
+export function demoPresenceFor(novaId: string): PresenceStatus {
   const map: Record<string, PresenceStatus> = {
     '4820193': 'online',
     '7193044': 'idle',
@@ -85,5 +85,5 @@ export function demoPresenceFor(arkId: string): PresenceStatus {
     '3344556': 'online',
     '2200987': 'inactive',
   };
-  return map[arkId] || 'online';
+  return map[novaId] || 'online';
 }

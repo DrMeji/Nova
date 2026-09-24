@@ -6,11 +6,11 @@ import {
   AREA_SUGGESTIONS,
   type TeamAccess,
   type TeammateAssignment,
-} from '@/lib/arkTeam';
-import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
+} from '@/lib/novaTeam';
+import { formatNovaId, isNovaUserId, normalizeNovaId } from '@/lib/novaUserId';
 import { NovaMark } from '@/components/NovaMark';
 
-type Person = GitHubCollaborator & { arkId?: string; displayName?: string };
+type Person = GitHubCollaborator & { novaId?: string; displayName?: string };
 
 type Props = {
   people: Person[];
@@ -58,7 +58,7 @@ export function TeammateBar({
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2 rounded-full border border-surface-border bg-ark-navy-950/95 pl-1 pr-2.5 py-1 shadow-lg hover:bg-surface-hover"
+        className="flex items-center gap-2 rounded-full border border-surface-border bg-nova-navy-950/95 pl-1 pr-2.5 py-1 shadow-lg hover:bg-surface-hover"
         title="Teammates on this project"
       >
         <span className="flex -space-x-2">
@@ -76,7 +76,7 @@ export function TeammateBar({
             ))
           )}
           {people.length > 6 && (
-            <span className="w-7 h-7 rounded-full bg-surface-hover border-2 border-ark-navy-950 flex items-center justify-center text-[9px] text-content-secondary">
+            <span className="w-7 h-7 rounded-full bg-surface-hover border-2 border-nova-navy-950 flex items-center justify-center text-[9px] text-content-secondary">
               +{people.length - 6}
             </span>
           )}
@@ -89,7 +89,7 @@ export function TeammateBar({
       </button>
 
       {open && (
-        <div className="absolute bottom-11 left-0 w-72 rounded-2xl border border-surface-border bg-ark-navy-950 shadow-xl p-3">
+        <div className="absolute bottom-11 left-0 w-72 rounded-2xl border border-surface-border bg-nova-navy-950 shadow-xl p-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium text-content-primary">Teammates</p>
             <button type="button" onClick={() => setOpen(false)} className="text-content-tertiary">
@@ -105,17 +105,17 @@ export function TeammateBar({
                 <Face person={p} title={p.login} />
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-content-primary truncate">
-                    {p.arkId ? (p.displayName || `NOVA ${formatArkId(p.arkId)}`) : `@${p.login}`}
+                    {p.novaId ? (p.displayName || `NOVA ${formatNovaId(p.novaId)}`) : `@${p.login}`}
                   </p>
                   <p className="text-[10px] text-content-tertiary">
-                    {p.arkId ? formatArkId(p.arkId) : accessLabel(githubPermissionToAccess(p))}
-                    {p.arkId ? ` · ${accessLabel(githubPermissionToAccess(p))}` : ''}
+                    {p.novaId ? formatNovaId(p.novaId) : accessLabel(githubPermissionToAccess(p))}
+                    {p.novaId ? ` · ${accessLabel(githubPermissionToAccess(p))}` : ''}
                   </p>
                   {canInvite ? (
                     <select
                       value={areaFor(p.login) || ''}
                       onChange={e => onAssign(p.login, e.target.value)}
-                      className="mt-1 w-full bg-ark-navy-900 border border-surface-border rounded-md text-[10px] text-content-secondary px-1.5 py-1"
+                      className="mt-1 w-full bg-nova-navy-900 border border-surface-border rounded-md text-[10px] text-content-secondary px-1.5 py-1"
                     >
                       <option value="">Assign an area…</option>
                       {AREA_SUGGESTIONS.map(a => (
@@ -144,13 +144,13 @@ export function TeammateBar({
 
       {inviteOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-ark-navy-950 p-4 shadow-xl">
+          <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-nova-navy-950 p-4 shadow-xl">
             <p className="text-sm font-medium text-content-primary mb-3">Invite a teammate</p>
             <input
               value={username}
               onChange={e => setUsername(e.target.value.replace(/^@/, ''))}
               placeholder="NOVA ID or GitHub username"
-              className="w-full bg-ark-navy-900 border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary mb-2"
+              className="w-full bg-nova-navy-900 border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary mb-2"
             />
             <div className="flex gap-1 mb-2">
               {(['read', 'write', 'full'] as TeamAccess[]).map(a => (
@@ -174,7 +174,7 @@ export function TeammateBar({
             {needsTrust && (
               <label className="flex items-start gap-2 text-[11px] text-content-secondary mb-3">
                 <input type="checkbox" checked={trust} onChange={e => setTrust(e.target.checked)} className="mt-0.5" />
-                I trust {isArkUserId(normalizeArkId(username)) ? formatArkId(normalizeArkId(username)) : `@${username || 'this person'}`} with {accessLabel(access).toLowerCase()} on this project.
+                I trust {isNovaUserId(normalizeNovaId(username)) ? formatNovaId(normalizeNovaId(username)) : `@${username || 'this person'}`} with {accessLabel(access).toLowerCase()} on this project.
               </label>
             )}
             <div className="flex gap-2">

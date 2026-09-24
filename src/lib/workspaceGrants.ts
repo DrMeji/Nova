@@ -39,7 +39,7 @@ function grantsLookEnabled(g: WorkspaceGrants): boolean {
  */
 export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   try {
-    const remote = await window.arkDesktop?.workspaceGetGrants?.();
+    const remote = await window.novaDesktop?.workspaceGetGrants?.();
     if (remote?.ok && remote.grants) {
       cachedMainGrants = {
         desktop: Boolean(remote.grants.desktop),
@@ -84,7 +84,7 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
     return;
   }
   try {
-    const written = await window.arkDesktop?.workspaceSetGrants?.(grants);
+    const written = await window.novaDesktop?.workspaceSetGrants?.(grants);
     if (written?.ok && written.grants) {
       cachedMainGrants = {
         desktop: Boolean(written.grants.desktop),
@@ -103,7 +103,7 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
 
 function prefsHaveExplicitGrantKeys(): boolean {
   try {
-    const raw = localStorage.getItem('ark:local-prefs')
+    const raw = localStorage.getItem('NOVA:local-prefs')
       || localStorage.getItem('NOVA:local-prefs');
     if (!raw) return false;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -172,7 +172,7 @@ async function findFolderInRoot(
   depth = 0,
   maxDepth = 2,
 ): Promise<DirHit | null> {
-  const listing = await window.arkDesktop?.listDir?.(rootPath);
+  const listing = await window.novaDesktop?.listDir?.(rootPath);
   if (!listing?.ok) return null;
 
   const dirs = (listing.items || []).filter(i => i.kind === 'dir' && i.name);
@@ -185,7 +185,7 @@ async function findFolderInRoot(
       // Prefer real project roots (package.json / src) over nested name/name clones.
       let bonus = 0;
       try {
-        const probe = await window.arkDesktop?.listDir?.(full);
+        const probe = await window.novaDesktop?.listDir?.(full);
         if (probe?.ok) {
           const names = new Set((probe.items || []).map(i => String(i.name || '').toLowerCase()));
           if (names.has('package.json') || names.has('src') || names.has('index.html')) bonus += 8;
@@ -237,7 +237,7 @@ export async function resolveScopedFolderPath(ref: {
   rawPath?: string;
 }): Promise<{ ok: boolean; path?: string; matchedName?: string; nested?: boolean; error?: string }> {
   if (ref.scope === 'absolute' && ref.rawPath) {
-    const stat = await window.arkDesktop?.workspaceStatPath?.(ref.rawPath);
+    const stat = await window.novaDesktop?.workspaceStatPath?.(ref.rawPath);
     if (stat?.ok && stat.isDirectory && stat.path) {
       return { ok: true, path: stat.path, matchedName: stat.name };
     }
@@ -250,7 +250,7 @@ export async function resolveScopedFolderPath(ref: {
 
   await syncWorkspaceGrantsFromPrefs();
 
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const rootId = ref.scope === 'documents' ? 'documents' : ref.scope === 'downloads' ? 'downloads' : 'desktop';
   const rootPath = roots?.roots?.find(r => r.id === rootId)?.path;
   if (!rootPath) {
@@ -265,7 +265,7 @@ export async function resolveScopedFolderPath(ref: {
     };
   }
 
-  const stat = await window.arkDesktop?.workspaceStatPath?.(hit.path);
+  const stat = await window.novaDesktop?.workspaceStatPath?.(hit.path);
   if (!stat?.ok || !stat.isDirectory || !stat.path) {
     return { ok: false, error: stat?.error || 'Could not open that folder.' };
   }
@@ -290,17 +290,17 @@ export async function resolveWorkFolderPath(
   await syncWorkspaceGrantsFromPrefs();
 
   // Prefer Desktop\Projects\<Name> when it exists. avoids nested Name\Name clones.
-  const roots = await window.arkDesktop?.browseRoots?.();
+  const roots = await window.novaDesktop?.browseRoots?.();
   const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path;
   if (desktopPath) {
     const projectsPath = joinPath(desktopPath, 'Projects');
     const preferred = joinPath(projectsPath, wantName);
-    const stat = await window.arkDesktop?.workspaceStatPath?.(preferred);
+    const stat = await window.novaDesktop?.workspaceStatPath?.(preferred);
     if (stat?.ok && stat.isDirectory && stat.path) {
       return { ok: true, path: stat.path, matchedName: stat.name || wantName, nested: false };
     }
     // Case-insensitive scan of Desktop\Projects
-    const listing = await window.arkDesktop?.listDir?.(projectsPath);
+    const listing = await window.novaDesktop?.listDir?.(projectsPath);
     if (listing?.ok) {
       for (const item of listing.items || []) {
         if (item.kind !== 'dir') continue;
@@ -320,7 +320,7 @@ export async function resolveWorkFolderPath(
   if (desktopHit.ok && desktopHit.path) return desktopHit;
 
   if (parentPath) {
-    const listing = await window.arkDesktop?.listDir?.(parentPath);
+    const listing = await window.novaDesktop?.listDir?.(parentPath);
     if (listing?.ok) {
       let best: { name: string; path: string; score: number } | null = null;
       for (const item of listing.items || []) {
@@ -331,7 +331,7 @@ export async function resolveWorkFolderPath(
         }
       }
       if (best) {
-        const stat = await window.arkDesktop?.workspaceStatPath?.(best.path);
+        const stat = await window.novaDesktop?.workspaceStatPath?.(best.path);
         if (stat?.ok && stat.isDirectory && stat.path) {
           return { ok: true, path: stat.path, matchedName: best.name };
         }

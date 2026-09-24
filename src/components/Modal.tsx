@@ -99,14 +99,14 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 animate-fade-in">
       <div
-        className="absolute inset-0 bg-ark-navy-950/70 backdrop-blur-md"
+        className="absolute inset-0 bg-nova-navy-950/70 backdrop-blur-md"
         onClick={requestClose}
         aria-hidden="true"
       />
 
       <div
         ref={dialogRef}
-        className={`z-10 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/40 overflow-hidden animate-slide-up ${sizeClasses[size]} ${className}`}
+        className={`z-10 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-nova-navy-900 shadow-2xl shadow-black/40 overflow-hidden animate-slide-up ${sizeClasses[size]} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={!hideHeader && title ? 'modal-title' : undefined}

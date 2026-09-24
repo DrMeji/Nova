@@ -12,7 +12,7 @@ import {
   gitStatus,
   githubCloneUrl,
   parseGithubRepoRef,
-} from '@/lib/arkGitClient';
+} from '@/lib/novaGitClient';
 import { findQueryFromMessage, formatSearchHits, isFindInFilesAsk, searchInFiles } from '@/lib/projectInspect';
 import { getPluginRuntime, loadPluginState } from '@/lib/plugins';
 import {
@@ -72,8 +72,8 @@ export async function runCodeStudioCommand(opts: {
     const query = findQueryFromMessage(message);
     let hits = searchInFiles(files, query).hits;
     let total = hits.length;
-    if (!hits.length && window.arkDesktop?.projectSearch) {
-      const res = await window.arkDesktop.projectSearch({ projectId, query, limit: 40 });
+    if (!hits.length && window.novaDesktop?.projectSearch) {
+      const res = await window.novaDesktop.projectSearch({ projectId, query, limit: 40 });
       hits = res.hits || [];
       total = typeof res.total === 'number' ? res.total : hits.length;
     }

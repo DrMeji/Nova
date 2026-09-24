@@ -12,7 +12,7 @@ import {
   cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
-import { engineGenerate, engineGenerateStream, getEngineStatus } from '@/lib/arkEngine';
+import { engineGenerate, engineGenerateStream, getEngineStatus } from '@/lib/novaEngine';
 import { getProviderApiKeys, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import type { RouterChatTurn } from '@/lib/chatHistory';
@@ -24,7 +24,7 @@ export const RECOMMENDED_VISION_MODEL_NAME = 'Qwen2-VL 7B';
 const VISION_CLOUD_IDS = ['google', 'openai', 'anthropic'] as const;
 
 export function messageHasImages(content: string): boolean {
-  return /!\[[^\]]*]\(ark-media:[^)]+\)/.test(content)
+  return /!\[[^\]]*]\(nova-media:[^)]+\)/.test(content)
     || /!\[[^\]]*]\(data:image\//.test(content)
     || extractVisionImages(content).length > 0;
 }
@@ -43,7 +43,7 @@ export function hasCloudVisionCapability(): boolean {
 
 /** True when Qwen2-VL GGUF + mmproj are installed and the engine is online. */
 export async function isLocalVisionReady(): Promise<boolean> {
-  if (!window.arkDesktop?.engineStatus) return false;
+  if (!window.novaDesktop?.engineStatus) return false;
   try {
     const status = await getEngineStatus();
     if (status.phase !== 'online' && status.phase !== 'degraded') return false;
@@ -148,13 +148,13 @@ export function buildVisionDescribePrompt(userMessage: string): string {
 
 export function composeVisionToCoderBrief(visionNotes: string, userMessage: string): string {
   const ask = String(userMessage || '')
-    .replace(/!\[[^\]]*]\(ark-media:[^)]+\)/g, '')
+    .replace(/!\[[^\]]*]\(nova-media:[^)]+\)/g, '')
     .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/g, '')
     .trim();
   return [
     ask || 'Fix the issue shown in the screenshot.',
     '',
-    '<!--ark-vision-brief-->',
+    '<!--nova-vision-brief-->',
     'Vision hop notes (from the screenshot):',
     String(visionNotes || '').trim(),
     '',
