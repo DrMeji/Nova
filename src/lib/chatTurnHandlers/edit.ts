@@ -610,10 +610,12 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
   }
 
   const { verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
-  const { codingFileEditTimeoutMs } = await import('@/lib/studioAnswerEngine');
+  const { codingFileEditTimeoutMs, looksLikeFullUiBuildCodingAsk } = await import('@/lib/studioAnswerEngine');
   const editBudgetMs = codingFileEditTimeoutMs(host.editUserMessage || host.content);
   const snapshot = { ...host.files };
-  host.pushStatus(editBudgetMs >= 120_000 ? 'Rebuilding UI…' : 'Coding…');
+  const isUiRebuild = looksLikeFullUiBuildCodingAsk(host.editUserMessage || host.content)
+    || editBudgetMs > 120_000;
+  host.pushStatus(isUiRebuild ? 'Rebuilding UI…' : 'Coding…');
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), editBudgetMs);
@@ -643,9 +645,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         startedAt: host.replyStartedAt,
         elapsedMs,
         userMessage: host.content,
-        answer: editBudgetMs >= 120_000
+        answer: isUiRebuild
           ? 'That UI rebuild timed out before files were written. Say rebuild the UI again and I will continue from this folder.'
-          : 'That edit timed out before I could write files. Try a shorter one-line change.',
+          : 'That edit timed out before I could write files. Try a shorter one-line change, or name the exact file to patch.',
         wrotePaths: [],
         projectName: host.projectLabel,
       }),

@@ -17,11 +17,12 @@ import {
 import { sendFriendRequest, respondFriendRequest, subscribeFriendRequests, syncFriendRequests } from '@/lib/friendRequests';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import { isRevealed } from '@/lib/featurePark';
+import { isRevealed, isSocialParked } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { pushLocalNotification } from '@/lib/localNotifications';
 import { formatNovaId } from '@/lib/novaUserId';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 type SocialContextValue = {
   contacts: NovaContact[];
@@ -40,44 +41,84 @@ type SocialContextValue = {
 
 const SocialContext = createContext<SocialContextValue | undefined>(undefined);
 
+const PARKED_VALUE: SocialContextValue = {
+  contacts: [],
+  unreadFrom: [],
+  blockedUsers: [],
+  refreshContacts: async () => undefined,
+  refreshBlocked: async () => undefined,
+  inviteByNovaId: async () => {
+    throw new Error('Networking is coming soon.');
+  },
+  acceptFriendRequest: async () => {
+    throw new Error('Networking is coming soon.');
+  },
+  declineFriendRequest: async () => undefined,
+  removeFriend: async () => undefined,
+  deleteContact: async () => undefined,
+  blockFriend: async () => undefined,
+  unblockFriend: async () => undefined,
+};
+
+/** Friends / DMs stay dead while Networking + Message are parked (GitHub-only auth). */
+function socialCloudLive() {
+  return !isSocialParked('networking') && !isSocialParked('message') && isSupabaseConfigured;
+}
+
 export function SocialProvider({ children }: { children: ReactNode }) {
+  const live = socialCloudLive();
   const { user, profile } = useAuth();
   const { route } = useRouter();
   const [contacts, setContacts] = useState<NovaContact[]>([]);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
-  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>(() => loadBlockedUsers());
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>(() => (live ? loadBlockedUsers() : []));
   const myNovaId = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || '');
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
 
   const refreshContacts = async () => {
+    if (!live) {
+      setContacts([]);
+      return;
+    }
     const list = await listContacts(user?.id);
     setContacts(list);
   };
 
   const refreshBlocked = async () => {
+    if (!live) {
+      setBlockedUsers([]);
+      return;
+    }
     const list = await syncBlockedFromCloud(user?.id);
     setBlockedUsers(list);
   };
 
   useEffect(() => {
+    if (!live) {
+      setContacts([]);
+      setUnreadFrom([]);
+      setBlockedUsers([]);
+      return;
+    }
     void refreshContacts();
     void refreshBlocked();
-  }, [user?.id]);
+  }, [user?.id, live]);
 
   useEffect(() => {
+    if (!live) return;
     const bump = () => setBlockedUsers(loadBlockedUsers());
     window.addEventListener('NOVA:blocks-changed', bump);
     return () => window.removeEventListener('NOVA:blocks-changed', bump);
-  }, []);
+  }, [live]);
 
-  // Re-pull live names/avatars when opening Message (friends may have updated Settings).
   useEffect(() => {
+    if (!live) return;
     if (route.name === 'message') void refreshContacts();
-  }, [route.name, user?.id]);
+  }, [route.name, user?.id, live]);
 
   useEffect(() => {
-    if (!myNovaId) return;
+    if (!live || !myNovaId) return;
     void syncFriendRequests(myNovaId, user?.id);
     const unsub = subscribeFriendRequests(myNovaId, user?.id, {
       onAccepted: () => {
@@ -86,10 +127,10 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       },
     });
     return unsub;
-  }, [myNovaId, user?.id]);
+  }, [myNovaId, user?.id, live]);
 
   useEffect(() => {
-    if (!myNovaId) return;
+    if (!live || !myNovaId) return;
     const unsub = subscribeMessages(myNovaId, (msg: DirectMessage) => {
       if (msg.recipientNovaId !== myNovaId) return;
       const viewingMessage = route.name === 'message';
@@ -116,15 +157,17 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       }
     }, user?.id);
     return unsub;
-  }, [myNovaId, route, user?.id]);
+  }, [myNovaId, route, user?.id, live]);
 
   useEffect(() => {
+    if (!live) return;
     if (route.name === 'message' && route.peer) {
       setUnreadFrom(prev => prev.filter(id => id !== route.peer));
     }
-  }, [route]);
+  }, [route, live]);
 
   const inviteByNovaId = async (novaId: string, _displayName?: string) => {
+    if (!live) throw new Error('Networking is coming soon.');
     const prefs = getLocalPrefs();
     const fromName = prefs.displayName?.trim() && prefs.displayName.trim() !== 'Guest'
       ? prefs.displayName.trim()
@@ -141,6 +184,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptFriendRequest = async (requestId: string) => {
+    if (!live) throw new Error('Networking is coming soon.');
     const req = await respondFriendRequest(requestId, 'accepted', { userId: user?.id, myNovaId });
     if (!req) throw new Error('Could not accept that friend request.');
     const list = await listContacts(user?.id);
@@ -149,48 +193,55 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const declineFriendRequest = async (requestId: string) => {
+    if (!live) return;
     await respondFriendRequest(requestId, 'declined', { userId: user?.id, myNovaId });
   };
 
   const removeFriend = async (novaId: string) => {
+    if (!live) return;
     await unfriendPeer(user?.id, novaId);
     hideDemoContact(novaId);
     await refreshContacts();
   };
 
   const deleteContact = async (novaId: string) => {
+    if (!live) return;
     await unfriendPeer(user?.id, novaId);
     hideDemoContact(novaId);
     await refreshContacts();
   };
 
   const blockFriend = async (novaId: string, displayName?: string) => {
+    if (!live) return;
     await blockNovaId(novaId, { userId: user?.id, displayName });
     await refreshContacts();
     await refreshBlocked();
   };
 
   const unblockFriend = async (novaId: string) => {
+    if (!live) return;
     await unblockNovaId(novaId, user?.id);
     await refreshBlocked();
   };
 
   const value = useMemo(
-    () => ({
-      contacts,
-      unreadFrom,
-      blockedUsers,
-      refreshContacts,
-      refreshBlocked,
-      inviteByNovaId,
-      acceptFriendRequest,
-      declineFriendRequest,
-      removeFriend,
-      deleteContact,
-      blockFriend,
-      unblockFriend,
-    }),
-    [contacts, unreadFrom, blockedUsers, myNovaId, profile?.display_name, user?.id],
+    () => (live
+      ? {
+          contacts,
+          unreadFrom,
+          blockedUsers,
+          refreshContacts,
+          refreshBlocked,
+          inviteByNovaId,
+          acceptFriendRequest,
+          declineFriendRequest,
+          removeFriend,
+          deleteContact,
+          blockFriend,
+          unblockFriend,
+        }
+      : PARKED_VALUE),
+    [live, contacts, unreadFrom, blockedUsers, myNovaId, profile?.display_name, user?.id],
   );
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;

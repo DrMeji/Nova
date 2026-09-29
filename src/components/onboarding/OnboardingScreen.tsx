@@ -38,8 +38,7 @@ import { RotatingTip } from '@/components/RotatingTip';
 import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
-  Monitor, MonitorCog, Check, Gauge, Shield, ExternalLink, Wifi, FolderOpen,
-  FolderKanban, HardDriveDownload, Sparkles,
+  Monitor, MonitorCog, Check, Gauge, ExternalLink, Wifi,
 } from 'lucide-react';
 
 type Phase = 'intro' | 'hardware' | 'speed' | 'models' | 'access' | 'connect' | 'finishing';
@@ -129,26 +128,45 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
   const pc = getHardwareClass(hw);
   const primary = getRecommendedChatModel(hw);
 
+  const pick = (id: string, name: string, size: string, recommended?: boolean): RecModel => ({
+    id,
+    name,
+    size,
+    detail: '',
+    recommended,
+  });
+
+  // Six strong defaults across chat / code / layout / vision — no role labels in the UI.
   if (pc === 'strong') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
-      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: '' },
-      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: '' },
-    ];
+      pick(primary.id, primary.name, primary.size, true),
+      pick('qwen25-coder-7b', 'Qwen2.5-Coder 7B', '4.7 GB'),
+      pick('uigen-fx-4b', 'UIGEN-FX 4B', '2.5 GB'),
+      pick('qwen2-vl-7b', 'Qwen2-VL 7B', '7.4 GB'),
+      pick('llama32-3b', 'Llama 3.2 3B Instruct', '2.0 GB'),
+      pick('llama31-8b', 'Llama 3.1 8B Instruct', '4.9 GB'),
+    ].filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).slice(0, 6);
   }
 
   if (pc === 'standard') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
-      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: '' },
-      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: '' },
-    ];
+      pick(primary.id, primary.name, primary.size, true),
+      pick('qwen25-coder-7b', 'Qwen2.5-Coder 7B', '4.7 GB'),
+      pick('uigen-fx-4b', 'UIGEN-FX 4B', '2.5 GB'),
+      pick('qwen25-7b', 'Qwen2.5 7B Instruct', '4.7 GB'),
+      pick('llama32-3b', 'Llama 3.2 3B Instruct', '2.0 GB'),
+      pick('gemma2-2b', 'Gemma 2 2B Instruct', '1.6 GB'),
+    ].filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).slice(0, 6);
   }
 
   return [
-    { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
-    { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: '' },
-  ];
+    pick(primary.id, primary.name, primary.size, true),
+    pick('llama32-3b', 'Llama 3.2 3B Instruct', '2.0 GB'),
+    pick('uigen-fx-4b', 'UIGEN-FX 4B', '2.5 GB'),
+    pick('gemma2-2b', 'Gemma 2 2B Instruct', '1.6 GB'),
+    pick('phi3-mini', 'Phi-3 Mini Instruct', '2.3 GB'),
+    pick('qwen25-coder-7b', 'Qwen2.5-Coder 7B', '4.7 GB'),
+  ].filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).slice(0, 6);
 }
 
 function queueSetupBrainDownloads(opts: {
@@ -220,7 +238,7 @@ export function OnboardingScreen() {
   const [speedSkipped, setSpeedSkipped] = useState(false);
   const [apiProbes, setApiProbes] = useState<ProviderProbe[]>([]);
   const [models, setModels] = useState<RecModel[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [finishError, setFinishError] = useState<string | null>(null);
   const [finishReady, setFinishReady] = useState(false);
@@ -241,8 +259,17 @@ export function OnboardingScreen() {
   );
 
   const pcClass = useMemo(() => (hw ? getHardwareClass(hw) : null), [hw]);
-  const selected = models.find(m => m.id === selectedId) ?? models.find(m => m.recommended) ?? null;
+  const selectedModels = models.filter(m => selectedIds.includes(m.id));
+  const primarySelected =
+    selectedModels.find(m => m.recommended)
+    ?? selectedModels[0]
+    ?? models.find(m => m.recommended)
+    ?? null;
   const connectedCount = Object.values(savedKeys).filter(Boolean).length;
+
+  const toggleModel = (id: string) => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
 
   const runHardware = async () => {
     setPhase('hardware');
@@ -259,7 +286,7 @@ export function OnboardingScreen() {
     setHw(detected);
     setModels(recs);
     const chatId = recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null;
-    setSelectedId(chatId);
+    setSelectedIds(chatId ? [chatId] : []);
     setHwScanning(false);
     if (chatId) {
       queueSetupBrainDownloads({
@@ -311,11 +338,14 @@ export function OnboardingScreen() {
     setFinishReady(false);
 
     const rec = hw ? getRecommendedChatModel(hw) : { id: 'qwen25-15b' };
-    const allowed = ['qwen25-15b', 'llama32-3b', 'qwen25-7b', 'qwen25-coder-7b', 'qwen25-coder-14b'];
+    const chatCapable = new Set([
+      'qwen25-15b', 'llama32-3b', 'qwen25-7b', 'llama31-8b', 'mistral-7b',
+      'gemma2-2b', 'phi3-mini', 'deepseek-r1-distill-8b',
+    ]);
     const brainId =
-      selectedId && allowed.includes(selectedId)
-        ? selectedId
-        : rec.id;
+      selectedIds.find(id => chatCapable.has(id))
+      || (primarySelected && chatCapable.has(primarySelected.id) ? primarySelected.id : null)
+      || rec.id;
 
     setLocalPrefs({
       defaultModelId: 'NOVA-auto',
@@ -351,12 +381,24 @@ export function OnboardingScreen() {
         }),
       );
 
-      const queueOptionalCoder = () => {
-        const coder = hw ? getRecommendedCoderModel(hw) : null;
-        if (!coder || coder.id === brainId) return;
-        const haveCoder = listed.some((m) => m.id === coder.id && m.status === 'ready');
-        if (haveCoder) return;
-        void downloadEngineModel(coder.id).catch(() => undefined);
+      const queueSelectedDownloads = () => {
+        const ids = selectedIds.length
+          ? selectedIds
+          : [brainId];
+        for (const id of ids) {
+          if (id === brainId) continue;
+          const have = listed.some((m) => m.id === id && m.status === 'ready');
+          if (have) continue;
+          void downloadEngineModel(id).catch(() => undefined);
+        }
+        // Also queue role defaults when user skipped picks entirely.
+        if (!selectedIds.length) {
+          const coder = hw ? getRecommendedCoderModel(hw) : null;
+          if (coder && coder.id !== brainId) {
+            const haveCoder = listed.some((m) => m.id === coder.id && m.status === 'ready');
+            if (!haveCoder) void downloadEngineModel(coder.id).catch(() => undefined);
+          }
+        }
       };
 
       if (haveBrain || haveWeightsOnDisk) {
@@ -364,13 +406,14 @@ export function OnboardingScreen() {
         setProgress(100);
         setFinishReady(true);
         downloadStarted = true;
-        queueOptionalCoder();
+        queueSelectedDownloads();
         return;
       }
 
       await downloadEngineModel(brainId);
       downloadStarted = true;
-      queueOptionalCoder();
+      setProgress(5);
+      queueSelectedDownloads();
 
       await new Promise<void>((resolve) => {
         const tick = window.setInterval(async () => {
@@ -695,23 +738,18 @@ export function OnboardingScreen() {
 
           {phase === 'models' && (
             <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
-                  <Gauge className="w-5 h-5 text-content-secondary" />
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-content-primary">Optional — pick a model or skip</p>
-                </div>
-              </div>
+              <p className="text-sm text-content-secondary text-center">
+                Pick one or more models to download. You can add more later in Models.
+              </p>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 max-h-[min(22rem,46vh)] overflow-y-auto pr-0.5">
                 {models.map(model => {
-                  const on = selectedId === model.id;
+                  const on = selectedIds.includes(model.id);
                   return (
                     <button
                       key={model.id}
                       type="button"
-                      onClick={() => setSelectedId(model.id)}
+                      onClick={() => toggleModel(model.id)}
                       className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
                         on ? 'bg-surface-hover' : 'hover:bg-surface-hover/50'
                       }`}
@@ -720,143 +758,125 @@ export function OnboardingScreen() {
                         <span className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium text-content-primary">{model.name}</span>
                           {model.recommended && (
-                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5 text-[10px] font-medium">
-                              Recommended
-                            </span>
+                            <span className="text-[10px] text-content-tertiary">Recommended</span>
                           )}
                         </span>
                         <span className="block text-xs text-content-tertiary mt-0.5">
                           {model.size}
                         </span>
                       </span>
-                      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                        on ? 'bg-surface-hover text-nova-accent-green' : 'text-content-tertiary'
-                      }`}>
-                        {on ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4 opacity-50" />}
-                      </span>
+                      {on ? (
+                        <Check className="w-4 h-4 text-content-secondary shrink-0" />
+                      ) : (
+                        <Download className="w-4 h-4 text-content-tertiary/50 shrink-0" />
+                      )}
                     </button>
                   );
                 })}
               </div>
 
-              <button
-                type="button"
-                disabled={!selected}
-                onClick={() => {
-                  const chatId = selectedId || selected?.id;
-                  if (chatId) {
-                    setLocalPrefs({
-                      activeChatId: chatId,
-                      defaultModelId: chatId,
-                      lastChatModelId: chatId,
-                    });
-                    queueSetupBrainDownloads({
-                      chatId,
-                      chatName: selected?.name,
-                      hw,
-                    });
-                  }
-                  setPhase('finishing');
-                }}
-                className="nova-btn-primary w-full h-11 rounded-xl"
-              >
-                Start building
-              </button>
-              <button
-                type="button"
-                onClick={() => setPhase('finishing')}
-                className="w-full h-10 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
-              >
-                Skip — I’ll pick a brain later
-              </button>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedIds([]);
+                    void finish();
+                  }}
+                  className="flex-1 h-11 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ids = selectedIds.length
+                      ? selectedIds
+                      : (primarySelected ? [primarySelected.id] : []);
+                    const chatId = primarySelected?.id || ids[0];
+                    if (chatId) {
+                      setLocalPrefs({
+                        activeChatId: chatId,
+                        defaultModelId: chatId,
+                        lastChatModelId: chatId,
+                      });
+                    }
+                    for (const id of ids) {
+                      const hit = models.find(m => m.id === id);
+                      void import('@/lib/engineDownloads').then(({ startEngineDownload }) => {
+                        void startEngineDownload({
+                          id,
+                          name: hit?.name || id,
+                          source: 'local-ai',
+                          forceUnknownDisk: true,
+                        }).catch(() => undefined);
+                      });
+                    }
+                    void finish();
+                  }}
+                  className="nova-btn-primary flex-[2] h-11 rounded-xl"
+                >
+                  {selectedIds.length > 1
+                    ? `Download ${selectedIds.length}`
+                    : 'Start building'}
+                </button>
+              </div>
             </div>
           )}
 
           {phase === 'access' && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-emerald-400" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-content-primary">Documents grant first</p>
-                  {accessEnabledCount > 0 ? (
-                    <p className="text-xs text-content-tertiary mt-0.5">
-                      {accessEnabledCount} permission{accessEnabledCount === 1 ? '' : 's'} enabled
-                    </p>
-                  ) : (
-                    <p className="text-xs text-content-tertiary mt-0.5">
-                      Needed so NOVA can write projects under Documents
-                    </p>
-                  )}
+            <div className="space-y-6">
+              <p className="text-sm text-content-secondary text-center">
+                Choose where NOVA can save projects. You can change this later in Settings.
+              </p>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 px-1">
+                  <p className="text-xs text-content-tertiary">Folders</p>
+                  <button
+                    type="button"
+                    onClick={enableRecommendedAccess}
+                    className="text-xs text-content-tertiary hover:text-content-secondary shrink-0"
+                  >
+                    Enable recommended
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <SetupChoiceRow
+                    title="Documents"
+                    hint="Recommended"
+                    selected={documentsAccess}
+                    onSelect={toggleDocumentsAccess}
+                  />
+                  <SetupChoiceRow
+                    title="Desktop"
+                    selected={desktopAccess}
+                    onSelect={toggleDesktopAccess}
+                  />
+                  <SetupChoiceRow
+                    title="Full PC"
+                    hint="Optional"
+                    selected={fullPcAccess}
+                    onSelect={toggleFullPcAccess}
+                  />
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={enableRecommendedAccess}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2.5 text-sm font-medium text-sky-300 hover:bg-sky-500/15 transition-colors"
-              >
-                <Sparkles className="w-4 h-4 shrink-0" aria-hidden />
-                Enable recommended access
-              </button>
-
               <div className="space-y-2">
-                <AccessPermissionCard
-                  icon={FolderOpen}
-                  title="Desktop folder access"
-                  enabled={desktopAccess}
-                  onToggle={toggleDesktopAccess}
-                  accent="sky"
-                />
-                <AccessPermissionCard
-                  icon={FolderKanban}
-                  title="Documents folder access"
-                  enabled={documentsAccess}
-                  onToggle={toggleDocumentsAccess}
-                  accent="violet"
-                />
-                <AccessPermissionCard
-                  icon={HardDriveDownload}
-                  title="Full PC access (files)"
-                  enabled={fullPcAccess}
-                  onToggle={toggleFullPcAccess}
-                  accent="emerald"
-                  recommended
-                />
-              </div>
-
-              <div className="rounded-xl border border-surface-border bg-black/20 p-3">
-                <p className="text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</p>
-                <div className="grid grid-cols-1 gap-1.5">
+                <p className="text-xs text-content-tertiary px-1">Commands</p>
+                <div className="flex flex-col gap-1">
                   {([
-                    { id: 'allowlist' as const, label: 'Confirm each command' },
+                    { id: 'allowlist' as const, label: 'Ask me first', hint: 'Recommended' },
                     { id: 'auto_review' as const, label: 'Auto-review' },
                     { id: 'run_all' as const, label: 'Run everything' },
-                  ]).map(opt => {
-                    const on = executionMode === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setExecutionMode(opt.id)}
-                        className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                          on
-                            ? 'bg-surface-hover border border-sky-500/30'
-                            : 'border border-transparent hover:bg-surface-hover/60'
-                        }`}
-                      >
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                          on ? 'border-sky-400 bg-sky-500/20' : 'border-surface-border bg-black/20'
-                        }`}>
-                          {on ? <span className="h-2 w-2 rounded-full bg-sky-400" /> : null}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm text-content-primary">{opt.label}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  ]).map(opt => (
+                    <SetupChoiceRow
+                      key={opt.id}
+                      title={opt.label}
+                      hint={opt.hint}
+                      selected={executionMode === opt.id}
+                      onSelect={() => setExecutionMode(opt.id)}
+                    />
+                  ))}
                 </div>
               </div>
 
@@ -873,16 +893,25 @@ export function OnboardingScreen() {
                   onClick={() => {
                     if (!models.length) {
                       const recs = hw ? recommendationsFor(hw) : [
-                        { id: 'NOVA-auto', name: 'Auto', size: '', detail: 'Pick later in Models', recommended: true },
+                        { id: 'qwen25-7b', name: 'Qwen2.5 7B Instruct', size: '4.7 GB', detail: '', recommended: true },
+                        { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: '' },
+                        { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', size: '2.5 GB', detail: '' },
+                        { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', size: '7.4 GB', detail: '' },
+                        { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: '' },
+                        { id: 'llama31-8b', name: 'Llama 3.1 8B Instruct', size: '4.9 GB', detail: '' },
                       ];
                       setModels(recs);
-                      setSelectedId(recs.find(r => r.recommended)?.id || recs[0]?.id || null);
+                      const recId = recs.find(r => r.recommended)?.id || recs[0]?.id;
+                      setSelectedIds(recId ? [recId] : []);
+                    } else if (!selectedIds.length) {
+                      const recId = models.find(r => r.recommended)?.id || models[0]?.id;
+                      if (recId) setSelectedIds([recId]);
                     }
                     setPhase('models');
                   }}
                   className="nova-btn-primary flex-[2] h-11 rounded-xl"
                 >
-                  {accessEnabledCount > 0 ? 'Continue to coder' : 'Skip — use sandbox'}
+                  {accessEnabledCount > 0 ? 'Continue' : 'Skip for now'}
                 </button>
               </div>
             </div>
@@ -984,7 +1013,7 @@ export function OnboardingScreen() {
                 </p>
                 <p className="text-xs text-content-tertiary">
                   Try: “build me a coffee shop site called Ember”
-                  {selected?.name ? ` · coder ${selected.name}` : ''}
+                  {primarySelected?.name ? ` · ${primarySelected.name}` : ''}
                 </p>
               </div>
               <div className="space-y-2">
@@ -1021,27 +1050,36 @@ export function OnboardingScreen() {
                 >
                   Enter NOVA
                 </button>
-              ) : null}
-              {finishError && (
+              ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-rose-300/90 text-center leading-relaxed">{finishError}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void finish();
-                    }}
-                    className="nova-btn-primary w-full h-11 rounded-xl"
-                  >
-                    Retry download
-                  </button>
+                  {finishError ? (
+                    <p className="text-xs text-rose-300/90 text-center leading-relaxed">{finishError}</p>
+                  ) : (
+                    <p className="text-[11px] text-content-tertiary text-center">
+                      You can enter Chat now — models keep installing in the background.
+                    </p>
+                  )}
+                  {finishError ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void finish();
+                      }}
+                      className="nova-btn-primary w-full h-11 rounded-xl"
+                    >
+                      Retry download
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
                       void enterApp();
                     }}
-                    className="nova-btn-secondary w-full h-11 rounded-xl"
+                    className={finishError ? 'nova-btn-secondary w-full h-11 rounded-xl' : 'nova-btn-primary w-full h-11 rounded-xl'}
                   >
-                    {connectedCount > 0 ? 'Continue with cloud keys' : 'Skip to chat anyway'}
+                    {finishError
+                      ? (connectedCount > 0 ? 'Continue with cloud keys' : 'Skip to chat anyway')
+                      : 'Enter NOVA'}
                   </button>
                 </div>
               )}
@@ -1052,9 +1090,9 @@ export function OnboardingScreen() {
       <PlayWhileDownloading
         open={playOpen}
         onClose={() => setPlayOpen(false)}
-        contextLabel={selected?.name || 'local brain'}
-        contextSize={selected?.size}
-        contextDetail={selected?.detail}
+        contextLabel={primarySelected?.name || 'local brain'}
+        contextSize={primarySelected?.size}
+        contextDetail={primarySelected?.detail}
         externalProgress={progress}
         externalComplete={progress >= 100 && !finishError}
       />
@@ -1062,67 +1100,34 @@ export function OnboardingScreen() {
   );
 }
 
-function AccessPermissionCard({
-  icon: Icon,
+function SetupChoiceRow({
   title,
-  enabled,
-  onToggle,
-  accent,
-  recommended,
+  hint,
+  selected,
+  onSelect,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
   title: string;
-  enabled: boolean;
-  onToggle: () => void;
-  accent: 'sky' | 'violet' | 'emerald';
-  recommended?: boolean;
+  hint?: string;
+  selected: boolean;
+  onSelect: () => void;
 }) {
-  const accentRing = enabled
-    ? accent === 'sky'
-      ? 'border-sky-500/40 bg-sky-500/5'
-      : accent === 'violet'
-        ? 'border-violet-500/40 bg-violet-500/5'
-        : 'border-emerald-500/40 bg-emerald-500/5'
-    : 'border-surface-border bg-black/15 hover:bg-surface-hover/40';
-  const iconTone = enabled
-    ? accent === 'sky'
-      ? 'text-sky-400 bg-sky-500/15'
-      : accent === 'violet'
-        ? 'text-violet-400 bg-violet-500/15'
-        : 'text-emerald-400 bg-emerald-500/15'
-    : 'text-content-tertiary bg-surface-hover';
-
   return (
     <button
       type="button"
-      onClick={onToggle}
-      className={`w-full flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all ${accentRing}`}
+      onClick={onSelect}
+      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
+        selected ? 'bg-surface-hover' : 'hover:bg-surface-hover/50'
+      }`}
     >
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconTone}`}>
-        <Icon className="h-5 w-5" aria-hidden />
-      </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-content-primary">{title}</span>
-          {recommended ? (
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-400">
-              Recommended
-            </span>
+          {hint ? (
+            <span className="text-[10px] text-content-tertiary">{hint}</span>
           ) : null}
         </span>
       </span>
-      <span
-        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-          enabled ? 'bg-sky-500/80' : 'bg-surface-hover border border-surface-border'
-        }`}
-        aria-hidden
-      >
-        <span
-          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
-            enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
-          }`}
-        />
-      </span>
+      {selected ? <Check className="w-4 h-4 text-content-secondary shrink-0" /> : null}
     </button>
   );
 }

@@ -1,7 +1,7 @@
 /** Live status line inside the assistant bubble (Thinking → Exploring → …). */
 
 import { memo, useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Globe } from 'lucide-react';
 import {
   formatStepDurationMs,
   normalizeStatusHistory,
@@ -10,36 +10,82 @@ import {
 
 const NOISE = /thinking \(step|listed project files|^read src\/|verify passed|checking preview ready|preview ready fail|re-editing the ui|model timed out|step time reached|fix: thinking|build: thinking|almost done: finishing|final pass: checking|premium floor: another|keeping prior app/i;
 
-/** Show the passes that stuck. Collapse retries into one line. */
+function looksLikeWebSearchStatus(label: string): boolean {
+  return /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references|your\s+message)\b|\blayout\s+references\b|\bfinding\s+relevant\s+sources\b|\bcomparing\s+sources\b|\bverifying\s+candidate\b|\blooking\s+for\s+images\b|\bplanning\s+searches\b|\bbuilding\s+answer\b/i.test(
+    String(label || ''),
+  );
+}
+
+/** Show the passes that stuck. Drop noisy thinking/timeout lines — never invent a fake "redo" step. */
 function compressStatusSteps(steps: ChatTurnStatusStep[]): ChatTurnStatusStep[] {
   const out: ChatTurnStatusStep[] = [];
-  let sawFail = false;
+  let clinicHeavy = false;
   for (const step of steps) {
     const label = step.label.replace(/\*\*/g, '').trim();
     if (!label || /^done$/i.test(label)) continue;
-    if (NOISE.test(label)) {
-      sawFail = true;
-      continue;
-    }
-    if (sawFail) {
-      const redo = 'Redoing this pass — the last one failed';
-      const prev = out[out.length - 1];
-      if (!prev || prev.label !== redo) out.push({ label: redo, at: step.at });
-      sawFail = false;
+    if (NOISE.test(label)) continue;
+    // Clinic: drop micro inventory/static ticks — keep pass headers, deep file reads, outcomes.
+    if (/^Pass 1 · Inventory · (?:listing|starting)/i.test(label)) continue;
+    if (/^Pass 1 · note ·/i.test(label)) continue;
+    if (/^Static · /i.test(label)) continue;
+    if (/^Pass 2 · Assets ·/i.test(label)) continue;
+    if (/^Pass 2 · Static scan ·/i.test(label)) continue;
+    if (/^Deep review · batch \d+ skipped/i.test(label)) continue;
+    if (/^Deep review · (?:asking|reading files)/i.test(label)) continue;
+    if (/^(?:Debug clinic|Pass [123]|Deep ·|Deep review|Clinic ready|Verify ·|Triage ·|Plan ·|Agent ·|Multi-agent ·)/i.test(label)) {
+      clinicHeavy = true;
     }
     const prev = out[out.length - 1];
+    // Coalesce npm progress beats into one live row (clock updates, list stays readable).
+    const npmBeat = /^(?:npm (?:downloading|still unpacking)|Installing npm packages|Still installing npm)/i;
+    if (prev && npmBeat.test(prev.label) && npmBeat.test(label)) {
+      prev.label = label;
+      prev.at = step.at;
+      continue;
+    }
+    // Coalesce rapid "Reading path" / Deep · file ticks into the latest while keeping pass headers.
+    if (
+      prev
+      && /^Reading /i.test(prev.label)
+      && /^Reading /i.test(label)
+    ) {
+      prev.label = label;
+      prev.at = step.at;
+      continue;
+    }
+    // Clinic deep / model counters: one live row that updates in place (N/M · left · file).
+    const deepRead = /^Deep · reading \d+\/\d+/i;
+    const deepModel = /^Deep · model(?:\s+\d+\/\d+|\s+·)/i;
+    if (prev && deepRead.test(prev.label) && deepRead.test(label)) {
+      prev.label = label;
+      prev.at = step.at;
+      continue;
+    }
+    if (prev && deepModel.test(prev.label) && deepModel.test(label)) {
+      prev.label = label;
+      prev.at = step.at;
+      continue;
+    }
+    if (
+      prev
+      && /^Deep · /i.test(prev.label)
+      && /^Deep · /i.test(label)
+      && !/finding|clean|skipped|slow|complete|unavailable|wrapped/i.test(label)
+      && !deepRead.test(label)
+      && !deepModel.test(label)
+    ) {
+      prev.label = label;
+      prev.at = step.at;
+      continue;
+    }
     if (prev && prev.label === label) {
       prev.at = step.at;
       continue;
     }
     out.push({ label, at: step.at });
   }
-  if (sawFail) {
-    const redo = 'Redoing this pass — the last one failed';
-    const prev = out[out.length - 1];
-    if (!prev || prev.label !== redo) out.push({ label: redo, at: steps[steps.length - 1]?.at || Date.now() });
-  }
-  return out.slice(-8);
+  // Debug clinic needs a longer trail so the dropdown shows inventory → static → deep.
+  return out.slice(clinicHeavy ? -24 : -8);
 }
 
 /** Dots stay mounted — label updates must not remount them or the ripple resets / syncs. */
@@ -65,11 +111,15 @@ export function AgentProgressStatus({
   /** Work lines (strings or {label,at}) for the expandable list. */
   history?: Array<string | ChatTurnStatusStep>;
 }) {
-  const shown = (label?.trim() || 'Working…').replace(/\u2014/g, ':').replace(/\*\*/g, '');
-  const finished = /^done$/i.test(shown);
-  const steps = compressStatusSteps(normalizeStatusHistory(history, shown)
+  const rawLabel = (label?.trim() || 'Working…').replace(/\u2014/g, ':').replace(/\*\*/g, '');
+  const finished = /^done$/i.test(rawLabel);
+  const steps = compressStatusSteps(normalizeStatusHistory(history, rawLabel)
     .filter((s) => s.label && !/^Thinking…?$/i.test(s.label)));
-  const displaySteps = steps.length ? steps : [{ label: shown, at: Date.now() }];
+  const displaySteps = steps.length ? steps : [{ label: rawLabel, at: Date.now() }];
+  // Collapsed line always mirrors the latest live step (clinic counters, pass names, verify…).
+  const latestStep = displaySteps[displaySteps.length - 1]?.label || rawLabel;
+  const shown = finished ? rawLabel : latestStep;
+  const webSearch = looksLikeWebSearchStatus(shown);
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -98,22 +148,30 @@ export function AgentProgressStatus({
     });
   }, [open, displaySteps.length]);
 
-  const canExpand = displaySteps.length > 1;
+  const canExpand = displaySteps.length > 1
+    || /debug clinic|pass [123]|deep review|deep ·|verify ·|static ·|triage|clinic ready|^plan ·|^agent ·|^multi-agent ·|^reading /i.test(shown)
+    || displaySteps.some((s) => /debug clinic|pass [123]|deep review|deep ·|verify ·|static ·|triage|^plan ·|^agent ·|^multi-agent ·|^reading /i.test(s.label));
 
   return (
     <div ref={rootRef} className="relative min-w-0 max-w-full">
       <button
         type="button"
-        className="flex items-center gap-2.5 py-0.5 min-w-0 max-w-full text-left rounded-md hover:bg-white/[0.04] transition-colors"
+        className="flex items-center gap-2.5 py-0.5 min-w-0 max-w-full text-left rounded-md hover:bg-white/[0.04] transition-colors disabled:opacity-100"
         aria-live="polite"
         aria-label={shown}
         aria-expanded={open}
         title={canExpand ? 'Show every step Nova worked through' : shown}
-        onClick={() => canExpand && setOpen((v) => !v)}
-        disabled={!canExpand}
+        onClick={() => {
+          if (!canExpand) return;
+          setOpen((v) => !v);
+        }}
       >
-        {finished ? null : <StatusDots />}
-        <span className={`min-w-0 flex-1 text-[13px] font-medium tracking-wide break-words [overflow-wrap:anywhere] ${finished ? 'text-content-tertiary' : 'text-content-secondary'}`}>
+        {finished ? null : webSearch ? (
+          <Globe className="w-3.5 h-3.5 shrink-0 text-sky-400 animate-pulse" aria-hidden />
+        ) : (
+          <StatusDots />
+        )}
+        <span className={`min-w-0 flex-1 text-[13px] font-medium tracking-wide break-words [overflow-wrap:anywhere] ${finished ? 'text-content-tertiary' : webSearch ? 'text-sky-300' : 'text-content-secondary'}`}>
           {shown}
         </span>
         {canExpand ? (

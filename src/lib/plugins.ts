@@ -298,6 +298,56 @@ export function getChatEnabledPlugins(map: PluginStateMap) {
   });
 }
 
+/** Installed + connected with a token — enough to run live API asks from chat. */
+export function getConnectedPlugins(map: PluginStateMap) {
+  return PLUGIN_CATALOG.filter(p => {
+    if (!isPluginWired(p.id)) return false;
+    const s = getPluginRuntime(p.id, map);
+    if (!s.installed || !s.connected || s.permissions.length === 0) return false;
+    return Boolean(String(s.token || '').trim());
+  });
+}
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** True when the user ask clearly targets this plugin (name, Try-in-chat label, or mention regex). */
+export function pluginIntentMatches(pluginId: string, userText: string): boolean {
+  const raw = String(userText || '').trim();
+  if (!raw) return false;
+  if (/<!--nova-debug-clinic-->/i.test(raw) || /^Debug this\.\s*find the issue/i.test(raw) || /^\[Debug\]/i.test(raw)) {
+    return false;
+  }
+  const lower = raw.toLowerCase();
+  const plugin = getPluginById(pluginId);
+  if (!plugin) return pluginMentionsText(pluginId, lower);
+
+  const name = plugin.name.toLowerCase();
+  // Explicit: "Using Gmail…", "via Slack", "from Notion"
+  if (new RegExp(`\\b(?:using|via|from|with|in)\\s+${escapeRegExp(name)}\\b`, 'i').test(raw)) {
+    return true;
+  }
+  if (lower === name || lower.startsWith(`${name},`) || lower.startsWith(`${name}:`)) {
+    return true;
+  }
+
+  // Try-in-chat chip labels / full prompts (exact or near-exact)
+  for (const action of plugin.actions || []) {
+    const label = String(action.label || '').trim().toLowerCase();
+    const prompt = String(action.prompt || '').trim().toLowerCase();
+    if (label && (lower === label || lower === `${label}.`)) return true;
+    if (prompt && lower === prompt) return true;
+    // Short chip text typed manually: "Inbox summary", "Unread channels", "My issues"
+    if (label.length >= 4 && (lower === label || lower.includes(label))) {
+      // Avoid "mail" false positives: require label to be a substantial share of the ask
+      if (lower.length <= label.length + 12) return true;
+    }
+  }
+
+  return pluginMentionsText(pluginId, lower);
+}
+
 /** Stub / live plugin replies for chat. */
 export async function runPluginAction(
   pluginId: string,
@@ -308,12 +358,15 @@ export async function runPluginAction(
   const handler = getCatalogPluginHandler(pluginId);
   if (!handler) return null;
 
-  const lower = userText.toLowerCase();
-  if (!pluginMentionsText(pluginId, lower)) return null;
+  if (!pluginIntentMatches(pluginId, userText)) return null;
 
   const needed = intentPermission(pluginId, userText);
   if (permissions && permissions.length > 0) {
-    if (!hasPluginPermission(permissions, 'read') && needed === 'read') {
+    const hasListOrRead = hasPluginPermission(permissions, 'list') || hasPluginPermission(permissions, 'read');
+    if (needed === 'list' && !hasListOrRead) {
+      return requirePluginPermission(permissions, 'list', pluginId);
+    }
+    if (!hasPluginPermission(permissions, 'read') && needed === 'read' && !hasListOrRead) {
       return requirePluginPermission(permissions, 'read', pluginId);
     }
     if (needed === 'write' && !hasPluginPermission(permissions, 'write')) {
@@ -342,8 +395,7 @@ export async function runPluginAction(
 
 /** Honest reply when a plugin is named but not connected. never invent account data. */
 export function runPluginStub(pluginId: string, userText: string): string | null {
-  const lower = userText.toLowerCase();
-  if (!pluginMentionsText(pluginId, lower)) return null;
+  if (!pluginIntentMatches(pluginId, userText)) return null;
 
   const name = getPluginById(pluginId)?.name || pluginId;
   return [
@@ -354,9 +406,54 @@ export function runPluginStub(pluginId: string, userText: string): string | null
   ].join('\n');
 }
 
-export function detectPluginIntent(text: string, enabledIds: string[]): string | null {
-  for (const id of enabledIds) {
-    if (runPluginStub(id, text)) return id;
+/**
+ * Pick which connected plugin should handle this ask.
+ * Prefers: explicit "Using X" → exact Try-in-chat label → mention regex.
+ * When several match (e.g. "issue"), prefer the one named in the text, else first id order.
+ */
+export function detectPluginIntent(text: string, candidateIds: string[]): string | null {
+  if (!candidateIds.length) return null;
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  // Debug clinic owns the turn — never hand "issue"/"problems" to GitHub/Linear.
+  if (/<!--nova-debug-clinic-->/i.test(raw) || /^Debug this\.\s*find the issue/i.test(raw) || /^\[Debug\]/i.test(raw)) {
+    return null;
   }
-  return null;
+  const lower = raw.toLowerCase();
+
+  type Hit = { id: string; score: number };
+  const hits: Hit[] = [];
+
+  for (const id of candidateIds) {
+    const plugin = getPluginById(id);
+    if (!plugin) continue;
+    const name = plugin.name.toLowerCase();
+    let score = 0;
+
+    if (new RegExp(`\\b(?:using|via|from|with)\\s+${escapeRegExp(name)}\\b`, 'i').test(raw)) {
+      score = 100;
+    } else {
+      for (const action of plugin.actions || []) {
+        const label = String(action.label || '').trim().toLowerCase();
+        const prompt = String(action.prompt || '').trim().toLowerCase();
+        if (label && (lower === label || lower === `${label}.`)) {
+          score = Math.max(score, 90);
+        } else if (prompt && lower === prompt) {
+          score = Math.max(score, 90);
+        } else if (label.length >= 4 && lower.length <= label.length + 12 && lower.includes(label)) {
+          score = Math.max(score, 80);
+        }
+      }
+      if (score === 0 && pluginIntentMatches(id, raw)) {
+        // Bare mention — boost if plugin name appears
+        score = lower.includes(name) || lower.includes(id.replace(/-/g, ' ')) ? 60 : 40;
+      }
+    }
+
+    if (score > 0) hits.push({ id, score });
+  }
+
+  if (!hits.length) return null;
+  hits.sort((a, b) => b.score - a.score);
+  return hits[0].id;
 }

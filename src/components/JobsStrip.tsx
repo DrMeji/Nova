@@ -1,8 +1,9 @@
 /**
  * Compact background jobs + transient toasts above the sidebar profile.
+ * Model downloads collapse into one combined progress card.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import {
   cancelEngineDownload,
@@ -11,6 +12,7 @@ import {
   subscribeEngineDownloads,
   type EngineDownloadJob,
 } from '@/lib/engineDownloads';
+import { ENGINE_UI_CATALOG } from '@/lib/engineCatalogUi';
 import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { ROTATION_NOTE_EVENT } from '@/lib/modelRotation';
 import { SIDEBAR_TOAST_EVENT, type SidebarToastDetail } from '@/lib/sidebarToast';
@@ -23,8 +25,53 @@ function jobRoleLabel(job: EngineDownloadJob): string {
   const name = String(job.name || '');
   if (/next brain/i.test(name)) return 'Next brain';
   if (/coder/i.test(id) || /coder/i.test(name)) return 'Coding model';
+  if (/uigen|design/i.test(`${id} ${name}`)) return 'Design brain';
+  if (/vl|vision/i.test(`${id} ${name}`)) return 'Vision model';
   if (/qwen25-7b|instruct|llama|mistral|chat/i.test(`${id} ${name}`)) return 'Chat brain';
   return name.replace(/^Next brain · /i, '').trim() || job.id;
+}
+
+function jobSizeGb(job: EngineDownloadJob): number {
+  if (typeof job.sizeGb === 'number' && job.sizeGb > 0) return job.sizeGb;
+  const hit = ENGINE_UI_CATALOG.find((m) => m.id === job.id);
+  return hit?.sizeGb && hit.sizeGb > 0 ? hit.sizeGb : 1;
+}
+
+/** Size-weighted overall % across concurrent downloads. */
+function combinedProgress(jobs: EngineDownloadJob[]): number {
+  if (jobs.length === 0) return 0;
+  let done = 0;
+  let total = 0;
+  for (const j of jobs) {
+    const w = jobSizeGb(j);
+    total += w;
+    done += w * (Math.min(100, Math.max(0, j.progress)) / 100);
+  }
+  if (total <= 0) return 0;
+  return Math.round((done / total) * 100);
+}
+
+/** Rough ETA from elapsed time + weighted progress. */
+function formatEta(jobs: EngineDownloadJob[], combinedPct: number): string | null {
+  if (combinedPct <= 1 || combinedPct >= 100) return null;
+  const started = jobs
+    .map((j) => j.startedAt)
+    .filter((t): t is number => typeof t === 'number' && t > 0);
+  if (!started.length) return null;
+  const earliest = Math.min(...started);
+  const elapsedMs = Date.now() - earliest;
+  if (elapsedMs < 4_000) return null;
+  const rate = combinedPct / elapsedMs;
+  if (rate <= 0) return null;
+  const remainMs = (100 - combinedPct) / rate;
+  if (!Number.isFinite(remainMs) || remainMs <= 0) return null;
+  const sec = Math.round(remainMs / 1000);
+  if (sec < 60) return `~${sec}s left`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `~${min} min left`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `~${hr}h ${remMin}m left` : `~${hr}h left`;
 }
 
 export function JobsStrip({
@@ -40,6 +87,7 @@ export function JobsStrip({
   const [rotationNote, setRotationNote] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastRow[]>([]);
   const [playOpen, setPlayOpen] = useState(false);
+  const [, setTick] = useState(0);
 
   useEffect(() => subscribeEngineDownloads(() => {
     setJobs(getEngineDownloadJobs());
@@ -107,14 +155,28 @@ export function JobsStrip({
 
   const active = jobs.filter(j => j.progress < 100 || j.error || j.canceling);
   const downloading = active.filter(j => j.progress < 100 && !j.error && !j.canceling);
+  const errored = active.filter(j => j.error);
+
+  const sortedBySpeed = useMemo(
+    () => [...downloading].sort((a, b) => b.progress - a.progress),
+    [downloading],
+  );
+  const lead = sortedBySpeed[0] || null;
+  const combinedPct = combinedProgress(downloading);
+  const eta = formatEta(downloading, combinedPct);
+
+  useEffect(() => {
+    if (downloading.length === 0) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 5_000);
+    return () => window.clearInterval(id);
+  }, [downloading.length]);
+
   if (active.length === 0 && !updateJob && !rotationNote && toasts.length === 0 && !playOpen) return null;
 
-  const topPct = Math.round(
-    downloading[0]?.progress
-      ?? updateJob?.percent
-      ?? 0,
-  );
   const compactRail = variant === 'sidebar' && collapsed;
+  const displayPct = downloading.length > 0
+    ? combinedPct
+    : Math.round(updateJob?.percent ?? 0);
 
   if (compactRail) {
     return (
@@ -122,8 +184,12 @@ export function JobsStrip({
         <div className="mb-2 flex flex-col items-center gap-1.5 px-1">
           <div
             className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-nova-navy-950/95"
-            title={downloading[0] ? `Downloading ${jobRoleLabel(downloading[0])} (${topPct}%)` : 'Download'}
-            aria-label={`Download ${topPct} percent`}
+            title={
+              lead
+                ? `${jobRoleLabel(lead)} lead · ${downloading.length} model${downloading.length === 1 ? '' : 's'} · ${displayPct}%`
+                : 'Download'
+            }
+            aria-label={`Download ${displayPct} percent`}
           >
             <svg className="absolute inset-1" viewBox="0 0 36 36" aria-hidden>
               <circle
@@ -146,7 +212,7 @@ export function JobsStrip({
                 className="text-sky-400 transition-[stroke-dashoffset] duration-300"
                 style={{
                   strokeDasharray: `${2 * Math.PI * 14}`,
-                  strokeDashoffset: `${2 * Math.PI * 14 * (1 - Math.min(100, topPct) / 100)}`,
+                  strokeDashoffset: `${2 * Math.PI * 14 * (1 - Math.min(100, displayPct) / 100)}`,
                   transform: 'rotate(-90deg)',
                   transformOrigin: '50% 50%',
                 }}
@@ -154,7 +220,7 @@ export function JobsStrip({
             </svg>
             <Loader2 className="relative z-[1] h-3.5 w-3.5 text-sky-300 animate-spin" />
           </div>
-          <span className="text-[10px] tabular-nums text-content-tertiary leading-none">{topPct}%</span>
+          <span className="text-[10px] tabular-nums text-content-tertiary leading-none">{displayPct}%</span>
         </div>
         <PlayWhileDownloading open={playOpen} onClose={() => setPlayOpen(false)} />
       </>
@@ -174,66 +240,66 @@ export function JobsStrip({
             {t.message}
           </p>
         ))}
-        {downloading.length > 0 ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-content-secondary leading-tight truncate min-w-0">Downloading…</p>
-            <PlayGameButton onClick={() => setPlayOpen(true)} className="shrink-0" />
-          </div>
-        ) : null}
-        {active.map(job => {
-          const label = jobRoleLabel(job);
-          const pct = Math.round(job.progress);
-          return (
-            <div key={job.id} className="space-y-1">
-              <div className="flex items-center gap-2 text-[11px]">
-                {!job.error && !job.canceling ? (
-                  <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
-                ) : null}
-                <div className="min-w-0 flex-1">
-                  {job.error ? (
-                    <NovaErrorInline message={job.error} />
-                  ) : (
-                    <div className="flex items-baseline justify-between gap-2 min-w-0">
-                      <p className="text-content-secondary truncate">
-                        {job.canceling ? 'Canceling…' : label}
-                      </p>
-                      {!job.canceling ? (
-                        <span className="tabular-nums text-content-tertiary shrink-0">{pct}%</span>
-                      ) : null}
-                    </div>
-                  )}
+
+        {downloading.length > 0 && lead ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[11px] text-content-secondary truncate leading-tight">
+                    {jobRoleLabel(lead)}
+                  </p>
+                  <p className="text-[10px] text-content-tertiary truncate leading-tight mt-0.5">
+                    {downloading.length === 1
+                      ? 'Downloading'
+                      : `${downloading.length} models · combined`}
+                    {eta ? ` · ${eta}` : ''}
+                  </p>
                 </div>
-                {!job.error && !job.canceling ? (
-                  <button
-                    type="button"
-                    className="shrink-0 p-0.5 text-content-tertiary hover:text-rose-300"
-                    aria-label="Cancel download"
-                    onClick={() => void cancelEngineDownload(job.id)}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                ) : null}
               </div>
-              {job.error ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <PlayGameButton onClick={() => setPlayOpen(true)} className="shrink-0" />
+                <span className="tabular-nums text-[11px] text-content-tertiary">{combinedPct}%</span>
                 <button
                   type="button"
-                  className="text-[10px] text-content-tertiary hover:text-content-secondary"
-                  onClick={() => dismissEngineDownloadError(job.id)}
+                  className="p-0.5 text-content-tertiary hover:text-rose-300"
+                  aria-label="Cancel all downloads"
+                  title="Cancel all"
+                  onClick={() => {
+                    for (const j of downloading) void cancelEngineDownload(j.id);
+                  }}
                 >
-                  Dismiss
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              ) : null}
-              {!job.error && !job.canceling && job.progress < 100 ? (
-                <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-sky-500/80 transition-all"
-                    style={{ width: `${Math.min(100, job.progress)}%` }}
-                  />
-                </div>
-              ) : null}
+              </div>
             </div>
-          );
-        })}
+            <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-sky-500/80 transition-all"
+                style={{ width: `${Math.min(100, combinedPct)}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {errored.map(job => (
+          <div key={job.id} className="space-y-1">
+            <div className="flex items-center gap-2 text-[11px]">
+              <div className="min-w-0 flex-1">
+                <NovaErrorInline message={job.error || 'Download failed'} />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="text-[10px] text-content-tertiary hover:text-content-secondary"
+              onClick={() => dismissEngineDownloadError(job.id)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
+
         {rotationNote ? (
           <p className="text-xs text-content-tertiary truncate">{rotationNote}</p>
         ) : null}

@@ -35,7 +35,7 @@ import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
   Sparkles,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, Mic,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, AudioLines,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/novaEngine';
@@ -54,7 +54,6 @@ import { isNovaDevSession } from '@/lib/novaRuntime';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { useSocial } from '@/context/SocialContext';
 import { supabase } from '@/lib/supabase';
 
@@ -62,7 +61,7 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'account', label: 'Account', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'ai', label: 'AI', icon: Zap },
-  { id: 'voice', label: 'Voice', icon: Mic },
+  { id: 'voice', label: 'Voice', icon: AudioLines },
   { id: 'models', label: 'Models', icon: Boxes },
   { id: 'providers', label: 'Providers', icon: Cloud },
   { id: 'privacy', label: 'Privacy', icon: Shield },

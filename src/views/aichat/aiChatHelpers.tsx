@@ -1,6 +1,8 @@
 /**
  * Pure helpers / constants for AIChat — extracted to shrink the view.
  */
+import { useEffect } from 'react';
+import { MessageSquare, AudioLines } from 'lucide-react';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { stopSpeaking } from '@/lib/voiceSession';
@@ -41,12 +43,28 @@ export function stackedLiveTurnParts(ms: number): { top: string; bottom: string;
 }
 
 export const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
-  plan: 'Plan this out step by step, then we can build:\n\n',
+  // Hidden marker — Plan mode routes to the deep plan card (not prose prefix pollution).
+  plan: '<!--nova-plan-mode-->\n',
   ask: '',
-  agent: 'Agent mode. edit files and run approved tools in this workspace:\n\n',
-  debug: 'Debug this. find the issue and propose a fix:\n\n',
-  multitask: '[Multi-agent] ',
+  // Hidden markers — Agent / Multi-agent early send paths (no prose pollution in the bubble).
+  agent: '<!--nova-agent-mode-->\n',
+  // Debug uses a hidden marker + seeded composer text — never the old "find the issue" line
+  // (that word falsely routed to the GitHub plugin).
+  debug: '<!--nova-debug-clinic-->\n',
+  multitask: '<!--nova-multi-agent-->\n',
 };
+
+/** Default composer draft when Plan is armed (user can edit freely). */
+export const PLAN_MODE_SEED = 'Help me plan this out before we build.';
+
+/** Default composer draft when Debug is armed (user can edit freely). */
+export const DEBUG_CLINIC_SEED = 'Find all problems in this project.';
+
+/** Default composer draft when Agent is armed. */
+export const AGENT_MODE_SEED = 'Work through the bound project one task at a time.';
+
+/** Default composer draft when Multi-agent is armed. */
+export const MULTI_AGENT_MODE_SEED = 'Scout, build, and verify the next fix on this project.';
 
 export const COMPOSER_MODE_LABEL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan',
@@ -60,11 +78,27 @@ export const COMPOSER_MODE_PILL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'mu
   plan: 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-200',
   ask: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
   agent: 'border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-200',
-  debug: 'border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200',
+  // Clinic mode — rose, distinct from the amber folder bind pill.
+  debug: 'border-rose-500/55 bg-rose-500/20 text-rose-100 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]',
   multitask: 'border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-200',
 };
 
+const LEGACY_DEBUG_PREFIX = 'Debug this. find the issue and propose a fix:';
+
 export function composerModeFromContent(content: string): 'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null {
+  const raw = String(content || '');
+  if (/<!--nova-debug-clinic-->/i.test(raw) || raw.startsWith(LEGACY_DEBUG_PREFIX) || /^\[Debug\]/i.test(raw.trim())) {
+    return 'debug';
+  }
+  if (/<!--nova-plan-mode-->/i.test(raw) || /^\[Plan\]/i.test(raw.trim())) {
+    return 'plan';
+  }
+  if (/<!--nova-multi-agent-->/i.test(raw) || /^\[Multi-agent\]/i.test(raw.trim())) {
+    return 'multitask';
+  }
+  if (/<!--nova-agent-mode-->/i.test(raw) || /^\[Agent\]/i.test(raw.trim())) {
+    return 'agent';
+  }
   if (content.startsWith(COMPOSER_MODE_PREFIX.plan)) return 'plan';
   if (content.startsWith(COMPOSER_MODE_PREFIX.agent)) return 'agent';
   if (content.startsWith(COMPOSER_MODE_PREFIX.debug)) return 'debug';
@@ -84,46 +118,70 @@ export function ChatModeTabs() {
   const current = route.name === 'chat'
     ? (route.mode === 'voice' ? 'voice' : 'general')
     : 'general';
+  const voiceFocus = current === 'voice';
+
+  const emitVoiceVisual = (mode: 'voice' | 'chat') => {
+    window.dispatchEvent(new CustomEvent('NOVA:voice-visual', { detail: { mode } }));
+  };
+
+  useEffect(() => {
+    emitVoiceVisual(current === 'voice' ? 'voice' : 'chat');
+  }, [current]);
+
   const go = (next: 'general' | 'voice') => {
     if (next === 'voice' && !isVoiceTabEnabled()) return;
     if (next === 'general') {
       stopSpeaking();
+      emitVoiceVisual('chat');
       if (route.name === 'chat' && !route.mode && !route.chatId) return;
       navigate({ name: 'chat' });
       return;
     }
     if (route.name === 'chat' && route.mode === next) return;
+    emitVoiceVisual('voice');
     navigate({ name: 'chat', mode: next });
   };
-  const tabs: { id: 'general' | 'voice'; label: string }[] = [
-    { id: 'general', label: 'Chat' },
-    { id: 'voice', label: 'Voice' },
+
+  const tabs: { id: 'general' | 'voice'; label: string; Icon: typeof MessageSquare }[] = [
+    { id: 'general', label: 'Chat', Icon: MessageSquare },
+    { id: 'voice', label: 'Voice', Icon: AudioLines },
   ];
+
   return (
-    <div className="relative z-30 shrink-0 flex items-center justify-center gap-1 pt-3 pb-1 pointer-events-auto">
-      {tabs.map(t => {
-        const parked = t.id === 'voice' && !isVoiceTabEnabled();
-        const soonTitle = 'Voice · coming soon (conversation only, no PC control or builds)';
-        return (
-          <button
-            key={t.id}
-            type="button"
-            disabled={parked}
-            onClick={() => go(t.id)}
-            title={parked ? soonTitle : undefined}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-              parked
-                ? 'text-content-tertiary/40 cursor-not-allowed opacity-50'
-                : current === t.id
-                ? 'bg-surface-hover text-content-primary'
-                : 'text-content-tertiary hover:text-content-primary'
-            }`}
-          >
-            {t.label}
-            {parked ? ' · soon' : ''}
-          </button>
-        );
-      })}
+    <div
+      className={`fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-500 ${
+        voiceFocus ? 'opacity-[0.38] hover:opacity-70' : 'opacity-100'
+      }`}
+    >
+      <div className="nova-glass-tabs pointer-events-auto inline-flex items-center justify-center gap-0.5 rounded-full p-1 min-w-[6.5rem]">
+        {tabs.map(t => {
+          const parked = t.id === 'voice' && !isVoiceTabEnabled();
+          const soonTitle = 'Voice · coming soon (conversation only, no PC control or builds)';
+          const active = !parked && current === t.id;
+          const Icon = t.Icon;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              disabled={parked}
+              data-active={active ? 'true' : 'false'}
+              onClick={() => go(t.id)}
+              title={parked ? soonTitle : t.label}
+              aria-label={t.label}
+              className={`relative z-10 flex items-center justify-center rounded-full min-w-[2.75rem] min-h-[2.35rem] px-3.5 py-2 transition-colors ${
+                parked
+                  ? 'text-content-tertiary/40 cursor-not-allowed opacity-50'
+                  : active
+                  ? 'text-content-primary'
+                  : 'text-content-tertiary/70 hover:text-content-primary cursor-pointer'
+              }`}
+            >
+              <Icon className="w-4 h-4 pointer-events-none" strokeWidth={2} aria-hidden />
+              <span className="sr-only">{t.label}{parked ? ' · soon' : ''}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -250,7 +308,7 @@ export const PLACEHOLDERS: Record<ChatMode, string[]> = {
     'Ask NOVA to generate a short clip...',
   ],
   voice: [
-    'Tap send, then speak. NOVA will listen and reply aloud.',
+    'Type a message or tap the mic, then press Enter…',
     'Ask a question or request a short story…',
   ],
   code: [
@@ -266,6 +324,104 @@ export const GREETINGS = [
   'Ready when you are.',
   'What would you like to explore?',
 ];
+
+/** Spoken when entering Voice — one line per visit, conversation-only. */
+export const VOICE_GREETINGS = [
+  'Hey — what do you want to talk about today?',
+  'Welcome back. How can I help?',
+  'Hi. What’s on your mind?',
+  'Ready when you are. What should we chat about?',
+  'Hey there. How’s your day going?',
+  'What can we dig into today?',
+  'Hello. What would you like to talk through?',
+  'I’m here. What do you want to discuss?',
+  'Good to see you. How can I assist you today?',
+  'What would you like to explore in conversation?',
+  'Take your time — what’s on your plate today?',
+  'How’s everything going? What should we cover?',
+  'Whenever you’re ready — what can I help with?',
+  'Nice to have you back. What are we chatting about?',
+  'How was your day? Want to talk something through?',
+  'I’m listening. What would you like to start with?',
+];
+
+/** Brief hold lines while Voice works — pick by ask intent, not one generic “research” line. */
+export const VOICE_RESEARCH_FILLERS = [
+  'Just a moment — let me look that up.',
+  'One second while I check that for you.',
+  'Give me a moment to research that.',
+  'Just a moment while I look into that.',
+  'One moment while I dig into that.',
+];
+
+const VOICE_STORY_FILLERS = [
+  'Okay — let me get a story together for you.',
+  'Alright, give me a second to put a story together.',
+  'Sure — let me spin up a short story.',
+  'One moment — I’ve got a story coming.',
+];
+
+const VOICE_CAPABILITY_FILLERS = [
+  'Sure — let me walk you through what I can do.',
+  'Happy to — give me a second to cover what Nova’s good for.',
+  'Alright, let me explain what I can help with.',
+];
+
+const VOICE_JOKE_FILLERS = [
+  'Okay — let me think of a good one.',
+  'One sec — I’ve got a joke brewing.',
+];
+
+const VOICE_GENERAL_FILLERS = [
+  'Okay — give me a moment.',
+  'Sure, one second.',
+  'Alright, let me think that through.',
+  'On it — just a moment.',
+  'Give me a second.',
+];
+
+function pickFrom(list: string[], fallback: string): string {
+  return list[Math.floor(Math.random() * list.length)] || fallback;
+}
+
+/** Pick a greeting different from the last spoken one when possible. */
+export function pickVoiceGreeting(previous?: string | null): string {
+  const list = VOICE_GREETINGS;
+  if (list.length <= 1) return list[0] || '';
+  let pick = list[Math.floor(Math.random() * list.length)];
+  if (previous && list.length > 1) {
+    let guard = 0;
+    while (pick === previous && guard++ < 8) {
+      pick = list[Math.floor(Math.random() * list.length)];
+    }
+  }
+  return pick;
+}
+
+/** Hold line matched to what the user asked — avoids “pulling that up” on unrelated asks. */
+export function pickVoiceHoldLine(ask: string): string {
+  const t = String(ask || '').toLowerCase();
+  if (/\b(stor(?:y|ies)|tale|fable|bedtime|narrat)/i.test(t)) {
+    return pickFrom(VOICE_STORY_FILLERS, 'Okay — let me get a story together for you.');
+  }
+  if (
+    /\b(what can (?:you|nova)|what do you do|what(?:'s| is) nova|capabilities|what are you|who are you|how can you help|what can nova do)\b/i.test(t)
+  ) {
+    return pickFrom(VOICE_CAPABILITY_FILLERS, 'Sure — let me walk you through what I can do.');
+  }
+  if (/\b(joke|funny|make me laugh|pun)\b/i.test(t)) {
+    return pickFrom(VOICE_JOKE_FILLERS, 'Okay — let me think of a good one.');
+  }
+  if (/\b(who is|who was|what is|tell me about|look(?:ing)? up|search|research|explain|wikipedia|define)\b/i.test(t)) {
+    return pickFrom(VOICE_RESEARCH_FILLERS, 'Just a moment — let me look that up.');
+  }
+  return pickFrom(VOICE_GENERAL_FILLERS, 'Okay — give me a moment.');
+}
+
+/** @deprecated Prefer pickVoiceHoldLine(ask) — kept for older call sites. */
+export function pickVoiceResearchFiller(): string {
+  return pickFrom(VOICE_GENERAL_FILLERS, 'Okay — give me a moment.');
+}
 
 export const IMAGE_IDEAS = [
   { id: 'caricature', label: 'Create a caricature', tone: 'from-amber-900/80 to-stone-900' },

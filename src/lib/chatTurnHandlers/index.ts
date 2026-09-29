@@ -2,7 +2,7 @@
  * Turn handlers — AIChat switches on classifyTurn.kind and calls these owners.
  */
 
-export { handlePlanTurnReply, type PlanTurnHost } from './plan';
+export { handlePlanTurnReply, runPlanTurn, type PlanTurnHost } from './plan';
 export {
   pendingCreateBootstrap,
   runCreateTurn,

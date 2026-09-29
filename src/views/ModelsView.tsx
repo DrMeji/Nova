@@ -500,6 +500,7 @@ function BuildTeamPanel({
   installing,
   installProgress,
   onInstall,
+  onInstallTeam,
   onCancel,
   onDelete,
 }: {
@@ -507,6 +508,7 @@ function BuildTeamPanel({
   installing: Set<string>;
   installProgress: Record<string, number>;
   onInstall: (id: string) => void;
+  onInstallTeam: (ids: string[]) => void;
   onCancel: (id: string) => void;
   onDelete: (id: string, name: string) => void;
 }) {
@@ -527,7 +529,7 @@ function BuildTeamPanel({
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
-  }, [installed]);
+  }, [installed, installing]);
 
   const roleModels = useMemo(() => {
     const byRole: Record<'chat' | 'coder' | 'design' | 'vision', LocalModel[]> = {
@@ -544,9 +546,16 @@ function BuildTeamPanel({
     return byRole;
   }, []);
 
+  /** Missing roles + Design specialist when only Instruct fallback — skip optional Vision. */
   const missingInstalls = (team?.roles || [])
-    .filter((r) => r.status === 'missing' && r.role !== 'vision')
-    .map((r) => ({ id: r.recommendedId, name: r.recommendedId, role: r.role }));
+    .filter((r) => {
+      if (r.role === 'vision') return false;
+      if (r.status === 'missing') return true;
+      if (r.role === 'design' && r.status === 'fallback') return true;
+      return false;
+    })
+    .map((r) => ({ id: r.recommendedId, name: r.recommendedId, role: r.role }))
+    .filter((m) => m.id && !installed.has(m.id) && !installing.has(m.id) && isEngineDownloadable(m.id));
 
   return (
     <div className="space-y-10">
@@ -563,9 +572,8 @@ function BuildTeamPanel({
               type="button"
               className="nova-btn-primary h-8 px-3 rounded-lg text-xs shrink-0"
               onClick={() => {
-                for (const m of missingInstalls.slice(0, 3)) {
-                  onInstall(m.id);
-                }
+                const ids = [...new Set(missingInstalls.map((m) => m.id))];
+                onInstallTeam(ids);
               }}
             >
               Install recommended team
@@ -1268,6 +1276,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
         id: opts.downloadId,
         name: opts.downloadName,
         source: 'models',
+        sizeGb: opts.needGb > 0 ? opts.needGb / 1.15 : undefined,
         hunt: opts.huntMeta
           ? {
               url: opts.huntMeta.url,
@@ -2085,6 +2094,29 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
               installing={installing}
               installProgress={installProgress}
               onInstall={(id) => toggleInstall(id)}
+              onInstallTeam={(ids) => {
+                const unique = [...new Set(ids)].filter(
+                  (id) => isEngineDownloadable(id) && !installed.has(id) && !isEngineDownloading(id),
+                );
+                if (unique.length === 0) {
+                  setOllamaNote('Recommended team models are already installed or downloading.');
+                  return;
+                }
+                const names = unique.map((id) => LOCAL_MODELS.find((m) => m.id === id)?.name || id);
+                setOllamaNote(
+                  unique.length === 1
+                    ? `Downloading ${names[0]}…`
+                    : `Downloading ${unique.length} team models: ${names.join(', ')}…`,
+                );
+                for (const id of unique) {
+                  const model = LOCAL_MODELS.find((m) => m.id === id);
+                  executeInstall({
+                    id,
+                    name: model?.name || id,
+                    category: model?.category,
+                  });
+                }
+              }}
               onCancel={(id) => cancelInstall(id)}
               onDelete={(id, name) => removeInstall(id, name)}
             />

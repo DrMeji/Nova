@@ -39,7 +39,7 @@ function esc(text: string) {
 }
 
 function tok(cls: string, text: string) {
-  return `<span class="ark-tok-${cls}">${esc(text)}</span>`;
+  return `<span class="nova-tok-${cls}">${esc(text)}</span>`;
 }
 
 function highlightJsLike(code: string): string {
@@ -64,6 +64,17 @@ function highlightJsLike(code: string): string {
       continue;
     }
     const ch = code[i];
+    // JSX / TSX tags — same colors as HTML (was all-gray "Notes" look for <div> etc.).
+    if (ch === '<' && i + 1 < n && /[A-Za-z/!]/.test(code[i + 1])) {
+      const end = code.indexOf('>', i);
+      if (end < 0) {
+        out += highlightHtmlTag(code.slice(i));
+        break;
+      }
+      out += highlightHtmlTag(code.slice(i, end + 1));
+      i = end + 1;
+      continue;
+    }
     if (ch === '"' || ch === "'" || ch === '`') {
       let j = i + 1;
       while (j < n) {
@@ -95,7 +106,7 @@ function highlightJsLike(code: string): string {
       i = j;
       continue;
     }
-    out += esc(ch);
+    out += tok('punct', ch);
     i += 1;
   }
   return out;

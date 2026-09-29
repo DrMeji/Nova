@@ -7,6 +7,7 @@ import { looksLikeImplementGo, isPlanPrefixedMessage } from '@/lib/chatPlanMode'
 import { looksLikePromptEcho } from '@/lib/chatHistory';
 import { looksLikeConversationalPlanningAsk, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
+import { wantsApplyFix, looksLikeFeatureMutateAsk } from '@/lib/chatDiagnose';
 import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 
 export const NO_WORKSPACE_MSG =
@@ -52,23 +53,32 @@ export function hasActiveWorkspace(opts: {
 export function normalizeComposerMode(mode: ComposerAgentMode): 'ask' | 'plan' | 'agent' {
   if (mode === 'plan') return 'plan';
   if (mode === 'ask') return 'ask';
-  if (mode === 'agent' || mode === 'debug') return 'agent';
-  // Default chat (no chip) and Tasks: allow code edits when the user asks to change code.
+  // Debug clinic — never treat as agent write mode.
+  if (mode === 'debug') return 'ask';
+  if (mode === 'agent' || mode === 'multitask') return 'agent';
+  // Default chat (no chip): allow code edits when the user asks to change code.
   return 'agent';
 }
 
 const PLAN_PREFIX = 'Plan this out step by step, then we can build:\n\n';
 const AGENT_PREFIX = 'Agent mode. edit files and run approved tools in this workspace:\n\n';
 const DEBUG_PREFIX = 'Debug this. find the issue and propose a fix:\n\n';
+const DEBUG_PREFIX_ALT = 'Debug this. find the issue and propose a fix:';
 const TASKS_PREFIX = 'Break this into parallel tasks and tackle them clearly:\n\n';
 
 export function stripComposerPrefix(text: string): string {
   return String(text || '')
+    .replace(/<!--nova-debug-clinic-->\s*/gi, '')
+    .replace(/<!--nova-plan-mode-->\s*/gi, '')
+    .replace(/<!--nova-agent-mode-->\s*/gi, '')
+    .replace(/<!--nova-multi-agent-->\s*/gi, '')
+    .replace(/^\[Multi-agent\]\s*/i, '')
     .replace(PLAN_PREFIX, '')
     .replace(AGENT_PREFIX, '')
     .replace(DEBUG_PREFIX, '')
+    .replace(new RegExp(`^${DEBUG_PREFIX_ALT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '')
     .replace(TASKS_PREFIX, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[\[](?:Plan|Ask|Agent|Debug|Tasks|Multi-agent)[\]]\s*/i, '')
     .trim();
 }
 
@@ -77,8 +87,12 @@ export function isChatPlanTurn(content: string): boolean {
 }
 
 export function isChatAgentTurn(content: string, composerMode: ComposerAgentMode): boolean {
-  if (composerMode === 'agent' || composerMode === 'debug') return true;
-  return content.startsWith(AGENT_PREFIX) || looksLikeImplementGo(content);
+  if (composerMode === 'debug') return false;
+  if (composerMode === 'agent' || composerMode === 'multitask') return true;
+  return content.startsWith(AGENT_PREFIX)
+    || /<!--nova-agent-mode-->|<!--nova-multi-agent-->/i.test(content)
+    || /^\[Multi-agent\]/i.test(content.trim())
+    || looksLikeImplementGo(content);
 }
 
 export function modeBlocksFileWrites(mode: 'ask' | 'plan' | 'agent', content: string): boolean {
@@ -212,16 +226,33 @@ export function looksLikeCodeEditAsk(text: string): boolean {
 }
 
 export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerAgentMode): boolean {
+  // Debug clinic is audit-only — never write files on a Debug turn.
+  if (
+    composerMode === 'debug'
+    || /<!--nova-debug-clinic-->/i.test(String(content || ''))
+    || /^\[Debug\]/i.test(String(content || '').trim())
+    || content.startsWith(DEBUG_PREFIX)
+    || content.startsWith(DEBUG_PREFIX_ALT)
+  ) {
+    return false;
+  }
   const mode = normalizeComposerMode(composerMode);
   // Explicit UI/code edits always write — even if the composer chip is Ask.
   if (looksLikeImplementGo(content) || looksLikeBuildStart(content) || looksLikeCodeEditAsk(content)) {
+    return true;
+  }
+  // "Can you fix the settings switch?" must write even when phrased as a question.
+  if (wantsApplyFix(content) || looksLikeFeatureMutateAsk(content)) {
     return true;
   }
   if (mode === 'ask') return false;
   if (modeBlocksFileWrites(mode, content)) return false;
   if (looksLikePromptEcho(content)) return false;
   if (wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)) return false;
-  if (looksLikeProjectDebugAsk(content)) return true;
+  // Diagnose-only ("I'm having a problem with…") explains — no file writes yet.
+  if (looksLikeProjectDebugAsk(content)) {
+    return false;
+  }
   if (mode === 'agent') {
     const t = String(content || '').trim();
     // Casual Q&A like "what can you help me build?" must hit the model. not the no-workspace wall.

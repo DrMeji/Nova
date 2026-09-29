@@ -75,7 +75,10 @@ const MIN_RAM_GB: Record<string, number> = {
 type EngineRow = { id?: string; status?: string; name?: string };
 
 export function isCoderEngineId(id: string | undefined | null): boolean {
-  return /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(String(id || ''));
+  const s = String(id || '');
+  // Vision / VL packs must never be treated as craft coders.
+  if (/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj)\b/i.test(s)) return false;
+  return /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(s);
 }
 
 /** UI / design-specialist GGUFs (not craft coders). */
@@ -96,7 +99,8 @@ export function rankedReadyDesignIds(
     .filter((id) => fitsRam(id, ramGb));
   const specialists = ready.filter((id) => isUiDesignEngineId(id));
   const instruct = rankedReadyEngineIds(models, 'chat', ramGb, maxCoderParamsB)
-    .filter((id) => !isCoderEngineId(id));
+    .filter((id) => !isCoderEngineId(id))
+    .filter((id) => !/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj|qwen2-vl)\b/i.test(id));
   const ordered: string[] = [];
   for (const id of DESIGN_ENGINE_RANK) {
     if (specialists.includes(id) || instruct.includes(id)) ordered.push(id);
@@ -176,7 +180,9 @@ export function rankedReadyEngineIds(
         && !String(m.id).includes('image')
         && !String(m.id).includes('video')
         && !String(m.id).startsWith('sd')
-        && m.id !== 'flux-schnell-local',
+        && m.id !== 'flux-schnell-local'
+        // Vision / mmproj packs are never chat or coding engines.
+        && !/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj|qwen2-vl|qwen2\.5-vl)\b/i.test(String(m.id)),
       )
       .map(m => String(m.id)),
   );
@@ -350,6 +356,7 @@ export function pickNextBackupId(
   kind: 'chat' | 'coding' | 'image' | 'video',
   ramGb = 8,
   currentId?: string,
+  maxParamsB?: number | null,
 ): string | undefined {
   const blocked = new Set(
     (models || [])
@@ -370,6 +377,10 @@ export function pickNextBackupId(
     if (blocked.has(id)) continue;
     if (!fitsRam(id, ramGb)) continue;
     if (!isEngineDownloadable(id)) continue;
+    if (typeof maxParamsB === 'number' && maxParamsB > 0) {
+      const p = parseParamsB(id);
+      if (p != null && p > maxParamsB) continue;
+    }
     return id;
   }
   return undefined;

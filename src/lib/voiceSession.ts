@@ -12,6 +12,12 @@ import {
   pickBestTtsVoice,
   resolveNeuralVoiceId,
 } from '@/lib/voiceAudio';
+import {
+  attachSpeakAudioMeter,
+  beginSystemSpeakMeter,
+  endSpeakMeter,
+  punchSystemSpeakMeter,
+} from '@/lib/voiceSpeakMeter';
 
 type SpeechRecognitionLike = {
   continuous: boolean;
@@ -92,6 +98,28 @@ export function scrubDictationTranscript(text: string): string {
  * Live speech-to-text for the Chat composer.
  * Click mic again (handle.stop) when done speaking.
  */
+export function humanizeSpeechError(code: string): string {
+  const key = String(code || '').trim().toLowerCase();
+  switch (key) {
+    case 'network':
+      return 'Speech recognition needs a network connection right now. Check Wi‑Fi, or type instead.';
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone permission denied. Allow mic access, then try again.';
+    case 'audio-capture':
+      return 'Could not capture audio. Check the mic in Settings → Voice.';
+    case 'language-not-supported':
+      return 'This speech language isn’t supported here.';
+    case 'bad-grammar':
+      return 'Speech recognition hit a setup error. Try the mic again.';
+    case 'listen failed':
+    case 'mic start failed':
+      return 'Couldn’t start listening. Tap the mic and try again.';
+    default:
+      return code || 'Listening failed. Try the mic again, or type instead.';
+  }
+}
+
 export function startLiveDictation(opts: {
   lang?: string;
   onInterim?: (text: string) => void;
@@ -125,7 +153,7 @@ export function startLiveDictation(opts: {
     try { rec.stop(); } catch { /* ignore */ }
     try { rec.abort(); } catch { /* ignore */ }
     const text = scrubDictationTranscript((finalText || interimText).trim());
-    if (error) opts.onError?.(error);
+    if (error) opts.onError?.(humanizeSpeechError(error));
     else if (text) opts.onFinal?.(text);
     opts.onEnd?.();
   };
@@ -202,51 +230,73 @@ async function primeOutputSink(): Promise<void> {
 }
 
 let activeAudio: HTMLAudioElement | null = null;
+/** Bumped on every speak/stop so in-flight TTS promises abandon cleanly. */
+let speakToken = 0;
 
 function playBase64Audio(
   base64: string,
   mime: string,
+  token: number,
   onPlaybackStart?: () => void,
 ): Promise<void> {
   return new Promise((resolve) => {
+    if (token !== speakToken) {
+      resolve();
+      return;
+    }
     try {
       activeAudio?.pause();
+      try { if (activeAudio) activeAudio.currentTime = 0; } catch { /* ignore */ }
       const audio = new Audio(`data:${mime};base64,${base64}`);
       activeAudio = audio;
       let started = false;
       const markStart = () => {
-        if (started) return;
+        if (started || token !== speakToken) return;
         started = true;
         onPlaybackStart?.();
       };
+      const done = () => {
+        if (activeAudio === audio) activeAudio = null;
+        endSpeakMeter();
+        resolve();
+      };
       audio.onplaying = markStart;
       audio.onplay = markStart;
-      audio.onended = () => {
-        if (activeAudio === audio) activeAudio = null;
-        resolve();
-      };
-      audio.onerror = () => {
-        if (activeAudio === audio) activeAudio = null;
-        resolve();
-      };
-      void audio.play().catch(() => resolve());
+      audio.onended = done;
+      audio.onerror = done;
+      void attachSpeakAudioMeter(audio).then(() => {
+        if (token !== speakToken) {
+          try { audio.pause(); audio.currentTime = 0; } catch { /* ignore */ }
+          done();
+          return;
+        }
+        void audio.play().then(() => {
+          if (token !== speakToken) {
+            try { audio.pause(); audio.currentTime = 0; } catch { /* ignore */ }
+            done();
+          }
+        }).catch(() => done());
+      });
     } catch {
+      endSpeakMeter();
       resolve();
     }
   });
 }
 
-async function speakViaNeural(text: string, onPlaybackStart?: () => void): Promise<boolean> {
+async function speakViaNeural(text: string, token: number, onPlaybackStart?: () => void): Promise<boolean> {
   if (!window.novaDesktop?.voiceNeuralSpeak) return false;
   const voice = resolveNeuralVoiceId(getVoiceTtsVoiceUri() || undefined);
   const res = await window.novaDesktop.voiceNeuralSpeak({ text, voice });
+  if (token !== speakToken) return true; // treat as handled — caller should stop
   if (!res?.ok || !res.base64) return false;
   await primeOutputSink();
-  await playBase64Audio(res.base64, res.mime || 'audio/mpeg', onPlaybackStart);
+  if (token !== speakToken) return true;
+  await playBase64Audio(res.base64, res.mime || 'audio/mpeg', token, onPlaybackStart);
   return true;
 }
 
-async function speakViaOpenAI(text: string, onPlaybackStart?: () => void): Promise<boolean> {
+async function speakViaOpenAI(text: string, token: number, onPlaybackStart?: () => void): Promise<boolean> {
   const key = getProviderApiKeys().openai;
   if (!key?.trim() || !window.novaDesktop?.httpRequest) return false;
   const res = await desktopRequest('https://api.openai.com/v1/audio/speech', {
@@ -260,27 +310,75 @@ async function speakViaOpenAI(text: string, onPlaybackStart?: () => void): Promi
       response_format: 'mp3',
     }),
   });
+  if (token !== speakToken) return true;
   if (!res.ok) return false;
   const data = res.data as { __binary?: boolean; base64?: string; mime?: string };
   if (!data?.__binary || !data.base64) return false;
   await primeOutputSink();
-  await playBase64Audio(data.base64, data.mime || 'audio/mpeg', onPlaybackStart);
+  if (token !== speakToken) return true;
+  await playBase64Audio(data.base64, data.mime || 'audio/mpeg', token, onPlaybackStart);
   return true;
 }
 
-async function speakViaSystem(text: string, onPlaybackStart?: () => void): Promise<void> {
+async function speakViaSystem(text: string, token: number, onPlaybackStart?: () => void): Promise<void> {
+  if (token !== speakToken) return;
   const voices = await ensureSpeechVoicesLoaded();
-  window.speechSynthesis.cancel();
+  if (token !== speakToken) return;
+  try {
+    window.speechSynthesis.cancel();
+  } catch { /* ignore */ }
   const utter = new SpeechSynthesisUtterance(String(text || '').slice(0, 1200));
   utter.rate = 0.96;
   utter.pitch = 1.02;
   const voice = pickBestTtsVoice(voices);
   if (voice) utter.voice = voice;
   await new Promise<void>((resolve) => {
-    utter.onstart = () => onPlaybackStart?.();
-    utter.onend = () => resolve();
-    utter.onerror = () => resolve();
-    window.speechSynthesis.speak(utter);
+    if (token !== speakToken) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(watch);
+      resolve();
+    };
+    const watch = window.setInterval(() => {
+      if (token !== speakToken) {
+        try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+        finish();
+      }
+    }, 120);
+    utter.onstart = () => {
+      if (token !== speakToken) {
+        try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+        finish();
+        return;
+      }
+      beginSystemSpeakMeter();
+      onPlaybackStart?.();
+    };
+    utter.onboundary = (ev: SpeechSynthesisEvent) => {
+      if (token !== speakToken) return;
+      const name = String(ev.name || '').toLowerCase();
+      if (name === 'word' || name === 'sentence' || !name) {
+        punchSystemSpeakMeter(name === 'sentence' ? 0.55 : 0.95);
+      }
+    };
+    utter.onend = () => {
+      endSpeakMeter();
+      finish();
+    };
+    utter.onerror = () => {
+      endSpeakMeter();
+      finish();
+    };
+    try {
+      window.speechSynthesis.speak(utter);
+    } catch {
+      finish();
+    }
   });
 }
 
@@ -291,6 +389,7 @@ export type SpeakTextOptions = {
 
 export function speakText(text: string, opts?: SpeakTextOptions): Promise<void> {
   const onStart = opts?.onPlaybackStart;
+  const token = ++speakToken;
   return new Promise((resolve) => {
     void (async () => {
       const chunk = String(text || '').trim();
@@ -298,85 +397,169 @@ export function speakText(text: string, opts?: SpeakTextOptions): Promise<void> 
         resolve();
         return;
       }
-      window.speechSynthesis?.cancel();
-      activeAudio?.pause();
+      try {
+        window.speechSynthesis?.cancel();
+      } catch { /* ignore */ }
+      try {
+        activeAudio?.pause();
+        if (activeAudio) activeAudio.currentTime = 0;
+      } catch { /* ignore */ }
       activeAudio = null;
 
-      if (await speakViaNeural(chunk, onStart)) {
+      if (await speakViaNeural(chunk, token, onStart)) {
         resolve();
         return;
       }
-      if (await speakViaOpenAI(chunk, onStart)) {
+      if (token !== speakToken) {
         resolve();
         return;
       }
-      await speakViaSystem(chunk, onStart);
+      if (await speakViaOpenAI(chunk, token, onStart)) {
+        resolve();
+        return;
+      }
+      if (token !== speakToken) {
+        resolve();
+        return;
+      }
+      await speakViaSystem(chunk, token, onStart);
       resolve();
     })();
   });
 }
 
 export function stopSpeaking(): void {
+  speakToken += 1;
+  endSpeakMeter();
   try {
     window.speechSynthesis?.cancel();
-    activeAudio?.pause();
-    activeAudio = null;
+    // Chromium sometimes ignores a single cancel while speaking.
+    window.speechSynthesis?.pause?.();
+    window.speechSynthesis?.cancel();
   } catch {
     /* ignore */
   }
+  try {
+    if (activeAudio) {
+      activeAudio.pause();
+      activeAudio.currentTime = 0;
+      activeAudio.src = '';
+    }
+  } catch {
+    /* ignore */
+  }
+  activeAudio = null;
 }
 
 export async function listenOnce(
-  timeoutMsOrOpts: number | { timeoutMs?: number; onMicStream?: (stream: MediaStream) => void } = 12_000,
+  timeoutMsOrOpts: number | { timeoutMs?: number; onMicStream?: (stream: MediaStream) => void } = 16_000,
 ): Promise<{ ok: boolean; text: string; error?: string }> {
-  const timeoutMs = typeof timeoutMsOrOpts === 'number' ? timeoutMsOrOpts : (timeoutMsOrOpts.timeoutMs ?? 12_000);
+  const timeoutMs = typeof timeoutMsOrOpts === 'number' ? timeoutMsOrOpts : (timeoutMsOrOpts.timeoutMs ?? 16_000);
   const onMicStream = typeof timeoutMsOrOpts === 'number' ? undefined : timeoutMsOrOpts.onMicStream;
   const rec = getRecognition();
   if (!rec) {
     return { ok: false, text: '', error: 'Speech recognition is not available in this browser.' };
   }
 
+  // Stop any TTS so the mic isn't fighting playback / echo cancel.
+  stopSpeaking();
+
+  // Keep the selected device stream open for the whole listen — Web Speech often
+  // follows the active capture device once getUserMedia has claimed it.
   const inputStream = await openVoiceInputStream();
   if (!inputStream) {
     return { ok: false, text: '', error: 'Microphone access denied. Pick a mic in Settings → Voice.' };
   }
   onMicStream?.(inputStream);
+
+  // Brief warm-up so the OS routes capture before recognition starts.
+  await new Promise<void>(r => window.setTimeout(r, 180));
+
   return new Promise((resolve) => {
     let done = false;
+    let best = '';
+    let startedAt = Date.now();
+    let restartCount = 0;
+
     const releaseMic = () => {
-      inputStream.getTracks().forEach(t => t.stop());
+      try { inputStream.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
     };
+
     const finish = (result: { ok: boolean; text: string; error?: string }) => {
       if (done) return;
       done = true;
       window.clearTimeout(timer);
       releaseMic();
+      try { rec.onresult = null; rec.onerror = null; rec.onend = null; } catch { /* ignore */ }
       try { rec.stop(); } catch { /* ignore */ }
       try { rec.abort(); } catch { /* ignore */ }
       resolve(result);
     };
 
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = 'en-US';
+    const tryStart = () => {
+      if (done) return;
+      try {
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+        rec.start();
+      } catch (err) {
+        // Already started is fine; otherwise bail.
+        const msg = err instanceof Error ? err.message : String(err || '');
+        if (!/already started/i.test(msg) && restartCount === 0) {
+          finish({ ok: false, text: '', error: msg || 'mic start failed' });
+        }
+      }
+    };
+
     rec.onresult = (ev) => {
       const parts: string[] = [];
       for (let i = 0; i < ev.results.length; i++) {
         parts.push(ev.results[i][0]?.transcript || '');
       }
-      finish({ ok: true, text: parts.join(' ').trim() });
-    };
-    rec.onerror = (ev) => finish({ ok: false, text: '', error: ev.error || 'listen failed' });
-    rec.onend = () => {
-      if (!done) finish({ ok: false, text: '', error: 'no speech detected' });
+      best = scrubDictationTranscript(parts.join(' ').trim());
+      const last = ev.results[ev.results.length - 1] as { isFinal?: boolean };
+      if (last?.isFinal && best) {
+        finish({ ok: true, text: best });
+      }
     };
 
-    const timer = window.setTimeout(() => finish({ ok: false, text: '', error: 'listen timed out' }), timeoutMs);
-    try {
-      rec.start();
-    } catch (err) {
-      finish({ ok: false, text: '', error: err instanceof Error ? err.message : 'mic start failed' });
-    }
+    rec.onerror = (ev) => {
+      const err = String(ev.error || 'listen failed');
+      // Keep listening through silence / aborted — don't fail the turn early.
+      if (err === 'no-speech' || err === 'aborted') return;
+      if (err === 'audio-capture') {
+        finish({ ok: false, text: '', error: 'Could not capture audio. Check the mic in Settings → Voice.' });
+        return;
+      }
+      if (err === 'not-allowed') {
+        finish({ ok: false, text: '', error: 'Microphone permission denied.' });
+        return;
+      }
+      // Soft errors: allow onend restart path.
+    };
+
+    rec.onend = () => {
+      if (done) return;
+      if (best) {
+        finish({ ok: true, text: best });
+        return;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < timeoutMs - 400 && restartCount < 6) {
+        restartCount += 1;
+        window.setTimeout(tryStart, 120);
+        return;
+      }
+      finish({ ok: false, text: '', error: 'no speech detected' });
+    };
+
+    const timer = window.setTimeout(() => {
+      if (best) finish({ ok: true, text: best });
+      else finish({ ok: false, text: '', error: 'listen timed out' });
+    }, timeoutMs);
+
+    tryStart();
   });
 }
 

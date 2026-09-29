@@ -5,6 +5,19 @@
 
 export const NOVA_CHANGELOG = [
   {
+    version: '0.1.250',
+    channel: 'stable' as const,
+    date: 'Sep 28, 2026',
+    title: 'Project asks stay on disk; clinic tabs; diagnose chat',
+    notes: [
+      'Bound-folder asks (“what is this project / more info / full report”) never hit web search or GitHub plugins — no random book links',
+      'Overview vs diagnose vs Debug clinic routing: answer the question asked',
+      'Debug Clinic severity tabs + compact expandable rows; Repair all pill only',
+      'Natural-language diagnose → cause → fix offer; NovaClinicGym test project',
+      'Live Preview HashRouter / base path harden for gym-style Vite apps',
+    ],
+  },
+  {
     version: '0.1.230',
     channel: 'stable' as const,
     date: 'Sep 17, 2026',

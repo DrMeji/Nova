@@ -23,6 +23,10 @@ import { countLineDiff } from '@/lib/agentTrace';
 import { buildStudioTraceMessage } from '@/lib/chatCodeReply';
 import { getActiveBrainId, isWeakCoderId } from '@/lib/brainRoles';
 import { isCoderEngineId } from '@/lib/enginePick';
+import {
+  replyHasUnexpectedForeignBleed,
+  scrubUnexpectedForeignScript,
+} from '@/lib/scrubForeignBleed';
 import { inferEditTopicFromAsk, rememberLastEditTopic } from '@/lib/editAskResolve';
 import { pushApplySnapshot } from '@/lib/chatApplySnapshotStore';
 
@@ -389,6 +393,10 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
     priorHistory,
     regenerate: Boolean(bag.regenerating),
     shouldAbort: () => !turnStillActive(bag),
+    onStatus: (label: string) => {
+      if (!turnStillActive(bag)) return;
+      bag.pushAssistantStatus(label);
+    },
     onDelta: (live: string) => {
       if (!turnStillActive(bag)) return;
       let text = String(live || '').trim();
@@ -403,17 +411,33 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
           '',
         ).trim();
       }
+      // English asks: never paint a Chinese/Japanese/Korean dump mid-stream.
+      const userAsk = String(bag.content || '').trim();
+      text = scrubUnexpectedForeignScript(text, userAsk) || text;
       if (text.length < 2) return;
       bag.setMessages((prev: { id?: string; content?: string }[]) => {
         const cur = prev.find((m) => m.id === assistantId);
         const prevText = String(cur?.content || '');
-        // Do not wipe a longer good stream with a short unrelated replacement.
+        // Do not wipe a longer good stream with a short unrelated replacement —
+        // but always allow shrinking when we are stripping foreign-script bleed.
+        const prevBleed = replyHasUnexpectedForeignBleed(prevText, userAsk);
+        const nextBleed = replyHasUnexpectedForeignBleed(text, userAsk);
         if (
           prevText.length >= 48
           && !prevText.startsWith('__generating__:')
           && text.length < Math.floor(prevText.length * 0.55)
           && !text.startsWith(prevText.slice(0, Math.min(40, prevText.length)))
+          && !(prevBleed && !nextBleed)
         ) {
+          return prev;
+        }
+        // Prefer clean English over a longer bleed already in the bubble.
+        if (prevBleed && !nextBleed) {
+          const next = prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m));
+          bag.messagesRef.current = next;
+          return next;
+        }
+        if (!prevBleed && nextBleed && prevText.length >= 24) {
           return prev;
         }
         const next = prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m));

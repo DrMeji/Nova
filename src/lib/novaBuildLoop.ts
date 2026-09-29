@@ -405,10 +405,10 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
   };
 }
 
-/** Whether create should use the Nova build loop (default on; free, no paywall). */
+/** Whether create should use the legacy Nova build loop. Default off (createV2). */
 export function shouldUseNovaCreateBuildLoop(): boolean {
   const prefs = getLocalPrefs();
-  return prefs.agentLoopOnCreate !== false;
+  return prefs.agentLoopOnCreate === true;
 }
 
 export function shouldUseNovaEditBuildLoop(): boolean {

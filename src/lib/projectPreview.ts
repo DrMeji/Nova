@@ -104,10 +104,94 @@ export async function verifyLivePreviewUrl(url: string | null | undefined): Prom
     });
     window.clearTimeout(timer);
     // Vite may return 200/304; some configs briefly 404 the root before HMR — treat 2xx–4xx as "server up".
-    return res.status > 0 && res.status < 500;
+    if (!(res.status > 0 && res.status < 500)) return false;
   } catch {
     return false;
   }
+
+  // Reject raw TSX/JSX (blank Live + crash sound). Transformed modules include jsxDEV/createElement.
+  for (const rel of ['/src/main.tsx', '/src/main.jsx', '/src/index.tsx', '/src/index.jsx']) {
+    try {
+      const ctrl = new AbortController();
+      const timer = window.setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(new URL(rel, raw).href, {
+        method: 'GET',
+        signal: ctrl.signal,
+        cache: 'no-store',
+        mode: 'cors',
+        headers: { Accept: 'text/javascript, application/javascript, */*' },
+      });
+      window.clearTimeout(timer);
+      if (!res.ok) continue;
+      const body = (await res.text()).slice(0, 40_000);
+      if (!body) continue;
+      if (/getElementById\([^)]*\)!/.test(body)) return false;
+      if (/<React\.StrictMode>|<App\s*\/>/.test(body) && !/jsxDEV|createElement/.test(body)) return false;
+      if (/\bimport\s+React\b/.test(body) && /from\s+['"]react['"]/.test(body) && /<[A-Z]/.test(body)) {
+        return false;
+      }
+      if (/jsxDEV|createElement|createRoot/.test(body)) return true;
+      return true;
+    } catch {
+      /* try next entry */
+    }
+  }
+  return true;
+}
+
+/**
+ * Preflight before Live Preview — catch missing entry / assets so we don’t open a black window.
+ * Returns ok:false with a human error when the tree isn’t ready to preview.
+ */
+export function verifyPreviewReady(files: Record<string, string>): { ok: true } | { ok: false; error: string } {
+  const keys = Object.keys(files || {}).map((k) => k.replace(/\\/g, '/'));
+  const has = (rel: string) => keys.some((k) => k === rel || k.endsWith(`/${rel}`));
+
+  const htmlKey = keys.find((k) => /(^|\/)index\.html$/i.test(k) && !/(^|\/)dist\//i.test(k))
+    || keys.find((k) => /(^|\/)index\.html$/i.test(k));
+  if (!htmlKey) {
+    return { ok: false, error: 'No index.html found — Live Preview needs an entry page before it can open.' };
+  }
+  const html = String(files[htmlKey] || files[Object.keys(files).find((k) => k.replace(/\\/g, '/') === htmlKey) || ''] || '');
+  const entry = html.match(/<script[^>]+src=["']([^"']+)["']/i)?.[1]
+    || html.match(/src=["'](\/?src\/main\.[tj]sx?)["']/i)?.[1];
+  if (entry && !/^https?:/i.test(entry)) {
+    const rel = entry.replace(/^\.\//, '').replace(/^\//, '');
+    if (!has(rel) && !has(`src/${rel.split('/').pop()}`)) {
+      // Vite resolves /src/main.tsx from disk; only fail when files map is rich and still missing.
+      if (keys.length >= 8 && !keys.some((k) => k.endsWith(rel) || k.endsWith('main.tsx') || k.endsWith('main.jsx'))) {
+        return {
+          ok: false,
+          error: `Entry script “${entry}” is missing — fix the entry file before opening Live Preview.`,
+        };
+      }
+    }
+  }
+
+  // Icon / asset refs that would 404 and sometimes leave a broken first paint.
+  const assetRefs = [...html.matchAll(/(?:href|src)=["']([^"']+\.(?:svg|png|jpe?g|ico|webp))["']/gi)]
+    .map((m) => String(m[1] || '').trim())
+    .filter((r) => r && !/^https?:/i.test(r) && !r.startsWith('data:'));
+  for (const ref of assetRefs) {
+    const clean = ref.replace(/^\.\//, '').replace(/^\//, '');
+    const okAsset = has(clean)
+      || has(`public/${clean}`)
+      || keys.some((k) => k.endsWith(`/${clean}`) || k.endsWith(clean));
+    if (!okAsset && keys.length >= 4) {
+      return {
+        ok: false,
+        error: `Missing asset “${ref}” (referenced from index.html). Repair that finding first, then open Live.`,
+      };
+    }
+  }
+
+  if (isViteProject(files)) {
+    if (!files['package.json'] && !keys.some((k) => k.endsWith('package.json'))) {
+      return { ok: false, error: 'Vite project is missing package.json — cannot start Live Preview.' };
+    }
+  }
+
+  return { ok: true };
 }
 
 /** Start / refresh the static preview server and open (or reload) the NOVA preview window. */
@@ -226,9 +310,14 @@ async function readTextRel(root: string, rel: string): Promise<string | null> {
   return null;
 }
 
-/** Pull previewable HTML/CSS/JS (and launchers) from a bound folder without dumping the whole tree. */
+/** Pull previewable + source text from a bound folder (recursive under src/). */
 export async function loadPreviewFilesFromDisk(root: string): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
+  const maxFiles = 220;
+  const codeRe = /\.(html?|css|scss|js|jsx|mjs|cjs|ts|tsx|svg|json|md)$/i;
+  const skipDir = /^(node_modules|dist|build|release|\.git|\.vite|coverage|out)$/i;
+  const skipFile = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i;
+
   const textRels = [
     'index.html',
     'static/index.html',
@@ -253,6 +342,7 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
     'src/index.tsx',
     'css/styles.css',
     'js/app.js',
+    'README.md',
     '.gitignore',
   ];
   for (const rel of textRels) {
@@ -260,17 +350,22 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
     if (text != null) files[rel] = text;
   }
 
-  // Pull additional source files from src/ (and common web folders) so studio
-  // rebinds never drop App.jsx / CSS after a Recent switch.
-  for (const dir of ['src', 'src/components', 'src/pages', 'css', 'js', 'styles']) {
+  const walk = async (relDir: string, depth: number) => {
+    if (depth > 6 || Object.keys(files).length >= maxFiles) return;
     try {
-      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, dir));
-      if (!listing?.ok) continue;
+      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, relDir));
+      if (!listing?.ok) return;
       for (const item of listing.items || []) {
-        if (item.kind !== 'file' || !item.name) continue;
-        if (!/\.(html?|css|js|jsx|mjs|cjs|ts|tsx|svg|json)$/i.test(item.name)) continue;
-        if (/^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i.test(item.name)) continue;
-        const rel = `${dir}/${item.name}`.replace(/\\/g, '/');
+        if (Object.keys(files).length >= maxFiles) break;
+        if (!item?.name) continue;
+        if (skipDir.test(item.name)) continue;
+        const rel = (relDir ? `${relDir}/${item.name}` : item.name).replace(/\\/g, '/');
+        if (item.kind === 'dir') {
+          await walk(rel, depth + 1);
+          continue;
+        }
+        if (item.kind !== 'file') continue;
+        if (skipFile.test(item.name) || !codeRe.test(item.name)) continue;
         if (files[rel]) continue;
         const text = await readTextRel(root, rel);
         if (text != null) files[rel] = text;
@@ -278,20 +373,30 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
     } catch {
       /* ignore */
     }
+  };
+
+  // Full recursive source tree — clinic + repairs need views/hooks/data, not only App.tsx.
+  await walk('src', 0);
+  await walk('public', 0);
+  await walk('electron', 0);
+  for (const dir of ['css', 'js', 'styles', 'static', 'components', 'pages', 'app']) {
+    await walk(dir, 0);
   }
 
   // Static asset siblings next to static/index.html (text only — images stay on live server).
-  for (const dir of ['static', 'public', 'dist']) {
+  // (Already covered by walk('static') / walk('public') / walk('dist') when present.)
+  if (!files['dist/index.html']) {
     try {
-      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, dir));
-      if (!listing?.ok) continue;
-      for (const item of listing.items || []) {
-        if (item.kind !== 'file' || !item.name) continue;
-        if (!/\.(html?|css|js|mjs|svg|json)$/i.test(item.name)) continue;
-        const rel = `${dir}/${item.name}`;
-        if (files[rel]) continue;
-        const text = await readTextRel(root, rel);
-        if (text != null) files[rel] = text;
+      const listing = await window.novaDesktop?.listDir?.(joinRoot(root, 'dist'));
+      if (listing?.ok) {
+        for (const item of listing.items || []) {
+          if (item.kind !== 'file' || !item.name) continue;
+          if (!/\.(html?|css|js|mjs|svg|json)$/i.test(item.name)) continue;
+          const rel = `dist/${item.name}`;
+          if (files[rel]) continue;
+          const text = await readTextRel(root, rel);
+          if (text != null) files[rel] = text;
+        }
       }
     } catch {
       /* ignore */
@@ -332,69 +437,101 @@ export async function ensureBoundFolderPreview(opts: {
   // Never fall through to static HTML for Vite — serving raw JSX is a blank black window.
   const viteLike = isViteProject(files);
 
+  const ready = verifyPreviewReady(files);
+  if (!ready.ok) return ready;
+
   // Attach to an existing preview session before starting another Vite.
   const attached = await attachPreviewIfExists({ cwd: root });
   if (attached.ok) {
-    await openInAppPreview(attached.url, {
-      projectId: opts.projectId,
-      title: opts.title,
-      forceNavigate: true,
-      device: opts.device,
-    });
-    return { ok: true, url: attached.url };
+    const alive = await verifyLivePreviewUrl(attached.url);
+    if (alive) {
+      await openInAppPreview(attached.url, {
+        projectId: opts.projectId,
+        title: opts.title,
+        forceNavigate: true,
+        device: opts.device,
+      });
+      return { ok: true, url: attached.url };
+    }
+    // Stale/dead session — fall through and start a fresh one.
   }
 
   if (window.novaDesktop?.getOrAttachPreview) {
     const live = await window.novaDesktop.getOrAttachPreview(root);
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
-      await openInAppPreview(live.url, {
-        projectId: opts.projectId,
-        title: opts.title,
-        forceNavigate: true,
-        device: opts.device,
-      });
-      return { ok: true, url: live.url };
+      const alive = await verifyLivePreviewUrl(live.url);
+      if (alive) {
+        await openInAppPreview(live.url, {
+          projectId: opts.projectId,
+          title: opts.title,
+          forceNavigate: true,
+          device: opts.device,
+        });
+        return { ok: true, url: live.url };
+      }
     }
+    // Vite (including Electron+Vite) must never open as static HTML — that is the black window.
     if (viteLike) {
       return {
         ok: false,
         error: live?.error
-          || 'Could not start the live preview. Say **install npm dependencies** then click Localhost again.',
+          || 'Could not start the live preview server. Say **install npm dependencies**, then click Live again.',
       };
     }
   } else if (window.novaDesktop?.agentStartFolderPreview) {
     const live = await window.novaDesktop.agentStartFolderPreview({ cwd: root });
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
-      await openInAppPreview(live.url, {
-        projectId: opts.projectId,
-        title: opts.title,
-        forceNavigate: true,
-        device: opts.device,
-      });
-      return { ok: true, url: live.url };
+      const alive = await verifyLivePreviewUrl(live.url);
+      if (alive) {
+        await openInAppPreview(live.url, {
+          projectId: opts.projectId,
+          title: opts.title,
+          forceNavigate: true,
+          device: opts.device,
+        });
+        return { ok: true, url: live.url };
+      }
     }
     if (viteLike) {
       return {
         ok: false,
         error: live?.error
-          || 'Could not start the live preview. Say **install npm dependencies** then click Localhost again.',
+          || 'Could not start the live preview server. Say **install npm dependencies**, then click Live again.',
       };
     }
   } else if (viteLike) {
-    const dev = await ensureViteDevServer(root);
-    if (dev.ok && dev.url && !isPlaceholderPreviewUrl(dev.url)) {
-      await openInAppPreview(dev.url, {
-        projectId: opts.projectId,
-        title: opts.title,
-        forceNavigate: true,
-        device: opts.device,
-      });
-      return { ok: true, url: dev.url };
+    // Renderer-only path (no Electron IPC). Still avoid electron-flavored npm run dev when possible.
+    const lookElectron = (() => {
+      try {
+        const raw = files['package.json'] || '';
+        return /"electron"|vite-plugin-electron|dist-electron/i.test(raw);
+      } catch {
+        return false;
+      }
+    })();
+    if (!lookElectron) {
+      const dev = await ensureViteDevServer(root);
+      if (dev.ok && dev.url && !isPlaceholderPreviewUrl(dev.url)) {
+        const alive = await verifyLivePreviewUrl(dev.url);
+        if (alive) {
+          await openInAppPreview(dev.url, {
+            projectId: opts.projectId,
+            title: opts.title,
+            forceNavigate: true,
+            device: opts.device,
+          });
+          return { ok: true, url: dev.url };
+        }
+      }
+      return {
+        ok: false,
+        error: dev.error
+          || 'Could not start the Vite preview. Say **install npm dependencies** then click Live again.',
+      };
     }
     return {
       ok: false,
-      error: dev.error
-        || 'Could not start the Vite preview. Say **install npm dependencies** then click Localhost again.',
+      error: 'Electron+Vite preview needs the desktop bridge. Restart NOVA, then click Live again.',
     };
   }
 

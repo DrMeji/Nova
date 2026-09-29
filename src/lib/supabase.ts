@@ -37,18 +37,14 @@ const supabaseAnonKey = deskAnon || viteAnon;
 const missingSupabase = !supabaseUrl || !supabaseAnonKey || /placeholder\.invalid/i.test(supabaseUrl);
 
 /**
- * Hard brick only for browser builds without env.
- * Electron desktop may boot guest-local (create/bind/preview) when cloud keys
- * were not baked in — show supabaseCloudWarning instead of a black screen.
+ * GitHub-only auth: missing Supabase must never brick the shell.
+ * Kept as null for callers that still check the legacy export.
  */
-export const supabaseConfigError =
-  missingSupabase && typeof window !== 'undefined' && !(window as { novaDesktop?: unknown }).novaDesktop
-    ? 'NOVA was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
-    : null;
+export const supabaseConfigError: string | null = null;
 
-/** Non-blocking: cloud sign-in / sync unavailable until rebuilt with env. */
+/** Non-blocking note when optional cloud/social backends are absent. */
 export const supabaseCloudWarning = missingSupabase
-  ? 'Cloud sign-in is off (no Supabase env in this build). Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY to .env.local, then relaunch. Guest local create still works.'
+  ? 'Cloud social sync is off (no Supabase env). Sign in with GitHub still works; Networking/Message stay parked.'
   : null;
 
 export const isSupabaseConfigured = !missingSupabase;
@@ -281,8 +277,9 @@ export const supabase = createClient(
   supabaseAnonKey || 'public-anon-placeholder',
   {
     auth: {
-      persistSession: true,
-      autoRefreshToken: true,
+      // GitHub-only gate: no session persistence / refresh when cloud keys are absent.
+      persistSession: isSupabaseConfigured,
+      autoRefreshToken: isSupabaseConfigured,
       detectSessionInUrl: false,
       storage: novaAuthStorage,
       storageKey: 'ark-auth-token',

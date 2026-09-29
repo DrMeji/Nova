@@ -19,6 +19,9 @@ import {
   classifyCodeTurnSize,
   type ProjectFileMap,
 } from '@/lib/projectCodeEdit';
+import { looksLikeProjectDebugAsk, looksLikeProjectOverviewAsk } from '@/lib/chatProjectDebug';
+import { wantsApplyFix, looksLikeFeatureMutateAsk, diagnoseProjectAsk, formatDiagnoseExplainReply, rankFindingsForAsk } from '@/lib/chatDiagnose';
+import { looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 import {
   collectProjectFindings,
   describeProjectFromFiles,
@@ -26,10 +29,9 @@ import {
   isBuildArtifactPath,
   reportProjectFocusAsk,
   reportProjectProblems,
+  scanProjectFindings,
   type InspectFinding,
 } from '@/lib/projectInspect';
-import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
-import { looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 import {
   looksLikeGreenfieldKeepPlanning,
   looksLikeRequirementsAsk,
@@ -67,6 +69,8 @@ export type StudioAnswerInput = {
   stickyPinnedSource?: string;
   /** Abort if returns true (e.g. genSeq changed / stop). */
   shouldAbort?: () => boolean;
+  /** Override model wall (ms). createV2 passes a hard craft wall so 12-min build budget never applies. */
+  timeoutMs?: number;
   /** Plan-only turn. no file writes until user says go. */
   planOnly?: boolean;
   /** User asked to implement. model may emit @@@FILE blocks. */
@@ -102,6 +106,8 @@ const MODEL_TIMEOUT_CODE_MS = 120_000;
 const MODEL_TIMEOUT_BUILD_MS = 720_000;
 /** Micro follow-ups after surgical miss — never 300s. */
 const MODEL_TIMEOUT_MICRO_MS = 45_000;
+/** createV2 single-write craft — hard wall so silent GGUF waits cannot hang for minutes. */
+const MODEL_TIMEOUT_CREATE_V2_MS = 75_000;
 
 /** Create polish / full App+CSS builds — must not use the 45s micro timeout. */
 export function looksLikeFullUiBuildCodingAsk(message: string): boolean {
@@ -139,6 +145,10 @@ function looksLikeMicroCodingAsk(message: string): boolean {
 
 /** Timeout used by answerStudio for coding/file-edit turns (exported for smoke). */
 export function codingFileEditTimeoutMs(userMessage: string): number {
+  // createV2 craft — never use the 12-minute legacy build budget.
+  if (/createV2\s+RULES|FRESH BUILD RULES/i.test(String(userMessage || ''))) {
+    return MODEL_TIMEOUT_CREATE_V2_MS;
+  }
   // Tool-loop steps must stay snappy — hanging on "Thinking (step N/24)" for 8 minutes each froze creates.
   if (looksLikeAgentToolLoopPrompt(userMessage)) return MODEL_TIMEOUT_CODE_MS;
   if (looksLikeFullUiBuildCodingAsk(userMessage)) return MODEL_TIMEOUT_BUILD_MS;
@@ -187,6 +197,11 @@ export function classifyStudioIntent(
     return 'freeform';
   }
 
+  // Overview / “what is this about” / “more info on this project” before any debug intent.
+  if (looksLikeProjectOverviewAsk(String(message || ''))) {
+    if (/\b(?:more|full|deeper|detail|report|closer)\b/i.test(ask)) return 'file-detail';
+    return 'overview';
+  }
   if (looksLikeProjectDebugAsk(String(message || ''))) return 'debug';
   if (STUDIO_WIDER_RE.test(ask)) return 'wider';
   if (STUDIO_FIX_ASK_RE.test(ask) || /^(fix|how)\??$/i.test(ask) || /\bfix\s*#?\s*\d+\b/i.test(ask)) {
@@ -311,6 +326,7 @@ export function packStudioContext(input: StudioAnswerInput): {
     : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all', ask);
 
   const handsFreeDebug = looksLikeProjectDebugAsk(input.userMessage);
+  const applyNow = handsFreeDebug && (wantsApplyFix(input.userMessage) || looksLikeFeatureMutateAsk(input.userMessage) || input.allowFileEdits);
   const turnSize = handsFreeDebug ? 'full' : classifyCodeTurnSize(ask, input.files);
   const maxFiles = input.mode === 'code'
     ? (handsFreeDebug ? 16 : PACK_MAX_FILES_CODE)
@@ -348,9 +364,9 @@ export function packStudioContext(input: StudioAnswerInput): {
   const fileRule = input.planOnly
     ? 'PLAN ONLY. output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
-      ? handsFreeDebug
-        ? 'Hands-free debug: start with 2-4 sentences naming the root cause (file in backticks + why it breaks). Then emit @@@FILE blocks with COMPLETE updated file contents for every file you change. Do not stop at a checklist. Keep edits surgical. After the files, add ONE short sentence on how to verify.'
-        :         wantsFullUiBuild
+      ? handsFreeDebug && applyNow
+        ? 'Hands-free fix: start with 2-4 sentences in this shape — "Okay, I see the problem…", then **Cause:** `file` — why it breaks, then **How to fix it:** one short sentence. Then emit @@@FILE blocks with COMPLETE updated file contents for every file you change. Do not stop at a checklist. Keep edits surgical. After the files, add ONE short sentence on how to verify.'
+        : wantsFullUiBuild
           ? [
             'BUILD THE PRODUCT UI NOW. Do not describe it. Do not summarize the plan.',
             'Emit @@@FILE blocks with COMPLETE file contents for src/App.jsx (or App.tsx), src/App.css, and src/index.css at minimum.',
@@ -362,7 +378,9 @@ export function packStudioContext(input: StudioAnswerInput): {
             'After the files, add ONE short plain-English sentence only (no code fences).',
           ].join(' ')
           : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
-      : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
+      : handsFreeDebug
+        ? 'Diagnose only. Reply in this exact shape: (1) "Okay — I see the problem you’re describing." (2) **What’s going wrong:** restate their symptom in one line. (3) **Cause:** `path` — why it breaks. (4) **How to fix it:** one concrete step. (5) Offer to apply with "Say fix it when you’re ready." Do NOT write @@@FILE blocks. Do not dump whole files.'
+        : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const emptyProject = sourceKeys.length === 0;
   const plainSocial = !input.allowFileEdits
@@ -472,18 +490,45 @@ function localScanAnswer(
   }
   if (intent === 'debug') {
     const handsFree = looksLikeProjectDebugAsk(ask) || /\b(find why|root cause|fix it|fix this)\b/i.test(ask);
+    if (handsFree) {
+      const base = findings.length ? findings : scanProjectFindings(files, ask);
+      const ranked = rankFindingsForAsk(base, ask);
+      const flat = flattenProjectFiles(files);
+      const count = Object.keys(flat).filter(k => !isBuildArtifactPath(k)).length;
+      return formatDiagnoseExplainReply({
+        ask,
+        findings: ranked,
+        projectName,
+        fileCount: count || Object.keys(flat).length,
+        offerApply: true,
+      });
+    }
     return reportProjectProblems(files, projectName, 'debug', {
-      focusFix: handsFree,
+      focusFix: false,
       userQuestion: ask,
     });
   }
   if (intent === 'file-detail') {
-    return describeProjectInDetail(files, projectName);
+    const detail = describeProjectInDetail(files, projectName);
+    return [
+      detail.trim(),
+      '',
+      'If you want a deep scan for bugs and risks, press **+ → Debug** and say **find problems**.',
+      'If you want to change this project — add, remove, or fix something — just say what you need.',
+    ].join('\n');
   }
   let spoken = describeProjectFromFiles(files, projectName);
   if (/\b(can you |do you )?see\b/i.test(ask) || /\bwhat (am i|i'?m)/i.test(ask)) {
     const n = Object.keys(flattenProjectFiles(files)).length;
     spoken = `Yes. I can see **${n} file${n === 1 ? '' : 's'}** from **${projectName || 'this folder'}** in this chat.\n\n${spoken}`;
+  }
+  if (intent === 'overview' || looksLikeProjectOverviewAsk(ask)) {
+    spoken = [
+      spoken.trim(),
+      '',
+      'If you want a deep scan for bugs and risks, press **+ → Debug** and say **find problems**.',
+      'If you want to change this project — add, remove, or fix something — just say what you need and we can start.',
+    ].join('\n');
   }
   return spoken;
 }
@@ -577,6 +622,25 @@ export async function answerStudio(
   const packed = packStudioContext({ ...input, userMessage: ask });
   let findings = packed.findings;
   const packedTokens = packed.packedTokens;
+
+  // Natural-language diagnose (no apply yet): only for real problem asks — never overview.
+  if (
+    !input.allowFileEdits
+    && looksLikeProjectDebugAsk(input.userMessage)
+    && !looksLikeProjectOverviewAsk(input.userMessage)
+    && hasRealStudioFiles(input.files)
+  ) {
+    const diagnosed = diagnoseProjectAsk(input.files, ask, input.projectName);
+    findings = diagnosed.findings.length ? diagnosed.findings : findings;
+    return {
+      text: stripStudioMeta(diagnosed.text),
+      intent: 'debug',
+      findings,
+      meta: 'Diagnose \u00b7 attached files',
+      streamed: false,
+      packedTokens,
+    };
+  }
 
   // Empty folder + planning language must never dump "I scanned 0 source files".
   const planningTalk = !input.allowFileEdits && (
@@ -684,11 +748,15 @@ export async function answerStudio(
       }
     }
 
-    const timeoutMs = input.allowFileEdits
-      ? codingFileEditTimeoutMs(input.userMessage)
-      : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
-        ? MODEL_TIMEOUT_CODE_MS
-        : MODEL_TIMEOUT_MS;
+    const timeoutMs = typeof input.timeoutMs === 'number' && input.timeoutMs > 0
+      ? input.timeoutMs
+      : (input.allowFileEdits
+        ? codingFileEditTimeoutMs(input.userMessage)
+        : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
+          ? MODEL_TIMEOUT_CODE_MS
+          : MODEL_TIMEOUT_MS);
+    // Poll shouldAbort while waiting — stream callbacks never fire during silent GGUF load.
+    let abortPollId: number | null = null;
     const routePromise = arkRoute({
       message: packed.prompt,
       kind: routeKind,
@@ -725,12 +793,23 @@ export async function answerStudio(
         : undefined,
     });
 
+    const abortRace = new Promise<{ ok: false; aborted: true }>((resolve) => {
+      abortPollId = window.setInterval(() => {
+        if (input.shouldAbort?.()) {
+          killLocalInfer();
+          resolve({ ok: false, aborted: true });
+        }
+      }, 400);
+    });
+
     const timed = await Promise.race([
       routePromise.then(r => ({ ok: true as const, routed: r })),
-      new Promise<{ ok: false }>((resolve) => {
+      new Promise<{ ok: false; aborted?: false }>((resolve) => {
         window.setTimeout(() => resolve({ ok: false }), timeoutMs);
       }),
+      abortRace,
     ]);
+    if (abortPollId != null) window.clearInterval(abortPollId);
 
     if (input.shouldAbort?.()) {
       killLocalInfer();

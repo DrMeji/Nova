@@ -16,7 +16,6 @@ import {
 } from '@/components/SettingsShared';
 import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
 import { formatNovaId } from '@/lib/novaUserId';
@@ -37,15 +36,14 @@ import {
 } from '@/lib/novaSkills';
 import { isNovaDevSession } from '@/lib/novaRuntime';
 import {
-  Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
+  Check, Cpu, KeyRound, Sparkles, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
 
 
 export function SettingsGeneral({ ctx }: { ctx: any }) {
   const {
     activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
-    flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
+    setSavedFlash,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
@@ -71,18 +69,24 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
             <SettingsSection title="Account">
               <div className="space-y-5">
                 <div className="flex items-start gap-4">
-                  <div className="relative shrink-0 w-16 h-16 flex items-center justify-center">
-                    <NovaMark className="w-8 h-8 text-content-primary" title="NOVA" />
+                  <div className="relative shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border border-surface-border bg-nova-navy-900">
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <Github className="w-7 h-7 text-content-primary" />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
                     <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
-                      <Mail className="w-3 h-3" />
-                      {user?.email ?? 'guest@NOVA.local'}
+                      <Github className="w-3 h-3" />
+                      {user?.id === 'guest-local'
+                        ? 'guest@NOVA.local'
+                        : (profile?.nova_id ? formatNovaId(profile.nova_id) : 'GitHub')}
                     </p>
                     <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
                       <BadgeCheck className="w-3 h-3 text-sky-400" />
-                      {user?.id === 'guest-local' ? 'Guest session on this device' : 'Signed in account'}
+                      {user?.id === 'guest-local' ? 'Guest session on this device' : 'Signed in with GitHub'}
                     </p>
                   </div>
                 </div>
@@ -95,10 +99,10 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                 />
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <label className="block text-xs font-medium text-content-secondary">NOVA ID</label>
+                    <label className="block text-xs font-medium text-content-secondary">GitHub</label>
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
-                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-nova-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
+                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-nova-navy-900/80 px-3 py-2 text-sm font-mono text-content-primary overflow-x-auto">
                       {isNovaDevEmail(user?.email)
                         ? 'DEV'
                         : (profile?.nova_id ? formatNovaId(profile.nova_id) : '•••••••')}
@@ -108,23 +112,22 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                       disabled={!profile?.nova_id && !isNovaDevEmail(user?.email)}
                       onClick={() => {
                         if (!profile?.nova_id && !isNovaDevEmail(user?.email)) return;
-                        const novaIdText = isNovaDevEmail(user?.email)
+                        const idText = isNovaDevEmail(user?.email)
                           ? 'DEV'
                           : formatNovaId(String(profile?.nova_id ?? ''));
-                        void navigator.clipboard.writeText(novaIdText).then(() => {
+                        void navigator.clipboard.writeText(idText).then(() => {
                           setArkCopied(true);
                           window.setTimeout(() => setArkCopied(false), 1600);
                         }).catch(() => undefined);
                       }}
                       className="nova-btn-secondary shrink-0"
-                      title="Copy NOVA ID"
+                      title="Copy GitHub username"
                     >
                       {arkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       {arkCopied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
                 </div>
-                <Field label="Email" value={user?.email ?? 'guest@NOVA.local'} onChange={() => {}} disabled />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoCard title="Plan" value="Free on this PC" />
@@ -135,75 +138,10 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                   <button type="button" onClick={signOut} className="nova-btn-secondary !text-nova-accent-red">
                     Sign Out
                   </button>
-                  {user?.id && user.id !== 'guest-local' ? (
-                    <button
-                      type="button"
-                      disabled={deleteAccountBusy}
-                      className="nova-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
-                      onClick={() => {
-                        setDeleteAccountMsg(null);
-                        setDeleteConfirmOpen(true);
-                      }}
-                    >
-                      Delete account
-                    </button>
-                  ) : null}
                 </div>
-                {deleteAccountMsg ? (
-                  <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
-                ) : null}
               </div>
             </SettingsSection>
           )}
-
-          {deleteConfirmOpen ? (
-            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="NOVA-delete-account-title"
-                className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-nova-navy-900 shadow-2xl p-5 space-y-3"
-              >
-                <h3 id="NOVA-delete-account-title" className="text-base font-semibold text-content-primary">
-                  Delete your account permanently?
-                </h3>
-                <p className="text-sm text-content-secondary leading-relaxed">
-                  This removes your NOVA account and cloud data <span className="text-content-primary font-medium">immediately</span>.
-                  It cannot be undone. Local projects on this PC are not deleted unless you remove them yourself.
-                </p>
-                <div className="flex flex-wrap gap-2 justify-end pt-1">
-                  <button
-                    type="button"
-                    className="nova-btn-secondary"
-                    disabled={deleteAccountBusy}
-                    onClick={() => setDeleteConfirmOpen(false)}
-                  >
-                    Keep account
-                  </button>
-                  <button
-                    type="button"
-                    className="nova-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
-                    disabled={deleteAccountBusy}
-                    onClick={() => {
-                      setDeleteAccountBusy(true);
-                      setDeleteAccountMsg(null);
-                      void deleteAccountPermanently().then((res: { ok: boolean; error?: string }) => {
-                        setDeleteAccountBusy(false);
-                        if (!res.ok) {
-                          setDeleteAccountMsg(res.error || 'Could not delete account');
-                          return;
-                        }
-                        setDeleteConfirmOpen(false);
-                      });
-                    }}
-                  >
-                    {deleteAccountBusy ? 'Deleting…' : 'Delete forever'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
 
           {activeSection === 'appearance' && (
             <SettingsSection title="Appearance">

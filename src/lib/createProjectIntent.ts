@@ -48,7 +48,7 @@ const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
 
 const PROJECT_NOUN_RE =
-  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage)\b/i;
+  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage|todo(?:s)?|to-?dos?|timer|counter|checklist|list)\b/i;
 
 /** Shared create-verb + product-noun gate (classifyTurn / createBrief / buildStart). */
 export function isCreateVerbNoun(message: string): boolean {
@@ -90,6 +90,9 @@ export function fallbackCreateProjectName(text: string): string {
   if (named && !/^(site|app|my app|board|game|tool|new app)$/i.test(named)) return named;
   const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
   if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
+  if (/\b(?:todo(?:s)?|to-?dos?|checklist)\b/i.test(t)) return 'Todo List';
+  if (/\b(?:timer|stopwatch|pomodoro)\b/i.test(t)) return 'Timer';
+  if (/\b(?:counter|click\s+count)\b/i.test(t)) return 'Click Counter';
   if (/\b(?:game|arcade|fps|shooter)\b/i.test(t)) return 'Game';
   if (/\b(?:bot|cli|script)\b/i.test(t) && kind === 'python') return 'Tool';
   if (kind === 'static-web' || /\b(?:website|site|landing|page|homepage)\b/i.test(t)) return 'Site';

@@ -20,17 +20,11 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
     const paintValue = truncated
       ? `${value.split('\n').slice(0, MAX_PAINT_LINES).join('\n')}\n\n/* … ${rawLineCount - MAX_PAINT_LINES} more lines hidden — open the file in Explorer if you need the full lockfile */\n`
       : value;
-    // Live create streams huge App buffers — full highlight every chunk freezes the shell.
-    // During watch-only, paint plain text (escaped) and only syntax-highlight when idle/small.
+    // Always syntax-highlight (VS Code colors). Cap work via paintValue line limit above.
+    // Never fall back to plain escaped text — that looked like a Notes paste (all gray).
     const highlighted = useMemo(() => {
-      if (readOnly && paintValue.length > 2400) {
-        return paintValue
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
-      }
       return highlightCode(paintValue, language);
-    }, [paintValue, language, readOnly]);
+    }, [paintValue, language]);
     const lineCount = Math.max(1, paintValue.split('\n').length);
     const lines = useMemo(
       () => Array.from({ length: lineCount }, (_, i) => String(i + 1)),

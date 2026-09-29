@@ -6,6 +6,12 @@
 
 import { isTraceMessage, parseTraceMessage, stripAgentTrace } from '@/lib/agentTrace';
 import { isCatalogMessage, parseCatalogMessage, catalogToPlainText } from '@/lib/folderCatalog';
+import {
+  isClinicReportMessage,
+  parseClinicReportMessage,
+  clinicReportToPlainText,
+} from '@/lib/debugClinic';
+import { isPlanReportMessage, parsePlanReport, planReportToPlainText } from '@/lib/planReport';
 import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from '@/lib/pcExplore';
 import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
 import { getUsableTokens } from '@/lib/ggufContext';
@@ -59,6 +65,7 @@ export const BASE_SYSTEM =
   + 'If they reply yes / yeah / sure / more / go on / overall / full detail, continue that SAME topic with NEW depth. Never restart with a greeting. Never restate the same summary. '
   + 'Read every user message carefully before answering. Prefer a thorough, useful reply over a rushed short one. '
   + 'Reply in English by default. Do not mix Chinese, Japanese, Korean, or other scripts into English sentences unless the user explicitly asks for a translation or a foreign-language sample. '
+  + 'When they ask for a story, poem, joke, or any creative writing in English: write the ENTIRE piece in English from the first word to the last. Never switch languages mid-reply. '
   + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'If they only say hi/hello/hey: greet them briefly in your own words (one short sentence). Do not paste a fixed script. Do not list capabilities unless they ask. '
@@ -358,12 +365,23 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
     const data = parseCatalogMessage(raw);
     return data ? catalogToPlainText(data) : '';
   }
+  if (isClinicReportMessage(raw)) {
+    const report = parseClinicReportMessage(raw);
+    return report ? clinicReportToPlainText(report) : '';
+  }
+  if (isPlanReportMessage(raw)) {
+    const report = parsePlanReport(raw);
+    return report ? planReportToPlainText(report) : '';
+  }
   if (isPcExploreMessage(raw)) {
     const data = parsePcExploreMessage(raw);
     return data ? pcExploreToPlainText(data) : '';
   }
   if (isPromptChipsMessage(raw)) {
     const { body, chips } = parsePromptChipsMessage(raw);
+    if (isPlanReportMessage(body)) {
+      return slimTurnContent(body, maxChars);
+    }
     const chipNote = chips.length ? `\n[Options: ${promptChipsToPlainText(chips)}]` : '';
     return `${body}${chipNote}`.trim();
   }
@@ -728,6 +746,9 @@ export function sanitizeAssistantReply(
 ): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
+  // Structured clinic / plan payloads — never run fence/JSON strippers on them.
+  if (isClinicReportMessage(text)) return text;
+  if (isPlanReportMessage(text)) return text;
   text = stripAgentTrace(text);
 
   // Drop full system-prompt echoes from GGUF / packed prompts.
@@ -1212,6 +1233,8 @@ export function usableAssistantText(
   previousAssistant?: string,
   opts?: { stream?: boolean },
 ): string {
+  if (isClinicReportMessage(raw)) return String(raw || '');
+  if (isPlanReportMessage(raw)) return String(raw || '');
   const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant, opts);
   if (cleaned.trim()) {
     if (isCannedGreetingReply(cleaned, lastUserMessage)) return '';

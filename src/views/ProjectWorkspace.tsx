@@ -22,6 +22,7 @@ import { openInSystemBrowser } from '@/lib/openExternal';
 import {
   detectPluginIntent,
   getChatEnabledPlugins,
+  getConnectedPlugins,
   getPluginRuntime,
   loadPluginState,
   runPluginAction,
@@ -176,11 +177,11 @@ const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
 ];
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
-  plan: 'Plan this out step by step, then we can build:\n\n',
+  plan: '<!--nova-plan-mode-->\n',
   ask: '',
-  agent: 'Agent mode. edit files and run approved tools in this workspace:\n\n',
-  debug: 'Debug this. find the issue and propose a fix:\n\n',
-  multitask: '[Multi-agent] ',
+  agent: '<!--nova-agent-mode-->\n',
+  debug: '<!--nova-debug-clinic-->\n',
+  multitask: '<!--nova-multi-agent-->\n',
 };
 
 type ProjectRow = Project & { id: string };
@@ -1859,7 +1860,11 @@ export function ProjectWorkspace() {
     }
 
     const capacity = await probeLiveCapacity();
-    const pluginHit = detectPluginIntent(rawContent, getChatEnabledPlugins(loadPluginState()).map(p => p.id));
+    const connected = getConnectedPlugins(loadPluginState());
+    const pluginHit = detectPluginIntent(
+      rawContent,
+      (connected.length ? connected : getChatEnabledPlugins(loadPluginState())).map(p => p.id),
+    );
     const wantsWrites = wantsProjectFileEdits(rawContent) || looksLikeWebsiteBuild(rawContent);
 
     // Offline scaffold: build/change asks still write files even with no live brain.
@@ -2326,7 +2331,8 @@ export function ProjectWorkspace() {
 
     void (async () => {
       const pluginState = loadPluginState();
-      const enabled = getChatEnabledPlugins(pluginState);
+      const routable = getConnectedPlugins(pluginState);
+      const enabled = routable.length ? routable : getChatEnabledPlugins(pluginState);
       const pluginId = detectPluginIntent(content, enabled.map(p => p.id));
 
       let replyText = '';

@@ -143,6 +143,8 @@ export async function runAgentCommand(opts: {
   cwd: string;
   confirmLabel?: string;
   skipConfirm?: boolean;
+  /** Hard wall forwarded to Electron (ms). Heavy npm defaults to 180s in main. */
+  timeoutMs?: number;
 }): Promise<AgentRunOutcome> {
   const { command, cwd } = opts;
   if (!window.novaDesktop?.agentRun) {
@@ -166,6 +168,9 @@ export async function runAgentCommand(opts: {
     cwd,
     skipConfirm: true,
     userConfirmed: true,
+    ...(typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0
+      ? { timeoutMs: opts.timeoutMs }
+      : {}),
   });
   const out = sanitizeAgentOutput(ran.output?.trim() || '', command);
   if (ran.ok) {

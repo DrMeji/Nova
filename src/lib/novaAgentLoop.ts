@@ -388,7 +388,7 @@ export function shouldRunAgentLoop(opts: {
   const prefs = getLocalPrefs();
   if (prefs.agentLoopEnabled === false) return false;
   if (!opts.hasWorkspace) return false;
-  if (opts.composerMode === 'ask' || opts.composerMode === 'plan') return false;
+  if (opts.composerMode === 'ask' || opts.composerMode === 'plan' || opts.composerMode === 'debug') return false;
   const t = String(opts.message || '');
   // Tiny UI copy/color tweaks belong to deterministic micro-patches, not the agent loop.
   if (
@@ -398,7 +398,7 @@ export function shouldRunAgentLoop(opts: {
   ) {
     return false;
   }
-  if (opts.composerMode === 'agent' || opts.composerMode === 'debug') return true;
+  if (opts.composerMode === 'agent') return true;
   // Bound workspace: treat concrete edit asks as agent work even without Agent pill.
   return /\b(fix|implement|refactor|add|wire|patch|debug|build|continue|change|update|edit|comment|insert|rename|remove|delete)\b/i.test(opts.message)
     && (

@@ -63,6 +63,10 @@ import {
   looksLikeLyricsAsk,
   looksLikeInventedLyricsDump,
   looksLikeThinSideQuestReply,
+  looksLikeComprehensiveAsk,
+  looksLikeIdentifyMediaAsk,
+  looksLikeExplicitResearchAsk,
+  looksLikeRejectedPriorAnswerAsk,
   honestLyricsUnavailableReply,
   sideQuestAnswerHint,
   scrubSideQuestBleed,
@@ -70,7 +74,11 @@ import {
   webSearchForChat,
   formatWebLookupForPrompt,
   webLookupUnavailableNote,
+  repairReplySourceLinks,
+  identifyResearchFailedReply,
 } from '@/lib/webSearch';
+import { runDeepResearch } from '@/lib/deepResearch';
+import { looksLikeColorCodeAsk, colorCodeReply } from '@/lib/colorCodeAsk';
 import type { ChatMessage } from '@/types';
 import type { ChatMode } from '@/context/RouterContext';
 
@@ -712,6 +720,11 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
             ];
           }
         }
+        // Color codes: short local reply (clickable hex swatch) — skip LLM + web.
+        if (!usedPlugin && looksLikeColorCodeAsk(content)) {
+          response = colorCodeReply(content);
+          usedPlugin = true;
+        }
         if (!usedPlugin) {
         if (planningTalk || keepBuildingTalk) {
           // Single status only — no multi-second delay that thrash-replaces the bubble before tokens arrive.
@@ -729,10 +742,49 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
           routeMessage = content;
         }
         let preferPerplexityForTurn = false;
-        if (looksLikeWebGroundedAsk(content) && !looksLikeLyricsAsk(content)) {
+        // Book identify: research FIRST — never let Qwen invent “The Friendship Treehouse”.
+        const identifyAskMedia = looksLikeIdentifyMediaAsk(content)
+          || looksLikeExplicitResearchAsk(content)
+          || looksLikeRejectedPriorAnswerAsk(content);
+        if (identifyAskMedia && !looksLikeLyricsAsk(content) && !looksLikeColorCodeAsk(content)) {
+          chatTurnCtlRef.current.pushStatus('Reading your message…');
+          await new Promise<void>((r) => window.setTimeout(r, 400));
+          if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
           chatTurnCtlRef.current.pushStatus('Thinking…');
+          await new Promise<void>((r) => window.setTimeout(r, 350));
+          if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
           try {
-            const hit = await webSearchForChat(content);
+            const deep = await runDeepResearch(content, {
+              shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+              timeoutMs: 75_000,
+              wantImages: true,
+              onProgress: (p) => {
+                const detail = p.detail ? ` — ${p.detail}` : '';
+                chatTurnCtlRef.current.pushStatus(`${p.label}${detail}`);
+              },
+            });
+            if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+            response = deep.answer || identifyResearchFailedReply(content);
+            if (deep.ok && deep.sources.length) {
+              sideQuestLookup = {
+                ok: true,
+                text: deep.text,
+                sources: deep.sources,
+              };
+            }
+          } catch {
+            response = identifyResearchFailedReply(content);
+          }
+          usedPlugin = true;
+        } else if (looksLikeWebGroundedAsk(content) && !looksLikeLyricsAsk(content) && !looksLikeColorCodeAsk(content)) {
+          chatTurnCtlRef.current.pushStatus('Researching…');
+          try {
+            const hit = await webSearchForChat(content, {
+              priorTurns: history
+                .filter((h) => h.role === 'user' || h.role === 'assistant')
+                .map((h) => ({ role: h.role, content: String(h.content || '') })),
+              timeoutMs: 45_000,
+            });
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
             const keys = getProviderApiKeys();
             preferPerplexityForTurn = Boolean(keys.perplexity) && isCloudProviderEnabled('perplexity');
@@ -741,8 +793,17 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
               text: String(hit.text || ''),
               sources: Array.isArray(hit.sources) ? hit.sources : [],
             };
-            const note = hit.ok ? formatWebLookupForPrompt(hit) : '';
+            const identifyAsk = looksLikeIdentifyMediaAsk(content)
+              || looksLikeExplicitResearchAsk(content)
+              || looksLikeRejectedPriorAnswerAsk(content);
+            const note = hit.ok
+              ? formatWebLookupForPrompt(hit, {
+                comprehensive: looksLikeComprehensiveAsk(content) || looksLikeExplicitResearchAsk(content),
+                identify: identifyAsk,
+              })
+              : '';
             if (note) {
+              chatTurnCtlRef.current.pushStatus('Reviewing sources…');
               history = [
                 ...history,
                 {
@@ -751,6 +812,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
                 },
               ];
             } else {
+              chatTurnCtlRef.current.pushStatus('Thinking…');
               history = [
                 ...history,
                 { role: 'user' as const, content: webLookupUnavailableNote() },
@@ -764,6 +826,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
             }
           } catch {
             /* offline / blocked — answer from local knowledge */
+            chatTurnCtlRef.current.pushStatus('Thinking…');
           }
         }
         if (looksLikeDirectJudgmentAsk(content)) {
@@ -790,6 +853,8 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
             ...history,
           ];
         }
+        // Identify / color / lyrics already set `response` — do not call the local model.
+        if (!usedPlugin) {
         const sticky = stickyBrain;
         const pinnedIsCoder = /coder|starcoder/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`);
         const judgmentAsk = looksLikeDirectJudgmentAsk(content);
@@ -1061,6 +1126,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
         }
         usedPlugin = true;
         }
+        } // end !usedPlugin — skip local model when identify already answered
       } catch (err) {
         if (idleTimer) window.clearTimeout(idleTimer);
         abandoned = true;
@@ -1220,6 +1286,12 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
         ) {
           response = fallbackAnswerFromLookup(content, sideQuestLookup || { text: '', sources: [], ok: false });
         }
+      }
+      // Only keep source links that match live lookup (or strip invented ones).
+      if (sideQuestLookup?.ok && Array.isArray(sideQuestLookup.sources) && sideQuestLookup.sources.length) {
+        response = repairReplySourceLinks(response, sideQuestLookup.sources);
+      } else if (looksLikeWebGroundedAsk(content) || looksLikeSideQuestAsk(content)) {
+        response = repairReplySourceLinks(response);
       }
     }
     if (

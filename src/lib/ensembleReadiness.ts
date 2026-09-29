@@ -3,6 +3,7 @@
  * Sequential ensemble needs teammate GGUFs on disk; dual-VRAM is unrelated.
  */
 
+import { isEngineDownloadable } from '@/lib/api';
 import { getActiveBrainId, isWeakCoderId } from '@/lib/brainRoles';
 import {
   isCoderEngineId,
@@ -13,6 +14,7 @@ import {
   DESIGN_ENGINE_RANK,
   CHAT_ENGINE_RANK,
   CODER_ENGINE_RANK,
+  pickNextBackupId,
 } from '@/lib/enginePick';
 
 export type RoleReadiness = 'ready' | 'fallback' | 'missing' | 'weak';
@@ -50,11 +52,22 @@ function readyIds(models: EngineRow[] | undefined): string[] {
     .filter(Boolean);
 }
 
-function firstReady(preferred: readonly string[], ready: string[]): string | null {
-  for (const id of preferred) {
-    if (ready.includes(id)) return id;
+/** Best catalog id to install for a role — never an already-ready model. */
+function recommendedInstallId(
+  preferred: readonly string[],
+  ready: string[],
+  fallback: string,
+  pickFromRank?: string | undefined,
+): string {
+  if (pickFromRank && isEngineDownloadable(pickFromRank) && !ready.includes(pickFromRank)) {
+    return pickFromRank;
   }
-  return ready[0] || null;
+  for (const id of preferred) {
+    if (ready.includes(id)) continue;
+    if (isEngineDownloadable(id)) return id;
+  }
+  if (isEngineDownloadable(fallback) && !ready.includes(fallback)) return fallback;
+  return fallback;
 }
 
 /**
@@ -105,7 +118,12 @@ export function assessEnsembleReadiness(
         : (isWeakCoderId(chatId) ? 'weak' : (chatDistinct ? 'ready' : 'fallback')),
       id: chatId,
       name: rowName(models, chatId),
-      recommendedId: firstReady(CHAT_ENGINE_RANK, ready) || 'qwen25-7b',
+      recommendedId: recommendedInstallId(
+        CHAT_ENGINE_RANK,
+        ready,
+        'qwen25-7b',
+        pickNextBackupId(models, 'chat', ram, undefined, maxB),
+      ),
       why: !chatId
         ? 'Install an Instruct chat model for plan / spec / copy'
         : (chatDistinct ? 'Ready for plan/spec/copy/verify' : 'Will reuse the coder — plan quality drops'),
@@ -117,7 +135,12 @@ export function assessEnsembleReadiness(
         : (isWeakCoderId(craftId) || !isCoderEngineId(craftId) ? 'weak' : 'ready'),
       id: craftId,
       name: rowName(models, craftId),
-      recommendedId: firstReady(CODER_ENGINE_RANK, ready) || 'qwen25-coder-7b',
+      recommendedId: recommendedInstallId(
+        CODER_ENGINE_RANK,
+        ready,
+        'qwen25-coder-7b',
+        pickNextBackupId(models, 'coding', ram, undefined, maxB),
+      ),
       why: !craftId
         ? 'Required — install a coder GGUF to build'
         : 'Craft / file writes',
@@ -129,7 +152,7 @@ export function assessEnsembleReadiness(
         : (designIsSpecialist ? 'ready' : (designDistinct ? 'fallback' : 'fallback')),
       id: designId,
       name: rowName(models, designId),
-      recommendedId: firstReady(DESIGN_ENGINE_RANK, ready) || 'uigen-fx-4b',
+      recommendedId: recommendedInstallId(DESIGN_ENGINE_RANK, ready, 'uigen-fx-4b', 'uigen-fx-4b'),
       why: !designId
         ? 'Install UIGEN-FX (or Instruct) for Layout Contracts — otherwise genre defaults only'
         : (designIsSpecialist
@@ -141,7 +164,7 @@ export function assessEnsembleReadiness(
       status: visionId ? 'ready' : 'missing',
       id: visionId,
       name: rowName(models, visionId),
-      recommendedId: visions[0] || 'qwen2-vl-7b',
+      recommendedId: recommendedInstallId(['qwen2-vl-7b'], ready, 'qwen2-vl-7b'),
       why: visionId
         ? 'Live Critic can grade screenshots'
         : 'Optional — Critic will use text-only without Vision',

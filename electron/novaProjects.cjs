@@ -361,9 +361,28 @@ function isAllowedExternalPath(absPath) {
   if (novaSelfGuard.isArkProtectedPath(p)) return false;
   const pr = path.resolve(projectsRoot());
   if (isPathUnderRoot(p, pr)) return true;
+  if (isUnderNovaProjectsHome(p)) return true;
   if (isUnderFullPcGrant(p)) return true;
   if (isUnderGrantedScope(p)) return true;
   return loadApprovedRoots().some(r => isPathUnderRoot(p, path.resolve(String(r.path || ''))));
+}
+
+/** Documents/Desktop "NOVA Projects" (and legacy ARK) — always deletable/listable without Settings grants. */
+function isUnderNovaProjectsHome(absPath) {
+  const p = path.resolve(String(absPath || ''));
+  if (!p) return false;
+  const home = require('os').homedir();
+  const candidates = [
+    path.join(home, 'Documents', 'NOVA Projects'),
+    path.join(home, 'Desktop', 'NOVA Projects'),
+    path.join(home, 'Documents', 'ARK Projects'),
+    path.join(home, 'Desktop', 'ARK Projects'),
+  ];
+  return candidates.some((root) => {
+    const r = path.resolve(root);
+    // Allow the home itself and any child folder — never the drive root.
+    return p.toLowerCase() === r.toLowerCase() || isPathUnderRoot(p, r);
+  });
 }
 
 function shouldSkipDir(name) {
@@ -930,15 +949,19 @@ function getProjectPath(projectId) {
 
 function deleteGrantedFolder(targetPath) {
   const full = path.resolve(String(targetPath || ''));
-  if (!full || !fs.existsSync(full)) return { ok: false, error: 'Folder not found' };
+  if (!full || !fs.existsSync(full)) return { ok: true, path: full, missing: true };
   const pr = path.resolve(projectsRoot());
   const underSandbox = isPathUnderRoot(full, pr);
-  // Never delete the sandbox root itself or reserved system dirs.
-  if (underSandbox) {
-    const base = path.basename(full).toLowerCase();
-    if (full.toLowerCase() === pr.toLowerCase() || base === 'code' || base === 'uploads') {
-      return { ok: false, error: 'That folder is reserved by NOVA.' };
-    }
+  const base = path.basename(full).toLowerCase();
+  // Never delete the sandbox root, NOVA/ARK Projects homes, or reserved sandbox dirs.
+  if (full.toLowerCase() === pr.toLowerCase()) {
+    return { ok: false, error: 'That folder is reserved by NOVA.' };
+  }
+  if (base === 'nova projects' || base === 'ark projects') {
+    return { ok: false, error: 'That folder is reserved by NOVA.' };
+  }
+  if (underSandbox && (base === 'code' || base === 'uploads')) {
+    return { ok: false, error: 'That folder is reserved by NOVA.' };
   }
   if (!isAllowedExternalPath(full) && !underSandbox) {
     return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
@@ -950,7 +973,15 @@ function deleteGrantedFolder(targetPath) {
     } else {
       fs.unlinkSync(full);
     }
-    return { ok: true, path: full };
+    if (fs.existsSync(full) && process.platform === 'win32') {
+      const fallback = deleteGrantedFolderWindows(full);
+      if (!fallback.ok) return fallback;
+    }
+    return {
+      ok: !fs.existsSync(full),
+      path: full,
+      error: fs.existsSync(full) ? 'Folder still exists after delete.' : undefined,
+    };
   } catch (err) {
     if (process.platform === 'win32') {
       const fallback = deleteGrantedFolderWindows(full);
@@ -1169,11 +1200,32 @@ function deleteGrantedFolderWindows(full) {
     const escaped = String(full).replace(/'/g, "''");
     execFileSync(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', `Remove-Item -LiteralPath '${escaped}' -Recurse -Force -ErrorAction Stop`],
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        [
+          `$p = '${escaped}'`,
+          'if (Test-Path -LiteralPath $p) {',
+          '  Get-ChildItem -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Attributes = \"Normal\" } catch {} }',
+          '  Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop',
+          '}',
+        ].join('; '),
+      ],
       { windowsHide: true, timeout: 120_000 },
     );
     if (!fs.existsSync(full)) return { ok: true, path: full };
-    return { ok: false, error: 'Folder still exists after delete.' };
+    // Last resort: cmd rmdir (handles some locked trees better after attrs cleared).
+    try {
+      execFileSync('cmd.exe', ['/c', 'rmdir', '/s', '/q', full], {
+        windowsHide: true,
+        timeout: 120_000,
+      });
+    } catch {
+      /* fall through */
+    }
+    if (!fs.existsSync(full)) return { ok: true, path: full };
+    return { ok: false, error: 'Folder still exists after delete (file may be in use). Close Live preview / Node and try again.' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
   }

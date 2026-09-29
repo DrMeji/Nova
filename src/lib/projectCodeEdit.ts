@@ -495,7 +495,10 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
     }
     if (!path || !path.includes('.') || path.length > 180) return;
     if (!/^[A-Za-z0-9_./@+-]+$/.test(path)) return;
-    let body = scrubLeakedFileMarkers(content.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, ''));
+    let body = scrubLeakedFileMarkers(
+      content.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, ''),
+      path,
+    );
     if (/\.json$/i.test(path) || /(^|\/)package\.json$/i.test(path)) {
       body = sanitizeJsonFileContent(path, body);
     }
@@ -1377,18 +1380,22 @@ function looksLikeCodeDump(text: string): boolean {
   return false;
 }
 
-/** Strip leftover @@@FILE markers / fence junk the model appends after a file body. */
-export function scrubLeakedFileMarkers(content: string): string {
+/** Strip leftover @@@FILE markers / fence junk the model appends after a file body.
+ *  Markdown/docs keep fenced code blocks — those are real content, not leaked chatter. */
+export function scrubLeakedFileMarkers(content: string, path?: string): string {
   let body = String(content || '');
   const nextFile = body.search(/\n@@@FILE\s+\S/i);
   if (nextFile >= 0) body = body.slice(0, nextFile);
   body = body.replace(/\n@@@[\s\S]*$/g, '');
   body = body.replace(/\s*@@@\s*$/g, '');
-  // Model often appends ```css / **CSS… / This completes… after a valid App body.
-  body = body.replace(/\n```(?:[a-z0-9_+-]*)?\s*[\s\S]*$/i, '');
-  body = body.replace(/\n\*\*[^\n]{0,80}\*?\*?[\s\S]*$/g, '');
-  body = body.replace(/\nThis completes[\s\S]*$/i, '');
-  body = body.replace(/\n```\s*$/g, '');
+  const keepFences = Boolean(path && /\.(?:md|markdown|txt|rst|svg|html?)$/i.test(path));
+  if (!keepFences) {
+    // Model often appends ```css / **CSS… / This completes… after a valid App body.
+    body = body.replace(/\n```(?:[a-z0-9_+-]*)?\s*[\s\S]*$/i, '');
+    body = body.replace(/\n\*\*[^\n]{0,80}\*?\*?[\s\S]*$/g, '');
+    body = body.replace(/\nThis completes[\s\S]*$/i, '');
+    body = body.replace(/\n```\s*$/g, '');
+  }
   return body.trimEnd();
 }
 

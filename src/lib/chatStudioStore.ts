@@ -180,16 +180,22 @@ export async function resolveChatProjectRoot(opts: {
   };
 }
 
-export function saveChatStudio(
-  chatId: string,
-  snapshot: {
-    files: Record<string, string>;
-    projectId: string | null;
-    name?: string;
-    diskRoot?: string | null;
-    previewUrl?: string | null;
-  },
-) {
+const studioPersistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const studioPersistPending = new Map<string, {
+  files: Record<string, string>;
+  projectId: string | null;
+  name?: string;
+  diskRoot?: string | null;
+  previewUrl?: string | null;
+}>();
+
+function flushChatStudio(chatId: string) {
+  const snapshot = studioPersistPending.get(chatId);
+  studioPersistPending.delete(chatId);
+  const t = studioPersistTimers.get(chatId);
+  if (t) clearTimeout(t);
+  studioPersistTimers.delete(chatId);
+  if (!snapshot) return;
   const hasFiles = Boolean(chatId && Object.keys(snapshot.files).length);
   const hasRoot = Boolean(chatId && snapshot.diskRoot);
   if (!hasFiles && !hasRoot) return;
@@ -205,6 +211,28 @@ export function saveChatStudio(
   } catch {
     /* ignore */
   }
+}
+
+export function saveChatStudio(
+  chatId: string,
+  snapshot: {
+    files: Record<string, string>;
+    projectId: string | null;
+    name?: string;
+    diskRoot?: string | null;
+    previewUrl?: string | null;
+  },
+) {
+  const hasFiles = Boolean(chatId && Object.keys(snapshot.files).length);
+  const hasRoot = Boolean(chatId && snapshot.diskRoot);
+  if (!hasFiles && !hasRoot) return;
+  studioPersistPending.set(chatId, snapshot);
+  const prev = studioPersistTimers.get(chatId);
+  if (prev) clearTimeout(prev);
+  // Debounce large JSON.stringify of full file maps — avoid main-thread freezes mid-craft.
+  const bytes = Object.values(snapshot.files || {}).reduce((n, c) => n + String(c || '').length, 0);
+  const delay = bytes > 40_000 ? 2_000 : 400;
+  studioPersistTimers.set(chatId, setTimeout(() => flushChatStudio(chatId), delay));
 }
 
 export type BoundStudio = {

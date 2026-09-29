@@ -294,11 +294,7 @@ export function Dashboard() {
                 return (
                   <div
                     key={item.id}
-                    className={`group w-full grid grid-cols-[1fr_6.5rem_5rem_2rem] gap-2 items-center px-1 py-3 text-left rounded-xl transition-colors ${
-                      selected
-                        ? 'bg-sky-500/15 ring-1 ring-sky-500/30'
-                        : 'hover:bg-surface-hover/70'
-                    }`}
+                    className="group w-full grid grid-cols-[1fr_6.5rem_5rem_2rem] gap-2 items-center px-1 py-3 text-left rounded-xl transition-colors hover:bg-surface-hover/70"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <button
@@ -310,7 +306,7 @@ export function Dashboard() {
                         className="shrink-0 p-0.5"
                       >
                         <span
-                          className={`block w-4 h-4 rounded-full border transition-colors ${
+                          className={`block w-4 h-4 rounded-full border transition-colors shadow-none ${
                             selected
                               ? 'border-sky-400 bg-sky-400'
                               : 'border-content-tertiary/50 bg-transparent'
@@ -358,11 +354,7 @@ export function Dashboard() {
                 return (
                   <div
                     key={item.id}
-                    className={`group relative text-left rounded-2xl overflow-hidden border transition-colors ${
-                      selected
-                        ? 'border-sky-400/50 bg-sky-500/15'
-                        : 'border-surface-border/60 bg-surface-hover/40 hover:bg-surface-hover'
-                    }`}
+                    className="group relative text-left rounded-2xl overflow-hidden border border-surface-border/60 bg-surface-hover/40 hover:bg-surface-hover transition-colors"
                   >
                     <button
                       type="button"

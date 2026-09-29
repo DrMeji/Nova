@@ -52,63 +52,83 @@ function rowName(models: EngineRow[] | undefined, id: string): string {
 
 /**
  * Build a sequential team from ready engines + role prefs.
+ * Default: single-coder only (multiHop false). Multi-hop only when opts.allowMultiHop.
+ * Vision / mmproj never fills plan, copy, design, craft, or style.
  */
 export function resolveCreateEnsembleTeam(
   models: EngineRow[] | undefined,
-  opts?: { ramGb?: number; maxCoderParamsB?: number | null; craftId?: string | null },
+  opts?: {
+    ramGb?: number;
+    maxCoderParamsB?: number | null;
+    craftId?: string | null;
+    /** Explicit opt-in — default create is coder-only. */
+    allowMultiHop?: boolean;
+  },
 ): CreateEnsembleTeam {
   const ram = opts?.ramGb ?? 8;
   const maxB = opts?.maxCoderParamsB ?? null;
+  const allowMultiHop = Boolean(opts?.allowMultiHop);
   const coders = rankedReadyCoderIds(models, ram, maxB);
-  const chats = rankedReadyEngineIds(models, 'chat', ram, maxB);
-  const designs = rankedReadyDesignIds(models, ram, maxB);
+  const chats = rankedReadyEngineIds(models, 'chat', ram, maxB)
+    .filter((id) => !/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj|qwen2-vl)\b/i.test(id));
+  const designs = rankedReadyDesignIds(models, ram, maxB)
+    .filter((id) => !/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj|qwen2-vl)\b/i.test(id));
 
   const craftPref = String(opts?.craftId || getActiveBrainId('coder') || '').trim();
   const craftId = (craftPref && craftPref !== 'NOVA-auto' && coders.includes(craftPref))
     ? craftPref
     : (coders[0] || '');
   const chatPref = String(getActiveBrainId('chat') || '').trim();
-  const planId = (chatPref && chatPref !== 'NOVA-auto' && chats.includes(chatPref))
-    ? chatPref
-    : (chats.find((id) => id !== craftId) || chats[0] || '');
+  const planId = allowMultiHop
+    ? ((chatPref && chatPref !== 'NOVA-auto' && chats.includes(chatPref))
+      ? chatPref
+      : (chats.find((id) => id !== craftId) || chats[0] || ''))
+    : '';
 
   const designPref = String(getActiveBrainId('design') || '').trim();
-  const designId = (designPref && designPref !== 'NOVA-auto' && (designs.includes(designPref) || chats.includes(designPref)))
-    ? designPref
-    : (designs.find((id) => id !== craftId) || planId || '');
+  const designId = allowMultiHop
+    ? ((designPref && designPref !== 'NOVA-auto' && (designs.includes(designPref) || chats.includes(designPref)))
+      ? designPref
+      : (designs.find((id) => id !== craftId) || planId || ''))
+    : '';
 
-  const copyId = planId || designId;
-  const styleId = designId || craftId;
+  // Copy is instruct/chat only — never vision, never design-as-VL.
+  const copyId = allowMultiHop
+    ? (planId || (designId && !/\b(?:vl|vision|mmproj)\b/i.test(designId) ? designId : '') || '')
+    : '';
+  const styleId = allowMultiHop ? (designId || craftId) : craftId;
   // Verify reviews App/CSS like a craft pass — always the best coder, never chat Instruct.
   const verifyId = craftId || planId;
-  const criticPref = String(getActiveBrainId('vision') || '').trim();
-  const visionReady = (models || [])
-    .filter((m) => String(m.status || '') === 'ready')
-    .map((m) => String(m.id || ''))
-    .filter((id) => /vl|vision|llava|moondream|minicpm/i.test(id));
-  const criticId = (criticPref && criticPref !== 'NOVA-auto' && visionReady.includes(criticPref))
-    ? criticPref
-    : (visionReady[0] || verifyId);
+  // Critic/vision only when multi-hop AND only for optional screenshot critique — never Copy.
+  const criticId = '';
 
   const members: EnsembleMember[] = [];
   const push = (role: EnsembleRole, id: string) => {
     if (!id) return;
+    if (/\b(?:vl|vision|llava|moondream|minicpm[-_]?v|mmproj|qwen2-vl)\b/i.test(id)
+      && role !== 'critic') {
+      return;
+    }
     members.push({ role, id, name: rowName(models, id), source: 'local' });
   };
-  push('plan', planId);
-  push('spec', planId);
-  push('design', designId);
-  push('copy', copyId);
+  if (allowMultiHop) {
+    push('plan', planId);
+    push('spec', planId);
+    push('design', designId);
+    push('copy', copyId);
+  }
   push('craft', craftId);
-  if (styleId && styleId !== craftId) push('style', styleId);
+  if (allowMultiHop && styleId && styleId !== craftId) push('style', styleId);
   push('verify', verifyId);
-  if (criticId) push('critic', criticId);
+  if (allowMultiHop && criticId) push('critic', criticId);
 
   const distinct = new Set(members.map((m) => m.id));
-  const multiHop = distinct.size >= 2 && Boolean(craftId);
+  const multiHop = allowMultiHop && distinct.size >= 2 && Boolean(craftId);
 
   const attribution = members.length
-    ? members.map((m) => `${m.role}: ${m.name}`).join(' → ')
+    ? (multiHop
+      ? members.map((m) => `${m.role}: ${m.name}`).join(' → ')
+      : `craft: ${rowName(models, craftId) || 'coder'}`)
     : 'single coder';
 
   return { multiHop, members, attribution };

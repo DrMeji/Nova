@@ -4,8 +4,8 @@ export type ParkId = 'networking' | 'message' | 'call';
 
 const KEY = 'NOVA:revealed-features';
 
-/** Always on for signed-in users (Message / Networking). */
-const ALWAYS_LIVE: ParkId[] = ['networking', 'message'];
+/** Social surfaces parked while GitHub-only auth lands — re-enable later deliberately. */
+const ALWAYS_LIVE: ParkId[] = [];
 
 function readList(): ParkId[] {
   try {
@@ -49,9 +49,10 @@ export function setRevealed(id: ParkId, on: boolean) {
   writeList([...cur]);
 }
 
+/** Networking + Message stay parked until we redesign social on GitHub identity. */
 export function isSocialParked(name: 'networking' | 'message' | 'call'): boolean {
   if (name === 'call') return true;
-  if (name === 'networking' || name === 'message') return false;
+  if (name === 'networking' || name === 'message') return true;
   return !isRevealed(name);
 }
 

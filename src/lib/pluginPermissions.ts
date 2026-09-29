@@ -36,6 +36,8 @@ export function intentPermission(pluginId: string, userText: string): PluginPerm
   if (pluginId === 'github') {
     if (/\b(comment|post|create|write|close|push|clone)\b/.test(lower)) return 'write';
     if (/\b(search|find|look up)\b/.test(lower)) return 'search';
+    // List repos — either Read or List is enough.
+    if (/\b(list|repos?|repositor)\b/.test(lower)) return 'list';
     return 'read';
   }
   if (pluginId === 'notion') {

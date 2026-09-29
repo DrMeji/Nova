@@ -8,6 +8,8 @@ import { arkRoute, routerProviderLabel } from '@/lib/novaRouter';
 import { buildRouterHistory, type RouterChatTurn } from '@/lib/chatHistory';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { chatSuccess, type ChatSuccess } from '@/lib/productContract';
+import { looksLikeBoundProjectAsk } from '@/lib/chatProjectDebug';
+import { hasRealStudioFiles } from '@/lib/plainChatAsk';
 import {
   looksLikePlainChatAsk,
   looksLikePureGreeting,
@@ -24,10 +26,20 @@ import {
 import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
 import { isCannedGreetingReply, usableAssistantText, scrubCannedGreetingFlash } from '@/lib/chatHistory';
 import {
+  preferEnglishSafeReply,
+  replyHasUnexpectedForeignBleed,
+  scrubUnexpectedForeignScript,
+} from '@/lib/scrubForeignBleed';
+import {
   looksLikeWebGroundedAsk,
   looksLikeLyricsAsk,
   looksLikeSideQuestAsk,
   looksLikeThreadFollowUpAsk,
+  looksLikeComprehensiveAsk,
+  looksLikeIdentifyMediaAsk,
+  looksLikeExplicitResearchAsk,
+  looksLikeRejectedPriorAnswerAsk,
+  looksLikeBookFindOrBuyAsk,
   honestLyricsUnavailableReply,
   sideQuestAnswerHint,
   webSearchForChat,
@@ -38,20 +50,56 @@ import {
   scrubSideQuestBleed,
   scrubEmptyFactPlaceholders,
   repairReplySourceLinks,
+  pickBestBookCandidateFromLookup,
+  identifyAnswerFromLookup,
+  identifyReplyConflictsWithLookup,
+  bookFindAnswerFromLookup,
+  identifyResearchFailedReply,
 } from '@/lib/webSearch';
+import { runDeepResearch } from '@/lib/deepResearch';
 import { scrubDictationTranscript } from '@/lib/voiceSession';
+import { looksLikeColorCodeAsk, colorCodeReply } from '@/lib/colorCodeAsk';
 
 /** Soft style hints for the model — never a canned user-visible reply. */
 function answerShapeHintForAsk(message: string): string {
   const t = String(message || '').trim();
   if (!t) return '';
+  // Identify: only override when lookup conflicts or source labels are empty — never just because links are missing.
+  if (
+    looksLikeIdentifyMediaAsk(t)
+    || looksLikeExplicitResearchAsk(t)
+    || looksLikeRejectedPriorAnswerAsk(t)
+  ) {
+    return [
+      'ANSWER SHAPE (identify): Lead with the best matching title + author ONLY if it appears in lookup notes / CANDIDATE TITLES.',
+      'Then map the user’s remembered plot points to confirmed facts from the notes.',
+      'Include 2–4 markdown Sources links with real https URLs from lookup Sources only (Goodreads / Wikipedia / Open Library / Amazon / store).',
+      'Never invent titles. Never name “AI book finder” tools as the book. Never list filler “possible books” that are not in the notes.',
+    ].join(' ');
+  }
+  if (looksLikeBookFindOrBuyAsk(t)) {
+    return [
+      'ANSWER SHAPE (find/buy): List the books briefly if asked, then give 3–5 markdown links with real https URLs from lookup Sources (Amazon, Barnes & Noble, Google Books, Open Library, Audible).',
+      'Every store name MUST include a clickable URL. Never say “sure, here are links” without actual https links.',
+      'Do not invent URLs. Prefer exact URLs from the lookup Sources list.',
+    ].join(' ');
+  }
   // Factoid: net worth / price / how much — lead with the number, not a bio.
   if (/\b(?:net\s*worth|how\s+much\s+(?:is|are|does|did|has|have)|(?:what(?:'s|\s+is)\s+(?:the\s+)?)?(?:price|cost|salary|earnings?|revenue|valuation))\b/i.test(t)) {
     return [
       'ANSWER SHAPE (factoid): Lead with the number/estimate in the FIRST sentence.',
       'Do NOT open with a biography (“X is a South African-born…”).',
       'Then 2–4 quick facts tied to that number (assets, date of estimate if in notes).',
-      'End with 1–2 markdown source links. Never invent precise figures or future dates not in the lookup notes.',
+      'End with 1–2 markdown source links copied from lookup Sources only. Never invent URLs.',
+    ].join(' ');
+  }
+  // Comprehensive / “everything you know”
+  if (looksLikeComprehensiveAsk(t)) {
+    return [
+      'ANSWER SHAPE (comprehensive): The user wants a FULL answer — do not hold back to a short card.',
+      'Write ~250–450 words with clear sections (Overview, Background, Career, Companies/projects, Public role).',
+      'Use every usable fact from lookup notes. Omit unknowns — never write “Not specified”.',
+      'End with a Sources list using ONLY exact URLs from the lookup Sources. Never invent biography.com or random blog links.',
     ].join(' ');
   }
   // Expand / who is / more info — bio first, then depth.
@@ -59,7 +107,8 @@ function answerShapeHintForAsk(message: string): string {
     && !/\b(?:net\s*worth|how\s+much|price|cost)\b/i.test(t)) {
     return [
       'ANSWER SHAPE (expand): Open with who they are (short bio), then career/companies, then notable facts.',
-      'This is a deepen ask — go broader than a one-line number. Include 1–3 clear markdown links.',
+      'This is a deepen ask — go broader than a one-line number.',
+      'Include 1–3 markdown links using ONLY exact URLs from lookup Sources. Never invent links.',
       'Do not invent earnings/net-worth figures unless they appear in the lookup notes.',
     ].join(' ');
   }
@@ -198,11 +247,27 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
   // Fix common voice mishears before routing / web lookup (Timmy ≠ teammate).
   host = { ...host, content: scrubDictationTranscript(host.content) };
 
+  const statusPause = (ms: number) => new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+  // Read → think first on every chat ask (then research only when needed).
+  if (!host.shouldAbort()) {
+    host.onStatus?.('Reading your message…');
+    await statusPause(450);
+  }
+  if (!host.shouldAbort()) {
+    host.onStatus?.('Thinking…');
+    await statusPause(400);
+  }
+
   // Chat turns never pack project files into the bubble — arkRoute only.
-  // (Previously non-plain chat still hit answerStudio → @@@FILE / CSS bleed.)
+  // Exception: bound-project overview / diagnose asks must read the folder.
   const talkOrAdvice =
     looksLikeTalkBeforeCreateAsk(host.content) || looksLikeRequirementsAsk(host.content);
-  if (!host.allowFileEdits) {
+  const projectAwareAsk =
+    looksLikeBoundProjectAsk(host.content)
+    && hasRealStudioFiles(host.files);
+  if (!host.allowFileEdits && !projectAwareAsk) {
     const prefs = getLocalPrefs();
     let streamed = '';
     let lastGood = '';
@@ -226,10 +291,92 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
         provider: 'NOVA',
       };
     }
-    if (looksLikeWebGroundedAsk(host.content) || followUp) {
+    // Color codes: short deterministic reply + clickable hex swatch (no HTML/CSS lecture).
+    if (looksLikeColorCodeAsk(host.content)) {
+      const color = colorCodeReply(host.content);
+      return {
+        status: 'handled',
+        text: color,
+        intent: 'plain-chat',
+        contract: chatSuccess(color),
+        provider: 'NOVA',
+      };
+    }
+
+    const identifyAskEarly = looksLikeIdentifyMediaAsk(host.content)
+      || looksLikeExplicitResearchAsk(host.content)
+      || looksLikeRejectedPriorAnswerAsk(host.content);
+    const bookFindAskEarly = looksLikeBookFindOrBuyAsk(host.content);
+
+    // Book identify: deep multi-query research FIRST (real searches + images).
+    if (identifyAskEarly) {
       try {
+        const deep = await runDeepResearch(host.content, {
+          shouldAbort: () => host.shouldAbort(),
+          timeoutMs: 75_000,
+          wantImages: true,
+          onProgress: (p) => {
+            const detail = p.detail ? ` — ${p.detail}` : '';
+            host.onStatus?.(`${p.label}${detail}`);
+          },
+        });
+        webHit = deep.searchPerformed
+          ? { ok: deep.ok, text: deep.text, sources: deep.sources }
+          : null;
+        if (host.shouldAbort()) {
+          return {
+            status: 'handled',
+            text: '',
+            intent: 'plain-chat',
+            contract: chatSuccess(''),
+            provider: 'NOVA',
+          };
+        }
+        if (deep.answer) {
+          return {
+            status: 'handled',
+            text: deep.answer,
+            intent: 'plain-chat',
+            contract: chatSuccess(deep.answer),
+            provider: 'NOVA',
+          };
+        }
+      } catch {
+        webHit = null;
+      }
+      if (host.shouldAbort()) {
+        return {
+          status: 'handled',
+          text: '',
+          intent: 'plain-chat',
+          contract: chatSuccess(''),
+          provider: 'NOVA',
+        };
+      }
+      const failed = identifyResearchFailedReply(host.content);
+      return {
+        status: 'handled',
+        text: failed,
+        intent: 'plain-chat',
+        contract: chatSuccess(failed),
+        provider: 'NOVA',
+      };
+    }
+
+    if (
+      !projectAwareAsk
+      && (
+        looksLikeWebGroundedAsk(host.content)
+        || bookFindAskEarly
+        || (followUp && /\b(?:more\s+(?:info|information|details?)|tell\s+me\s+more|net\s*worth|who\s+(?:is|are)|what\s+about|look\s+up|research|nope|wrong|not\s+the\s+name)\b/i.test(host.content)
+          && !/\b(?:this|the|my|our)\s+(?:project|folder|app)\b/i.test(host.content))
+      )
+    ) {
+      try {
+        host.onStatus?.('Researching…');
         webHit = await webSearchForChat(host.content, {
           priorTurns: host.priorHistory || [],
+          timeoutMs: 45_000,
         });
       } catch {
         webHit = null;
@@ -243,7 +390,21 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           provider: 'NOVA',
         };
       }
-      const note = webHit?.ok ? formatWebLookupForPrompt(webHit) : '';
+      if (webHit?.ok) {
+        host.onStatus?.('Reviewing sources…');
+      } else {
+        host.onStatus?.('Thinking…');
+      }
+      const identifyAsk = false;
+      const bookFindAsk = bookFindAskEarly;
+      const note = webHit?.ok
+        ? formatWebLookupForPrompt(webHit, {
+          comprehensive: looksLikeComprehensiveAsk(host.content)
+            || looksLikeExplicitResearchAsk(host.content)
+            || bookFindAsk,
+          identify: identifyAsk && !bookFindAsk,
+        })
+        : '';
       if (sideQuest || followUp || webHit?.ok) {
         history = [
           {
@@ -388,9 +549,12 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
             return;
           }
           const usable = usableAssistantText(live, host.content, undefined, { stream: true });
-          if (usable) live = usable;
+          // Always prefer scrubbed English over a longer foreign-bleed draft.
+          live = scrubUnexpectedForeignScript(usable || live, host.content) || usable || live;
           if (isTalkFenceJunk(live)) {
-            if (lastGood.length >= 2) host.onDelta?.(lastGood);
+            if (lastGood.length >= 2 && !replyHasUnexpectedForeignBleed(lastGood, host.content)) {
+              host.onDelta?.(lastGood);
+            }
             return;
           }
           // After a retry, ignore short unrelated replacements (stops long→short flicker).
@@ -398,18 +562,29 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
             lastGood.length >= 48
             && live.length < Math.floor(lastGood.length * 0.92)
             && !live.startsWith(lastGood.slice(0, Math.min(48, lastGood.length)))
+            && !replyHasUnexpectedForeignBleed(lastGood, host.content)
           ) {
             return;
           }
-          lastGood = live.length >= lastGood.length ? live : lastGood;
+          // Prefer longer only when it does not introduce unexpected foreign script.
+          if (replyHasUnexpectedForeignBleed(live, host.content) && lastGood && !replyHasUnexpectedForeignBleed(lastGood, host.content)) {
+            host.onDelta?.(lastGood);
+            return;
+          }
+          lastGood = preferEnglishSafeReply(live, lastGood, host.content);
           host.onDelta?.(lastGood);
         }
         : undefined,
     });
     // Prefer the longest solid live paint — never let a quieter scrub retract the bubble.
+    // Exception: never restore a foreign-script bleed over scrubbed English.
     const routedText = String(routed.reply || '').trim();
-    let raw = routedText;
-    if (lastGood.length >= 80 && lastGood.length > routedText.length * 1.08) {
+    let raw = preferEnglishSafeReply(routedText, lastGood, host.content);
+    if (
+      lastGood.length >= 80
+      && lastGood.length > routedText.length * 1.08
+      && !replyHasUnexpectedForeignBleed(lastGood, host.content)
+    ) {
       raw = lastGood;
     } else if (!raw) {
       raw = lastGood || streamed || '';
@@ -417,8 +592,13 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     let text = scrubTalkFirstCodeBleed(scrubFalseProjectChatPreamble(raw));
     if (sideQuest) text = scrubSideQuestBleed(text, host.content) || text;
     text = scrubEmptyFactPlaceholders(text);
-    // If scrubbing shrinks a solid live answer, keep the live paint.
-    if (lastGood.length >= 80 && text.length < Math.floor(lastGood.length * 0.85)) {
+    text = scrubUnexpectedForeignScript(text, host.content) || text;
+    // If scrubbing shrinks a solid live answer, keep the live paint — unless live was bleed.
+    if (
+      lastGood.length >= 80
+      && text.length < Math.floor(lastGood.length * 0.85)
+      && !replyHasUnexpectedForeignBleed(lastGood, host.content)
+    ) {
       text = scrubEmptyFactPlaceholders(lastGood) || lastGood;
     }
     if (talkOrAdvice) {
@@ -427,24 +607,59 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
       text = ensurePlanningExit(text, host.content);
     }
     if (!text || isTalkFenceJunk(text)) {
-      text = (lastGood && !isTalkFenceJunk(lastGood)) ? lastGood : '';
+      text = (lastGood && !isTalkFenceJunk(lastGood) && !replyHasUnexpectedForeignBleed(lastGood, host.content))
+        ? lastGood
+        : scrubUnexpectedForeignScript(lastGood, host.content) || '';
     }
     if (looksLikeOrphanChatTail(text)) {
-      text = (lastGood && !looksLikeOrphanChatTail(lastGood)) ? lastGood : '';
+      text = (lastGood && !looksLikeOrphanChatTail(lastGood) && !replyHasUnexpectedForeignBleed(lastGood, host.content))
+        ? lastGood
+        : '';
     }
     // Prefer the live paint when a quiet hop shrunk a solid answer into a snippet dump.
     const preferSolid = (a: string, b: string) => {
       const score = (s: string) => {
         if (!s || /^here'?s what turned up live/i.test(s)) return 0;
+        if (replyHasUnexpectedForeignBleed(s, host.content)) return 0;
         const prose = s.replace(/https?:\/\/\S+/gi, '').replace(/\[[^\]]+\]\([^)]+\)/g, '').replace(/\s+/g, ' ').trim().length;
         const concrete = /\b(?:quick facts|net worth|born|founded|\$\d|billion|million|ceo|entrepreneur|biography)\b/i.test(s) ? 80 : 0;
         return prose + concrete;
       };
       return score(a) >= score(b) ? a : b;
     };
-    text = preferSolid(text, lastGood);
+    text = preferEnglishSafeReply(preferSolid(text, lastGood), text, host.content);
+    text = scrubUnexpectedForeignScript(text, host.content) || text;
+    // Never leave product-planning “Overall: keep the first version tiny…” glued onto book answers.
+    text = text
+      .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep the first version tiny[\s\S]*$/i, '')
+      .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep v1 tiny[\s\S]*$/i, '')
+      .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep every band[\s\S]*$/i, '')
+      .replace(/(?:^|\n)(?:\*\s*)?\*\*\s*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
-    if (webHit && looksLikeThinSideQuestReply(text, host.content)) {
+    const identifyAsk = looksLikeIdentifyMediaAsk(host.content)
+      || looksLikeExplicitResearchAsk(host.content)
+      || looksLikeRejectedPriorAnswerAsk(host.content);
+    const bookFindAsk = looksLikeBookFindOrBuyAsk(host.content);
+
+    // Book identify: only replace the model when a TRUSTED catalog title conflicts — never SEO “AI book finder” junk.
+    if (identifyAsk && webHit?.ok) {
+      const best = pickBestBookCandidateFromLookup(webHit);
+      const emptySources = /(?:^|\n)\s*[-*•]\s*\*{0,2}(?:Goodreads|Open Library|Wikipedia|Amazon|Scholastic)\*{0,2}\s*:?\s*(?=\n|$)/i.test(text)
+        && !/\[[^\]]+\]\(https?:\/\//i.test(text);
+      const metaJunkReply = /\b(?:free\s+ai\s+tool|find\s+a\s+book\s+title\s+by\s+plot|what\s+is\s+that\s+book\?|book\s+finder\s+for\s+forgotten)\b/i.test(text);
+      if (best && (identifyReplyConflictsWithLookup(text, webHit) || emptySources || metaJunkReply)) {
+        text = identifyAnswerFromLookup(host.content, webHit, best);
+      }
+    }
+
+    // “Give me links / where can I find” — require real store URLs from research.
+    if (bookFindAsk && webHit?.ok && !/\[[^\]]+\]\(https?:\/\//i.test(text)) {
+      text = bookFindAnswerFromLookup(host.content, webHit);
+    }
+
+    if (webHit && looksLikeThinSideQuestReply(text, host.content) && !identifyAsk) {
       // Never replace a solid prose answer (or live paint) with the raw snippet dump.
       const solid = text.length >= 160
         && !/^here'?s what turned up live/i.test(text)
@@ -455,8 +670,16 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     }
     if (!text || isTalkFenceJunk(text) || looksLikeOrphanChatTail(text)) {
       // Prefer a clear prose fallback over an empty CODE / "markdown ```" bubble.
-      // Domain-scoped so farmers-market / Apple copy never bleeds into unrelated chats.
-      text = orphanChatPlanFallback(host.content);
+      // Never inject product-planning fallbacks into book identify / find asks.
+      if (identifyAsk || bookFindAsk) {
+        text = webHit?.ok
+          ? (identifyAsk
+            ? identifyAnswerFromLookup(host.content, webHit)
+            : bookFindAnswerFromLookup(host.content, webHit))
+          : 'I could not finish that lookup cleanly — ask again and I will research it once more.';
+      } else {
+        text = orphanChatPlanFallback(host.content);
+      }
     }
     if (isCannedGreetingReply(text, host.content) && lastGood && !isCannedGreetingReply(lastGood, host.content)) {
       text = lastGood;
@@ -467,6 +690,11 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     } else {
       text = repairReplySourceLinks(text);
     }
+    // Strip leftover “use this in HTML/CSS…” lectures on color answers.
+    text = text.replace(
+      /\s*(?:You can use this code in HTML,?\s*CSS(?:,|\s+or)[^.!\n]*[.!]?\s*)+/gi,
+      '',
+    ).trim();
     return {
       status: 'handled',
       text,

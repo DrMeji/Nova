@@ -24,6 +24,7 @@ import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
 import { clearPluginToken, setPluginToken } from '@/lib/localPrefs';
 import { BrandMark } from '@/components/BrandMark';
+import { useRouter } from '@/context/RouterContext';
 
 function pluginStatusLine(
   runtime: PluginRuntimeState,
@@ -37,6 +38,7 @@ function pluginStatusLine(
 }
 
 export function BuildRun() {
+  const { navigate } = useRouter();
   const [query, setQuery] = useState('');
   const [state, setState] = useState<PluginStateMap>(() => loadPluginState());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -508,12 +510,20 @@ export function BuildRun() {
                       <p className="text-xs font-medium text-content-secondary mb-2">Try in chat</p>
                       <div className="flex flex-wrap gap-1.5">
                         {selected.actions.map(action => (
-                          <span
+                          <button
                             key={action.id}
-                            className="rounded-full border border-surface-border px-2.5 py-1 text-[11px] text-content-secondary"
+                            type="button"
+                            className="rounded-full border border-surface-border px-2.5 py-1 text-[11px] text-content-secondary hover:text-content-primary hover:border-sky-500/40 hover:bg-sky-500/10 transition-colors"
+                            title={action.prompt}
+                            onClick={() => {
+                              try {
+                                sessionStorage.setItem('NOVA:pending-chat-send', action.prompt);
+                              } catch { /* ignore */ }
+                              navigate({ name: 'chat' });
+                            }}
                           >
                             {action.label}
-                          </span>
+                          </button>
                         ))}
                       </div>
                     </div>

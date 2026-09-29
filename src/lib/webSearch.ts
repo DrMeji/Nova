@@ -1,9 +1,134 @@
 /** Chat-side web lookup (Electron IPC → DuckDuckGo / Wikipedia). */
 
+import { looksLikeColorCodeAsk } from '@/lib/colorCodeAsk';
+import { detectLayoutReference } from '@/lib/layoutReference';
+
 /**
  * Mid-thread side quests: weather, lyrics, sports, news, stocks, etc.
  * These must NOT keep dragging a prior build/plan into the answer.
  */
+
+/** Domains that look like “sources” but are social hangouts / unrelated junk. */
+const JUNK_SOURCE_HOSTS = [
+  'pairup.chat',
+  'pairup.com',
+  'omegle.com',
+  'chatroulette.com',
+  'monkey.app',
+  'pinterest.com',
+  'pin.it',
+  'facebook.com',
+  'instagram.com',
+  'tiktok.com',
+  'reddit.com',
+  'quora.com',
+  'medium.com',
+  'blogspot.com',
+  'wordpress.com',
+  'wix.com',
+  'squarespace.com',
+  // Meta “AI book finder” tools — not real titles; they pollute identify answers.
+  'whatisthatbook.com',
+  'whatbookisthis.com',
+  'capitalizemytitle.com',
+  'growthsummary.com',
+  'bookbrain.ai',
+  'bookbrain.com',
+  'meetnewbooks.com',
+  'sobrief.com',
+  'readthistwice.com',
+  // Plot-keyword SEO / fanfic / stock-art pages that invent fake titles like “The Friendship Treehouse”.
+  'scribd.com',
+  'freepik.com',
+  'behance.net',
+];
+
+/** Hosts that usually mean a real book page (not a plot-guessing gadget). */
+const TRUSTED_BOOK_HOSTS = [
+  'goodreads.com',
+  'openlibrary.org',
+  'wikipedia.org',
+  'scholastic.com',
+  'scholastic.ca',
+  'amazon.com',
+  'books.apple.com',
+  'books.google.com',
+  'barnesandnoble.com',
+  'penguinrandomhouse.com',
+  'harpercollins.com',
+  'simonandschuster.com',
+  'britannica.com',
+];
+
+function isTrustedBookHostUrl(url: string): boolean {
+  const host = hostFromUrl(url);
+  if (!host) return false;
+  return TRUSTED_BOOK_HOSTS.some((h) => host === h || host.endsWith(`.${h}`) || host.includes(h.replace('.com', '')));
+}
+
+/** Titles that are finder tools / SEO pages, not novels. */
+function looksLikeMetaBookFinderTitle(title: string): boolean {
+  const t = String(title || '');
+  return /\b(?:find\s+a\s+book|book\s+finder|what\s+(?:is\s+that|book\s+is\s+this)|ai\s+tool|vague\s+description|plot\s+or\s+vague|capitalize\s+my\s+title|bookbrain|forgotten\s+(?:book|title)s?|how\s+to\s+find\s+a\s+book\s+you\s+can'?t|rediscover\s+a\s+forgotten)\b/i.test(t);
+}
+
+function hostFromUrl(raw: string): string {
+  try {
+    return new URL(String(raw || '').trim()).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+export function isJunkWebSourceUrl(url: string): boolean {
+  const host = hostFromUrl(url);
+  if (!host) return true;
+  return JUNK_SOURCE_HOSTS.some((bad) => host === bad || host.endsWith(`.${bad}`));
+}
+
+/** Prefer encyclopedic / official hosts when ranking Sources for the model. */
+const PREFERRED_SOURCE_HOSTS = [
+  'wikipedia.org',
+  'wikidata.org',
+  'britannica.com',
+  'goodreads.com',
+  'openlibrary.org',
+  'scholastic.com',
+  'scholastic.ca',
+  'books.apple.com',
+  'amazon.com',
+  'liquipedia.net',
+  'vlr.gg',
+  'reuters.com',
+  'bbc.com',
+  'bbc.co.uk',
+  'apnews.com',
+  'neuralink.com',
+  'tesla.com',
+  'spacex.com',
+  'apple.com',
+  'riotgames.com',
+  'github.com',
+  'stripe.com',
+  'linear.app',
+];
+
+function sourceHostRank(url: string): number {
+  const host = hostFromUrl(url);
+  if (!host) return 99;
+  const idx = PREFERRED_SOURCE_HOSTS.findIndex((h) => host === h || host.endsWith(`.${h}`));
+  return idx >= 0 ? idx : 50;
+}
+
+export function filterWebSources<T extends { title?: string; url?: string }>(sources: T[]): T[] {
+  const cleaned = (sources || []).filter((s) => {
+    const u = String(s?.url || '').trim();
+    if (!/^https?:\/\//i.test(u)) return false;
+    if (isJunkWebSourceUrl(u)) return false;
+    return true;
+  });
+  return cleaned.sort((a, b) => sourceHostRank(String(a.url)) - sourceHostRank(String(b.url)));
+}
 
 /** Sports / esports / match predictions — need live web, not local-model guesses. */
 function looksLikeSportsOrEsportsAsk(text: string): boolean {
@@ -62,6 +187,8 @@ export function looksLikeSideQuestAsk(text: string): boolean {
   if (/\b(?:white\s+house|president|congress|election|headlines?|breaking\s+news|current\s+events)\b/i.test(t)) return true;
   if (/\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:weather|score|price|news)\b/i.test(t)) return true;
   if (/\bwho\s+won\b|\bwhat\s+happened\s+(?:today|yesterday|this\s+week|in\s+the\s+white\s+house)\b/i.test(t)) return true;
+  // Identify a real book/movie from a remembered plot — leave the build thread.
+  if (looksLikeIdentifyMediaAsk(t) || looksLikeExplicitResearchAsk(t) || looksLikeBookFindOrBuyAsk(t)) return true;
   return false;
 }
 
@@ -108,6 +235,9 @@ export function sideQuestAnswerHint(message: string): string {
   const lyrics = looksLikeLyricsAsk(message);
   const weather = /\b(?:weather|forecast|temperature)\b/i.test(message);
   const sports = looksLikeSportsOrEsportsAsk(message);
+  const identify = looksLikeIdentifyMediaAsk(message)
+    || looksLikeExplicitResearchAsk(message)
+    || looksLikeRejectedPriorAnswerAsk(message);
   const news = /\b(?:white\s+house|news|president|headlines?|election|stock|F1|formula)\b/i.test(message) || sports;
   return [
     'The user switched topics mid-chat. Answer ONLY this latest question.',
@@ -118,9 +248,12 @@ export function sideQuestAnswerHint(message: string): string {
       ? 'WEATHER: Give highs/lows, rain/snow chances, and the weekly feel when the lookup notes include them. If notes lack numbers, say the lookup was thin and share only what the snippets actually say — still no link dump.'
       : '',
     sports
-      ? 'SPORTS/ESPORTS: Use lookup snippets for team names, matchups, form, and tournament context. Give a clear pick or lean when asked who wins, with 1–2 reasons grounded in the notes. Never invent fake roster roles (do not invent “Primary Rifleman” / “Tactical Leader” expansions for org acronyms). If notes are thin, say so and still answer from what is available.'
+      ? 'SPORTS/ESPORTS: Use lookup snippets for team names, matchups, form, and tournament context. Give a clear pick or lean when asked who wins, with 1–2 reasons grounded in the notes. Never invent fake roster roles (do not invent “Primary Rifleman” / “Tactical Leader” expansions for org acronyms). Never cite social hangout / chat sites (e.g. PairUp.chat) as prediction sources. Prefer VLR.gg, Liquipedia, or official league pages from Sources. If notes are thin, say so and still answer from what is available.'
       : '',
-    /\b(?:who|twitch|streamer|brand|company|created|founded)\b/i.test(message)
+    identify
+      ? 'IDENTIFY BOOK/MOVIE: Use live lookup notes only. Name a title/author only if it appears in the notes. Map the user’s plot points to confirmed facts. Include real Sources links. Never invent alternate titles or claim a search you did not use.'
+      : '',
+    /\b(?:who|twitch|streamer|brand|company|created|founded)\b/i.test(message) && !identify
       ? 'PEOPLE/BRANDS: Lead with the identity (name, what they are known for). Add role/game/team or company history/products. Include the best Twitch/YouTube/official/wiki link from the notes. Do not ask “who do you mean?” when snippets already match.'
       : '',
     news && !sports
@@ -225,40 +358,827 @@ function looksLikeOfflineOnlyAsk(text: string): boolean {
   if (/\b(?:this\s+project|these\s+files|attached\s+(?:folder|project)|in\s+explorer|file\s+tree)\b/i.test(t)) {
     return true;
   }
+  // Hex / named color lookups are answered locally — no web needed.
+  if (looksLikeColorCodeAsk(t)) return true;
+  // Pure creative asks stay local by default (see looksLikeWebGroundedAsk for exceptions).
+  if (looksLikeCreativeAsk(t) && !looksLikeDesignReferenceAsk(t)) return true;
+  return false;
+}
+
+/** Stories, jokes, poems — answer from the model unless the user asked for a real-world reference. */
+export function looksLikeCreativeAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // Identifying a real book/movie from a plot is NOT creative writing.
+  if (looksLikeIdentifyMediaAsk(t) || looksLikeExplicitResearchAsk(t)) return false;
+  if (/\b(?:tell\s+me\s+a\s+story|write\s+(?:me\s+)?a\s+story|bedtime\s+story)\b/i.test(t)) return true;
+  if (/\bstory\s+(?:about|with|that|which)\b/i.test(t) && !/\b(?:book|novel|movie|film)\b/i.test(t)) return true;
+  if (/\b(?:thousand|1000|\d{3,4})\s+words?\b/i.test(t) && /\b(?:story|write|essay|fiction)\b/i.test(t)) return true;
+  if (/\bwrite\s+(?:me\s+)?(?:a|an|some)\b[\s\S]{0,60}\b(?:story|poem|joke|haiku|riddle|fanfic|fiction|script)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:joke|poem|riddle|haiku|limerick)\b/i.test(t) && !/\b(?:code|file|project|bug)\b/i.test(t)) return true;
   return false;
 }
 
 /**
- * Live web for nearly any real-world question.
- * Opt-out for builds/code/greetings — not an allowlist of topics.
+ * User is trying to identify a real book / movie / show from a remembered plot
+ * (“what’s the name of this book?”, childhood plot dump, etc.).
+ */
+export function looksLikeIdentifyMediaAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 16) return false;
+  if (/\b(?:what(?:'s|\s+is)\s+the\s+name\s+of\s+(?:this|the|that)\s+(?:book|novel|movie|film|show|series)|(?:name|title)\s+of\s+(?:this|the|that)\s+(?:book|novel|movie|film)|which\s+(?:book|novel|movie|film)|what\s+book\s+(?:is|was)\s+this|identify\s+(?:this|the)\s+(?:book|novel|movie|film)|what(?:'s|\s+is)\s+(?:this|that)\s+(?:book|novel|movie|film)\s+called)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:actual|real)\s+(?:book|novel|movie|film)\b/i.test(t)
+    && /\b(?:name|title|called|remember|know)\b/i.test(t)) {
+    return true;
+  }
+  // “don’t/can't/cannot remember the title/name” + book
+  if (/\b(?:book|novel|movie|film)\b/i.test(t)
+    && /\b(?:don'?t|do\s+not|can'?t|cannot|couldn'?t)\s+remember\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:book|novel|movie|film)\b/i.test(t)
+    && /\b(?:don'?t\s+know\s+(?:the\s+)?(?:name|title)|can'?t\s+remember\s+(?:the\s+)?(?:name|title)|tell\s+me\s+the\s+(?:name|title)|what(?:'s|\s+is)\s+(?:the\s+)?(?:name|title)|trying\s+to\s+remember)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:from\s+my\s+childhood|when\s+i\s+was\s+younger|read\s+(?:as\s+a\s+(?:kid|child)|growing\s+up)|help\s+me\s+find\s+(?:the\s+)?(?:book|novel|movie|title)|what(?:'s|\s+that)\s+book)\b/i.test(t)) {
+    return true;
+  }
+  // “figure out / know what book”, “sound familiar”, “what book am I talking about”
+  if (/\b(?:figure\s+out\s+what\s+book|know\s+what\s+book|what\s+book\s+(?:i'?m|am\s+i|could\s+this|is\s+this)|book\s+i'?m\s+(?:talking\s+about|thinking\s+of)|does\s+that\s+sound\s+familiar)\b/i.test(t)) {
+    return true;
+  }
+  // Long plot dump that clearly asks for a real book/movie title.
+  if (
+    t.length >= 100
+    && /\b(?:book|novel|movie|film)\b/i.test(t)
+    && /\b(?:name|title|called|remember|author|familiar|talking\s+about|thinking\s+of)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Plot-heavy “what’s that book” without the word title (maze / treehouse / garden dumps).
+  if (
+    t.length >= 80
+    && /\b(?:book|novel)\b/i.test(t)
+    && /\b(?:maze|treehouse|garden|outsider|friendship|plane\s+crash|wilderness|hatchet|glade|wall|fence)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Honest reply when identify research did not produce a trusted catalog match. */
+export function identifyResearchFailedReply(userMessage?: string): string {
+  const ask = String(userMessage || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return [
+    'I researched that plot online, but I could not confirm a single trusted title from live catalog sources (Goodreads / Wikipedia / Open Library / Amazon).',
+    '',
+    'I will not invent a book name. Add one more distinctive detail — a character name, place, object, or how it ends — and I will dig again.',
+    ask ? `\n(Your ask so far: “${ask}${ask.length >= 120 ? '…' : ''}”)` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/** Explicit request to research / dig on the web. */
+export function looksLikeExplicitResearchAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  return /\b(?:deep\s+research|do\s+(?:some\s+)?(?:deep\s+)?research|research\s+(?:this|that|it|please|deeper)|dig\s+(?:deep|deeper)|look\s+(?:this|it|that)\s+up|search\s+(?:the\s+)?(?:web|internet|online)|google\s+(?:it|this|that)|find\s+(?:it|this|that|out)\s+(?:online|on\s+the\s+web)|go\s+(?:look|search|find)\b)/i.test(t);
+}
+
+/** User rejected the prior guess (“nope”, “wrong book”, “not the name”). */
+export function looksLikeRejectedPriorAnswerAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 4) return false;
+  if (!/\b(?:nope|nah|wrong|incorrect|not\s+(?:the|that|it)|that(?:'s|\s+is)\s+not|try\s+again|guess\s+again|looked\s+it\s+up)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(?:book|name|title|movie|film|novel|answer|research|search)\b/i.test(t) || t.length < 220;
+}
+
+/**
+ * High-signal plot fingerprints → catalog title/author strings to SEARCH
+ * (not to return as answers). Live trusted hosts must still confirm the hit.
+ * Without these, DDG keyword soup often returns SEO junk or empty pages.
+ */
+export function identifyPlotSearchHints(text: string): string[] {
+  const t = String(text || '');
+  const out: string[] = [];
+  const push = (s: string) => {
+    const clean = s.replace(/\s+/g, ' ').trim();
+    if (!clean || out.some((x) => x.toLowerCase() === clean.toLowerCase())) return;
+    out.push(clean);
+  };
+
+  // Bridge to Terabithia — treehouse / friendship / outsider / art / sad ending
+  if (
+    /\b(?:treehouse|tree\s*house)\b/i.test(t)
+    && /\b(?:friend(?:ship)?|outsider|drawing|art|midwest|small\s+town)\b/i.test(t)
+  ) {
+    push('Bridge to Terabithia Katherine Paterson');
+  }
+  if (
+    /\b(?:friend(?:ship)?|outsider)\b/i.test(t)
+    && /\b(?:drawing|art)\b/i.test(t)
+    && /\b(?:sad|lose|losing|died|death|pass(?:ed)?\s+away)\b/i.test(t)
+    && /\b(?:book|novel|kid|school|younger)\b/i.test(t)
+  ) {
+    push('Bridge to Terabithia Katherine Paterson');
+  }
+
+  // The Maze Runner — wall/fence, boys, maze, monsters, escape, no memory
+  if (
+    /\bmaze\b/i.test(t)
+    && /\b(?:wall|fence|glade|monster|creature|boys?|escape|memory|memories)\b/i.test(t)
+  ) {
+    push('The Maze Runner James Dashner');
+  }
+
+  // The Secret Garden — garden + uncle/manor + sick/weak + girl helper
+  if (
+    /\b(?:secret\s+garden|abandoned\s+garden|hidden\s+garden)\b/i.test(t)
+    || (
+      /\bgarden\b/i.test(t)
+      && /\b(?:uncle|manor|cousin|orphan|sick|weak|invalid|mary|colin)\b/i.test(t)
+    )
+  ) {
+    push('The Secret Garden Frances Hodgson Burnett');
+  }
+
+  // Hatchet — plane crash + axe/hatchet + wilderness survival
+  if (
+    /\b(?:plane|crash)\b/i.test(t)
+    && /\b(?:axe|hatchet|wilderness|survive|survival|shelter)\b/i.test(t)
+  ) {
+    push('Hatchet Gary Paulsen');
+  }
+
+  // Holes — camp / digging holes / desert / curse
+  if (
+    /\b(?:dig(?:ging)?\s+holes|camp\s+green\s+lake|holes\b.*\bcamp|\bcamp\b.*\bholes)\b/i.test(t)
+    || (
+      /\bdig(?:ging)?\b/i.test(t)
+      && /\b(?:desert|curse|boys?)\b/i.test(t)
+      && /\b(?:hole|holes|camp|dirt)\b/i.test(t)
+    )
+  ) {
+    push('Holes Louis Sachar');
+  }
+
+  // The Honest Truth — sick boy, dog, grandfather, mountain
+  if (
+    /\b(?:hospital|sick|ill)\b/i.test(t)
+    && /\bdog\b/i.test(t)
+    && /\b(?:mountain|climb|climber)\b/i.test(t)
+    && /\b(?:grandfather|grandpa|family|boy)\b/i.test(t)
+  ) {
+    push('The Honest Truth Dan Gemeinhart');
+  }
+
+  return out.slice(0, 3);
+}
+
+/** Catalog search URLs so Sources is never an empty Goodreads/Amazon/Wikipedia shell. */
+export function catalogLookupUrlsForTitle(title: string, author?: string): { title: string; url: string }[] {
+  const t = canonicalizeBookDisplayTitle(title);
+  if (!t || t.length < 2) return [];
+  const q = encodeURIComponent(author ? `${t} ${author}` : t);
+  // Wikipedia search (not a raw slug) — avoids wrong pages and parenthesis URL glitches.
+  return [
+    { title: `${t} · Goodreads`, url: `https://www.goodreads.com/search?q=${q}` },
+    { title: `${t} · Amazon`, url: `https://www.amazon.com/s?k=${encodeURIComponent(`${t} book`)}` },
+    { title: `${t} · Wikipedia`, url: `https://en.wikipedia.org/w/index.php?search=${q}` },
+    { title: `${t} · Open Library`, url: `https://openlibrary.org/search?q=${q}` },
+  ];
+}
+
+/** Prefer the novel title (“Holes”) over shelf/series labels (“Holes Series”). */
+export function canonicalizeBookDisplayTitle(title: string): string {
+  return String(title || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+Book\s+Series\s*$/i, '')
+    .replace(/\s+Series\s*$/i, '')
+    .replace(/\s*\((?:novel\s+series|book\s+series|novel|book|film|movie|series)\)\s*$/i, '')
+    .replace(/\s*#\d+\s*$/i, '')
+    .trim();
+}
+
+/**
+ * Compress a long plot dump into a search-friendly keyword query.
+ * Keeps distinctive nouns; drops filler so DuckDuckGo can match real titles.
+ * High-signal plot tokens are front-loaded; meta “AI book finder” sites are excluded.
+ */
+export function compressIdentifySearchQuery(text: string): string {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  const media = /\b(?:movie|film|show|series)\b/i.test(raw) && !/\b(?:book|novel)\b/i.test(raw)
+    ? 'movie'
+    : 'book';
+  const stop = new Set([
+    'that', 'this', 'with', 'from', 'have', 'has', 'had', 'were', 'was', 'are', 'the',
+    'and', 'but', 'for', 'you', 'your', 'just', 'know', 'dont', "don't", 'didnt', "didn't",
+    'could', 'would', 'please', 'tell', 'name', 'title', 'actual', 'real', 'about', 'there',
+    'their', 'they', 'them', 'then', 'than', 'when', 'what', 'whats', "what's", 'which',
+    'where', 'into', 'onto', 'also', 'very', 'some', 'come', 'came', 'goes', 'went',
+    'like', 'want', 'need', 'help', 'make', 'made', 'been', 'being', 'only', 'over',
+    'now', 'here', 'back', 'well', 'even', 'still', 'something', 'someone', 'because',
+    'who', 'whom', 'whose', 'away', 'little', 'specific', 'wanted', 'passed', 'reaches',
+    'brings', 'find', 'goes', 'theres', "there's", 'named', 'else', 'looked', 'read',
+    'younger', 'travels', 'before', 'after', 'learns', 'learning', 'spends', 'spend',
+    'alone', 'left', 'given', 'gift', 'tool', 'maybe', 'possibly', 'area', 'long',
+    'time', 'does', 'getting', 'gets', 'ends', 'ended', 'okay', 'remember', 'trying',
+    'figure', 'sound', 'familiar', 'another', 'kinda', 'kind', 'really', 'vaguely',
+  ]);
+  // Distinctive plot tokens across survival / friendship / fantasy / garden stories.
+  const boostRe =
+    /\b(?:plane|crash(?:es|ed)?|pilot|axe|hatchet|wilderness|shelter|fish(?:ing)?|lake|storm|tornado|rescue(?:d|s)?|survival|survive[sd]?|moose|porcupine|canadian|canada|island|raft|fire|camp|animal|attack(?:ed)?|mother|mom|treehouse|friendship|outsider|midwest|school|drawing|art|maze|glade|monster|wall|fence|garden|secret|uncle|manor|orphan|bridge|terabithia|holes|camp)\b/gi;
+  const boosted: string[] = [];
+  let bm: RegExpExecArray | null;
+  while ((bm = boostRe.exec(raw)) !== null) {
+    const low = bm[0].toLowerCase();
+    if (!boosted.includes(low)) boosted.push(low);
+  }
+  const words = raw.match(/[A-Za-z']{3,}/g) || [];
+  const kept: string[] = [...boosted];
+  for (const w of words) {
+    const low = w.toLowerCase();
+    if (stop.has(low)) continue;
+    if (/^(?:book|novel|movie|film|story)$/i.test(low)) continue;
+    if (kept.includes(low)) continue;
+    kept.push(low);
+    if (kept.length >= 18) break;
+  }
+  const kidCue = /\b(?:boy|girl|kid|child|hospital|school|grandpa|grandfather|grandma|young(?:er)?)\b/i.test(raw);
+  const head = kidCue && media === 'book' ? 'children novel' : `${media} novel`;
+  const survivalCue = /\b(?:axe|hatchet|plane|crash)\b/i.test(raw) && /\b(?:wilderness|shelter|survive|survival|alone)\b/i.test(raw)
+    ? 'survival'
+    : '';
+  // Push DDG away from meta “AI find-a-book” gadgets toward real catalog pages.
+  const exclusions = '-site:whatisthatbook.com -site:whatbookisthis.com -site:capitalizemytitle.com -"AI book finder" -"find a book by plot"';
+  // Prefer known fingerprint titles first — keyword-only soup often returns junk or empty DDG pages.
+  const hints = identifyPlotSearchHints(raw);
+  const hintHead = hints.length ? `${hints[0]} ` : '';
+  return `${hintHead}${head} ${survivalCue} ${kept.join(' ')} ${exclusions}`.replace(/\s+/g, ' ').trim().slice(0, 280);
+}
+
+export type BookIdentifyCandidate = {
+  title: string;
+  author?: string;
+  score: number;
+  urls: string[];
+};
+
+function normalizeBookTitleKey(title: string): string {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/\b(?:novel|book|paperback|hardcover|scholastic|gold|edition|series)\b/gi, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isPlausibleBookTitle(title: string): boolean {
+  const t = String(title || '').trim();
+  if (t.length < 2 || t.length > 70) return false;
+  if (looksLikeMetaBookFinderTitle(t)) return false;
+  if (/^(?:amazon\.com|books?|find|what|home|search|free|how|best|top)\b/i.test(t)) return false;
+  if (/\b(?:http|www\.|\.com|\.org)\b/i.test(t)) return false;
+  if (/[:|]/.test(t) && !/\bby\b/i.test(t)) return false;
+  // Too many filler words → almost never a real title.
+  const words = t.split(/\s+/);
+  if (words.length > 8) return false;
+  return true;
+}
+
+/** Pull likely title/author pairs from live search titles + snippets. */
+export function extractBookCandidatesFromLookup(hit: {
+  text?: string;
+  sources?: { title?: string; url?: string }[];
+}): BookIdentifyCandidate[] {
+  const rows: { title: string; author?: string; url?: string; trusted: boolean }[] = [];
+  const push = (title: string, author?: string, url?: string) => {
+    let t = String(title || '').replace(/\s+/g, ' ').trim();
+    t = t
+      .replace(/\s*[|—–-]\s*(?:Goodreads|Wikipedia|Open Library|Amazon\.com?|Google Books|LibraryThing|Scholastic|Apple Books|Barnes\s*&\s*Noble).*$/i, '')
+      .replace(/\s*\((?:novel|book|Brian'?s Saga[^)]*|#[\d]+)\)\s*/gi, ' ')
+      .replace(/\s+Book\s+Series\s*$/i, '')
+      .replace(/\s+Series\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // “Title by Author” stuck in title field after partial strip.
+    const bySplit = t.match(/^(.+?)\s+by\s+(.+)$/i);
+    if (bySplit && !author) {
+      t = bySplit[1].trim();
+      author = bySplit[2].trim();
+    }
+    if (!isPlausibleBookTitle(t)) return;
+    if (url && (isJunkWebSourceUrl(url) || looksLikeMetaBookFinderTitle(`${t} ${url}`))) return;
+    rows.push({
+      title: t,
+      author: author ? String(author).replace(/\s+/g, ' ').trim() : undefined,
+      url: url && /^https?:\/\//i.test(url) ? url : undefined,
+      trusted: Boolean(url && isTrustedBookHostUrl(url)),
+    });
+  };
+
+  for (const s of hit.sources || []) {
+    const rawTitle = String(s.title || '').replace(/&#x27;/gi, "'").replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
+    const url = String(s.url || '').trim();
+    if (url && isJunkWebSourceUrl(url)) continue;
+    if (looksLikeMetaBookFinderTitle(rawTitle)) continue;
+
+    let m = rawTitle.match(/^(.+?)\s+by\s+([A-Z][\w.'’-]+(?:\s+[A-Z][\w.'’-]+){0,4})\b/i);
+    if (m) {
+      push(m[1], m[2], url);
+      continue;
+    }
+    m = rawTitle.match(/^(.+?)\s*[-–—:]\s*([A-Z][\w.'’-]+(?:\s+[A-Z][\w.'’-]+){0,3})\s*$/);
+    if (m && !/goodreads|wikipedia|amazon|open library|google|barnes/i.test(m[2])) {
+      push(m[1], m[2], url);
+      continue;
+    }
+    m = rawTitle.match(/^Amazon\.com:\s*(.+?):\s*\d+:\s*([^:]+?):\s*Books/i);
+    if (m) {
+      const author = m[2].includes(',')
+        ? m[2].split(',').map((p) => p.trim()).reverse().join(' ')
+        : m[2].trim();
+      push(m[1], author, url);
+      continue;
+    }
+    m = rawTitle.match(/^(.+?)\s*\((?:novel|book)\)\s*[-–—]/i);
+    if (m) {
+      push(m[1], undefined, url);
+      continue;
+    }
+    // Bare catalog pages only (never SEO finder tools).
+    if (url && isTrustedBookHostUrl(url)) {
+      const bare = rawTitle
+        .replace(/\s*[|—–-]\s*(?:Goodreads|Open Library|Scholastic|Google Books|Apple Books|Wikipedia|Amazon\.com?).*$/i, '')
+        .replace(/\s+by\s+.+$/i, '')
+        .trim();
+      if (bare && bare.length < 60) push(bare, undefined, url);
+    }
+  }
+
+  for (const line of String(hit.text || '').split('\n')) {
+    const clean = line.replace(/^\s*[-•]\s*/, '').replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim();
+    if (looksLikeMetaBookFinderTitle(clean)) continue;
+    const m = clean.match(/\b([A-Z][\w''\-]+(?:\s+[A-Z][\w''\-]+){0,5})\s+by\s+([A-Z][\w.'’-]+(?:\s+[A-Z][\w.'’-]+){0,4})\b/);
+    if (m) push(m[1], m[2]);
+  }
+
+  const map = new Map<string, BookIdentifyCandidate & { trustedHits: number }>();
+  for (const row of rows) {
+    const key = normalizeBookTitleKey(row.title);
+    if (!key || key.length < 2) continue;
+    const cur = map.get(key) || {
+      title: row.title,
+      author: row.author,
+      score: 0,
+      urls: [] as string[],
+      trustedHits: 0,
+    };
+    cur.score += 1;
+    if (row.trusted) cur.trustedHits += 1;
+    if (row.author && (!cur.author || row.author.length > cur.author.length)) cur.author = row.author;
+    if (row.url && !cur.urls.includes(row.url)) cur.urls.push(row.url);
+    if (row.title.length > cur.title.length && isPlausibleBookTitle(row.title)) cur.title = row.title;
+    map.set(key, cur);
+  }
+
+  return [...map.values()]
+    .map((c) => ({
+      title: canonicalizeBookDisplayTitle(c.title),
+      author: c.author,
+      urls: c.urls.filter((u) => !isJunkWebSourceUrl(u)),
+      // Require trusted catalog hits to outrank SEO junk; prefer the novel over “X Series”.
+      score: c.score
+        + (c.author ? 2 : 0)
+        + (c.trustedHits * 3)
+        + Math.min(2, c.urls.filter((u) => isTrustedBookHostUrl(u)).length)
+        + (/series$/i.test(c.title) ? -2 : 0)
+        + (c.urls.some((u) => /wikipedia\.org\/wiki\//i.test(u) && !/series/i.test(u)) ? 2 : 0),
+    }))
+    .filter((c) => isPlausibleBookTitle(c.title) && !looksLikeMetaBookFinderTitle(c.title))
+    .sort((a, b) => b.score - a.score || a.title.length - b.title.length || b.urls.length - a.urls.length);
+}
+
+export function pickBestBookCandidateFromLookup(hit: {
+  text?: string;
+  sources?: { title?: string; url?: string }[];
+}): BookIdentifyCandidate | null {
+  const list = extractBookCandidatesFromLookup(hit);
+  if (!list.length) return null;
+  const best = list[0];
+  if (looksLikeMetaBookFinderTitle(best.title)) return null;
+  const trustedUrls = best.urls.filter((u) => isTrustedBookHostUrl(u));
+  // Only override the model when a real catalog host backs the title.
+  if (trustedUrls.length < 1) return null;
+  if (best.score < 3 && trustedUrls.length < 2) return null;
+  return { ...best, urls: trustedUrls.length ? trustedUrls : best.urls };
+}
+
+/** Short neutral bridge — never invent plot beats from another book. */
+function identifyPlotBridge(userMessage: string): string {
+  const t = String(userMessage || '');
+  const bits: string[] = [];
+  if (/\b(?:plane|crash|axe|hatchet|wilderness)\b/i.test(t)) bits.push('wilderness survival');
+  if (/\b(?:treehouse|friendship|outsider|drawing|art)\b/i.test(t)) bits.push('a close childhood friendship');
+  if (/\b(?:maze|glade|wall|fence|monster)\b/i.test(t)) bits.push('a maze / confined group');
+  if (/\b(?:garden|secret\s+garden|uncle|manor)\b/i.test(t)) bits.push('a hidden garden');
+  if (/\b(?:midwest|small\s+town|school)\b/i.test(t)) bits.push('a small-town school setting');
+  if (/\b(?:dig(?:ging)?|holes?|desert|curse|camp)\b/i.test(t)) bits.push('a desert camp and forced digging');
+  if (/\b(?:hospital|sick|dog|mountain|grandfather|grandpa)\b/i.test(t)) bits.push('a sick boy, a dog, and a mountain');
+  if (!bits.length) return 'Your remembered details line up with how this book is described on those pages.';
+  return `Your details (${bits.slice(0, 3).join(', ')}) line up with how this book is described online.`;
+}
+
+/** Map the user’s plot points onto confirmed match bullets (grounded in their words). */
+function identifyWhyItMatches(userMessage: string): string[] {
+  const t = String(userMessage || '');
+  const bullets: string[] = [];
+  const push = (s: string) => {
+    if (!bullets.includes(s)) bullets.push(s);
+  };
+  if (/\bdig(?:ging)?\b/i.test(t) && /\bholes?\b/i.test(t)) {
+    push('Boys at a remote camp are forced to dig holes every day');
+  }
+  if (/\bcharacter\b/i.test(t) && /\bdig/i.test(t)) {
+    push('Staff say the digging builds “character,” but there’s another reason behind it');
+  }
+  if (/\b(?:desert|dirt|middle\s+of\s+nowhere|nowhere)\b/i.test(t)) {
+    push('The setting is a barren desert / dirt landscape far from town');
+  }
+  if (/\b(?:didn'?t\s+do|did\s+not\s+do|trouble|sent|wrongly|innocent)\b/i.test(t)) {
+    push('The main character is sent there after getting in trouble for something he says he didn’t do');
+  }
+  if (/\b(?:curse|family\s+story|past\s+and\s+(?:the\s+)?present|switches?\s+between|timeline)\b/i.test(t)) {
+    push('A family curse / older storyline weaves with what happens in the present');
+  }
+  if (/\b(?:buried|treasure|something\s+important)\b/i.test(t)) {
+    push('Something important is buried out in the desert');
+  }
+  if (/\b(?:friend|friends|other\s+boys)\b/i.test(t)) {
+    push('He befriends other boys at the camp while figuring out what’s really going on');
+  }
+  if (/\b(?:treehouse|friendship|outsider|drawing|art)\b/i.test(t)) {
+    push('An outsider kid forms an unusual, close friendship (art / a special hideaway)');
+  }
+  if (/\b(?:maze|wall|fence|glade|monster)\b/i.test(t)) {
+    push('Boys trapped behind a wall/fence with a deadly changing maze outside');
+  }
+  if (/\b(?:garden|uncle|manor|sick|weak)\b/i.test(t)) {
+    push('A hidden/abandoned garden, an old house, and healing through bringing it back to life');
+  }
+  if (/\b(?:plane|crash|axe|hatchet|wilderness)\b/i.test(t)) {
+    push('A plane crash and wilderness survival with a hatchet / axe');
+  }
+  if (/\b(?:hospital|sick|ill)\b/i.test(t) && /\bdog\b/i.test(t) && /\b(?:mountain|climb)/i.test(t)) {
+    push('A sick boy leaves the hospital with his dog to climb a mountain tied to his grandfather');
+  }
+  if (/\b(?:steal|stealing|food|restaurant)\b/i.test(t) && /\b(?:mountain|climb|dog)\b/i.test(t)) {
+    push('He gets in trouble along the way (food / running away) before reaching the mountain');
+  }
+  if (/\b(?:pass(?:ed)?\s+out|collapse|dog\s+(?:finds?|gets?|brings?)\s+help)\b/i.test(t)) {
+    push('He collapses near the top and the dog goes for help');
+  }
+  return bullets.slice(0, 6);
+}
+
+/** Pull a short blurb from live Wikipedia / snippet lines for the confirmed title. */
+function extractBookBlurbFromLookup(
+  hit: { text?: string; sources?: { title?: string; url?: string }[] },
+  title: string,
+): string | null {
+  const key = normalizeBookTitleKey(title);
+  if (!key) return null;
+  const text = String(hit.text || '');
+  const wikiLine = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => /wikipedia/i.test(l) && normalizeBookTitleKey(l).includes(key) && /:\s*\S/.test(l));
+  if (wikiLine) {
+    const blurb = wikiLine.replace(/^.*?Wikipedia[^\n:]*:\s*/i, '').replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim();
+    if (blurb.length >= 60) return blurb.slice(0, 480).replace(/\s+\S*$/, '') + (blurb.length > 480 ? '…' : '');
+  }
+  // Any Wikipedia · Title: extract line even if title wording differs slightly.
+  const anyWiki = text.match(/Wikipedia\s*[·•|\-–—]\s*[^\n:]{2,60}:\s*([^\n]{60,500})/i);
+  if (anyWiki?.[1]) {
+    const blurb = anyWiki[1].replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim();
+    if (blurb.length >= 60) return blurb.slice(0, 480).replace(/\s+\S*$/, '') + (blurb.length > 480 ? '…' : '');
+  }
+  // Fallback: longest trusted snippet mentioning the title.
+  let best = '';
+  for (const line of text.split('\n')) {
+    const clean = line.replace(/^\s*[-•]\s*/, '').replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim();
+    if (clean.length < 70 || clean.length > 420) continue;
+    if (!normalizeBookTitleKey(clean).includes(key) && !new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(clean)) {
+      continue;
+    }
+    if (clean.length > best.length) best = clean;
+  }
+  return best || null;
+}
+
+/** Prefer a direct Wikipedia article URL over a search page when live results include one. */
+function preferDirectCatalogUrl(
+  sources: { title?: string; url?: string }[],
+  kind: 'wikipedia' | 'goodreads' | 'amazon' | 'openlibrary',
+  title: string,
+): string | null {
+  const key = normalizeBookTitleKey(title);
+  const scored = sources
+    .filter((s) => s.url && /^https?:\/\//i.test(s.url))
+    .map((s) => {
+      const u = String(s.url);
+      const t = String(s.title || '');
+      let score = 0;
+      if (kind === 'wikipedia' && /wikipedia\.org\/wiki\//i.test(u) && !/\/wiki\/Special:/i.test(u)) score += 5;
+      if (kind === 'goodreads' && /goodreads\.com\/book\//i.test(u)) score += 5;
+      if (kind === 'amazon' && /amazon\.com\/.+\/dp\//i.test(u)) score += 5;
+      if (kind === 'openlibrary' && /openlibrary\.org\/(works|books)\//i.test(u)) score += 5;
+      if (kind === 'wikipedia' && /wikipedia\.org/i.test(u)) score += 1;
+      if (kind === 'goodreads' && /goodreads\.com/i.test(u)) score += 1;
+      if (kind === 'amazon' && /amazon\.com/i.test(u)) score += 1;
+      if (kind === 'openlibrary' && /openlibrary\.org/i.test(u)) score += 1;
+      if (normalizeBookTitleKey(t).includes(key) || normalizeBookTitleKey(u).includes(key)) score += 2;
+      if (/series/i.test(t) || /shelf\/show/i.test(u)) score -= 3;
+      return { url: u, score };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.url || null;
+}
+
+/** Deterministic identify reply grounded in live search (local models often ignore notes). */
+export function identifyAnswerFromLookup(
+  userMessage: string,
+  hit: { text?: string; sources?: { title?: string; url?: string }[] },
+  candidate?: BookIdentifyCandidate | null,
+): string {
+  const best = candidate || pickBestBookCandidateFromLookup(hit);
+  const sources = filterWebSources(hit.sources || [])
+    .filter((s) => s.url && isTrustedBookHostUrl(s.url) && !looksLikeMetaBookFinderTitle(String(s.title || '')))
+    .slice(0, 8);
+  if (!best) {
+    return [
+      'I researched that plot online, but the live results did not agree on one clear title yet.',
+      '',
+      'Add one more distinctive detail (a character name, place, object, or how it ends) and I will dig again.',
+    ].join('\n');
+  }
+
+  const displayTitle = canonicalizeBookDisplayTitle(best.title);
+  const blurb = extractBookBlurbFromLookup(hit, displayTitle);
+  const why = identifyWhyItMatches(userMessage);
+
+  // Prefer live catalog hits; fill gaps with searchable catalog URLs for the confirmed title.
+  const catalog = catalogLookupUrlsForTitle(displayTitle, best.author);
+  const pickUrl = (kind: 'wikipedia' | 'goodreads' | 'amazon' | 'openlibrary', fallbackHint: RegExp) => {
+    const direct = preferDirectCatalogUrl(sources, kind, displayTitle);
+    if (direct) return direct;
+    const fromSources = sources.find((x) => fallbackHint.test(`${x.title || ''} ${x.url || ''}`))?.url;
+    if (fromSources) return fromSources;
+    return catalog.find((c) => fallbackHint.test(`${c.title} ${c.url}`))?.url || null;
+  };
+
+  const linkLines: string[] = [];
+  const addLink = (label: string, url: string | null | undefined) => {
+    if (!url || linkLines.some((l) => l.includes(url))) return;
+    linkLines.push(`- **${label}:** [${displayTitle}](${url})`);
+  };
+  addLink('Goodreads', pickUrl('goodreads', /goodreads/i));
+  addLink('Amazon', pickUrl('amazon', /amazon\.com/i));
+  addLink('Wikipedia', pickUrl('wikipedia', /wikipedia/i));
+  addLink('Open Library', pickUrl('openlibrary', /openlibrary|open.?library/i));
+
+  return [
+    `That matches **${displayTitle}**${best.author ? ` by **${best.author}**` : ''}.`,
+    '',
+    ...(why.length
+      ? ['**Why this fits what you remembered**', ...why.map((b) => `- ${b}`), '']
+      : [identifyPlotBridge(userMessage), '']),
+    ...(blurb
+      ? ['**About the book**', blurb, '']
+      : []),
+    '**Where to look it up**',
+    ...(linkLines.length ? linkLines : ['- (Search returned a title match, but no reachable store/wiki links this time.)']),
+  ].filter((line, i, arr) => !(line === '' && arr[i - 1] === '')).join('\n');
+}
+
+/** Build a store/library link list when the user asked where to find / read a book. */
+export function bookFindAnswerFromLookup(
+  userMessage: string,
+  hit: { text?: string; sources?: { title?: string; url?: string }[] },
+): string {
+  const sources = filterWebSources(hit.sources || [])
+    .filter((s) => s.url && !isJunkWebSourceUrl(s.url) && !looksLikeMetaBookFinderTitle(String(s.title || '')))
+    .slice(0, 8);
+  const pick = (hint: RegExp) => sources.find((s) => hint.test(`${s.title || ''} ${s.url || ''}`));
+  const lines: string[] = [];
+  const used = new Set<string>();
+  const add = (label: string, hint: RegExp) => {
+    const s = pick(hint);
+    if (!s?.url || used.has(s.url)) return;
+    used.add(s.url);
+    lines.push(`- **${label}:** [${s.title || label}](${s.url})`);
+  };
+  add('Amazon', /amazon\.com/i);
+  add('Barnes & Noble', /barnesandnoble|barnes\s*&\s*noble/i);
+  add('Google Books', /books\.google|google\.com\/books/i);
+  add('Open Library', /openlibrary|open.?library/i);
+  add('Goodreads', /goodreads/i);
+  add('Audible', /audible\.com/i);
+  add('Wikipedia', /wikipedia/i);
+  for (const s of sources) {
+    if (lines.length >= 5) break;
+    if (!s.url || used.has(s.url)) continue;
+    if (!isTrustedBookHostUrl(s.url) && !/kindle|libby|overdrive|hoopla|audible/i.test(s.url)) continue;
+    used.add(s.url);
+    lines.push(`- [${s.title || 'Source'}](${s.url})`);
+  }
+  const ask = String(userMessage || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  if (!lines.length) {
+    return [
+      `I researched where to get that${ask ? ` (“${ask}”)` : ''}, but live results did not return reachable store links this time.`,
+      '',
+      'Try Amazon, Barnes & Noble, your library app (Libby / Hoopla), or Kindle — or ask again with the exact title.',
+    ].join('\n');
+  }
+  return [
+    'Here are live links from the research:',
+    '',
+    ...lines,
+    '',
+    'Availability and free full-text access vary by title and region — use the store or library page for the legal copy.',
+  ].join('\n');
+}
+
+/** True when the assistant named a title that does not appear in live lookup hits. */
+export function identifyReplyConflictsWithLookup(
+  reply: string,
+  hit: { text?: string; sources?: { title?: string; url?: string }[] },
+): boolean {
+  const best = pickBestBookCandidateFromLookup(hit);
+  if (!best) return false;
+  const t = String(reply || '');
+  const bestKey = normalizeBookTitleKey(best.title);
+  if (!bestKey) return false;
+  // Model already said the consensus title — keep its prose.
+  if (normalizeBookTitleKey(t).includes(bestKey) || new RegExp(best.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(t)) {
+    return false;
+  }
+  // Look for “**Title** by **Author**” / “titled X” style claims that disagree.
+  const claim = t.match(/\b(?:book|novel|title)\s+(?:is|called|titled)?\s*\*{0,2}([A-Z][^.*\n]{2,60}?)\*{0,2}(?:\s+by\s+\*{0,2}([A-Z][^.*\n]{2,40}?)\*{0,2})?/i)
+    || t.match(/\*{0,2}([A-Z][^.*\n]{2,50}?)\*{0,2}\s+by\s+\*{0,2}([A-Z][^.*\n]{2,40}?)\*{0,2}/);
+  if (!claim) {
+    // Strong consensus online + reply never mentions it → treat as conflict.
+    return best.score >= 4;
+  }
+  const claimedKey = normalizeBookTitleKey(claim[1] || '');
+  if (!claimedKey) return best.score >= 4;
+  if (claimedKey === bestKey || bestKey.includes(claimedKey) || claimedKey.includes(bestKey)) return false;
+  // Claimed title also appears in lookup → soft conflict only.
+  const alts = extractBookCandidatesFromLookup(hit);
+  if (alts.some((c) => normalizeBookTitleKey(c.title) === claimedKey && c.score >= 2)) return false;
+  return true;
+}
+
+/**
+ * Build / UI asks that need a live look at a real site or brand pattern
+ * (“make it like apple.com”, “inspired by Linear”, pasted https://…).
+ */
+export function looksLikeDesignReferenceAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 8) return false;
+  try {
+    if (detectLayoutReference(t).wantsInspiration) return true;
+  } catch { /* keep scanning */ }
+  if (/\bhttps?:\/\/[^\s)\]}'"]+/i.test(t)
+    && /\b(?:look|ui|layout|design|style|feel|vibe|homepage|landing|reference|inspired|clone|replica)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:look(?:s|ing)?\s+like|inspired\s+by|based\s+(?:on|off)|as\s+(?:a\s+)?(?:layout\s+)?reference|layout\s+(?:like|from)|ui\s+(?:like|from)|style\s+(?:of|like)|feel\s+like)\b/i.test(t)
+    && (/\b\w+\.(?:com|io|app|dev|co|design)\b/i.test(t)
+      || /\b(?:apple|discord|stripe|linear|notion|figma|spotify|netflix|airbnb|github)\b/i.test(t))) {
+    return true;
+  }
+  return false;
+}
+
+/** User wants a deep / exhaustive profile — not a tight Quick facts card. */
+export function looksLikeComprehensiveAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (looksLikeExplicitResearchAsk(t)) return true;
+  if (/\b(?:everything|every\s+thing|all\s+(?:you\s+)?(?:know|got|have)|give\s+me\s+(?:all|everything)|full\s+(?:bio|biography|profile|rundown|breakdown)|comprehensive|in[- ]depth|as\s+much\s+as\s+you\s+can|tell\s+me\s+all)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:who\s+is|tell\s+me\s+about|what\s+do\s+you\s+know\s+about)\b/i.test(t)
+    && /\b(?:everything|all|every|detail|details|know)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** User wants store / library / online-read links for a known book or series. */
+export function looksLikeBookFindOrBuyAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 8) return false;
+  const bookish = /\b(?:book|books|novel|novels|series|trilogy|hunger\s+games|harry\s+potter|narnia|percy\s+jackson)\b/i.test(t);
+  if (!bookish && !/\b(?:kindle|audiobook|paperback|hardcover|ebook)\b/i.test(t)) return false;
+  if (/\b(?:where\s+(?:can|do)\s+i\s+(?:find|buy|get|read|download)|give\s+me\s+(?:a\s+)?links?|links?\s+so\s+i\s+can|read\s+them\s+online|buy\s+(?:them|it|the\s+books?)|purchase|order\s+(?:them|it)|barnes\s*&\s*noble|amazon\s+link)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:list|name)\b[\s\S]{0,40}\b(?:books?|series)\b/i.test(t)
+    && /\b(?:where|find|buy|get|link|online|store)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Search when external info would actually help — not on every message.
+ *
+ * Yes: people / news / predictions, “more information”, design refs (apple.com UI),
+ *      explicit “search the web”, book/movie identify-from-plot, build asks that need a live layout look.
+ * No:  plain stories/jokes, greeting, color codes, routine coding without a reference.
  */
 export function looksLikeWebGroundedAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length < 6) return false;
+
+  // Bound-folder asks (“this project”, “more info about my app”) never hit the public web.
+  if (/\b(?:this|the|my|our)\s+(?:project|folder|app|codebase|code)\b/i.test(t)
+    && !/\b(?:github\.com|https?:\/\/|apple\.com|figma|dribbble)\b/i.test(t)) {
+    return false;
+  }
+
+  // Design / layout references win even on build asks (“site like apple.com”).
+  if (looksLikeDesignReferenceAsk(t)) return true;
+
+  // Identify / research asks must hit the web even when the plot reads like a “story”.
+  if (looksLikeIdentifyMediaAsk(t) || looksLikeExplicitResearchAsk(t) || looksLikeRejectedPriorAnswerAsk(t)) {
+    return true;
+  }
+  // “Where can I buy / give me links to read” — need real store URLs.
+  if (looksLikeBookFindOrBuyAsk(t)) return true;
+
   if (looksLikeOfflineOnlyAsk(t)) return false;
-  if (looksLikeSideQuestAsk(t)) return true;
-  if (looksLikeSportsOrEsportsAsk(t)) return true;
-  // Any substantive question / lookup / “who is X” style ask.
-  if (/\?/.test(t)) return true;
-  if (/\b(?:who|what|when|where|which|how|why)\b/i.test(t)) return true;
-  if (/\b(?:tell\s+me\s+about|look\s+up|search\s+for|find\s+out|info(?:rmation)?\s+(?:on|about)|more\s+(?:info|information|details?)\s+(?:on|about))\b/i.test(t)) {
+  if (looksLikeCreativeAsk(t)) return false;
+  if (looksLikeLyricsAsk(t)) return false;
+
+  // User explicitly asked to search.
+  if (/\blook\s+(?:up|this)\s+up\b|\bsearch\s+(?:the\s+)?(?:web|internet|online)\b|\bgoogle\s+(?:it|this|that)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:twitch|youtube|streamer|stream|pro\s+player|esports?|company|brand|founded|creator|created)\b/i.test(t)) {
+
+  // Time-sensitive: sports predictions, weather, markets, news.
+  if (looksLikeSportsOrEsportsAsk(t)
+    && /\b(?:predict|prediction|win|won|vs\.?|versus|odds|score|match|standings?|who\s+will|upcoming|next|today|tonight|live)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:weather|news|stock(?:\s+price)?s?|current\s+events|headlines?|breaking|restaurant|near\s+me)\b/i.test(t)) {
+  if (/\b(?:weather|forecast|temperature|humid(?:ity)?)\b/i.test(t)) return true;
+  if (/\b(?:stock|stocks|share\s+price|AAPL|TSLA|NVDA|S&P|nasdaq|dow\s+jones|net\s*worth|live\s+(?:price|odds|score)|current\s+price)\b/i.test(t)) {
     return true;
   }
-  if (/\blook\s+(?:up|this)\s+up\b|\bsearch\s+(?:the\s+)?(?:web|internet|online)\b/i.test(t)) return true;
-  // Short proper-noun / person / brand style asks without a question mark.
-  if (t.length <= 160 && /\b(?:is|are|was|were|about|named|called)\b/i.test(t)) return true;
+  if (/\b(?:white\s+house|president|congress|election|headlines?|breaking\s+news|current\s+events|what\s+happened\s+(?:today|yesterday|this\s+week))\b/i.test(t)) {
+    return true;
+  }
+  if (/\bhow\s+much\s+(?:is|are|does|did|has|have)\b/i.test(t)) return true;
+
+  // Deep / accurate lookups about people, orgs, products.
+  if (looksLikeComprehensiveAsk(t)) return true;
+  if (/\b(?:more\s+(?:info|information|details?)(?:\s+(?:on|about))?|tell\s+me\s+more|full\s+(?:bio|biography|profile))\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:who\s+(?:is|are|was|were)|who(?:'s)|tell\s+me\s+about)\b/i.test(t)
+    && !/\b(?:file|folder|project|button|css|component|function)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:info(?:rmation)?\s+(?:on|about)|find\s+out\s+(?:about|more)|look\s+up)\b/i.test(t)) return true;
+  if (/\b(?:who\s+created|founded|founder|when\s+was\b.{0,40}\bfounded)\b/i.test(t)) return true;
+
+  // Specs / “is it worth it” product digs — not bare “what is a mouse”.
+  if (/\b(?:specs?|specifications|review|is\s+it\s+worth|best\s+(?:price|deal)|compare)\b/i.test(t)) {
+    return true;
+  }
+
+  // Planning how to implement a real product UI (still not routine file edits).
+  if (/\b(?:how\s+(?:should|would|do)\s+(?:we|i|you)\s+(?:build|implement|structure|layout)|best\s+way\s+to\s+(?:build|implement|structure)|what(?:'s|\s+is)\s+the\s+best\s+(?:way|approach)\s+to\s+(?:build|implement))\b/i.test(t)
+    && /\b(?:website|app|ui|page|landing|dashboard|homepage|site)\b/i.test(t)) {
+    return true;
+  }
+
   return false;
 }
 
 export async function webSearchForChat(
   query: string,
-  opts?: { priorTurns?: { role: string; content: string }[] },
+  opts?: { priorTurns?: { role: string; content: string }[]; timeoutMs?: number },
 ): Promise<{
   ok: boolean;
   text: string;
@@ -266,16 +1186,43 @@ export async function webSearchForChat(
   error?: string;
 }> {
   const cleaned = buildContextualWebQuery(query, opts?.priorTurns || []);
-  try {
-    if (window.novaDesktop?.webSearch) {
-      const res = await window.novaDesktop.webSearch(cleaned);
-      return {
-        ok: Boolean(res?.ok),
-        text: String(res?.text || ''),
-        sources: Array.isArray(res?.sources) ? res.sources : [],
-        error: res?.error,
-      };
+  // Identify / deep research asks benefit from a longer live dig (up to 45s).
+  const budget = Math.max(6_000, Math.min(Number(opts?.timeoutMs) || 45_000, 45_000));
+  const run = async () => {
+    if (!window.novaDesktop?.webSearch) {
+      return { ok: false, text: '', sources: [], error: 'Web search unavailable outside desktop' };
     }
+    const res = await window.novaDesktop.webSearch(cleaned);
+    const sources = filterWebSources(Array.isArray(res?.sources) ? res.sources : []);
+    // Drop junk lines that cite filtered hosts from the text blob too.
+    let text = String(res?.text || '');
+    if (text) {
+      text = text
+        .split('\n')
+        .filter((line) => {
+          const urls = line.match(/https?:\/\/[^\s)]+/gi) || [];
+          if (!urls.length) return true;
+          return urls.every((u) => !isJunkWebSourceUrl(u));
+        })
+        .join('\n');
+    }
+    return {
+      ok: Boolean(res?.ok) && (Boolean(text.trim()) || sources.length > 0),
+      text,
+      sources,
+      error: res?.error,
+    };
+  };
+  try {
+    let timer: number | undefined;
+    const timed = new Promise<{ ok: boolean; text: string; sources: { title: string; url: string }[]; error?: string }>((resolve) => {
+      timer = window.setTimeout(() => {
+        resolve({ ok: false, text: '', sources: [], error: 'Research timed out' });
+      }, budget);
+    });
+    const hit = await Promise.race([run(), timed]);
+    if (timer != null) window.clearTimeout(timer);
+    return hit;
   } catch (err) {
     return {
       ok: false,
@@ -284,7 +1231,6 @@ export async function webSearchForChat(
       error: err instanceof Error ? err.message : 'Web search failed',
     };
   }
-  return { ok: false, text: '', sources: [], error: 'Web search unavailable outside desktop' };
 }
 
 /** Pull people/games from recent thread so follow-ups search the right topic. */
@@ -315,12 +1261,16 @@ function extractLookupEntities(blob: string): string[] {
 /** True when this ask depends on prior turn (he/his/the game/more info…). */
 export function looksLikeThreadFollowUpAsk(text: string): boolean {
   const t = String(text || '').trim();
-  if (!t || t.length < 8) return false;
+  if (!t || t.length < 4) return false;
+  if (looksLikeRejectedPriorAnswerAsk(t) || looksLikeExplicitResearchAsk(t)) return true;
   if (/\b(?:he|she|they|him|his|her|them|their)\b/i.test(t) && t.length < 160) return true;
   if (/\b(?:the\s+game|that\s+game|this\s+game|more\s+(?:info|information|details?)|tell\s+me\s+more)\b/i.test(t)) {
     return true;
   }
   if (/\b(?:same\s+(?:guy|person|player|streamer)|what\s+about\s+(?:him|her|them))\b/i.test(t)) return true;
+  if (/\b(?:the\s+(?:book|novel|movie|film|title)|that\s+(?:book|novel|movie|film))\b/i.test(t) && t.length < 200) {
+    return true;
+  }
   return false;
 }
 
@@ -344,7 +1294,15 @@ function normalizeWebSearchQuery(raw: string): string {
       .replace(/\bTL\b/g, 'Team Liquid TL')
       .replace(/\bSEN\b/g, 'Sentinels SEN')
       .replace(/\bFNC\b/g, 'Fnatic FNC')
-      .replace(/\bC9\b/g, 'Cloud9 C9');
+      .replace(/\bC9\b/g, 'Cloud9 C9')
+      .replace(/\bTYL\b/g, 'TYL Valorant');
+  }
+  // Match predictions → bias search toward VLR / Liquipedia style results, not social chat sites.
+  if (/\b(?:predict|prediction|who\s+(?:will|gonna|going\s+to)\s+win|vs)\b/i.test(q)
+    && /\b(?:valorant|cs2|esports?|vct)\b/i.test(q)) {
+    if (!/\b(?:vlr|liquipedia|odds|vct)\b/i.test(q)) {
+      q = `${q} VCT odds prediction`.trim();
+    }
   }
   if (/\b(?:timmy|itstimmy)\b/i.test(q) && !/\bapex\b/i.test(q)) {
     q = `${q} Apex Legends`.trim();
@@ -362,6 +1320,22 @@ export function buildContextualWebQuery(
     .map((t) => String(t.content || '').slice(0, 400))
     .join('\n');
   const entities = extractLookupEntities(`${priorBlob}\n${ask}`);
+
+  // Book/movie identify: compress the plot (or prior plot on “nope / research” follow-ups).
+  const priorPlot = [...priorTurns]
+    .reverse()
+    .find((t) => t.role === 'user' && looksLikeIdentifyMediaAsk(String(t.content || '')));
+  const identifyNow = looksLikeIdentifyMediaAsk(ask);
+  const identifyFollow =
+    !identifyNow
+    && (looksLikeExplicitResearchAsk(ask) || looksLikeRejectedPriorAnswerAsk(ask))
+    && Boolean(priorPlot);
+  if (identifyNow || identifyFollow) {
+    const plotSrc = identifyNow ? ask : String(priorPlot?.content || ask);
+    const compressed = compressIdentifySearchQuery(plotSrc);
+    if (compressed.length >= 12) return compressed;
+  }
+
   let q = normalizeWebSearchQuery(ask);
 
   if (looksLikeThreadFollowUpAsk(ask) && entities.length) {
@@ -375,38 +1349,73 @@ export function buildContextualWebQuery(
   return q.slice(0, 220);
 }
 
-export function formatWebLookupForPrompt(result: {
-  text: string;
-  sources?: { title: string; url: string }[];
-}): string {
+export function formatWebLookupForPrompt(
+  result: {
+    text: string;
+    sources?: { title: string; url: string }[];
+  },
+  opts?: { comprehensive?: boolean; identify?: boolean },
+): string {
   const body = String(result.text || '').trim();
   if (!body) return '';
+  const comprehensive = Boolean(opts?.comprehensive);
+  const identify = Boolean(opts?.identify);
   // Prefer snippet lines without raw URLs so the model answers from text, not a link list.
   const factLines = body
     .split('\n')
     .map((l) => l.replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim())
     .filter(Boolean)
-    .slice(0, 16);
-  const links = (result.sources || [])
-    .filter((s) => s?.url)
-    .slice(0, 6)
+    .slice(0, comprehensive || identify ? 28 : 16);
+  const links = filterWebSources(result.sources || [])
+    .slice(0, comprehensive || identify ? 6 : 4)
     .map((s) => `- ${s.title || 'Link'}: ${s.url}`)
     .join('\n');
+  const shapeRules = identify
+    ? [
+      '- The user is identifying a REAL book/movie/show from a remembered plot. Do NOT invent titles.',
+      '- Lead with the best matching title + author/creator ONLY if that title appears in the lookup notes below.',
+      '- If CANDIDATE TITLES FROM SEARCH lists a book, that is the answer — use that exact title/author.',
+      '- Then map the user’s plot points to confirmed facts from the notes (character names, mountain, illness, dog, ending).',
+      '- If notes disagree or are thin, say what matched and what is still uncertain — never pad with fake alternate titles.',
+      '- Include 2–4 markdown links using ONLY exact URLs from the Sources list (Goodreads, Scholastic, Open Library, Wikipedia, publisher, store). Every source label MUST have a real https URL.',
+      '- Never claim you “searched” without using these notes. Never invent Where-the-Mountain-style filler titles.',
+    ]
+    : comprehensive
+    ? [
+      '- The user asked for a FULL / comprehensive answer — do NOT hold back to a short card.',
+      '- Write a thorough profile (~250–450 words) using every usable fact from the notes.',
+      '- Suggested sections (skip any you lack facts for): **Overview**, **Early life / background**, **Career**, **Companies & projects**, **Public role / recent notes**.',
+      '- Use short paragraphs and bullet lists where helpful — never pad with “Not specified” rows.',
+      '- NEVER invent earnings, follower counts, birth dates, net worth figures, or quotes. Only use numbers that appear in the notes.',
+      '- At the end, add a **Sources** list with at most 4 markdown links copied from the Sources list below (exact URLs). Prefer Wikipedia / official sites. Do not invent biography.com or random blog links.',
+    ]
+    : [
+      '- Lead with who/what they are in 1–2 sentences, then a tight **Quick facts** list (only fields you actually know from the notes).',
+      '- NEVER write “Not specified in the provided data” / “unknown” rows — omit fields you do not have.',
+      '- NEVER invent earnings, follower counts, birth dates, net worth figures, or team history. Only quote numbers that appear in the notes.',
+      '- If the user asked for a single fact (net worth / price / how much), lead with that number — do not open with a biography.',
+      '- If the user asked for more information / who is, open with a short bio then deepen.',
+      '- Include 1–3 markdown links using ONLY exact URLs from the Sources list below. Prefer Wikipedia / official sites. Do not invent links.',
+    ];
+  const candidates = identify ? extractBookCandidatesFromLookup(result).slice(0, 3) : [];
+  const candidateBlock = candidates.length
+    ? [
+      '',
+      'CANDIDATE TITLES FROM SEARCH (prefer the top match; do not invent others):',
+      ...candidates.map((c, i) => `${i + 1}. ${c.title}${c.author ? ` by ${c.author}` : ''} (score ${c.score})`),
+    ].join('\n')
+    : '';
   return [
     'INTERNAL LOOKUP DATA (not a user message — do not thank it, do not acknowledge it).',
     'Write a direct user-facing answer using the facts/snippets below.',
     'HARD RULES:',
-    '- Lead with who/what they are in 1–2 sentences, then a tight **Quick facts** list (only fields you actually know from the notes).',
-    '- NEVER write “Not specified in the provided data” / “unknown” rows — omit fields you do not have.',
-    '- NEVER invent earnings, follower counts, birth dates, net worth figures, or team history. Only quote numbers that appear in the notes.',
-    '- If the user asked for a single fact (net worth / price / how much), lead with that number — do not open with a biography.',
-    '- If the user asked for more information / who is, open with a short bio then deepen.',
-    '- Stay on the person/game from this thread. If the thread is about Apex / ItsTimmy, do NOT switch to Fortnite or another title unless the user asked.',
-    '- Include 1–3 real markdown links with clear labels, e.g. [ItsTimmy on Twitch](https://twitch.tv/…) or [Apex Legends](https://www.ea.com/games/apex-legends). Prefer Twitch/official/Liquipedia/EsportsEarnings over random blogs.',
-    '- For “the game he plays” follow-ups: answer about THAT player’s main game from the thread, with a short what-it-is + official link.',
+    ...shapeRules,
+    '- Stay on the person/game/book from this thread. If the thread is about Apex / ItsTimmy, do NOT switch to Fortnite or another title unless the user asked.',
+    '- For “the game he plays” follow-ups: answer about THAT player’s main game from the thread, with a short what-it-is + official link from Sources only.',
     '',
     factLines.join('\n'),
-    links ? `\nSources (pick the best 1–3 as markdown links in the reply):\n${links}` : '',
+    candidateBlock,
+    links ? `\nSources (copy exact URLs only — never invent new ones):\n${links}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -477,9 +1486,13 @@ export function repairReplySourceLinks(
   if (!out.trim()) return out;
   const urls = (sources || [])
     .map((s) => String(s?.url || '').trim())
-    .filter((u) => /^https?:\/\//i.test(u));
+    .filter((u) => /^https?:\/\//i.test(u) && !isJunkWebSourceUrl(u));
   const pick = (hint: RegExp) => {
-    const hit = (sources || []).find((s) => hint.test(`${s.title || ''} ${s.url || ''}`));
+    const hit = (sources || []).find((s) => {
+      const u = String(s?.url || '').trim();
+      if (!u || isJunkWebSourceUrl(u)) return false;
+      return hint.test(`${s.title || ''} ${u}`);
+    });
     return hit?.url && /^https?:\/\//i.test(hit.url) ? hit.url : urls[0] || '';
   };
 
@@ -488,11 +1501,33 @@ export function repairReplySourceLinks(
     const lab = String(label || '');
     const url = /forbes/i.test(lab) ? pick(/forbes/i)
       : /wiki/i.test(lab) ? pick(/wikipedia|wiki/i)
+      : /goodreads/i.test(lab) ? pick(/goodreads/i)
+      : /open\s*library/i.test(lab) ? pick(/openlibrary|open.?library/i)
+      : /amazon/i.test(lab) ? pick(/amazon\.com/i)
+      : /scholastic/i.test(lab) ? pick(/scholastic/i)
       : /twitch/i.test(lab) ? pick(/twitch/i)
       : /live|net\s*worth|track/i.test(lab) ? pick(/forbes|bloomberg|net.?worth|track/i)
       : urls[0] || '';
     return url ? `[${lab}](${url})` : lab;
   });
+
+  // Empty “Goodreads:” / “Wikipedia:” bullets with no URL — fill from live sources.
+  out = out.replace(
+    /^([ \t]*[-*•]\s*)\*{0,2}(Goodreads|Open Library|Wikipedia|Amazon|Scholastic|Google Books)\*{0,2}\s*:?\s*$/gim,
+    (_m, bullet, label) => {
+      const lab = String(label || '');
+      const url = /goodreads/i.test(lab) ? pick(/goodreads/i)
+        : /open\s*library/i.test(lab) ? pick(/openlibrary|open.?library/i)
+        : /wiki/i.test(lab) ? pick(/wikipedia|wiki/i)
+        : /amazon/i.test(lab) ? pick(/amazon\.com/i)
+        : /scholastic/i.test(lab) ? pick(/scholastic/i)
+        : /google\s*books/i.test(lab) ? pick(/books\.google|google\.com\/books/i)
+        : urls[0] || '';
+      if (!url) return `${bullet}**${lab}:**`;
+      const hostLabel = lab;
+      return `${bullet}**${hostLabel}:** [${hostLabel}](${url})`;
+    },
+  );
 
   // “live here ↗” / **live here** with no URL — attach best tracker link.
   if (/\blive\s+here\b/i.test(out) && !/\[live\s+here\]\(https?:\/\//i.test(out)) {
@@ -504,6 +1539,94 @@ export function repairReplySourceLinks(
 
   // Drop dangling ↗ that isn't next to a link.
   out = out.replace(/(?<!\])\s*↗/g, '');
+  out = scrubJunkDomainMentions(out);
+  return scrubUnverifiedMarkdownLinks(out, sources);
+}
+
+/** Strip hallucinated citations to known junk hosts (even as plain prose). */
+export function scrubJunkDomainMentions(reply: string): string {
+  let out = String(reply || '');
+  if (!out.trim()) return out;
+  // Whole sentences that lean on PairUp / similar hangout sites as “prediction AI”.
+  out = out.replace(
+    /[^.!\n]*\b(?:pairup\.chat|pairup\.com|omegle\.com|chatroulette\.com)\b[^.!\n]*[.!?]?/gi,
+    '',
+  );
+  // Bare leftover host tokens.
+  out = out.replace(/\b(?:pairup\.chat|pairup\.com)\b/gi, '');
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return out;
+}
+
+/**
+ * Keep only markdown links whose URL matches a verified lookup source.
+ * Invented biography.com / blog URLs that look clickable but go nowhere are removed entirely.
+ * When no verified sources exist, strip all markdown links (labels become plain text).
+ */
+export function scrubUnverifiedMarkdownLinks(
+  reply: string,
+  sources?: { title: string; url: string }[],
+): string {
+  let out = String(reply || '');
+  if (!out.trim()) return out;
+
+  const verified = (sources || [])
+    .map((s) => String(s?.url || '').trim())
+    .filter((u) => /^https?:\/\//i.test(u) && !isJunkWebSourceUrl(u));
+
+  const urlAllowed = (href: string): boolean => {
+    const h = String(href || '').trim().replace(/[),.;]+$/g, '');
+    if (!/^https?:\/\//i.test(h)) return false;
+    if (isJunkWebSourceUrl(h)) return false;
+    if (!verified.length) return false;
+    try {
+      const u = new URL(h);
+      return verified.some((raw) => {
+        try {
+          const v = new URL(raw);
+          const hostU = u.hostname.replace(/^www\./i, '').toLowerCase();
+          const hostV = v.hostname.replace(/^www\./i, '').toLowerCase();
+          if (h.replace(/\/$/, '') === raw.replace(/\/$/, '')) return true;
+          if (hostU !== hostV) return false;
+          const pathU = u.pathname.replace(/\/$/, '') || '/';
+          const pathV = v.pathname.replace(/\/$/, '') || '/';
+          return pathU === pathV || pathU.startsWith(`${pathV}/`) || pathV.startsWith(`${pathU}/`);
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (full, _label, href) => (
+    urlAllowed(href) ? full : ''
+  ));
+
+  // Cap Sources dumps — prefer first N verified links only (already ranked).
+  const maxLinks = 4;
+  let linkCount = 0;
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, (full) => {
+    linkCount += 1;
+    return linkCount <= maxLinks ? full : '';
+  });
+
+  // Bare https URLs not in the verified set (common under Sources)
+  if (verified.length) {
+    out = out.replace(/https?:\/\/[^\s)\]>]+/gi, (url) => (urlAllowed(url) ? url : ''));
+  } else {
+    // No verified sources — remove markdown-style citation links already stripped;
+    // also drop a trailing Sources block of bare URLs.
+    out = out.replace(/(^|\n)(?:#{1,3}\s*)?Sources\s*:?\s*\n(?:[-*•]\s*.*\n?){0,12}$/i, '$1');
+  }
+
+  // Clean empty bullets / numbered leftovers and empty Sources headers
+  out = out.replace(/^[ \t]*[-*•]\s*$/gm, '');
+  out = out.replace(/^[ \t]*\d+[.)]\s*$/gm, '');
+  out = out.replace(/(^|\n)(?:#{1,3}\s*)?\*{0,2}Sources\*{0,2}\s*:?\s*(?=\n|$)/gi, '$1');
+  out = out.replace(/[ \t]+\n/g, '\n');
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
   return out;
 }
 

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Mic, Volume2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Mic, Volume2, RefreshCw, KeyRound, Download } from 'lucide-react';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import { isNovaDevSession } from '@/lib/novaRuntime';
 import { isVoiceTabEnabled } from '@/lib/voiceMode';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
+import { VoiceVizSettingsPanel } from '@/components/VoiceVizSettingsPanel';
+import { useRouter } from '@/context/RouterContext';
 import {
   VOICE_DEVICE_AUTO,
   VOICE_TTS_CHOICES,
@@ -11,8 +14,9 @@ import {
   listAudioDevices,
   playOutputTestTone,
   syncAutoVoiceDevices,
-  testMicrophoneInput,
+  startMicrophoneLevelMonitor,
   type AudioDeviceOption,
+  type MicLevelHandle,
 } from '@/lib/voiceAudio';
 
 const SELECT_CLASS =
@@ -33,14 +37,29 @@ function dedupeDevices(devices: AudioDeviceOption[]): AudioDeviceOption[] {
 }
 
 export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
+  const { navigate } = useRouter();
   const [prefs, setPrefs] = useState(() => getLocalPrefs());
   const [devices, setDevices] = useState<AudioDeviceOption[]>([]);
-  const [neuralTts, setNeuralTts] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [status, setStatus] = useState('');
   const [testingMic, setTestingMic] = useState(false);
   const [testingSpeaker, setTestingSpeaker] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micMeterActive, setMicMeterActive] = useState(false);
+  const micMonitorRef = useRef<MicLevelHandle | null>(null);
+  const micStopTimerRef = useRef(0);
+  const micPeakRef = useRef(0);
   const [autoLabels, setAutoLabels] = useState<{ input?: string; output?: string }>({});
+  const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
+
+  const stopMicMonitor = useCallback(() => {
+    window.clearTimeout(micStopTimerRef.current);
+    micMonitorRef.current?.stop();
+    micMonitorRef.current = null;
+    setMicMeterActive(false);
+    setMicLevel(0);
+    setTestingMic(false);
+  }, []);
 
   const refreshDevices = useCallback(async () => {
     setLoadingDevices(true);
@@ -54,26 +73,19 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
 
   useEffect(() => {
     void refreshDevices();
-    const loadVoices = async () => {
-      if (window.novaDesktop?.voiceNeuralVoices) {
-        const res = await window.novaDesktop.voiceNeuralVoices();
-        setNeuralTts(Boolean(res?.ok && res.voices?.length));
-      } else {
-        setNeuralTts(false);
-      }
-    };
-    void loadVoices();
+    void probeLiveCapacity().then(setCapacity).catch(() => setCapacity(null));
     const onAudio = () => setPrefs(getLocalPrefs());
     window.addEventListener('NOVA:voice-audio-changed', onAudio);
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices);
     return () => {
       window.removeEventListener('NOVA:voice-audio-changed', onAudio);
       navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices);
+      stopMicMonitor();
     };
-  }, [refreshDevices]);
+  }, [refreshDevices, stopMicMonitor]);
 
-  const patch = (patch: Partial<typeof prefs>) => {
-    const next = setLocalPrefs(patch);
+  const patch = (nextPatch: Partial<typeof prefs>) => {
+    const next = setLocalPrefs(nextPatch);
     setPrefs(next);
     onSaved?.('Saved on this device');
   };
@@ -82,11 +94,37 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
   const outputs = dedupeDevices(devices.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default'));
 
   const runMicTest = async () => {
+    if (micMeterActive) {
+      stopMicMonitor();
+      setStatus('Microphone test stopped.');
+      return;
+    }
     setTestingMic(true);
     setStatus('');
-    const result = await testMicrophoneInput();
+    setMicLevel(0);
+    micPeakRef.current = 0;
+    const result = await startMicrophoneLevelMonitor(level => {
+      if (level > micPeakRef.current) micPeakRef.current = level;
+      setMicLevel(level);
+    });
+    if (!result.ok) {
+      setTestingMic(false);
+      setStatus(result.error || 'Microphone test failed.');
+      return;
+    }
+    micMonitorRef.current = result.handle;
+    setMicMeterActive(true);
     setTestingMic(false);
-    setStatus(result.ok ? 'Microphone is working.' : (result.error || 'Microphone test failed.'));
+    setStatus('Speak into the mic — the green bar should move. Listening for 8 seconds…');
+    micStopTimerRef.current = window.setTimeout(() => {
+      const peak = micPeakRef.current;
+      stopMicMonitor();
+      setStatus(
+        peak > 0.05
+          ? 'Microphone is working. If Voice still can’t hear you, try Auto-detect or re-select the HyperX.'
+          : 'Opened the mic, but little signal was heard. Check Windows input level / mute on the HyperX.',
+      );
+    }, 8000);
   };
 
   const runSpeakerTest = async () => {
@@ -134,6 +172,52 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
       </div>
 
       <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
+        <p className="text-sm font-medium text-content-primary flex items-center gap-2">
+          <KeyRound className="w-4 h-4 text-content-secondary" />
+          Brain for Voice
+        </p>
+        <p className="text-[12px] text-content-secondary leading-relaxed">
+          Voice uses the same chat brain as Chat — a free cloud API key or a local model. Speech (mic + spoken replies) is built in; you don’t install a separate “voice model.”
+        </p>
+        {capacity ? (
+          <p className={`text-[12px] ${capacity.liveChat ? 'text-emerald-300/90' : 'text-amber-200/90'}`}>
+            {capacity.summary}
+          </p>
+        ) : (
+          <p className="text-[12px] text-content-tertiary">Checking brain capacity…</p>
+        )}
+        {capacity && !capacity.liveChat ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="nova-btn-secondary text-xs inline-flex items-center gap-1.5"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'providers' } }));
+              }}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              Connect free API key
+            </button>
+            <button
+              type="button"
+              className="nova-btn-secondary text-xs inline-flex items-center gap-1.5"
+              onClick={() => navigate({ name: 'models', tab: 'for-pc' })}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Install local brain
+            </button>
+          </div>
+        ) : null}
+        {capacity?.suggestedFreeKeys?.length && !capacity.liveChat ? (
+          <p className="text-[11px] text-content-tertiary">
+            Easy free keys: {capacity.suggestedFreeKeys.map(k => k.name).join(', ')}
+          </p>
+        ) : null}
+      </div>
+
+      <VoiceVizSettingsPanel />
+
+      <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-medium text-content-primary flex items-center gap-2">
             <Mic className="w-4 h-4 text-content-secondary" />
@@ -175,8 +259,25 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
           onClick={() => void runMicTest()}
           disabled={testingMic}
         >
-          {testingMic ? 'Testing…' : 'Test microphone'}
+          {micMeterActive ? 'Stop test' : testingMic ? 'Opening…' : 'Test microphone'}
         </button>
+        {micMeterActive || micLevel > 0.01 ? (
+          <div className="space-y-1.5" aria-live="polite">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-content-tertiary">
+              <span>Input level</span>
+              <span className="tabular-nums">{Math.round(micLevel * 100)}%</span>
+            </div>
+            <div className="h-2.5 w-full rounded-full bg-nova-navy-950/80 border border-surface-border overflow-hidden">
+              <div
+                className="h-full rounded-full bg-emerald-400 transition-[width] duration-75 ease-out"
+                style={{ width: `${Math.max(2, Math.round(micLevel * 100))}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-content-tertiary">
+              Talk normally — the green bar should rise with your voice.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-xl border border-surface-border bg-nova-navy-900/40 p-4 space-y-3">

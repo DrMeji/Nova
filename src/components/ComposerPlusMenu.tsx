@@ -34,13 +34,12 @@ type MenuItem = {
 
 const MODE_ITEMS: MenuItem[] = [
   { id: 'plan', label: 'Plan' },
-  { id: 'ask', label: 'Ask' },
   { id: 'agent', label: 'Agent' },
-  { id: 'debug', label: 'Debug' },
   { id: 'multitask', label: 'Multi-agent' },
+  { id: 'debug', label: 'Debug' },
 ];
 
-const MODE_IDS = new Set<ComposerPlusAction>(MODE_ITEMS.map((m) => m.id));
+const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
 
 function itemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
   if (scope === 'image') {

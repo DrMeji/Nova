@@ -1,6 +1,6 @@
 /**
  * Block chat / disk access to NOVA's own install tree (app.asar, resources, exe dir).
- * Dev sessions (Open-NOVA-Build.bat with NOVA_DEV=1) may access the source tree for testing.
+ * Unpackaged source builds (Open-NOVA-Build) allow access so Debug clinic can audit this tree.
  */
 
 const path = require('path');
@@ -53,7 +53,7 @@ function isArkProtectedPath(absPath) {
 }
 
 function protectedPathError() {
-  return 'That path is part of NOVA itself. NOVA cannot read or modify its own application files from chat.';
+  return "That path is part of NOVA itself. On a source build, relaunch with Open-NOVA-Build.bat so Debug can audit this folder. Packaged installs cannot bind NOVA's own files.";
 }
 
 module.exports = {

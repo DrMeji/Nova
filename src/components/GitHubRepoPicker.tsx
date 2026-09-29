@@ -18,7 +18,7 @@ export function GitHubRepoPicker({ open, onClose, onPick }: Props) {
     if (!open) return;
     const token = getPluginRuntime('github', loadPluginState()).token?.trim();
     if (!token) {
-      setError('Connect GitHub in Plugins first.');
+      setError('Sign in with GitHub (Continue with GitHub on the login screen) so NOVA can list your repos.');
       setRepos([]);
       return;
     }
@@ -50,16 +50,38 @@ export function GitHubRepoPicker({ open, onClose, onPick }: Props) {
           {error && (
             <div className="px-3 py-4 space-y-2">
               <p className="text-xs text-amber-300/90">{error}</p>
-              {error.includes('Connect GitHub') ? (
+              {error.includes('Sign in with GitHub') ? (
                 <button
                   type="button"
                   className="text-xs text-sky-400 hover:text-sky-300"
                   onClick={() => {
-                    onClose();
-                    window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'plugins' } }));
+                    void (async () => {
+                      const res = await window.novaDesktop?.pluginOAuthStart?.('github');
+                      if (!res?.ok || !res.accessToken) return;
+                      const { setPluginToken } = await import('@/lib/localPrefs');
+                      const { loadPluginState, upsertPluginRuntime } = await import('@/lib/plugins');
+                      setPluginToken('github', res.accessToken);
+                      upsertPluginRuntime(loadPluginState(), 'github', {
+                        installed: true,
+                        connected: true,
+                        enabledInChat: true,
+                        accountLabel: res.accountLabel || undefined,
+                        permissions: ['list', 'read', 'search', 'write'],
+                      });
+                      setError('');
+                      setLoading(true);
+                      try {
+                        const list = await listGitHubRepos(res.accessToken, 30);
+                        setRepos(list);
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Could not list repos');
+                      } finally {
+                        setLoading(false);
+                      }
+                    })();
                   }}
                 >
-                  Open Plugins → Connect GitHub
+                  Continue with GitHub
                 </button>
               ) : null}
             </div>

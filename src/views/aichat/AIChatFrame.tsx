@@ -2,14 +2,12 @@
  * AIChat presentational shell — composer, message list, dialogs.
  */
 // @ts-nocheck — props bag is intentionally loose; logic stays in AIChat.tsx
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RotatingTip } from '@/components/RotatingTip';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { AttachCard } from '@/components/AttachCard';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
 import { VoiceModeLayout } from '@/components/VoiceModeLayout';
-import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
 import { DeleteFileModal } from '@/components/DeleteFileModal';
 import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
@@ -26,6 +24,7 @@ import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
 import { formatReplyElapsed, shortReplyModelLabel } from '@/lib/speedTest';
 import { attachKey } from '@/lib/chatAttach';
+import { stripComposerPrefix } from '@/lib/chatAgentTurn';
 import { loadChatStudio, studioPathBasename } from '@/lib/chatStudioStore';
 import { getApplySnapshot, clearApplySnapshot, snapshotToRevertBlocks } from '@/lib/chatApplySnapshotStore';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
@@ -33,13 +32,13 @@ import { setLocalPrefs, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { autoEquippedCaption, autoRingDetail } from '@/lib/threadBrain';
-import { probeLiveCapacity } from '@/lib/novaCapacity';
 import { setEngineModel } from '@/lib/novaEngine';
+import { githubToken } from '@/lib/codeGitHubWorkflow';
 import {
   Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check,
   Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
+  Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
 } from 'lucide-react';
 import {
   ChatModeTabs,
@@ -68,7 +67,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const attachInputRef = props.attachInputRef;
   const attachUploading = props.attachUploading;
   const autoModelLabel = props.autoModelLabel;
-  const bindTypedPath = props.bindTypedPath;
   const browseBindFolder = props.browseBindFolder;
   const capacity = props.capacity;
   const chatPlugins = props.chatPlugins;
@@ -104,11 +102,21 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const engineReadyIds = props.engineReadyIds;
   const failoverNote = props.failoverNote;
   const flushQueuedSend = props.flushQueuedSend;
-  const freeKeyOpen = props.freeKeyOpen;
   const generating = props.generating;
   const generatingRef = props.generatingRef;
   const githubOfferId = props.githubOfferId;
   const githubPickerOpen = props.githubPickerOpen;
+  const [githubConnected, setGithubConnected] = useState(() => Boolean(githubToken()));
+  useEffect(() => {
+    const sync = () => setGithubConnected(Boolean(githubToken()));
+    sync();
+    window.addEventListener('focus', sync);
+    window.addEventListener('NOVA:plugins-changed', sync);
+    return () => {
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('NOVA:plugins-changed', sync);
+    };
+  }, [githubPickerOpen]);
   const greeting = props.greeting;
   const handleDeleteFileCancel = props.handleDeleteFileCancel;
   const handleDeleteFileConfirm = props.handleDeleteFileConfirm;
@@ -147,9 +155,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const openCodeWorkspace = props.openCodeWorkspace;
   const openProjectFolder = props.openProjectFolder;
   const openProjectPreview = props.openProjectPreview;
-  const pathBindDraft = props.pathBindDraft;
-  const pathBindInputRef = props.pathBindInputRef;
-  const pathBindOpen = props.pathBindOpen;
   const pendingAttaches = props.pendingAttaches;
   const pendingImages = props.pendingImages;
   const pendingQueueRef = props.pendingQueueRef;
@@ -178,16 +183,25 @@ export function AIChatFrame(props: AIChatFrameProps) {
     const id = window.setTimeout(() => setDropHint(null), 2200);
     return () => window.clearTimeout(id);
   }, [dropHint, setDropHint]);
+  // Which queued layer is selected for Edit / Delete (defaults to newest).
+  const [selectedQueueId, setSelectedQueueId] = useState<string | null>(null);
+  useEffect(() => {
+    const all = pendingQueueRef.current || [];
+    if (!all.length) {
+      setSelectedQueueId(null);
+      return;
+    }
+    if (!selectedQueueId || !all.some(q => q.id === selectedQueueId)) {
+      setSelectedQueueId(all[all.length - 1]?.id || null);
+    }
+  }, [queueLen, queueTick, selectedQueueId, pendingQueueRef]);
   // Keep ambient orbs moving while a reply generates (do not freeze the shell animation).
   const setEditingQueueId = props.setEditingQueueId;
   const setEditingQueueText = props.setEditingQueueText;
   const setFailoverNote = props.setFailoverNote;
-  const setFreeKeyOpen = props.setFreeKeyOpen;
   const setGithubPickerOpen = props.setGithubPickerOpen;
   const setInput = props.setInput;
   const setModelMenuOpen = props.setModelMenuOpen;
-  const setPathBindDraft = props.setPathBindDraft;
-  const setPathBindOpen = props.setPathBindOpen;
   const setPendingAttaches = props.setPendingAttaches;
   const setPendingImages = props.setPendingImages;
   const setQueueLen = props.setQueueLen;
@@ -508,11 +522,24 @@ export function AIChatFrame(props: AIChatFrameProps) {
       {failoverChip}
       <div className="flex flex-col min-w-0 w-full">
         <div className="min-w-0 flex flex-col w-full">
+          <div className="flex gap-2 min-w-0 items-end">
+          <div className="flex flex-col items-center justify-end shrink-0 self-end w-[1.25rem] select-none pb-1.5">
+            {threadSwitching ? (
+              <span title="Loading chat" className="inline-flex">
+                <Loader2
+                  className="w-3.5 h-3.5 text-content-tertiary animate-spin"
+                  aria-label="Loading chat"
+                />
+              </span>
+            ) : null}
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col">
+          {/* Status / chips above the box — same column as the composer so left edges match. */}
           {attachUploading && (
-            <p className="mb-2 px-1 text-[11px] text-sky-300/90 animate-pulse truncate">{attachUploading}</p>
+            <p className="mb-2 w-full min-w-0 text-left text-[11px] text-sky-300/90 animate-pulse truncate">{attachUploading}</p>
           )}
           {pendingAttaches.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1 max-w-full overflow-hidden">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 w-full max-w-full overflow-hidden">
               {pendingAttaches.map(meta => (
                 <span key={attachKey(meta)} className="inline-flex items-center gap-1">
                   <AttachCard meta={meta} />
@@ -542,17 +569,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
               )}
             </div>
           )}
-          {dictating ? (
-            <p className="mb-2 px-1 text-[11px] text-rose-300/90 animate-pulse">
-              Listening… speak now, then click the mic again when you’re done.
-            </p>
-          ) : dictationHint ? (
-            <p className="mb-2 px-1 text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2">
-              {dictationHint}
-            </p>
-          ) : null}
           {pendingImages.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 w-full">
               {pendingImages.map(img => (
                 <span
                   key={img.id}
@@ -572,9 +590,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
               ))}
             </div>
           )}
-
           {mode === 'video' && (
-            <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2 w-full">
               <span className="text-[11px] text-content-tertiary">Clip length</span>
               {([10, 20, 30] as const).map(sec => (
                 <button
@@ -591,21 +608,17 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   {sec}s
                 </button>
               ))}
-              
             </div>
           )}
-          <div className="flex gap-2 min-w-0 items-end">
-          <div className="flex flex-col items-center justify-end shrink-0 self-end w-[1.25rem] select-none pb-1.5">
-            {threadSwitching ? (
-              <span title="Loading chat" className="inline-flex">
-                <Loader2
-                  className="w-3.5 h-3.5 text-content-tertiary animate-spin"
-                  aria-label="Loading chat"
-                />
-              </span>
-            ) : null}
-          </div>
-          <div className="flex-1 min-w-0 flex flex-col">
+          {dictating ? (
+            <p className="mb-2 w-full min-w-0 text-left text-[11px] text-rose-300/90 animate-pulse">
+              Listening… speak now. Tap the mic again when you’re done, then press Enter.
+            </p>
+          ) : dictationHint ? (
+            <p className="mb-2 w-full min-w-0 text-left text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2">
+              {dictationHint}
+            </p>
+          ) : null}
           {dropHint && !attachUploading && (
             <p
               className="mb-2 w-full min-w-0 overflow-hidden text-left text-[11px] text-content-tertiary break-words [overflow-wrap:anywhere] line-clamp-2"
@@ -614,151 +627,130 @@ export function AIChatFrame(props: AIChatFrameProps) {
               {dropHint}
             </p>
           )}
-          {pathBindOpen && (
-            <div className="mb-2 w-full min-w-0 box-border rounded-xl border border-surface-border bg-nova-navy-900/90 px-2 py-1.5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/90" />
-                <input
-                  ref={pathBindInputRef}
-                  type="text"
-                  value={pathBindDraft}
-                  onChange={(e) => setPathBindDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      void bindTypedPath();
-                    }
-                    if (e.key === 'Escape') {
-                      setPathBindOpen(false);
-                      setPathBindDraft('');
-                    }
-                  }}
-                  placeholder="Folder path…"
-                  className="min-w-0 flex-1 bg-transparent border-none px-1 py-1 text-xs text-content-primary placeholder:text-content-tertiary focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => void browseBindFolder()}
-                  className="shrink-0 rounded-md px-2 py-1 text-[11px] text-content-secondary hover:bg-surface-hover hover:text-content-primary"
-                >
-                  Browse
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bindTypedPath()}
-                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-nova-navy-950 hover:bg-amber-400"
-                >
-                  Bind
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setPathBindOpen(false); setPathBindDraft(''); }}
-                  className="shrink-0 rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
-                  aria-label="Close"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
-          <div
-            data-ark-composer="1"
-            className={`w-full min-w-0 flex flex-col border border-surface-border bg-nova-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
-              mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
-            }`}
-          >
-          {queueLen > 0 && pendingQueueRef.current.length > 0 && (
-            <div className="w-full min-w-0 box-border flex flex-col gap-1.5 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
-              <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 flex-1 truncate">
-                  {queueLen === 1
-                    ? '1 message queued — edit or wait for this reply to finish'
-                    : `${queueLen} messages queued — next sends when this reply finishes`}
-                </span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
-                  onClick={() => {
-                    pendingQueueRef.current = [];
-                    setQueueLen(0);
-                    setQueueTick(t => t + 1);
-                    editingQueueIdRef.current = null;
-                    setEditingQueueId(null);
-                    setEditingQueueText('');
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-              <ul className="space-y-1.5" key={queueTick}>
-                {pendingQueueRef.current.map((q, idx) => (
-                  <li key={q.id} className="rounded-md border border-amber-500/20 bg-nova-navy-950/40 px-2 py-1.5">
-                    {editingQueueId === q.id ? (
-                      <div className="flex flex-col gap-1.5">
-                        <textarea
-                          value={editingQueueText}
-                          onChange={e => setEditingQueueText(e.target.value)}
-                          rows={2}
-                          className="w-full resize-none rounded-md border border-amber-500/30 bg-nova-navy-950 px-2 py-1 text-[12px] text-content-primary outline-none focus:border-amber-400/50"
-                        />
-                        <div className="flex justify-end gap-1.5">
-                          <button
-                            type="button"
-                            className="rounded-md px-2 py-0.5 text-amber-200/80 hover:bg-amber-500/15"
-                            onClick={() => {
-                              editingQueueIdRef.current = null;
-                              setEditingQueueId(null);
-                              setEditingQueueText('');
-                            }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md bg-amber-500/90 px-2.5 py-0.5 font-medium text-nova-navy-950 hover:bg-amber-400"
-                            onClick={() => {
-                              const text = editingQueueText.trim();
-                              if (!text) return;
-                              pendingQueueRef.current = pendingQueueRef.current.map(item => (
-                                item.id === q.id ? { ...item, text } : item
-                              ));
-                              setQueueTick(t => t + 1);
-                              editingQueueIdRef.current = null;
-                              setEditingQueueId(null);
-                              setEditingQueueText('');
-                              // If the reply already finished while editing, flush now.
-                              if (!generatingRef.current) flushQueuedSend();
-                            }}
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-start gap-2">
-                        <span className="min-w-0 flex-1 text-amber-50/90 break-words [overflow-wrap:anywhere]">
-                          <span className="text-amber-200/50 mr-1">{idx + 1}.</span>
-                          {q.text.length > 160 ? `${q.text.slice(0, 157)}…` : q.text}
-                        </span>
+          {queueLen > 0 && pendingQueueRef.current.length > 0 && (() => {
+            // Small numbered cues above the chat box (not inside it). Max 3.
+            // Cue 1 = next to send (oldest). Click → edit in composer; Enter saves back.
+            const items = pendingQueueRef.current.slice(0, 3);
+            const activeId = editingQueueId
+              || (selectedQueueId && items.some(q => q.id === selectedQueueId) ? selectedQueueId : null);
+            const beginEditCue = (q: { id: string; text: string }) => {
+              // If already editing another cue, stash that draft back first.
+              const prevId = editingQueueIdRef.current;
+              if (prevId && prevId !== q.id) {
+                const draft = String(input || '').trim();
+                if (draft) {
+                  pendingQueueRef.current = pendingQueueRef.current.map(item => (
+                    item.id === prevId ? { ...item, text: draft } : item
+                  ));
+                  setQueueTick(t => t + 1);
+                }
+              }
+              editingQueueIdRef.current = q.id;
+              setEditingQueueId(q.id);
+              setEditingQueueText(q.text);
+              setSelectedQueueId(q.id);
+              setInput(q.text);
+              requestAnimationFrame(() => {
+                const ta = textareaRef.current;
+                if (!ta) return;
+                ta.focus();
+                ta.style.height = 'auto';
+                ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+              });
+            };
+            const deleteCue = (id: string) => {
+              pendingQueueRef.current = pendingQueueRef.current.filter(item => item.id !== id);
+              const next = pendingQueueRef.current;
+              setQueueLen(next.length);
+              setQueueTick(t => t + 1);
+              if (editingQueueIdRef.current === id) {
+                editingQueueIdRef.current = null;
+                setEditingQueueId(null);
+                setEditingQueueText('');
+                setInput('');
+                if (textareaRef.current) textareaRef.current.style.height = 'auto';
+              }
+              if (selectedQueueId === id) setSelectedQueueId(null);
+              if (!generatingRef.current) flushQueuedSend();
+            };
+            return (
+              <div className="nova-queue-cues" key={queueTick} aria-label={`${items.length} queued`}>
+                <div className="nova-queue-cues-row">
+                  {items.map((q, idx) => {
+                    const n = idx + 1;
+                    const isActive = q.id === activeId;
+                    return (
+                      <div key={q.id} className={`nova-queue-cue ${isActive ? 'nova-queue-cue--active' : ''}`}>
                         <button
                           type="button"
-                          aria-label="Edit queued message"
-                          className="shrink-0 rounded-md px-1.5 py-0.5 text-amber-200/90 hover:bg-amber-500/20"
-                          onClick={() => {
-                            editingQueueIdRef.current = q.id;
-                            setEditingQueueId(q.id);
-                            setEditingQueueText(q.text);
-                          }}
+                          className="nova-queue-cue-btn"
+                          title={`Cue ${n}: click to edit in the chat box`}
+                          aria-label={`Queued message ${n}`}
+                          aria-pressed={isActive}
+                          onClick={() => beginEditCue(q)}
                         >
-                          Edit
+                          {n}
                         </button>
+                        {isActive ? (
+                          <button
+                            type="button"
+                            className="nova-queue-cue-x"
+                            aria-label={`Delete cue ${n}`}
+                            title="Delete this cue"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteCue(q.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        ) : null}
                       </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className="nova-queue-cues-clear"
+                    aria-label="Clear all queued messages"
+                    onClick={() => {
+                      pendingQueueRef.current = [];
+                      setQueueLen(0);
+                      setQueueTick(t => t + 1);
+                      editingQueueIdRef.current = null;
+                      setEditingQueueId(null);
+                      setEditingQueueText('');
+                      setSelectedQueueId(null);
+                      setInput('');
+                      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+                {editingQueueId ? (
+                  <p className="nova-queue-cues-hint">
+                    Editing cue — Enter to save · Esc to cancel · × to delete
+                  </p>
+                ) : null}
+              </div>
+            );
+          })()}
+          <div
+            data-ark-composer="1"
+            className={`relative z-10 w-full min-w-0 flex flex-col border border-surface-border nova-glass-composer overflow-hidden ${
+              mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
+            }`}
+            onMouseDown={(e) => {
+              // Clicking the glass chrome (not a control) should land the caret in the box.
+              const t = e.target as HTMLElement | null;
+              if (!t) return;
+              if (t.closest('button, a, input, select, textarea, [role="button"]')) return;
+              const ta = textareaRef.current;
+              if (!ta) return;
+              e.preventDefault();
+              ta.focus();
+            }}
+          >
           <input
             ref={attachInputRef}
             type="file"
@@ -792,23 +784,66 @@ export function AIChatFrame(props: AIChatFrameProps) {
             autoCorrect="on"
             autoCapitalize="sentences"
             onKeyDown={e => {
+              if (e.key === 'Escape' && editingQueueIdRef.current) {
+                e.preventDefault();
+                editingQueueIdRef.current = null;
+                setEditingQueueId(null);
+                setEditingQueueText('');
+                setSelectedQueueId(null);
+                setInput('');
+                if (textareaRef.current) textareaRef.current.style.height = 'auto';
+                if (!generatingRef.current) flushQueuedSend();
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 if (Date.now() < ignoreEnterUntilRef.current) {
                   e.preventDefault();
                   return;
                 }
                 e.preventDefault();
+                // Editing a cue: Enter saves back into the queue (does not send).
+                if (editingQueueIdRef.current) {
+                  const id = editingQueueIdRef.current;
+                  const text = String(input || '').trim();
+                  if (!text) {
+                    pendingQueueRef.current = pendingQueueRef.current.filter(item => item.id !== id);
+                  } else {
+                    pendingQueueRef.current = pendingQueueRef.current.map(item => (
+                      item.id === id ? { ...item, text } : item
+                    ));
+                  }
+                  editingQueueIdRef.current = null;
+                  setEditingQueueId(null);
+                  setEditingQueueText('');
+                  setSelectedQueueId(null);
+                  setInput('');
+                  if (textareaRef.current) textareaRef.current.style.height = 'auto';
+                  setQueueLen(pendingQueueRef.current.length);
+                  setQueueTick(t => t + 1);
+                  if (!generatingRef.current) flushQueuedSend();
+                  return;
+                }
                 handleSend();
               }
             }}
             placeholder={
-              pendingAttaches.length || Object.keys(chatStudioFiles).length
-                ? 'Press Enter to read this, or type an ask…'
-                : placeholder
+              editingQueueId
+                ? 'Edit this cue — Enter to save, Esc to cancel…'
+                : pendingAttaches.length || Object.keys(chatStudioFiles).length
+                  ? 'Press Enter to read this, or type an ask…'
+                  : placeholder
             }
             rows={1}
-            title="Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots"
-            aria-label="Message. Enter to send, Shift+Enter for a new line"
+            title={
+              editingQueueId
+                ? 'Enter saves this cue · Esc cancels · Shift+Enter for a new line'
+                : 'Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots'
+            }
+            aria-label={
+              editingQueueId
+                ? 'Edit queued message. Enter to save, Escape to cancel'
+                : 'Message. Enter to send, Shift+Enter for a new line'
+            }
             className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[2.75rem] px-3 pt-2.5 pb-1"
             style={{ overflowY: 'hidden' }}
           />
@@ -833,12 +868,33 @@ export function AIChatFrame(props: AIChatFrameProps) {
             />
             {composerMode ? (
               <span
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium shrink-0 ${COMPOSER_MODE_PILL[composerMode]}`}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold shrink-0 ${COMPOSER_MODE_PILL[composerMode]}`}
+                title={
+                  composerMode === 'debug'
+                    ? 'Debug clinic — audit the bound folder'
+                    : composerMode === 'plan'
+                      ? 'Plan mode — deep outline, no files until you say build'
+                      : composerMode === 'agent'
+                        ? 'Agent — one task at a time on the bound project'
+                        : composerMode === 'multitask'
+                          ? 'Multi-agent — Scout → Builder → Critic on the bound project'
+                          : undefined
+                }
               >
                 {COMPOSER_MODE_LABEL[composerMode]}
                 <button
                   type="button"
-                  onClick={() => setComposerMode(null)}
+                  onClick={() => {
+                    if (
+                      composerMode === 'plan'
+                      || composerMode === 'debug'
+                      || composerMode === 'agent'
+                      || composerMode === 'multitask'
+                    ) {
+                      setDropHint(null);
+                    }
+                    setComposerMode(null);
+                  }}
                   className="opacity-60 hover:opacity-100 -mr-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
                   aria-label="Clear mode"
                 >
@@ -850,13 +906,37 @@ export function AIChatFrame(props: AIChatFrameProps) {
               <button
                 type="button"
                 onClick={() => void openProjectFolder()}
-                className="inline-flex items-center gap-1 max-w-[11rem] rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0"
-                title={`Open in Explorer:\n${chatStudioDiskRoot}`}
+                className="inline-flex items-center gap-1 max-w-[12rem] rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0"
+                title={`Bound project folder:\n${chatStudioDiskRoot}`}
+                aria-label={`Bound folder ${workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}`}
               >
                 <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300" />
                 <span className="truncate">
-                  {`bound: ${workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}`}
+                  {workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}
                 </span>
+              </button>
+            ) : composerMode === 'debug' || composerMode === 'agent' || composerMode === 'multitask' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDropHint(
+                    composerMode === 'debug'
+                      ? 'Grant access to the project folder you want audited.'
+                      : composerMode === 'multitask'
+                        ? 'Grant access to the project folder for Multi-agent.'
+                        : 'Grant access to the project folder for Agent.',
+                  );
+                  void browseBindFolder();
+                }}
+                className="inline-flex items-center gap-1 max-w-[12rem] rounded-full border border-dashed border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200/90 hover:bg-amber-500/20 transition-colors shrink-0"
+                title={
+                  composerMode === 'debug'
+                    ? 'Bind a project folder to audit'
+                    : 'Bind a project folder to work on'
+                }
+              >
+                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/80" />
+                <span className="truncate">Bind folder…</span>
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code') && (showStudioPills || codePillSticky || chatStudioDiskRoot) ? (
@@ -933,23 +1013,21 @@ export function AIChatFrame(props: AIChatFrameProps) {
             ) : null}
             <div className="flex-1 min-w-0" aria-hidden />
             <div className="flex items-center gap-1.5 shrink-0">
-              {mode !== 'voice' ? (
-                <button
-                  type="button"
-                  onClick={() => toggleComposerDictation()}
-                  disabled={generating && !dictating}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
-                    dictating
-                      ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50 animate-pulse'
-                      : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                  } disabled:opacity-40`}
-                  title={dictating ? 'Stop listening' : 'Speak — fill the chat box with voice-to-text'}
+              <button
+                type="button"
+                onClick={() => toggleComposerDictation()}
+                disabled={generating && !dictating}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                  dictating
+                    ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50 animate-pulse'
+                    : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                } disabled:opacity-40`}
+                  title={dictating ? 'Stop listening' : 'Speak — fills this box with text, then press Enter'}
                   aria-label={dictating ? 'Stop listening' : 'Start voice to text'}
-                  aria-pressed={dictating}
-                >
-                  {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
-              ) : null}
+                aria-pressed={dictating}
+              >
+                {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
               {/* Chat: locked to Nova Multimodal (Auto). Image/video keep a picker. */}
               {mode === 'image' || mode === 'video' ? (
                 <>
@@ -1055,35 +1133,70 @@ export function AIChatFrame(props: AIChatFrameProps) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
-        {capacity && !capacity.liveChat && (mode === 'general' || mode === 'code') && (
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
+        {(mode === 'general' || mode === 'code') && (
           <>
-            <button
-              type="button"
-              onClick={() => setFreeKeyOpen(true)}
-              className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
-              title={
-                capacity.suggestedFreeKeys.length
-                  ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
-                  : 'Connect a free key'
-              }
-            >
-              Connect free key
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate({ name: 'local-ai' })}
-              className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors"
-              title="Install a local GGUF brain"
-            >
-              Install local brain
-            </button>
+            {capacity && !capacity.cloudKeys ? (
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'providers' } }));
+                }}
+                className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+                title={
+                  capacity.suggestedFreeKeys.length
+                    ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
+                    : 'Connect a free key'
+                }
+              >
+                Connect free key
+              </button>
+            ) : null}
+            {capacity && !capacity.localGguf && !capacity.ollama ? (
+              <button
+                type="button"
+                onClick={() => navigate({ name: 'models', tab: 'for-pc' })}
+                className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors"
+                title="Install a local GGUF brain"
+              >
+                Install local brain
+              </button>
+            ) : null}
+            {!githubConnected ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const res = await window.novaDesktop?.pluginOAuthStart?.('github');
+                    if (!res?.ok || !res.accessToken) return;
+                    const { setPluginToken } = await import('@/lib/localPrefs');
+                    const { loadPluginState, upsertPluginRuntime } = await import('@/lib/plugins');
+                    setPluginToken('github', res.accessToken);
+                    upsertPluginRuntime(loadPluginState(), 'github', {
+                      installed: true,
+                      connected: true,
+                      enabledInChat: true,
+                      accountLabel: res.accountLabel || undefined,
+                      permissions: ['list', 'read', 'search', 'write'],
+                    });
+                    setGithubConnected(true);
+                  })();
+                }}
+                className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+                title="GitHub is linked when you Continue with GitHub at sign-in"
+              >
+                <Github className="w-3 h-3" />
+                My GitHub
+              </button>
+            ) : null}
           </>
         )}
         {capacity && mode === 'image' && !capacity.imageFree && !capacity.openaiImage && (
           <button
             type="button"
-            onClick={() => setFreeKeyOpen(true)}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'providers' } }));
+            }}
             className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
           >
             Add image key (HF / OpenAI)
@@ -1093,40 +1206,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
           <span className="text-[11px] text-amber-400/90">
             Open desktop NOVA Engine for free video routes
           </span>
-        )}
-
-        {(mode === 'general' || mode === 'code') && (!capacity || !capacity.liveChat) && (
-          <>
-            <button
-              type="button"
-              onClick={() => setGithubPickerOpen(true)}
-              className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-              title="Pick a GitHub repo"
-            >
-              <Github className="w-3 h-3" />
-              My GitHub
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate({ name: 'build' })}
-              className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-            >
-              <Puzzle className="w-3.5 h-3.5" strokeWidth={1.75} />
-              {chatPlugins.length ? 'Manage plugins' : 'Add plugins'}
-            </button>
-
-            {mode === 'general' && (
-              <button
-                type="button"
-                onClick={() => navigate({ name: 'projects' })}
-                className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-              >
-                <Briefcase className="w-3.5 h-3.5" strokeWidth={1.75} />
-                Open a project
-              </button>
-            )}
-          </>
         )}
       </div>
     </div>
@@ -1190,7 +1269,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
           <ParkedNotice feature="voice" />
         </div>
       ) : null}
-      {(mode === 'general' || mode === 'voice') ? <ChatModeTabs /> : null}
+      {(mode === 'general' || mode === 'voice') ? (
+        <>
+          <div className="h-11 shrink-0" aria-hidden />
+          <ChatModeTabs />
+        </>
+      ) : null}
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-content-tertiary">
           <Loader2 className="w-5 h-5 animate-spin text-content-secondary" />
@@ -1208,14 +1292,16 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setFreeKeyOpen(true)}
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'providers' } }));
+                    }}
                     className="rounded-full bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 px-3 py-1 text-[11px] font-medium transition-colors"
                   >
                     Connect free key
                   </button>
                   <button
                     type="button"
-                    onClick={() => navigate({ name: 'local-ai' })}
+                    onClick={() => navigate({ name: 'models', tab: 'for-pc' })}
                     className="rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3 py-1 text-[11px] font-medium transition-colors"
                   >
                     Install local brain
@@ -1228,32 +1314,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
       ) : showEmpty ? (
         mode === 'general' ? (
           <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full min-h-0">
-            <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
+            <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-8 text-center">
               {greeting}
             </h1>
-            {capacity && !capacity.liveChat && engineInstallingModels.length > 0 && (
-              <div className="mb-6 max-w-md w-full px-2">
-                <RotatingTip />
-              </div>
-            )}
-            {capacity && !capacity.liveChat && !engineInstallingModels.length && (
-              <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
-                <button
-                  type="button"
-                  onClick={() => setFreeKeyOpen(true)}
-                  className="rounded-full bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors"
-                >
-                  Connect free key
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate({ name: 'local-ai' })}
-                  className="rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors"
-                >
-                  Install local brain
-                </button>
-              </div>
-            )}
             <div className="w-full max-w-3xl">
               {composer}
             </div>
@@ -1364,7 +1427,19 @@ export function AIChatFrame(props: AIChatFrameProps) {
                             content={msg.content}
                             live={false}
                             tone="user"
-                            onPromptChipPick={(prompt) => tryStartTurn(prompt)}
+                            onPromptChipPick={(prompt) => {
+                              if (prompt === '<!--nova-arm-plan-->') {
+                                handlePlusAction('plan');
+                                return;
+                              }
+                              const p = String(prompt || '').trim();
+                              // Let’s build → handoff: Plan pill disappears; builder takes over.
+                              if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
+                                setComposerMode(null);
+                                setDropHint(null);
+                              }
+                              tryStartTurn(prompt);
+                            }}
                           />
                         </div>
                         {(() => {
@@ -1378,7 +1453,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                               aria-label={copied ? 'Copied' : 'Copy prompt'}
                               className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
                               onClick={() => {
-                                void navigator.clipboard.writeText(raw).then(() => {
+                                const toCopy = stripComposerPrefix(raw);
+                                void navigator.clipboard.writeText(toCopy || raw).then(() => {
                                   setCopiedMsgId(msg.id);
                                   window.setTimeout(() => {
                                     setCopiedMsgId(prev => (prev === msg.id ? null : prev));
@@ -1422,7 +1498,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         return (
                           <NovaErrorInline
                             message={msg.content}
-                            onAction={errorInfo.code === 'KEY_MISSING' ? () => setFreeKeyOpen(true) : undefined}
+                            onAction={errorInfo.code === 'KEY_MISSING' ? () => {
+                              window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'providers' } }));
+                            } : undefined}
                           />
                         );
                       }
@@ -1431,7 +1509,22 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           content={msg.content}
                           live={Boolean(generating && isLast && isAssistant && isTraceMessage(raw))}
                           messageId={msg.id}
-                          onPromptChipPick={(prompt) => tryStartTurn(prompt)}
+                          onPromptChipPick={(prompt) => {
+                            if (prompt === '<!--nova-arm-plan-->') {
+                              handlePlusAction('plan');
+                              return;
+                            }
+                            const p = String(prompt || '').trim();
+                            if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
+                              setComposerMode(null);
+                              setDropHint(null);
+                            }
+                            // Repair / “fix DBG-015” — soft-arm Agent so the work queue applies.
+                            if (/\bfix\s+(?:dbg[- ]?\d+|\d+)/i.test(p) || /\bfix\s+\d+(?:\s*,|\s+and\b)/i.test(p)) {
+                              try { setComposerMode('agent'); } catch { /* ignore */ }
+                            }
+                            tryStartTurn(prompt);
+                          }}
                         />
                       );
                     })()}
@@ -1458,8 +1551,13 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         );
                       if (!showReplyMeta) return null;
                       const copied = copiedMsgId === msg.id;
-                      const timeBit = typeof msg.elapsed_ms === 'number' && msg.elapsed_ms >= 0
-                        ? formatReplyElapsed(msg.elapsed_ms)
+                      // Sub-second timers on Fix/Agent look fake (surgical disk writes).
+                      // Hide them — the Code pill + Files touched chips are the proof.
+                      const providerUsed = String(msg.provider_used || '');
+                      const isFileWorkProvider = /\b(?:Fix|Agent|Multi-agent|edit)\b/i.test(providerUsed);
+                      const rawMs = typeof msg.elapsed_ms === 'number' ? msg.elapsed_ms : -1;
+                      const timeBit = rawMs >= 0 && !(isFileWorkProvider && rawMs < 1500)
+                        ? formatReplyElapsed(rawMs)
                         : '';
                       const modelBit = shortReplyModelLabel(msg.provider_used);
                       const chatId = routeChatIdRef.current || persistChatIdRef.current || '';
@@ -1624,9 +1722,30 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         <button
                           type="button"
                           className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
-                          onClick={() => setGithubPickerOpen(true)}
+                          onClick={() => {
+                            if (!githubConnected) {
+                              void (async () => {
+                                const res = await window.novaDesktop?.pluginOAuthStart?.('github');
+                                if (!res?.ok || !res.accessToken) return;
+                                const { setPluginToken } = await import('@/lib/localPrefs');
+                                const { loadPluginState, upsertPluginRuntime } = await import('@/lib/plugins');
+                                setPluginToken('github', res.accessToken);
+                                upsertPluginRuntime(loadPluginState(), 'github', {
+                                  installed: true,
+                                  connected: true,
+                                  enabledInChat: true,
+                                  accountLabel: res.accountLabel || undefined,
+                                  permissions: ['list', 'read', 'search', 'write'],
+                                });
+                                setGithubConnected(true);
+                                setGithubPickerOpen(true);
+                              })();
+                              return;
+                            }
+                            setGithubPickerOpen(true);
+                          }}
                         >
-                          Pick a repo
+                          {githubConnected ? 'Pick a repo' : 'Continue with GitHub'}
                         </button>
                       </div>
                     )}
@@ -1719,14 +1838,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
             });
           }
         }}
-      />
-      <FreeKeyWizard
-        open={freeKeyOpen}
-        onClose={() => {
-          setFreeKeyOpen(false);
-          void probeLiveCapacity().then(setCapacity).catch(() => undefined);
-        }}
-        preferIds={capacity?.suggestedFreeKeys.map(k => k.id)}
       />
       <DeleteProjectFolderModal
         prompt={deleteProjectPrompt}

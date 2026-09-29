@@ -260,9 +260,9 @@ const FALLBACKS: Record<string, FallbackMark> = {
   devpost: { bg: 'bg-[#003E54]', node: <Letter text="Dp" /> },
   gguf: { bg: 'bg-[#0F766E]', node: <Letter text="GG" /> },
   nova: {
-    bg: 'bg-transparent',
+    bg: 'bg-nova-navy-800',
     node: (
-      <svg viewBox="0 0 128 128" className="w-[88%] h-[88%]" aria-hidden fill="none">
+      <svg viewBox="0 0 128 128" className="w-[88%] h-[88%] text-content-primary" aria-hidden fill="none">
         <g stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="64" cy="64" r="8.5" />
           <path d="M64 55.5 V24" />
@@ -454,13 +454,15 @@ export function BrandMark({
   /** @deprecated Kept for call-site compat. Brand logos always win when known. */
   glyph?: 'brain' | 'initial';
 }) {
+  const plate =
+    'rounded-xl border border-white/10 shadow-sm ring-1 ring-black/20';
   const key = resolveBrand(id, name);
   const dev = key ? DEVICONS[key] : null;
   if (dev) {
     const Icon = dev.Icon;
     return (
       <span
-        className={`${SIZE_CLASS[size]} bg-transparent flex items-center justify-center shrink-0 overflow-hidden ${dev.monoWhite ? 'text-content-primary' : ''} ${className}`}
+        className={`${SIZE_CLASS[size]} ${dev.bg} ${plate} flex items-center justify-center shrink-0 overflow-hidden ${dev.monoWhite ? 'text-white' : ''} ${className}`}
         title={name || id}
       >
         <Icon
@@ -475,9 +477,10 @@ export function BrandMark({
 
   const fallback = key ? FALLBACKS[key] : null;
   if (fallback) {
+    const transparent = fallback.bg === 'bg-transparent';
     return (
       <span
-        className={`${SIZE_CLASS[size]} ${TEXT_CLASS[size]} bg-transparent flex items-center justify-center shrink-0 overflow-hidden text-content-primary ${className}`}
+        className={`${SIZE_CLASS[size]} ${TEXT_CLASS[size]} ${transparent ? 'bg-nova-navy-800 text-content-primary' : fallback.bg} ${plate} flex items-center justify-center shrink-0 overflow-hidden text-white ${className}`}
         title={name || id}
       >
         {fallback.node}
@@ -485,11 +488,11 @@ export function BrandMark({
     );
   }
 
-  // Unknown brand — plain lettermark, no tile behind the glyph.
+  // Unknown brand — lettermark on a Nova plate.
   const label = (initial || (name || id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').slice(0, 2);
   return (
     <span
-      className={`${SIZE_CLASS[size]} bg-transparent flex items-center justify-center ${TEXT_CLASS[size]} font-semibold text-content-primary shrink-0 ${className}`}
+      className={`${SIZE_CLASS[size]} bg-nova-navy-800 ${plate} flex items-center justify-center ${TEXT_CLASS[size]} font-semibold text-content-primary shrink-0 ${className}`}
       title={name || id}
     >
       {label}

@@ -214,15 +214,27 @@ declare global {
       }>;
       brainTokenGet?: () => Promise<{ ok: boolean; token?: string; url?: string; hasToken?: boolean; packaged?: boolean }>;
       brainTokenRotate?: () => Promise<{ ok: boolean; token?: string; url?: string }>;
-      pluginOAuthStart?: (pluginId: string) => Promise<{
+      pluginOAuthStart?: (pluginId: string, opts?: { accessToken?: string; clientId?: string }) => Promise<{
         ok: boolean;
         accessToken?: string;
         accountLabel?: string;
+        githubId?: string;
+        avatarUrl?: string | null;
+        name?: string | null;
         message?: string;
         needsConfig?: boolean;
+        cancelled?: boolean;
       }>;
+      pluginOAuthCancel?: () => Promise<{ ok: boolean; message?: string }>;
       pluginOAuthStatus?: () => Promise<{ ok: boolean; github?: boolean; google?: boolean; notion?: boolean; stored?: Record<string, string> }>;
-      pluginOAuthSetClient?: (pluginId: string, clientId: string) => Promise<{ ok: boolean }>;
+      pluginOAuthSetClient?: (pluginId: string, clientId: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
+      onPluginOAuthProgress?: (handler: (payload: {
+        mode?: 'browser' | 'device';
+        userCode?: string;
+        verificationUri?: string;
+        message?: string;
+        cancelled?: boolean;
+      }) => void) => () => void;
       localReportsList?: () => Promise<{ ok: boolean; items?: unknown[]; path?: string }>;
       localReportsClear?: () => Promise<{ ok: boolean }>;
       localReportsOpen?: () => Promise<{ ok: boolean; path?: string }>;
@@ -257,6 +269,11 @@ declare global {
         ok: boolean;
         text?: string;
         sources?: { title: string; url: string }[];
+        error?: string;
+      }>;
+      imageSearch?: (query: string) => Promise<{
+        ok: boolean;
+        images?: { title: string; imageUrl: string; sourceUrl: string; sourceDomain?: string }[];
         error?: string;
       }>;
       onEngineChunk?: (handler: (payload: { text?: string }) => void) => () => void;
@@ -518,6 +535,8 @@ declare global {
         mode?: 'allowlist' | 'auto_review' | 'run_all';
         skipConfirm?: boolean;
         userConfirmed?: boolean;
+        /** Optional hard wall (ms). Main defaults: 180s heavy npm, 120s otherwise. */
+        timeoutMs?: number;
       }) => Promise<{
         ok: boolean;
         command?: string;

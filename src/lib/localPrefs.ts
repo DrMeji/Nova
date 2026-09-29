@@ -98,8 +98,8 @@ export type LocalPrefs = {
   /** Max tool steps per Agent loop (4–60). */
   agentLoopMaxSteps: number;
   /**
-   * Create polish via Nova tool loop + Ready/assets verify (default on).
-   * Free forever — uses local coder GGUF / user-keyed cloud; never a Nova paywall.
+   * Create craft via Nova tool loop (legacy). Default **off** — createV2 is single-coder
+   * whole-file write. Opt in under Settings only if you need the multi-step agent loop.
    */
   agentLoopOnCreate: boolean;
   /** Edit follow-ups prefer the tool loop when agentLoopEnabled is on (default on). */
@@ -109,7 +109,7 @@ export type LocalPrefs = {
    * Default off so first-time builds stay one-shot; power users can enable.
    */
   planApproveGate: boolean;
-  /** When true, create may use dual-load multi-model (legacy). Sequential ensemble always runs when chat+coder are ready. */
+  /** When true, create may run Design/Copy ensemble hops (opt-in). Default off — single coder only. */
   multiModelCreate: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
   agentLoopCommitOnSuccess: boolean;
@@ -139,7 +139,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   presenceStatus: 'online',
   defaultModelId: 'NOVA-auto',
   defaultCodeModelId: 'NOVA-auto',
-  prefsVersion: 3,
+  prefsVersion: 4,
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
@@ -181,7 +181,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   agentLoopEnabled: true,
   agentLoopInWorkspace: false,
   agentLoopMaxSteps: 32,
-  agentLoopOnCreate: true,
+  agentLoopOnCreate: false,
   agentLoopOnEdit: true,
   planApproveGate: false,
   multiModelCreate: false,
@@ -223,11 +223,20 @@ export function getLocalPrefs(): LocalPrefs {
     }
     // v3: Nova create/edit tool loop defaults (free, no paywall).
     if ((merged.prefsVersion || 0) < 3) {
-      if (typeof merged.agentLoopOnCreate !== 'boolean') merged.agentLoopOnCreate = true;
+      if (typeof merged.agentLoopOnCreate !== 'boolean') merged.agentLoopOnCreate = false;
       if (typeof merged.agentLoopOnEdit !== 'boolean') merged.agentLoopOnEdit = true;
       if (typeof merged.planApproveGate !== 'boolean') merged.planApproveGate = false;
       if (typeof merged.agentLoopEnabled !== 'boolean') merged.agentLoopEnabled = true;
       merged.prefsVersion = 3;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v4: createV2 — agent loop OFF for create; single-coder path is default.
+    if ((merged.prefsVersion || 0) < 4) {
+      merged.agentLoopOnCreate = false;
+      merged.multiModelCreate = false;
+      merged.prefsVersion = 4;
       try {
         localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
       } catch { /* ignore */ }

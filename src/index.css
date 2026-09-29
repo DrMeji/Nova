@@ -180,10 +180,27 @@
   .nova-nav-item {
     @apply flex items-center gap-2 py-2 rounded-none text-sm font-medium transition-colors duration-150 cursor-pointer min-w-0 pl-0 pr-2;
     color: rgb(var(--color-content-secondary));
+    /* Lock row height so hover/active paint never reflows icons */
+    min-height: 2.25rem;
+    position: relative;
+    z-index: 0;
+    background-color: transparent;
   }
   .nova-nav-item:hover {
     color: rgb(var(--color-content-primary));
-    background-color: rgb(var(--color-surface-hover));
+    background-color: transparent;
+  }
+  /* Hover uses the same inset rounded pill as the selected Chat item — not a full-width bar. */
+  .nova-nav-item:not(.active):hover::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    left: 0.55rem;
+    right: 0.55rem;
+    top: 0.28rem;
+    bottom: 0.28rem;
+    background-color: rgb(var(--color-surface-active));
+    border-radius: 0.55rem;
   }
   .nova-nav-item.active {
     /* Inset active fill — soft rounded corners (no hard chamfer slash). */
@@ -204,7 +221,7 @@
     border-radius: 0.55rem;
   }
   .nova-nav-item.active:hover::before {
-    background-color: rgb(var(--color-surface-hover));
+    background-color: rgb(var(--color-surface-active));
   }
   /*
    * Purple heartbeat ONLY when a chat is still working AND you are not on that chat.
@@ -256,13 +273,31 @@
     @apply w-4 h-4 shrink-0;
   }
   .nova-nav-item-rail {
-    @apply !justify-start !px-0 !py-2 !min-h-[2.25rem] !gap-2 !pr-0;
+    @apply !justify-start !px-0 !py-2 !min-h-[2.25rem] !gap-0 !pr-0;
   }
   .nova-nav-label {
-    @apply truncate transition-opacity duration-200 ease-out;
+    @apply truncate transition-opacity duration-200 ease-out min-w-0;
   }
+  /* Keep label out of flex sizing when collapsed — opacity alone still reserved width/height */
   .nova-nav-label-hide {
-    @apply opacity-0 pointer-events-none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Section titles keep a fixed slot so expand/collapse does not shove icons */
+  .nova-nav-section-label {
+    height: 1.25rem;
+    line-height: 1.25rem;
+    margin: 0;
+    overflow: hidden;
   }
   .nova-sidebar-panel {
     width: 16rem;
@@ -277,6 +312,46 @@
     width: 4rem;
     min-width: 4rem;
     max-width: 4rem;
+  }
+
+  /* Liquid-glass trial — frosted panels so ambient orbs show through */
+  .nova-glass {
+    background: rgba(18, 18, 22, 0.42) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  }
+  .nova-glass-composer {
+    background: rgba(16, 16, 20, 0.38) !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+    backdrop-filter: blur(32px) saturate(190%);
+    -webkit-backdrop-filter: blur(32px) saturate(190%);
+    box-shadow:
+      0 10px 40px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+  }
+  .nova-glass-tabs {
+    background: rgba(16, 16, 20, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  .nova-glass-tabs [data-active='true'] {
+    background: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .nova-glass,
+    .nova-glass-composer,
+    .nova-glass-tabs {
+      background: rgba(12, 12, 14, 0.82) !important;
+    }
   }
   .reduce-motion .nova-sidebar-panel,
   .reduce-motion .nova-nav-label {
@@ -358,44 +433,44 @@
     filter: blur(var(--auth-orb-blur, 7px)) brightness(1.12);
   }
   .auth-orb-app {
-    opacity: var(--auth-orb-app-opacity, 0.42);
+    opacity: var(--auth-orb-app-opacity, 0.55);
     filter: blur(var(--auth-orb-blur, 7px));
   }
   .auth-orb-tone-a {
-    background-color: rgb(56 189 248 / 0.7);
-    animation: authOrbHueA 48s ease-in-out infinite;
+    background-color: rgb(56 189 248 / 0.78);
+    animation: authOrbPulseA 9s ease-in-out infinite;
   }
   .auth-orb-tone-b {
-    background-color: rgb(167 139 250 / 0.68);
-    animation: authOrbHueB 56s ease-in-out infinite;
+    background-color: rgb(167 139 250 / 0.78);
+    animation: authOrbPulseB 10s ease-in-out infinite;
   }
   .auth-orb-tone-c {
-    background-color: rgb(52 211 153 / 0.65);
-    animation: authOrbHueC 52s ease-in-out infinite;
+    background-color: rgb(52 211 153 / 0.78);
+    animation: authOrbPulseC 8.5s ease-in-out infinite;
   }
   .auth-orb-tone-d {
-    background-color: rgb(244 114 182 / 0.64);
-    animation: authOrbHueD 44s ease-in-out infinite;
+    background-color: rgb(244 114 182 / 0.78);
+    animation: authOrbPulseD 9.5s ease-in-out infinite;
   }
   .auth-orb-tone-e {
-    background-color: rgb(251 191 36 / 0.62);
-    animation: authOrbHueE 60s ease-in-out infinite;
+    background-color: rgb(251 191 36 / 0.8);
+    animation: authOrbPulseE 11s ease-in-out infinite;
   }
   .auth-orb-tone-f {
-    background-color: rgb(125 211 252 / 0.66);
-    animation: authOrbHueF 40s ease-in-out infinite;
+    background-color: rgb(34 211 238 / 0.78);
+    animation: authOrbPulseF 8s ease-in-out infinite;
   }
   .auth-orb-tone-g {
-    background-color: rgb(251 146 60 / 0.64);
-    animation: authOrbHueG 50s ease-in-out infinite;
+    background-color: rgb(251 146 60 / 0.8);
+    animation: authOrbPulseG 10.5s ease-in-out infinite;
   }
   .auth-orb-tone-h {
-    background-color: rgb(192 132 252 / 0.65);
-    animation: authOrbHueH 54s ease-in-out infinite;
+    background-color: rgb(232 121 249 / 0.78);
+    animation: authOrbPulseH 9s ease-in-out infinite;
   }
   .auth-orb-tone-i {
-    background-color: rgb(74 222 128 / 0.62);
-    animation: authOrbHueI 46s ease-in-out infinite;
+    background-color: rgb(163 230 53 / 0.78);
+    animation: authOrbPulseI 8.8s ease-in-out infinite;
   }
   .auth-type-rainbow {
     background-image: linear-gradient(
@@ -563,68 +638,42 @@
     0% { background-position: 0% 50%; }
     100% { background-position: 220% 50%; }
   }
-  @keyframes authOrbHueA {
-    0% { background-color: rgb(56 189 248 / 0.7); }
-    25% { background-color: rgb(167 139 250 / 0.68); }
-    50% { background-color: rgb(244 114 182 / 0.64); }
-    75% { background-color: rgb(52 211 153 / 0.66); }
-    100% { background-color: rgb(56 189 248 / 0.7); }
+  /* Each orb keeps its own bright hue — pulse brightness only, never drift into gray/dim shared colors. */
+  @keyframes authOrbPulseA {
+    0%, 100% { background-color: rgb(56 189 248 / 0.72); }
+    50% { background-color: rgb(125 211 252 / 0.92); }
   }
-  @keyframes authOrbHueB {
-    0% { background-color: rgb(167 139 250 / 0.68); }
-    25% { background-color: rgb(251 146 60 / 0.64); }
-    50% { background-color: rgb(56 189 248 / 0.68); }
-    75% { background-color: rgb(244 114 182 / 0.62); }
-    100% { background-color: rgb(167 139 250 / 0.68); }
+  @keyframes authOrbPulseB {
+    0%, 100% { background-color: rgb(167 139 250 / 0.72); }
+    50% { background-color: rgb(196 181 253 / 0.92); }
   }
-  @keyframes authOrbHueC {
-    0% { background-color: rgb(52 211 153 / 0.65); }
-    25% { background-color: rgb(125 211 252 / 0.66); }
-    50% { background-color: rgb(192 132 252 / 0.64); }
-    75% { background-color: rgb(251 191 36 / 0.6); }
-    100% { background-color: rgb(52 211 153 / 0.65); }
+  @keyframes authOrbPulseC {
+    0%, 100% { background-color: rgb(52 211 153 / 0.72); }
+    50% { background-color: rgb(110 231 183 / 0.92); }
   }
-  @keyframes authOrbHueD {
-    0% { background-color: rgb(244 114 182 / 0.64); }
-    25% { background-color: rgb(74 222 128 / 0.62); }
-    50% { background-color: rgb(125 211 252 / 0.66); }
-    75% { background-color: rgb(251 146 60 / 0.62); }
-    100% { background-color: rgb(244 114 182 / 0.64); }
+  @keyframes authOrbPulseD {
+    0%, 100% { background-color: rgb(244 114 182 / 0.72); }
+    50% { background-color: rgb(249 168 212 / 0.92); }
   }
-  @keyframes authOrbHueE {
-    0% { background-color: rgb(251 191 36 / 0.62); }
-    25% { background-color: rgb(244 114 182 / 0.62); }
-    50% { background-color: rgb(56 189 248 / 0.68); }
-    75% { background-color: rgb(167 139 250 / 0.66); }
-    100% { background-color: rgb(251 191 36 / 0.62); }
+  @keyframes authOrbPulseE {
+    0%, 100% { background-color: rgb(251 191 36 / 0.74); }
+    50% { background-color: rgb(252 211 77 / 0.94); }
   }
-  @keyframes authOrbHueF {
-    0% { background-color: rgb(125 211 252 / 0.66); }
-    25% { background-color: rgb(52 211 153 / 0.64); }
-    50% { background-color: rgb(251 146 60 / 0.62); }
-    75% { background-color: rgb(192 132 252 / 0.64); }
-    100% { background-color: rgb(125 211 252 / 0.66); }
+  @keyframes authOrbPulseF {
+    0%, 100% { background-color: rgb(34 211 238 / 0.72); }
+    50% { background-color: rgb(103 232 249 / 0.92); }
   }
-  @keyframes authOrbHueG {
-    0% { background-color: rgb(251 146 60 / 0.64); }
-    25% { background-color: rgb(56 189 248 / 0.68); }
-    50% { background-color: rgb(74 222 128 / 0.62); }
-    75% { background-color: rgb(244 114 182 / 0.62); }
-    100% { background-color: rgb(251 146 60 / 0.64); }
+  @keyframes authOrbPulseG {
+    0%, 100% { background-color: rgb(251 146 60 / 0.74); }
+    50% { background-color: rgb(253 186 116 / 0.94); }
   }
-  @keyframes authOrbHueH {
-    0% { background-color: rgb(192 132 252 / 0.65); }
-    25% { background-color: rgb(251 191 36 / 0.6); }
-    50% { background-color: rgb(52 211 153 / 0.64); }
-    75% { background-color: rgb(125 211 252 / 0.66); }
-    100% { background-color: rgb(192 132 252 / 0.65); }
+  @keyframes authOrbPulseH {
+    0%, 100% { background-color: rgb(232 121 249 / 0.72); }
+    50% { background-color: rgb(240 171 252 / 0.92); }
   }
-  @keyframes authOrbHueI {
-    0% { background-color: rgb(74 222 128 / 0.62); }
-    25% { background-color: rgb(167 139 250 / 0.66); }
-    50% { background-color: rgb(251 146 60 / 0.62); }
-    75% { background-color: rgb(56 189 248 / 0.68); }
-    100% { background-color: rgb(74 222 128 / 0.62); }
+  @keyframes authOrbPulseI {
+    0%, 100% { background-color: rgb(163 230 53 / 0.72); }
+    50% { background-color: rgb(190 242 100 / 0.92); }
   }
 
   .text-balance {
@@ -671,6 +720,7 @@
 }
 .nova-code-highlight {
   pointer-events: none;
+  z-index: 1;
   color: #d4d4d4;
   scrollbar-width: none;
 }
@@ -678,23 +728,120 @@
   display: none;
 }
 .nova-code-input {
-  background: transparent;
-  color: transparent;
+  z-index: 2;
+  background: transparent !important;
+  /* Must stay transparent or the highlight layer looks like a gray Notes paste. */
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
   caret-color: #ffffff;
   outline: none;
   border: 0;
   resize: none;
 }
-.nova-tok-comment { color: #6a9955; }
-.nova-tok-string { color: #ce9178; }
-.nova-tok-keyword { color: #569cd6; }
-.nova-tok-number { color: #b5cea8; }
-.nova-tok-tag { color: #569cd6; }
-.nova-tok-attr { color: #9cdcfe; }
-.nova-tok-fn { color: #dcdcaa; }
-.nova-tok-type { color: #4ec9b0; }
-.nova-tok-punct { color: #808080; }
-.nova-tok-plain { color: #d4d4d4; }
+.nova-code-highlight .nova-tok-comment { color: #6a9955 !important; }
+.nova-code-highlight .nova-tok-string { color: #ce9178 !important; }
+.nova-code-highlight .nova-tok-keyword { color: #569cd6 !important; }
+.nova-code-highlight .nova-tok-number { color: #b5cea8 !important; }
+.nova-code-highlight .nova-tok-tag { color: #569cd6 !important; }
+.nova-code-highlight .nova-tok-attr { color: #9cdcfe !important; }
+.nova-code-highlight .nova-tok-fn { color: #dcdcaa !important; }
+.nova-code-highlight .nova-tok-type { color: #4ec9b0 !important; }
+.nova-code-highlight .nova-tok-punct { color: #d4d4d4 !important; }
+.nova-code-highlight .nova-tok-plain { color: #d4d4d4 !important; }
+
+/* Queue cues — small numbered chips above the chat box */
+.nova-queue-cues {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 0.4rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.nova-queue-cues-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.nova-queue-cue {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.nova-queue-cue-btn {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.95);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+.nova-queue-cue-btn:hover {
+  border-color: rgba(148, 163, 184, 0.6);
+  background: rgba(51, 65, 85, 0.98);
+}
+.nova-queue-cue--active .nova-queue-cue-btn {
+  border-color: rgba(125, 211, 252, 0.55);
+  background: rgba(30, 58, 80, 0.98);
+  color: rgb(224, 242, 254);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(125, 211, 252, 0.15);
+}
+.nova-queue-cue-x {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.nova-queue-cue-x:hover {
+  color: rgb(254, 202, 202);
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(127, 29, 29, 0.45);
+}
+.nova-queue-cues-clear {
+  margin-left: 0.15rem;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.65);
+  cursor: pointer;
+}
+.nova-queue-cues-clear:hover {
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.06);
+}
+.nova-queue-cues-hint {
+  margin: 0.3rem 0 0;
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  color: rgba(148, 163, 184, 0.6);
+}
+
+/* Legacy queue panel styles kept inert if unused */
+.nova-queue-panel { display: none; }
 
 /* Chat status dots — smooth overlapping wave (not one-at-a-time pops) */
 @keyframes nova-status-dot {

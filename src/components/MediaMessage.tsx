@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, Download, Check } from 'lucide-react';
+import { Copy, Download, Check, Globe } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
+import { scrubUnexpectedForeignScript } from '@/lib/scrubForeignBleed';
 import { ChatMarkdown } from '@/lib/chatMarkdown';
 import { isChatAttachMessage, stripChatAttach } from '@/lib/chatAttach';
 import { AttachMessageBody } from '@/components/AttachCard';
@@ -13,8 +14,17 @@ import { isPcExploreMessage, parsePcExploreMessage } from '@/lib/pcExplore';
 import { PcExploreCard } from '@/components/PcExploreCard';
 import { isPromptChipsMessage, parsePromptChipsMessage } from '@/lib/chatPromptChips';
 import { PromptChipsCard } from '@/components/PromptChipsCard';
+import {
+  isClinicReportMessage,
+  parseClinicReportMessage,
+  parseClinicStatusHistory,
+} from '@/lib/debugClinic';
+import { DebugClinicReport } from '@/components/DebugClinicReport';
+import { isPlanReportMessage, parsePlanReport } from '@/lib/planReport';
+import { PlanReport } from '@/components/PlanReport';
 import { AgentProgressStatus } from '@/components/AgentProgressStatus';
 import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
+import { stripComposerPrefix } from '@/lib/chatAgentTurn';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -86,14 +96,19 @@ export function GeneratingPlaceholder({
 
   if (kind === 'chat') {
     const shown = label || 'Thinking…';
+    const webSearch = /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references)\b|\blayout\s+references\b/i.test(shown);
     return (
       <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
-        <span className="inline-flex items-center gap-1.5" aria-hidden>
-          <span className="nova-status-dot nova-status-dot-1" />
-          <span className="nova-status-dot nova-status-dot-2" />
-          <span className="nova-status-dot nova-status-dot-3" />
-        </span>
-        <span className="min-w-0 flex-1 text-content-secondary text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere]">{shown}</span>
+        {webSearch ? (
+          <Globe className="w-3.5 h-3.5 shrink-0 text-sky-400 animate-pulse" aria-hidden />
+        ) : (
+          <span className="inline-flex items-center gap-1.5" aria-hidden>
+            <span className="nova-status-dot nova-status-dot-1" />
+            <span className="nova-status-dot nova-status-dot-2" />
+            <span className="nova-status-dot nova-status-dot-3" />
+          </span>
+        )}
+        <span className={`min-w-0 flex-1 text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere] ${webSearch ? 'text-sky-300' : 'text-content-secondary'}`}>{shown}</span>
       </div>
     );
   }
@@ -413,6 +428,9 @@ export function MessageContent({
   tone?: 'user' | 'assistant';
 }) {
   const turnStatus = useChatTurnStatus(messageId);
+  if (tone === 'user') {
+    content = stripComposerPrefix(content);
+  }
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
   }
@@ -425,6 +443,99 @@ export function MessageContent({
   if (isCatalogMessage(content)) {
     const data = parseCatalogMessage(content);
     if (data) return <FolderCatalogCard data={data} />;
+  }
+
+  if (isClinicReportMessage(content)) {
+    const report = parseClinicReportMessage(content);
+    if (report) {
+      const embedded = parseClinicStatusHistory(content);
+      const liveHistory = (
+        messageId
+        && turnStatus
+        && turnStatus.assistantId === messageId
+        && Array.isArray(turnStatus.history)
+      ) ? turnStatus.history : [];
+      const history = (embedded && embedded.length > 1) ? embedded : liveHistory;
+      const clinicHistory = history.some((step) => {
+        const label = typeof step === 'string' ? step : String(step?.label || '');
+        return /\b(?:debug clinic|pass [123]|static|deep|triage|clinic ready)\b/i.test(label);
+      });
+      return (
+        <div className="space-y-3 w-full max-w-full">
+          {clinicHistory && history.length > 1 && !live ? (
+            <AgentProgressStatus
+              label={/^done$/i.test(String(
+                (embedded && embedded.length ? embedded[embedded.length - 1]?.label : turnStatus?.label) || '',
+              )) ? 'Done' : 'Done'}
+              history={history}
+            />
+          ) : null}
+          <DebugClinicReport
+            report={report}
+            onRepair={onPromptChipPick
+              ? (findingId) => {
+                  const id = String(findingId || '').trim();
+                  if (!id) return;
+                  onPromptChipPick(`fix ${id}`);
+                }
+              : undefined}
+            onRepairAll={onPromptChipPick
+              ? () => {
+                  onPromptChipPick('finish all remaining work items');
+                }
+              : undefined}
+          />
+        </div>
+      );
+    }
+  }
+
+  if (isPlanReportMessage(content) || (isPromptChipsMessage(content) && isPlanReportMessage(parsePromptChipsMessage(content).body))) {
+    const { body, chips } = isPromptChipsMessage(content)
+      ? parsePromptChipsMessage(content)
+      : { body: content, chips: [] as { label: string; prompt: string }[] };
+    const report = parsePlanReport(body || content);
+    if (report) {
+      const intro =
+        String(report.intro || '').trim()
+        || String(body || '')
+          .split(/<!--nova-plan-report-->/i)[0]
+          ?.replace(/<!--[\s\S]*?-->/g, '')
+          .trim()
+        || '';
+      const introNorm = intro.replace(/\*\*/g, '').trim().toLowerCase();
+      const sumNorm = String(report.summary || '').replace(/\*\*/g, '').trim().toLowerCase();
+      const hideSummary = Boolean(intro)
+        && (
+          !sumNorm
+          || sumNorm === introNorm
+          || (sumNorm.length >= 24 && introNorm.includes(sumNorm.slice(0, 48)))
+        );
+      return (
+        <div className="space-y-3 w-full max-w-full">
+          {intro ? (
+            <div className="text-[14px] text-content-primary/95 leading-relaxed">
+              <ChatMarkdown text={intro} tone={tone} />
+            </div>
+          ) : null}
+          <PlanReport report={report} hideSummary={hideSummary} />
+          {onPromptChipPick && chips.length ? (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {chips.map((chip) => (
+                <button
+                  key={chip.prompt}
+                  type="button"
+                  className="text-[11px] rounded-full border border-white/15 bg-white/[0.04] text-content-secondary px-3 py-1.5 hover:bg-white/[0.08] hover:text-content-primary transition-colors"
+                  onClick={() => onPromptChipPick(chip.prompt)}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
   }
 
   if (isPromptChipsMessage(content)) {
@@ -490,10 +601,18 @@ export function MessageContent({
         : (lastStep && typeof lastStep === 'object' && 'label' in lastStep
           ? String((lastStep as { label?: string }).label || '')
           : '');
-      const label = /^Thinking…?$/i.test(String(liveLabel))
-        && liveHistory.length > 1
-        ? (lastLabel || 'Working…')
-        : liveLabel;
+      // Prefer the newest history step so clinic counters (5/60 · left) stay live on the top line.
+      const clinicLive = /\b(?:debug clinic|pass [123]|deep ·|verify ·|triage ·|clinic ready)\b/i.test(
+        `${liveLabel} ${lastLabel}`,
+      );
+      const label = clinicLive && lastLabel
+        ? lastLabel
+        : (
+          /^Thinking…?$/i.test(String(liveLabel))
+          && liveHistory.length > 1
+            ? (lastLabel || 'Working…')
+            : liveLabel
+        );
       return <AgentProgressStatus label={label} history={liveHistory} />;
     }
     return <GeneratingPlaceholder kind={kind} label={labelFromMsg} sessionKey={sessionKey} />;
@@ -504,7 +623,9 @@ export function MessageContent({
   }
 
   if (!content.includes('nova-media:') && !/!\[[^\]]*\]\([^)]+\)/.test(content)) {
-    const shown = usableAssistantText(content);
+    let shown = usableAssistantText(content);
+    // Display-time safety net: English lead-in + CJK dump must never stay visible.
+    shown = scrubUnexpectedForeignScript(shown || content) || shown;
     if (!shown) {
       // Never flash canned greetings / empty usable text as the bubble body.
       if (/^Hello! How can I assist you today\??\.?$/i.test(content.trim())) {
@@ -541,7 +662,8 @@ export function MessageContent({
   ) ? turnStatus.history : [];
   const buildyHistory = history.some((step) => {
     const label = typeof step === 'string' ? step : String(step?.label || '');
-    return /\b(?:build|craft|creating|writing|polish|coding|verif|scaffold|npm|design ·|copy ·|contract|folder)\b/i.test(label);
+    return /\b(?:build|craft|creating|writing|polish|coding|verif|scaffold|npm|design ·|copy ·|contract|folder|debug clinic|pass [123]|static ·|deep review|triage|clinic ready)\b/i.test(label)
+      || /^Reading /i.test(label);
   });
   const liveGenerating = Boolean(live);
   const finishedSteps = (

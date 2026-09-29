@@ -165,6 +165,10 @@ type AuthAmbientOrbsProps = {
   variant?: 'auth' | 'app';
 };
 
+type VisualMode = 'free' | 'hidden' | 'fadeIn';
+
+type VoiceVisualDetail = { mode?: 'voice' | 'chat' };
+
 export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
   const isApp = variant === 'app';
   const setup = isApp ? APP_ORB_SETUP : ORB_SETUP;
@@ -176,9 +180,13 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
   const stateRef = useRef<OrbSpec[] | null>(null);
   const rafRef = useRef(0);
   const reduceMotionRef = useRef(isReduceMotionOn());
+  const visualModeRef = useRef<VisualMode>('free');
+  const layerOpacityRef = useRef(1);
+  const fadeInTRef = useRef(1);
 
   const kickOrb = useCallback((index: number, clientX: number, clientY: number) => {
     if (isReduceMotionOn()) return;
+    if (visualModeRef.current !== 'free') return;
     const layer = layerRef.current;
     const orbs = stateRef.current;
     if (!layer || !orbs?.[index]) return;
@@ -214,6 +222,50 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     return () => window.removeEventListener('nova:prefs-changed', syncReduceMotion);
   }, []);
 
+  // App shell: Voice hides solid orbs. Chat restores with a slow light-up.
+  useEffect(() => {
+    if (!isApp) return;
+    const onVisual = (ev: Event) => {
+      const detail = (ev as CustomEvent<VoiceVisualDetail>).detail;
+      const next = detail?.mode === 'voice' ? 'voice' : 'chat';
+      const layer = layerRef.current;
+      if (next === 'voice') {
+        visualModeRef.current = 'hidden';
+        layerOpacityRef.current = 0;
+        fadeInTRef.current = 0;
+        if (layer) layer.style.opacity = '0';
+      } else {
+        if (visualModeRef.current === 'free' || visualModeRef.current === 'fadeIn') return;
+        const w = layer?.clientWidth || 0;
+        const h = layer?.clientHeight || 0;
+        if (w > 2 && h > 2) {
+          stateRef.current = seedOrbs(w, h, setup, speedMin, speedMax);
+          paintOrbs(stateRef.current, orbRefs.current, isReduceMotionOn());
+        }
+        if (isReduceMotionOn()) {
+          visualModeRef.current = 'free';
+          layerOpacityRef.current = 1;
+          fadeInTRef.current = 1;
+          if (layer) {
+            layer.style.opacity = '1';
+            layer.style.pointerEvents = 'none';
+          }
+          return;
+        }
+        // Soft lamp-style light-up while orbs keep drifting.
+        visualModeRef.current = 'fadeIn';
+        fadeInTRef.current = 0;
+        layerOpacityRef.current = 0;
+        if (layer) {
+          layer.style.opacity = '0';
+          layer.style.pointerEvents = 'none';
+        }
+      }
+    };
+    window.addEventListener('NOVA:voice-visual', onVisual);
+    return () => window.removeEventListener('NOVA:voice-visual', onVisual);
+  }, [isApp, setup, speedMin, speedMax]);
+
   useEffect(() => {
     const layer = layerRef.current;
     if (!layer) return;
@@ -229,7 +281,7 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
       if (w < 2 || h < 2) return false;
       if (!stateRef.current) {
         stateRef.current = seedOrbs(w, h, setup, speedMin, speedMax);
-      } else {
+      } else if (visualModeRef.current === 'free') {
         for (const orb of stateRef.current) {
           bounceWalls(orb, w, h);
         }
@@ -240,15 +292,11 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
 
     const tick = () => {
       if (!running) return;
-      // Pause only when the document is truly hidden (tab/minimize). Do NOT stop on
-      // window.blur — Windows/.bat/focus steals fire blur while visibility stays
-      // "visible", which previously left orbs frozen until a full app restart.
       if (backgrounded()) {
         rafRef.current = 0;
         return;
       }
 
-      // Re-read every frame so blur/slider prefs never accidentally unfreeze motion.
       const frozen = isReduceMotionOn();
       reduceMotionRef.current = frozen;
 
@@ -261,7 +309,17 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
         return;
       }
 
-      if (!frozen) {
+      const mode = visualModeRef.current;
+
+      if (mode === 'hidden') {
+        layer.style.opacity = '0';
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const drifting = mode === 'free' || mode === 'fadeIn';
+
+      if (!frozen && drifting) {
         for (const orb of orbs) {
           const s = Math.hypot(orb.vx, orb.vy);
           if (s > speedMax * 1.2) {
@@ -285,7 +343,23 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
         }
       }
 
-      paintOrbs(orbs, orbRefs.current, frozen);
+      if (mode === 'fadeIn' && !frozen) {
+        // ~2s ease — like a modern lamp warming up, not a flash.
+        fadeInTRef.current = Math.min(1, fadeInTRef.current + 0.0075);
+        const t = fadeInTRef.current;
+        const eased = t * t * (3 - 2 * t);
+        layerOpacityRef.current = eased;
+        layer.style.opacity = String(eased);
+        paintOrbs(orbs, orbRefs.current, false);
+        if (t >= 1) visualModeRef.current = 'free';
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (mode === 'free') {
+        layer.style.opacity = '1';
+        paintOrbs(orbs, orbRefs.current, frozen);
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -304,8 +378,6 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
     window.addEventListener('pageshow', resume);
-    // Watchdog: if something cancels rAF while still visible (focus races, Electron
-    // child windows, .bat launches), restart within ~1s without needing a remount.
     const watchdog = window.setInterval(() => {
       if (!running || backgrounded()) return;
       if (!rafRef.current) resume();
@@ -320,16 +392,14 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('focus', resume);
       window.removeEventListener('pageshow', resume);
-      // Keep seeded positions across Soft remounts from parent re-renders.
-      // Only drop state when the layer truly unmounts with variant change handled by deps.
       stateRef.current = null;
     };
-  }, [variant]);
+  }, [variant, setup, speedMin, speedMax]);
 
   return (
     <div
       ref={layerRef}
-      className={`absolute inset-0 overflow-hidden pointer-events-none ${isApp ? 'z-0' : ''}`}
+      className={`absolute inset-0 overflow-hidden pointer-events-none transition-opacity duration-300 ${isApp ? 'z-0' : ''}`}
       aria-hidden
     >
       {setup.map((spec, i) => {

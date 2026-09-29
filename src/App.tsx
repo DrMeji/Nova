@@ -18,9 +18,8 @@ import { BrainView } from '@/views/BrainView';
 import { Settings } from '@/views/Settings';
 import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
-import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
-import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
+import { isCodeTabEnabled, isSocialParked } from '@/lib/featurePark';
 import { requestOpenChatCode } from '@/lib/openChatCode';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { runSocialReleaseCleanIfNeeded, runArkIdRotationIfNeeded } from '@/lib/socialCleanBoot';
@@ -28,7 +27,6 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import { applyLocalAppearancePrefs } from '@/lib/applyLocalAppearance';
 import { startModelHuntCycle } from '@/lib/novaHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
-import { supabaseConfigError } from '@/lib/supabase';
 import { cancelAll, hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
 import { useEffect, useRef, useState, type ReactNode, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -77,10 +75,21 @@ function LazyPane({ children }: { children: ReactNode }) {
 }
 
 function AppRoutes() {
-  const { route } = useRouter();
+  const { route, navigate } = useRouter();
   const [keepChatAlive, setKeepChatAlive] = useState(() => hasChatInflight());
 
   useEffect(() => subscribeChatInflight(() => setKeepChatAlive(hasChatInflight())), []);
+
+  // Social tabs stay in the sidebar as Soon, but are not navigable.
+  useEffect(() => {
+    if (route.name === 'networking' && isSocialParked('networking')) {
+      navigate({ name: 'chat' });
+      return;
+    }
+    if ((route.name === 'message' || route.name === 'call') && isSocialParked('message')) {
+      navigate({ name: 'chat' });
+    }
+  }, [route.name, navigate]);
 
   const showChat = route.name === 'chat' || keepChatAlive;
   const chatVisible = route.name === 'chat';
@@ -109,19 +118,18 @@ function AppRoutes() {
       case 'brain': other = <BrainView />; break;
       case 'networking':
         other = isSocialParked('networking')
-          ? <ParkedNotice feature="networking" />
+          ? null
           : <LazyPane><NetworkingView /></LazyPane>;
         break;
       case 'message':
         other = isSocialParked('message')
-          ? <ParkedNotice feature="message" />
+          ? null
           : <LazyPane><MessageView /></LazyPane>;
         break;
       case 'notifications': other = <NotificationsView />; break;
       case 'call':
-        // Call removed from product — bounce to Message.
         other = isSocialParked('message')
-          ? <ParkedNotice feature="message" />
+          ? null
           : <LazyPane><MessageView /></LazyPane>;
         break;
       case 'settings': other = <Settings />; break;
@@ -255,18 +263,7 @@ function OpenLastProjectOnLaunch() {
 }
 
 function App() {
-  if (supabaseConfigError) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-nova-navy-950 text-white p-8 text-center">
-        <div className="max-w-md space-y-3">
-          <p className="text-lg font-semibold">NOVA could not start</p>
-          <p className="text-sm text-white/70">{supabaseConfigError}</p>
-          <p className="text-xs text-white/50">Rebuild with .env.production present, or set the Vite env vars.</p>
-        </div>
-      </div>
-    );
-  }
-
+  // GitHub-only gate — missing Supabase keys must not brick the desktop shell.
   return (
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}

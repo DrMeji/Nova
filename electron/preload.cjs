@@ -85,15 +85,27 @@ const novaDesktopApi = {
     ipcRenderer.invoke('NOVA:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
   engineGenerateCancel: (opts) => ipcRenderer.invoke('NOVA:engine-generate-cancel', opts || {}),
   webSearch: (query) => ipcRenderer.invoke('NOVA:web-search', { query }),
+  imageSearch: (query) => ipcRenderer.invoke('NOVA:image-search', { query }),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
     ipcRenderer.on('NOVA:engine-chunk', listener);
     return () => ipcRenderer.removeListener('NOVA:engine-chunk', listener);
   },
-  pluginOAuthStart: (pluginId) => ipcRenderer.invoke('NOVA:plugin-oauth-start', pluginId),
+  pluginOAuthStart: (pluginId, opts) => ipcRenderer.invoke('NOVA:plugin-oauth-start', pluginId, opts || {}),
+  pluginOAuthCancel: () => ipcRenderer.invoke('NOVA:plugin-oauth-cancel'),
   pluginOAuthStatus: () => ipcRenderer.invoke('NOVA:plugin-oauth-status'),
   pluginOAuthSetClient: (pluginId, clientId) =>
     ipcRenderer.invoke('NOVA:plugin-oauth-set-client', { pluginId, clientId }),
+  onPluginOAuthProgress: (handler) => {
+    if (typeof handler !== 'function') return () => undefined;
+    const listener = (_event, payload) => {
+      try { handler(payload); } catch { /* ignore */ }
+    };
+    ipcRenderer.on('NOVA:plugin-oauth-progress', listener);
+    return () => {
+      try { ipcRenderer.removeListener('NOVA:plugin-oauth-progress', listener); } catch { /* ignore */ }
+    };
+  },
   localReportsList: () => ipcRenderer.invoke('NOVA:local-reports-list'),
   localReportsClear: () => ipcRenderer.invoke('NOVA:local-reports-clear'),
   localReportsOpen: () => ipcRenderer.invoke('NOVA:local-reports-open'),

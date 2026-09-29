@@ -200,6 +200,13 @@ import {
 } from '@/lib/chatApplySnapshotStore';
 import { projectUsesNpm, mergeBriefNpmDependencies } from '@/lib/projectScaffolds';
 import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint, keepBuildingConversationHint } from '@/lib/chatPlanMode';
+import { looksLikePlanRefineAsk } from '@/lib/planReport';
+import {
+  looksLikeWorkQueueDoNext,
+  looksLikeWorkQueueFinishAll,
+  looksLikeWorkQueueStop,
+  loadWorkQueue,
+} from '@/lib/workQueue';
 import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
 import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeDirectJudgmentAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
@@ -221,7 +228,7 @@ import {
   setChatTurnStatus,
   forgetFinishedChatTurnStatus,
 } from '@/lib/chatTurnStatusStore';
-import { consumePendingStudioBind, readPendingStudioBind } from '@/lib/pendingStudioBind';
+import { consumePendingStudioBind, readPendingStudioBind, clearPendingStudioBind, writePendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
 import { useCreateJob } from '@/hooks/useCreateJob';
 import {
@@ -245,7 +252,6 @@ import {
   markCloudKeyNudgeShown,
   shouldOfferCloudKeyNudge,
 } from '@/lib/cloudKeyNudge';
-import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
 import { DeleteFileModal } from '@/components/DeleteFileModal';
 import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
@@ -374,6 +380,10 @@ import {
 
 import {
   COMPOSER_MODE_PREFIX,
+  DEBUG_CLINIC_SEED,
+  PLAN_MODE_SEED,
+  AGENT_MODE_SEED,
+  MULTI_AGENT_MODE_SEED,
   composerModeFromContent,
   previewFromText,
   CHAT_MODELS,
@@ -383,6 +393,8 @@ import {
   failoverChipText,
   PLACEHOLDERS,
   GREETINGS,
+  pickVoiceGreeting,
+  pickVoiceHoldLine,
   resolveStudioFiles,
   persistModeThread,
   deletePrepareErrorReply,
@@ -489,10 +501,21 @@ export function useAIChatController() {
   const [liveTurnMs, setLiveTurnMs] = useState(0);
   const liveTurnStartRef = useRef<number | null>(null);
   const [voicePhase, setVoicePhase] = useState<VoiceSessionPhase>('idle');
+  const voiceGreetSessionRef = useRef(0);
+  const lastVoiceGreetRef = useRef<string | null>(null);
+  const voiceGreetBusyRef = useRef(false);
   const [dictating, setDictating] = useState(false);
   const [dictationHint, setDictationHint] = useState<string | null>(null);
   const dictationRef = useRef<LiveDictationHandle | null>(null);
   const dictationBaseRef = useRef('');
+  /** Bumped to ignore late onInterim/onFinal after stop — otherwise speech overwrites typed keys. */
+  const dictationGenRef = useRef(0);
+  const stopComposerDictation = useCallback(() => {
+    dictationGenRef.current += 1;
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setDictating(false);
+  }, []);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -527,6 +550,8 @@ export function useAIChatController() {
   const [pendingAttaches, setPendingAttaches] = useState<ChatAttachMeta[]>([]);
   const [dragOverChat, setDragOverChat] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
+  const dropHintRef = useRef<string | null>(null);
+  dropHintRef.current = dropHint;
   const [pathBindOpen, setPathBindOpen] = useState(false);
   const [pathBindDraft, setPathBindDraft] = useState('');
   const pathBindInputRef = useRef<HTMLInputElement>(null);
@@ -572,7 +597,24 @@ export function useAIChatController() {
   /** actions = what next; handoff = after inspect */
   const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
-  const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
+  const [composerMode, setComposerModeState] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
+  /** Sync pill mode immediately so Debug/Bind + Enter never race a stale closure. */
+  const pillModeRef = useRef<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
+  const setComposerMode = (
+    next: 'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null
+      | ((prev: 'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null) => 'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null),
+  ) => {
+    if (typeof next === 'function') {
+      setComposerModeState((prev) => {
+        const resolved = next(prev);
+        pillModeRef.current = resolved;
+        return resolved;
+      });
+      return;
+    }
+    pillModeRef.current = next;
+    setComposerModeState(next);
+  };
   const [videoDurationSec, setVideoDurationSec] = useState<10 | 20 | 30>(10);
   const [tokenRatio, setTokenRatio] = useState(0);
   const [modelRatio, setModelRatio] = useState(0);
@@ -604,6 +646,8 @@ export function useAIChatController() {
   const persistChatIdRef = useRef<string | null>(null);
   /** Which chat owns the in-memory studio refs — never open Localhost from another thread's root. */
   const studioBoundChatIdRef = useRef<string | null>(null);
+  /** Bumps whenever the visible chat resets — async folder binds must not paint onto a newer canvas. */
+  const studioEpochRef = useRef(0);
   /** Always-current route chat id. avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
   const ignoreEnterUntilRef = useRef(0);
@@ -656,7 +700,6 @@ export function useAIChatController() {
   const stopRequestedByChatRef = useRef<Record<string, boolean>>({});
   const persistTimerRef = useRef<number | undefined>(undefined);
   const activeModelRef = useRef(activeModel);
-  const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
   const [ipcFallbackDev, setIpcFallbackDev] = useState(false);
   /** Auto: equipped brain for this chat thread (sticky until failover). */
@@ -668,6 +711,8 @@ export function useAIChatController() {
     return null;
   });
   const threadBrainRef = useRef<ThreadBrain | null>(threadBrain);
+  /** Live create hop label for the Multimodal pill (Craft · Qwen Coder…). */
+  const [createLiveModelLabel, setCreateLiveModelLabel] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(() => {
     try {
       return localStorage.getItem('NOVA:setup-brain-note');
@@ -1132,7 +1177,7 @@ export function useAIChatController() {
   useEffect(() => {
     if (route.name !== 'chat') {
       // Keep the active thread id while a gen is in flight (Settings / Local AI hops).
-      if (!generatingRef.current) {
+      if (!generatingRef.current && !hasChatInflight()) {
         routeChatIdRef.current = undefined;
       }
       return;
@@ -1199,7 +1244,10 @@ export function useAIChatController() {
     chatStudioProjectId,
   ]);
 
-  const autoModelLabel = useMemo(() => autoPillLabel(threadBrain), [threadBrain]);
+  const autoModelLabel = useMemo(() => {
+    if (createLiveModelLabel) return createLiveModelLabel;
+    return autoPillLabel(threadBrain);
+  }, [createLiveModelLabel, threadBrain]);
   const threadKind = useMemo(() => brainKindForChatMode(mode), [mode]);
 
   const unpickAutoSticky = () => {
@@ -1252,6 +1300,8 @@ export function useAIChatController() {
     if (mode !== 'voice') {
       setVoicePhase('idle');
       stopSpeaking();
+      voiceGreetBusyRef.current = false;
+      voiceGreetSessionRef.current += 1;
       return;
     }
     setMessages([]);
@@ -1264,7 +1314,41 @@ export function useAIChatController() {
     const syncTimer = window.setTimeout(() => {
       void syncAutoVoiceDevices();
     }, 0);
-    return () => window.clearTimeout(syncTimer);
+
+    // One greeting only per Voice enter — never stack lines.
+    const session = ++voiceGreetSessionRef.current;
+    voiceGreetBusyRef.current = false;
+    const greetTimer = window.setTimeout(() => {
+      if (session !== voiceGreetSessionRef.current) return;
+      if (voiceGreetBusyRef.current || generatingRef.current) return;
+      voiceGreetBusyRef.current = true;
+      stopSpeaking();
+      const line = pickVoiceGreeting(lastVoiceGreetRef.current);
+      lastVoiceGreetRef.current = line;
+      void (async () => {
+        try {
+          await speakText(line, {
+            onPlaybackStart: () => {
+              if (session === voiceGreetSessionRef.current) setVoicePhase('speaking');
+            },
+          });
+        } finally {
+          if (session === voiceGreetSessionRef.current) {
+            voiceGreetBusyRef.current = false;
+            setVoicePhase('idle');
+          }
+        }
+      })();
+    }, 1100);
+
+    return () => {
+      window.clearTimeout(syncTimer);
+      window.clearTimeout(greetTimer);
+      // Invalidate this visit so a Strict Mode remount cannot double-speak.
+      if (session === voiceGreetSessionRef.current) {
+        voiceGreetSessionRef.current += 1;
+      }
+    };
   }, [mode]);
 
   // After Chat → Image handoff, auto-send the carried prompt once.
@@ -1383,10 +1467,13 @@ export function useAIChatController() {
 
     if (route.chatId) {
       const inFlight = Boolean(
-        generatingRef.current && activeGenChatIdRef.current === route.chatId,
+        (generatingRef.current && activeGenChatIdRef.current === route.chatId)
+        || isChatInflight(route.chatId),
       );
       // Never clobber an in-progress Image/Video (or chat) turn by reloading disk.
       if (inFlight) {
+        activeGenChatIdRef.current = route.chatId;
+        generatingRef.current = true;
         setLoading(false);
         setGenerating(true);
         return;
@@ -1443,13 +1530,6 @@ export function useAIChatController() {
         window.clearTimeout(persistTimerRef.current);
         persistTimerRef.current = undefined;
       }
-      // Queue is per-view: never show another chat's backlog here.
-      pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === switchChatId);
-      setQueueLen(pendingQueueRef.current.length);
-      setQueueTick(t => t + 1);
-      setEditingQueueId(null);
-      setEditingQueueText('');
-      const hadPreview = Boolean(previewUrlRef.current);
       let nextMsgs: ChatMessage[] = [];
       try {
         const raw = localStorage.getItem(chatThreadKey(switchChatId));
@@ -1458,6 +1538,25 @@ export function useAIChatController() {
       } catch {
         nextMsgs = [];
       }
+      // Queue is per-view: never show another chat's backlog here.
+      pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === switchChatId);
+      // Drop ghosts that were already committed to this thread.
+      const sentOnSwitch = new Set(
+        nextMsgs
+          .filter(m => m.role === 'user')
+          .map(m => String(m.content || '').trim())
+          .filter(Boolean),
+      );
+      if (sentOnSwitch.size) {
+        pendingQueueRef.current = pendingQueueRef.current.filter(
+          q => !sentOnSwitch.has(String(q.text || '').trim()),
+        );
+      }
+      setQueueLen(pendingQueueRef.current.length);
+      setQueueTick(t => t + 1);
+      setEditingQueueId(null);
+      setEditingQueueText('');
+      const hadPreview = Boolean(previewUrlRef.current);
       messagesRef.current = nextMsgs;
       messagesChatIdRef.current = switchChatId;
       setMessages(nextMsgs);
@@ -1468,6 +1567,7 @@ export function useAIChatController() {
       userDetachScrollRef.current = false;
       setShowJumpToBottom(false);
       ignoreScrollUntilRef.current = Date.now() + 600;
+      studioEpochRef.current += 1;
       studioBoundChatIdRef.current = null;
       setChatStudioFiles({});
       chatStudioFilesRef.current = {};
@@ -1479,6 +1579,10 @@ export function useAIChatController() {
       previewUrlRef.current = null;
       setPendingAttaches([]);
       setCodePillSticky(false);
+      setComposerMode(null);
+      setDropHint(null);
+      clearPendingStudioBind();
+      stopComposerDictation();
       pinMessagesToBottom('auto');
 
       void (async () => {
@@ -1552,6 +1656,11 @@ export function useAIChatController() {
               activeGenChatIdRef.current = switchChatId;
               generatingRef.current = true;
               setGenerating(true);
+            } else if (isChatInflight(switchChatId)) {
+              // Inflight create/chat without a visible placeholder — restore busy chrome.
+              activeGenChatIdRef.current = switchChatId;
+              generatingRef.current = true;
+              setGenerating(true);
             }
           } else {
             const stuckChat = messagesRef.current.some(
@@ -1561,7 +1670,8 @@ export function useAIChatController() {
               if (stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
                 sessionStorage.removeItem('NOVA:inflight-media');
               }
-              // Never flip to interrupted while this chat still has work in flight.
+              // Clear stuck placeholders on THIS thread only. Never abort another chat's
+              // in-flight create by clearing generatingRef / activeGenChatIdRef.
               if (!isChatInflight(switchChatId)) {
                 setMessages(prev => {
                   const next = prev.map(m => (
@@ -1573,7 +1683,17 @@ export function useAIChatController() {
                   persistModeThread(mode, next, { chatId: switchChatId });
                   return next;
                 });
-                generatingRef.current = false;
+                const otherLive = Boolean(
+                  (activeGenChatIdRef.current
+                    && activeGenChatIdRef.current !== switchChatId
+                    && (generatingRef.current || isChatInflight(activeGenChatIdRef.current)))
+                  || hasChatInflight(),
+                );
+                if (!otherLive && activeGenChatIdRef.current === switchChatId) {
+                  generatingRef.current = false;
+                  activeGenChatIdRef.current = null;
+                }
+                // Hide Stop on this idle view; background work keeps generatingRef.
                 setGenerating(false);
               }
             }
@@ -1624,6 +1744,8 @@ export function useAIChatController() {
       window.clearTimeout(persistTimerRef.current);
       persistTimerRef.current = undefined;
     }
+    // Invalidate any in-flight openFolderInChat / hydrate that started on the previous canvas.
+    studioEpochRef.current += 1;
     studioBoundChatIdRef.current = null;
     setChatStudioFiles({});
     chatStudioFilesRef.current = {};
@@ -1636,6 +1758,11 @@ export function useAIChatController() {
     setPendingAttaches([]);
     setPendingImages([]);
     setCodePillSticky(false);
+    setComposerMode(null);
+    setDropHint(null);
+    setPathBindOpen(false);
+    setPathBindDraft('');
+    clearPendingStudioBind();
     lastStudioIntentRef.current = null;
     lastFindingsRef.current = [];
     void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
@@ -1646,26 +1773,18 @@ export function useAIChatController() {
     } catch { /* ignore */ }
     persistChatIdRef.current = null;
     // Blank starter must not show another chat's Stop / queue UI.
-    // Do NOT bump genSeq or stopRequested — a prior thread may still be finishing in the
-    // background and must keep writing to its own chatId (see finalizeAssistant).
+    // Do NOT bump genSeq, stopRequested, generatingRef, or activeGenChatIdRef —
+    // a prior thread may still be finishing and must keep writing to its own chatId.
     pendingQueueRef.current = [];
     setQueueLen(0);
     setQueueTick(t => t + 1);
     setEditingQueueId(null);
     setEditingQueueText('');
-    if (activeGenChatIdRef.current && routeChatIdRef.current
-      && activeGenChatIdRef.current === routeChatIdRef.current) {
-      // Only clear generating chrome when the abandoned view was that same in-flight chat.
-      activeGenChatIdRef.current = null;
-      generatingRef.current = false;
-      setGenerating(false);
-    } else if (!routeChatIdRef.current) {
-      // Blank New Chat: hide Stop even if another chat is still answering.
-      generatingRef.current = false;
-      setGenerating(false);
-    }
+    stopComposerDictation();
+    // Hide Stop on the blank canvas only — never abort background create/chat.
+    setGenerating(false);
     setLoading(false);
-  }, [route, mode, navigate]);
+  }, [route, mode, navigate, stopComposerDictation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1802,6 +1921,20 @@ export function useAIChatController() {
     };
   }, [route]);
 
+  useEffect(() => {
+    if (route.name !== 'chat') return;
+    let pending = '';
+    try {
+      pending = sessionStorage.getItem('NOVA:pending-chat-send') || '';
+      if (pending) sessionStorage.removeItem('NOVA:pending-chat-send');
+    } catch { /* ignore */ }
+    if (!pending.trim()) return;
+    const id = window.setTimeout(() => {
+      void sendMessageRef.current(pending.trim());
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [route]);
+
   const pinMessagesToBottom = (behavior: ScrollBehavior = 'auto') => {
     stickToBottomRef.current = true;
     userDetachScrollRef.current = false;
@@ -1923,6 +2056,8 @@ export function useAIChatController() {
   }, [modelMenuOpen]);
 
   const handleStop = () => {
+    stopSpeaking();
+    setVoicePhase('idle');
     const originGenChatId = activeGenChatIdRef.current
       || routeChatIdRef.current
       || persistChatIdRef.current
@@ -1983,7 +2118,6 @@ export function useAIChatController() {
   };
 
   const flushQueuedSend = () => {
-    if (generatingRef.current) return;
     // Hold the queue while the user is editing a queued message.
     if (editingQueueIdRef.current) return;
     const viewingId = route.name === 'chat' ? (route.chatId || persistChatIdRef.current) : null;
@@ -1991,18 +2125,47 @@ export function useAIChatController() {
     if (viewingId) {
       pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === viewingId);
     }
+    // Ghost prune: drop anything already sitting in the thread as a user message.
+    const sentTexts = new Set(
+      messagesRef.current
+        .filter(m => m.role === 'user')
+        .map(m => String(m.content || '').trim())
+        .filter(Boolean),
+    );
+    if (sentTexts.size) {
+      pendingQueueRef.current = pendingQueueRef.current.filter(
+        q => !sentTexts.has(String(q.text || '').trim()),
+      );
+    }
+    setQueueLen(pendingQueueRef.current.length);
+    setQueueTick(t => t + 1);
+    if (viewingId && (isChatInflight(viewingId) || (
+      generatingRef.current && activeGenChatIdRef.current === viewingId
+    ))) {
+      return;
+    }
+    if (generatingRef.current && !viewingId) return;
+    // Cue 1 = next to send (oldest). Hold while user is editing any cue in the composer.
     const next = pendingQueueRef.current.shift();
     setQueueLen(pendingQueueRef.current.length);
     setQueueTick(t => t + 1);
     if (next?.text) {
+      lastSendGuardRef.current = { text: next.text, at: Date.now() };
+      generatingRef.current = true;
       void sendMessageRef.current(next.text);
     }
   };
 
-  const endTurnAndFlush = (mySeq: number) => {
+  const endTurnAndFlush = (mySeq: number, chatId?: string) => {
     window.setTimeout(() => {
-      if (mySeq !== genSeqRef.current) return;
-      if (generatingRef.current) return;
+      const id = chatId || activeGenChatIdRef.current || persistChatIdRef.current || undefined;
+      if (id && genSeqByChatRef.current[id] != null) {
+        if (mySeq !== genSeqByChatRef.current[id]) return;
+      } else if (mySeq !== genSeqRef.current) {
+        return;
+      }
+      if (id && isChatInflight(id)) return;
+      if (generatingRef.current && activeGenChatIdRef.current === id) return;
       flushQueuedSend();
     }, 0);
   };
@@ -2097,11 +2260,13 @@ export function useAIChatController() {
       const detail = (ev as CustomEvent<{ diskPath?: string; name?: string }>).detail || {};
       const diskPath = String(detail.diskPath || '').trim();
       if (!diskPath) return;
+      const bindEpoch = studioEpochRef.current;
+      const bindChatAtStart = routeChatIdRef.current || persistChatIdRef.current || null;
       // Set disk root immediately so the next ask does not hit "No workspace yet"
       // while file hydration is still in flight.
       setChatStudioDiskRoot(diskPath);
       chatStudioDiskRootRef.current = diskPath;
-      const chatId = routeChatIdRef.current || persistChatIdRef.current;
+      const chatId = bindChatAtStart;
       if (chatId) {
         studioBoundChatIdRef.current = chatId;
         persistStudioSnapshot(chatId, {
@@ -2112,33 +2277,38 @@ export function useAIChatController() {
         setChatCodePill(chatId, true);
         setCodePillSticky(true);
       } else {
-        try {
-          sessionStorage.setItem('NOVA:pending-studio-bind', JSON.stringify({
-            files: {},
-            projectId: null,
-            name: detail.name || studioPathBasename(diskPath),
-            diskRoot: diskPath,
-            previewUrl: null,
-          }));
-        } catch { /* ignore */ }
+        writePendingStudioBind({
+          files: {},
+          projectId: null,
+          name: detail.name || studioPathBasename(diskPath),
+          diskRoot: diskPath,
+        });
       }
       void (async () => {
         try {
           const files = await loadPreviewFilesFromDisk(diskPath);
+          if (studioEpochRef.current !== bindEpoch) return;
+          const now = routeChatIdRef.current || persistChatIdRef.current || null;
+          if (bindChatAtStart && now !== bindChatAtStart) return;
+          if (!bindChatAtStart && now) return;
           if (!Object.keys(files).length) return;
           setChatStudioFiles(files);
           chatStudioFilesRef.current = files;
-          const id = routeChatIdRef.current || persistChatIdRef.current;
-          if (id) {
-            persistStudioSnapshot(id, {
+          if (chatId) {
+            persistStudioSnapshot(chatId, {
               files,
               name: detail.name || studioPathBasename(diskPath),
               diskRoot: diskPath,
             });
+          } else {
+            writePendingStudioBind({
+              files,
+              projectId: null,
+              name: detail.name || studioPathBasename(diskPath),
+              diskRoot: diskPath,
+            });
           }
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
       })();
     };
     window.addEventListener('NOVA:bind-studio-disk', onBind);
@@ -2217,22 +2387,26 @@ export function useAIChatController() {
 
     // Attach-only when main already owns a session for this cwd.
     try {
-      const { attachPreviewIfExists, isPlaceholderPreviewUrl } = await import('@/lib/projectPreview');
+      const { attachPreviewIfExists, isPlaceholderPreviewUrl, verifyLivePreviewUrl } = await import('@/lib/projectPreview');
       const attached = await attachPreviewIfExists({
         cwd: root,
         preferUrl: createJob?.previewUrl,
       });
       if (attached.ok && !isPlaceholderPreviewUrl(attached.url)) {
-        setPreviewUrl(attached.url);
-        previewUrlRef.current = attached.url;
-        try {
-          await window.novaDesktop?.previewOpenWindow?.({
-            url: attached.url,
-            title: studioPathBasename(root) || createJob?.name || 'Preview',
-            projectId: previewWindowIdForChat(chatId),
-          });
-        } catch { /* best-effort */ }
-        return attached.url;
+        const alive = await verifyLivePreviewUrl(attached.url);
+        if (alive) {
+          setPreviewUrl(attached.url);
+          previewUrlRef.current = attached.url;
+          try {
+            await window.novaDesktop?.previewOpenWindow?.({
+              url: attached.url,
+              title: studioPathBasename(root) || createJob?.name || 'Preview',
+              projectId: previewWindowIdForChat(chatId),
+            });
+          } catch { /* best-effort */ }
+          return attached.url;
+        }
+        // Dead session — fall through and start a fresh preview.
       }
     } catch { /* fall through to ensureBoundFolderPreview */ }
 
@@ -2614,9 +2788,21 @@ export function useAIChatController() {
     const wantImport = opts?.mode === 'import';
     // Prefer path bind: keep context light until Agent/tools need a file.
     const useInPlace = !wantImport && Boolean(window.novaDesktop?.workspaceOpenRoot);
+    const bindEpoch = studioEpochRef.current;
+    const bindChatAtStart = routeChatIdRef.current || persistChatIdRef.current || null;
+    const stillOnBindCanvas = () => {
+      if (studioEpochRef.current !== bindEpoch) return false;
+      const now = routeChatIdRef.current || persistChatIdRef.current || null;
+      // Blank→blank is ok only if epoch matches; blank→named chat means we left the starter.
+      if (bindChatAtStart && now !== bindChatAtStart) return false;
+      if (!bindChatAtStart && now) return false;
+      return true;
+    };
     setAttachUploading(useInPlace ? 'Binding folder path…' : 'Opening folder…');
     setAttachBusy(true);
-    setDropHint(null);
+    // Keep grant-access / pick-folder hints visible under the composer while Explorer is open
+    // (attachUploading hides them temporarily; restore on cancel).
+    const hintBeforeOpen = dropHintRef.current;
     const onProg = (ev: Event) => {
       const d = (ev as CustomEvent).detail as { label?: string; done?: number; total?: number } | undefined;
       if (d?.label) setAttachUploading(d.label);
@@ -2634,7 +2820,13 @@ export function useAIChatController() {
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
         });
-      if (res?.canceled) return { ok: false, error: 'canceled' };
+      if (res?.canceled) {
+        if (stillOnBindCanvas() && hintBeforeOpen) setDropHint(hintBeforeOpen);
+        return { ok: false, error: 'canceled' };
+      }
+      if (!stillOnBindCanvas()) {
+        return { ok: false, error: 'stale bind' };
+      }
       if (!res?.ok) {
         if ((res as { error?: string })?.error === 'file' && (res as { path?: string })?.path) {
           const filePath = String((res as { path: string }).path);
@@ -2658,6 +2850,9 @@ export function useAIChatController() {
         const err = res?.error || 'Could not open that folder.';
         setDropHint(err);
         return { ok: false, error: err };
+      }
+      if (!stillOnBindCanvas()) {
+        return { ok: false, error: 'stale bind' };
       }
       const catalogOnly = Boolean((res as { catalogOnly?: boolean }).catalogOnly) || useInPlace;
       const folderName = res.name || 'folder';
@@ -2688,6 +2883,9 @@ export function useAIChatController() {
         setDropHint('Could not bind that folder path.');
         return { ok: false, error: 'no root' };
       }
+      if (!stillOnBindCanvas()) {
+        return { ok: false, error: 'stale bind' };
+      }
       setChatStudioFiles(catalogOnly ? {} : files);
       chatStudioFilesRef.current = catalogOnly ? {} : files;
       setChatStudioProjectId(pid);
@@ -2700,6 +2898,9 @@ export function useAIChatController() {
       if (catalogOnly && res.root) {
         try {
           const hydrated = await loadPreviewFilesFromDisk(res.root);
+          if (!stillOnBindCanvas()) {
+            return { ok: false, error: 'stale bind' };
+          }
           if (Object.keys(hydrated).length) {
             setChatStudioFiles(hydrated);
             chatStudioFilesRef.current = hydrated;
@@ -2708,6 +2909,9 @@ export function useAIChatController() {
         } catch {
           /* keep empty map; Preview can still use diskRoot */
         }
+      }
+      if (!stillOnBindCanvas()) {
+        return { ok: false, error: 'stale bind' };
       }
       // New folder bind must not reuse another chat's localhost URL.
       setPreviewUrl(null);
@@ -2718,7 +2922,18 @@ export function useAIChatController() {
       setPendingAttaches([]);
       setPathBindOpen(false);
       setPathBindDraft('');
-      setDropHint(null);
+      if (pillModeRef.current === 'debug') {
+        const readyCount = Object.keys(chatStudioFilesRef.current || {})
+          .filter((p) => !/(^|\/)(node_modules|dist|build|release|\.git)(\/|$)/i.test(p.replace(/\\/g, '/')))
+          .length;
+        setDropHint(`${folderName} · ${readyCount} files · Press Enter to scan.`);
+        if (!String(inputRef.current || '').trim()) {
+          setInput(DEBUG_CLINIC_SEED);
+          inputRef.current = DEBUG_CLINIC_SEED;
+        }
+      } else {
+        setDropHint(null);
+      }
       if (!catalogOnly || Object.keys(chatStudioFilesRef.current).length) {
         try {
           localStorage.setItem(`NOVA:chat-studio-files:${pid}`, JSON.stringify({
@@ -2743,16 +2958,13 @@ export function useAIChatController() {
           });
         }
       } else {
-        // New chat not id'd yet — keep disk root in memory until first send persists it.
-        try {
-          sessionStorage.setItem('NOVA:pending-studio-bind', JSON.stringify({
-            files: chatStudioFilesRef.current,
-            projectId: pid,
-            name: folderName,
-            diskRoot: res.root || null,
-            previewUrl: null,
-          }));
-        } catch { /* ignore */ }
+        // New chat not id'd yet — keep disk root until first send persists it.
+        writePendingStudioBind({
+          files: chatStudioFilesRef.current,
+          projectId: pid,
+          name: folderName,
+          diskRoot: res.root || null,
+        });
       }
       ignoreEnterUntilRef.current = Date.now() + 600;
       requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
@@ -2772,10 +2984,11 @@ export function useAIChatController() {
   };
 
   const enterPathInChat = async () => {
-    setPathBindOpen(true);
-    setPathBindDraft(chatStudioDiskRootRef.current || '');
-    setDropHint(null);
-    requestAnimationFrame(() => pathBindInputRef.current?.focus());
+    // Native Explorer only — typed path strip is gone.
+    setPathBindOpen(false);
+    setPathBindDraft('');
+    setDropHint('Pick the project folder to bind.');
+    await openFolderInChat(undefined, { mode: 'path' });
   };
 
   const bindTypedPath = async () => {
@@ -2811,6 +3024,7 @@ export function useAIChatController() {
 
   const browseBindFolder = async () => {
     setPathBindOpen(false);
+    setPathBindDraft('');
     await openFolderInChat(undefined, { mode: 'path' });
   };
 
@@ -2880,17 +3094,124 @@ export function useAIChatController() {
       return;
     }
     if (action === 'bind-path' || action === 'folder' || action === 'enter-path') {
-      setPathBindOpen(true);
-      setPathBindDraft(chatStudioDiskRootRef.current || '');
-      setDropHint(null);
-      requestAnimationFrame(() => pathBindInputRef.current?.focus());
+      // Native Explorer immediately — no typed-path strip.
+      setPathBindOpen(false);
+      setPathBindDraft('');
+      setDropHint('Pick the project folder to bind.');
+      void openFolderInChat(undefined, { mode: 'path' });
       return;
     }
     if (action === 'import-folder') {
       void openFolderInChat(undefined, { mode: 'import' });
       return;
     }
-    if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
+    if (action === 'plan') {
+      stopComposerDictation();
+      setComposerMode('plan');
+      setDropHint('Planning · deeper outline · no files until you say build.');
+      if (!String(inputRef.current || '').trim()) {
+        setInput(PLAN_MODE_SEED);
+        inputRef.current = PLAN_MODE_SEED;
+      }
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        try {
+          const n = el.value.length;
+          el.setSelectionRange(n, n);
+        } catch { /* ignore */ }
+      });
+      return;
+    }
+    if (action === 'debug') {
+      stopComposerDictation();
+      setComposerMode('debug');
+      const chatId = route.name === 'chat' ? route.chatId : undefined;
+      const bound = hasActiveWorkspace({
+        files: chatStudioFilesRef.current || chatStudioFiles,
+        projectId: chatStudioProjectIdRef.current || chatStudioProjectId,
+        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
+        chatId,
+      });
+      if (!bound) {
+        setPathBindOpen(false);
+        setPathBindDraft('');
+        setDropHint('Grant access to the project folder you want audited.');
+        void openFolderInChat(undefined, { mode: 'path' }).then((res) => {
+          if (!res?.ok) return;
+          if (!String(inputRef.current || '').trim()) {
+            setInput(DEBUG_CLINIC_SEED);
+            inputRef.current = DEBUG_CLINIC_SEED;
+          }
+          requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+        });
+      } else {
+        const name = workspaceBadgeLabel
+          || studioPathBasename(chatStudioDiskRootRef.current || chatStudioDiskRoot || '')
+          || 'Project';
+        const fileCount = Object.keys(chatStudioFilesRef.current || chatStudioFiles || {})
+          .filter((p) => !/(^|\/)(node_modules|dist|build|release|\.git)(\/|$)/i.test(p.replace(/\\/g, '/')))
+          .length;
+        setDropHint(`${name} · ${fileCount} files · Press Enter to scan.`);
+        if (!String(inputRef.current || '').trim()) {
+          setInput(DEBUG_CLINIC_SEED);
+          inputRef.current = DEBUG_CLINIC_SEED;
+        }
+        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+      }
+      return;
+    }
+    if (action === 'agent' || action === 'multitask') {
+      stopComposerDictation();
+      setComposerMode(action);
+      const chatId = route.name === 'chat' ? route.chatId : undefined;
+      const bound = hasActiveWorkspace({
+        files: chatStudioFilesRef.current || chatStudioFiles,
+        projectId: chatStudioProjectIdRef.current || chatStudioProjectId,
+        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
+        chatId,
+      });
+      const seed = action === 'multitask' ? MULTI_AGENT_MODE_SEED : AGENT_MODE_SEED;
+      if (!bound) {
+        setPathBindOpen(false);
+        setPathBindDraft('');
+        setDropHint(
+          action === 'multitask'
+            ? 'Grant access to the project folder for Multi-agent.'
+            : 'Grant access to the project folder for Agent.',
+        );
+        void openFolderInChat(undefined, { mode: 'path' }).then((res) => {
+          if (!res?.ok) return;
+          if (!String(inputRef.current || '').trim()) {
+            setInput(seed);
+            inputRef.current = seed;
+          }
+          setDropHint(
+            action === 'multitask'
+              ? 'Multi-agent · Scout → Builder → Critic · Press Enter.'
+              : 'Agent · one task at a time · Press Enter.',
+          );
+          requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+        });
+      } else {
+        const name = workspaceBadgeLabel
+          || studioPathBasename(chatStudioDiskRootRef.current || chatStudioDiskRoot || '')
+          || 'Project';
+        setDropHint(
+          action === 'multitask'
+            ? `${name} · Multi-agent · Scout → Builder → Critic`
+            : `${name} · Agent · one task at a time`,
+        );
+        if (!String(inputRef.current || '').trim()) {
+          setInput(seed);
+          inputRef.current = seed;
+        }
+        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+      }
+      return;
+    }
+    if (action === 'ask') {
       setComposerMode(action);
       requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
     }
@@ -2925,38 +3246,59 @@ export function useAIChatController() {
     const typed = isTap ? '' : rawContent.trim();
 
     const finishVoice = async (phase: VoiceSessionPhase, speak?: string) => {
+      if (stopRequestedRef.current) {
+        stopSpeaking();
+        setVoicePhase('idle');
+        return;
+      }
       if (speak) {
         await speakText(speak.replace(/\*\*/g, '').replace(/[#*`]/g, ''), {
-          onPlaybackStart: () => setVoicePhase('speaking'),
+          onPlaybackStart: () => {
+            if (!stopRequestedRef.current) setVoicePhase('speaking');
+          },
         });
+      }
+      if (stopRequestedRef.current) {
+        stopSpeaking();
+        setVoicePhase('idle');
+        return;
       }
       setVoicePhase(phase);
     };
 
-    if (typed && looksLikeHarmfulContentAsk(typed)) {
+    if (!typed) {
+      setDictationHint('Type your message, or tap the mic to fill the box — then press Enter.');
+      setVoicePhase('idle');
+      return;
+    }
+
+    if (looksLikeHarmfulContentAsk(typed)) {
       await finishVoice('idle', harmfulContentBlockedReply(true));
       return;
     }
 
-    if (typed && looksLikeArkSelfHarmAsk(typed)) {
+    if (looksLikeArkSelfHarmAsk(typed)) {
       await finishVoice('idle', arkSelfHarmBlockedReply());
       return;
     }
 
-    if (typed && looksLikeVoiceBuildOrEditAsk(typed)) {
+    if (looksLikeVoiceBuildOrEditAsk(typed)) {
       // Voice is Chat with a mic — same classify + create/edit path.
       setVoicePhase('idle');
       tryStartTurn(typed);
       return;
     }
 
-    if (!voiceSupported()) {
-      await finishVoice('idle', 'Voice needs speech recognition and text-to-speech in this browser.');
+    // Typed / mic-filled turns only need TTS (STT is mic → box only).
+    if (typeof window === 'undefined'
+      || (!('speechSynthesis' in window) && !window.novaDesktop?.voiceNeuralSpeak)) {
+      await finishVoice('idle', 'Voice needs text-to-speech in this build.');
       return;
     }
 
     const liveCap = await probeLiveCapacity();
-    if (!liveCap.liveChat) {
+    // Capacity can lag; trust stored keys directly so Voice doesn't false-block.
+    if (!liveCap.liveChat && !hasAnyCloudChatKey()) {
       await finishVoice(
         'idle',
         'To use Voice, connect a free API key in Models, or install a local brain in Local AI.',
@@ -2971,41 +3313,36 @@ export function useAIChatController() {
     stopRequestedRef.current = false;
 
     try {
-      let voiceMsg = typed;
-      if (!voiceMsg) {
-        setVoicePhase('listening');
-        const heard = await listenOnce({ timeoutMs: 14_000 });
-        if (!heard.ok || !heard.text.trim()) {
-          await finishVoice('idle', heard.error
-            ? 'I could not hear you. Check your mic in Settings, then try again.'
-            : 'I did not catch that. Tap send and speak again.');
-          return;
-        }
-        voiceMsg = heard.text.trim();
-      }
-
-      if (looksLikeHarmfulContentAsk(voiceMsg)) {
-        await finishVoice('idle', harmfulContentBlockedReply(true));
-        return;
-      }
-
-      if (looksLikeArkSelfHarmAsk(voiceMsg)) {
-        await finishVoice('idle', arkSelfHarmBlockedReply());
-        return;
-      }
-
-      if (looksLikeVoiceBuildOrEditAsk(voiceMsg)) {
-        setVoicePhase('idle');
-        await sendMessageRef.current(voiceMsg);
-        return;
-      }
+      const voiceMsg = typed;
 
       setVoicePhase('thinking');
+      // Hold line while we think / look up — then answer aloud.
+      if (!stopRequestedRef.current) {
+        await speakText(pickVoiceHoldLine(voiceMsg), {
+          onPlaybackStart: () => {
+            if (!stopRequestedRef.current) setVoicePhase('speaking');
+          },
+        });
+        if (stopRequestedRef.current) {
+          setVoicePhase('idle');
+          return;
+        }
+        setVoicePhase('thinking');
+      }
+      if (stopRequestedRef.current) {
+        setVoicePhase('idle');
+        return;
+      }
       const routed = await voiceChatRoute(voiceMsg, {
         id: pinnedModel.id,
         name: pinnedModel.name,
         source: pinnedModel.source,
       });
+      if (stopRequestedRef.current) {
+        stopSpeaking();
+        setVoicePhase('idle');
+        return;
+      }
       const spoken = scrubVoiceConstraintEcho(
         redactArkSelfLeak(String(routed.reply || '').trim()),
       ) || 'I did not have a reply for that.';
@@ -3032,9 +3369,7 @@ export function useAIChatController() {
 
   const handleSend = () => {
     if (dictating || dictationRef.current) {
-      dictationRef.current?.stop();
-      dictationRef.current = null;
-      setDictating(false);
+      stopComposerDictation();
     }
     if (mode === 'voice') {
       if (!user) {
@@ -3056,8 +3391,86 @@ export function useAIChatController() {
     const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0
       || Boolean(chatStudioDiskRootRef.current)
       || Boolean(chatStudioProjectIdRef.current);
+    const chatIdForBind = route.name === 'chat' ? route.chatId : undefined;
+    const workspaceBoundForSend = hasActiveWorkspace({
+      files: chatStudioFilesRef.current,
+      projectId: chatStudioProjectIdRef.current,
+      diskRoot: chatStudioDiskRootRef.current,
+      chatId: chatIdForBind,
+    });
+
+    if (pillModeRef.current === 'debug' && !workspaceBoundForSend && !content && !images.length && !attaches.length) {
+      setPathBindOpen(false);
+      setDropHint('Grant access to the project folder you want audited.');
+      void openFolderInChat(undefined, { mode: 'path' });
+      return;
+    }
+
     if (!content && !images.length && !attaches.length && !hasStudio) return;
-    if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
+    if (pillModeRef.current === 'debug' && !content && !images.length && !attaches.length && workspaceBoundForSend) {
+      content = DEBUG_CLINIC_SEED;
+    }
+    if (pillModeRef.current === 'plan' && !content && !images.length && !attaches.length) {
+      content = PLAN_MODE_SEED;
+    }
+    if (pillModeRef.current === 'agent' && !content && !images.length && !attaches.length) {
+      content = AGENT_MODE_SEED;
+    }
+    if (pillModeRef.current === 'multitask' && !content && !images.length && !attaches.length) {
+      content = MULTI_AGENT_MODE_SEED;
+    }
+    // Soft re-arm Plan when they ask to extend an existing outline (pill was cleared).
+    if (
+      !pillModeRef.current
+      && (mode === 'general' || mode === 'code')
+      && looksLikePlanRefineAsk(content)
+      && !looksLikeImplementGo(content)
+    ) {
+      setComposerMode('plan');
+      setDropHint('Planning · deeper outline · no files until you say build.');
+    }
+    // Soft re-arm Agent / Multi-agent when work-queue chips fire after the pill was cleared.
+    if (
+      !pillModeRef.current
+      && (mode === 'general' || mode === 'code')
+      && (looksLikeWorkQueueDoNext(content) || looksLikeWorkQueueFinishAll(content) || looksLikeWorkQueueStop(content))
+    ) {
+      const chatId = route.name === 'chat' ? route.chatId : undefined;
+      const q = chatId ? loadWorkQueue(chatId) : null;
+      const nextMode = q?.mode === 'multitask' ? 'multitask' : 'agent';
+      setComposerMode(nextMode);
+      setDropHint(
+        nextMode === 'multitask'
+          ? 'Multi-agent · continuing queue'
+          : 'Agent · continuing queue',
+      );
+    }
+    // Handoff: Plan → builder. Clear pill + hint so Plan UI disappears for the build turn.
+    if (
+      pillModeRef.current === 'plan'
+      && looksLikeImplementGo(content)
+    ) {
+      setComposerMode(null);
+      setDropHint(null);
+    }
+    if (pillModeRef.current === 'debug') {
+      // Hidden routing marker — never the old "find the issue" prose (that stole GitHub).
+      if (!/<!--nova-debug-clinic-->/i.test(content)) {
+        content = `${COMPOSER_MODE_PREFIX.debug}${content}`;
+      }
+    } else if (pillModeRef.current === 'plan') {
+      if (!/<!--nova-plan-mode-->/i.test(content) && !looksLikeImplementGo(content)) {
+        content = `${COMPOSER_MODE_PREFIX.plan}${content}`;
+      }
+    } else if (pillModeRef.current === 'agent') {
+      if (!/<!--nova-agent-mode-->/i.test(content)) {
+        content = `${COMPOSER_MODE_PREFIX.agent}${content}`;
+      }
+    } else if (pillModeRef.current === 'multitask') {
+      if (!/<!--nova-multi-agent-->/i.test(content) && !/^\[Multi-agent\]/i.test(content.trim())) {
+        content = `${COMPOSER_MODE_PREFIX.multitask}${content}`;
+      }
+    } else if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     } else if (
       !composerMode
@@ -3107,35 +3520,58 @@ export function useAIChatController() {
     content = parts.join('\n\n');
     setPendingImages([]);
     setPendingAttaches([]);
-    setComposerMode(null);
-    // Queue only when this same thread is already answering. New Chat while another
-    // thread is busy still starts a new send once the engine is free (sendMessage gates).
+    // Debug + Plan + Agent + Multi-agent stay armed after Enter (work-queue modes).
+    // Plan only drops on “lets build this” handoff (above) or when the user dismisses the pill.
+    if (
+      pillModeRef.current !== 'debug'
+      && pillModeRef.current !== 'plan'
+      && pillModeRef.current !== 'agent'
+      && pillModeRef.current !== 'multitask'
+    ) {
+      setComposerMode(null);
+    }
+    // Queue only when THIS thread is already answering. Other chats / blank New Chat
+    // can still start a send — per-chat seq keeps the background create alive.
     const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
     const genId = activeGenChatIdRef.current;
-    // Blank starters have no route chatId yet — still treat in-flight gen as busy so
-    // a double Enter cannot start two creates (or queue the same create on itself).
-    const busyOnThisChat = generatingRef.current && (
-      !genId
-      || !viewingChatId
-      || viewingChatId === genId
+    const inflightHere = Boolean(
+      (viewingChatId && isChatInflight(viewingChatId))
+      || (generatingRef.current && genId && viewingChatId && viewingChatId === genId),
     );
+    const busyOnThisChat = inflightHere;
     const sameAsLast = lastSendGuardRef.current.text === content
       && (Date.now() - lastSendGuardRef.current.at) < 4000;
+    const alreadySentInThread = messagesRef.current.some(
+      m => m.role === 'user' && String(m.content || '').trim() === content.trim(),
+    );
     if (busyOnThisChat) {
       const qChat = viewingChatId || genId || persistChatIdRef.current || 'pending';
       const dupQueued = pendingQueueRef.current.some(q => q.chatId === qChat && q.text === content);
-      // Never re-queue the identical prompt that just started (double Enter / CDP click+Enter).
-      if (sameAsLast || dupQueued) {
+      // Never re-queue the identical prompt that just started (double Enter / CDP click+Enter)
+      // or a prompt already sitting in this thread (ghost queue after switch).
+      if (sameAsLast || dupQueued || alreadySentInThread) {
         setInput('');
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
         return;
       }
-      pendingQueueRef.current.push({
-        id: `q-${crypto.randomUUID().slice(0, 8)}`,
-        text: content,
-        chatId: qChat,
-      });
-      setQueueLen(pendingQueueRef.current.length);
+      // Cap at 3 — newest stays; drop the oldest waiting item.
+      const MAX_QUEUE = 3;
+      const nextQueue = [
+        ...pendingQueueRef.current.filter(q => q.chatId === qChat),
+        {
+          id: `q-${crypto.randomUUID().slice(0, 8)}`,
+          text: content,
+          chatId: qChat,
+        },
+      ];
+      const trimmed = nextQueue.length > MAX_QUEUE
+        ? nextQueue.slice(nextQueue.length - MAX_QUEUE)
+        : nextQueue;
+      pendingQueueRef.current = [
+        ...pendingQueueRef.current.filter(q => q.chatId !== qChat),
+        ...trimmed,
+      ];
+      setQueueLen(pendingQueueRef.current.filter(q => !viewingChatId || q.chatId === viewingChatId).length);
       setQueueTick(t => t + 1);
       setInput('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -3224,6 +3660,8 @@ export function useAIChatController() {
     setActiveModel,
     setPreviewUrl,
     setThreadBrain,
+    setCreateLiveModelLabel,
+    setDropHint,
     setTokenRatio,
     skipChatLoadIdsRef,
     stickToBottomRef,
@@ -3234,6 +3672,7 @@ export function useAIChatController() {
     user,
     userDetachScrollRef,
     videoDurationSec,
+    setComposerMode,
   });
 
   sendMessageRef.current = sendMessage;
@@ -3296,24 +3735,18 @@ export function useAIChatController() {
   };
 
   const onInput = (value: string) => {
+    // Keyboard wins over live speech — otherwise interim results keep wiping keystrokes.
+    if (dictationRef.current || dictating) {
+      stopComposerDictation();
+    }
     setInput(value);
     if (dictationHint) setDictationHint(null);
     if (imageSwitchDismissed && !looksLikeImageAsk(value)) setImageSwitchDismissed(false);
   };
 
-  const stopComposerDictation = useCallback(() => {
-    dictationRef.current?.stop();
-    dictationRef.current = null;
-    setDictating(false);
-  }, []);
-
   const toggleComposerDictation = useCallback(() => {
     if (dictating) {
       stopComposerDictation();
-      return;
-    }
-    if (mode === 'voice') {
-      setDictationHint('Use the Voice tab to talk. This mic fills the chat box with text.');
       return;
     }
     if (!speechRecognitionSupported()) {
@@ -3325,8 +3758,10 @@ export function useAIChatController() {
     dictationBaseRef.current = inputRef.current.trim();
     setDictationHint(null);
     setDictating(true);
+    const myGen = ++dictationGenRef.current;
     dictationRef.current = startLiveDictation({
       onInterim: (text) => {
+        if (myGen !== dictationGenRef.current) return;
         const base = dictationBaseRef.current;
         const next = base ? `${base} ${text}`.trim() : text;
         setInput(next);
@@ -3334,6 +3769,7 @@ export function useAIChatController() {
         requestAnimationFrame(() => resizeComposer());
       },
       onFinal: (text) => {
+        if (myGen !== dictationGenRef.current) return;
         const base = dictationBaseRef.current;
         const next = base ? `${base} ${text}`.trim() : text;
         setInput(next);
@@ -3345,16 +3781,19 @@ export function useAIChatController() {
         });
       },
       onError: (error) => {
+        if (myGen !== dictationGenRef.current) return;
         setDictationHint(error);
       },
       onEnd: () => {
+        if (myGen !== dictationGenRef.current) return;
         dictationRef.current = null;
         setDictating(false);
       },
     });
-  }, [dictating, generating, mode, resizeComposer, stopComposerDictation]);
+  }, [dictating, generating, resizeComposer, stopComposerDictation]);
 
   useEffect(() => () => {
+    dictationGenRef.current += 1;
     dictationRef.current?.stop();
     dictationRef.current = null;
   }, []);
@@ -3405,7 +3844,6 @@ export function useAIChatController() {
     engineReadyIds,
     failoverNote,
     flushQueuedSend,
-    freeKeyOpen,
     generating,
     generatingRef,
     githubOfferId,
@@ -3475,7 +3913,6 @@ export function useAIChatController() {
     setEditingQueueId,
     setEditingQueueText,
     setFailoverNote,
-    setFreeKeyOpen,
     setGithubPickerOpen,
     setInput,
     setModelMenuOpen,

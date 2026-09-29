@@ -2,74 +2,26 @@
 
 const { shell } = require('electron');
 
-/** Hosts NOVA intentionally opens (Connect, docs, updates, OAuth). */
-const ALLOWED_EXTERNAL_HOST_SUFFIXES = [
-  'github.com',
-  'githubusercontent.com',
-  'openai.com',
-  'platform.openai.com',
-  'huggingface.co',
-  'nvidia.com',
-  'nvcf.nvidia.com',
-  'build.nvidia.com',
-  'google.com',
-  'accounts.google.com',
-  'googleapis.com',
-  'aistudio.google.com',
-  'console.cloud.google.com',
-  'anthropic.com',
-  'console.anthropic.com',
-  'supabase.co',
-  'supabase.com',
-  'discord.com',
-  'discord.gg',
-  'slack.com',
-  'vercel.com',
-  'together.xyz',
-  'together.ai',
-  'fireworks.ai',
-  'deepseek.com',
-  'mistral.ai',
-  'cerebras.ai',
-  'cloud.cerebras.ai',
-  'sambanova.ai',
-  'perplexity.ai',
-  'x.ai',
-  'linear.app',
-  'figma.com',
-  'azure.com',
-  'zoom.us',
-  'canva.com',
-  'hubspot.com',
-  'asana.com',
-  'salesforce.com',
-  'cloud.sambanova.ai',
-  'groq.com',
-  'console.groq.com',
-  'openrouter.ai',
-  'cloudflare.com',
-  'pollinations.ai',
-  'aihorde.net',
-  'cursor.com',
-  'notion.so',
-  'notion.com',
-  'maps.google.com',
-  'goo.gl',
-  'yelp.com',
-  'tripadvisor.com',
-  'wikipedia.org',
-  'duckduckgo.com',
-];
-
-function hostAllowed(hostname) {
+/**
+ * Chat citations and Connect/docs links can point at any public https host.
+ * Block only dangerous / local targets (SSRF-style and accidental local opens).
+ */
+function isBlockedHost(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
-  if (!host) return false;
-  // Never open bare IPs (SSRF / phishing via numeric hosts).
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
-  if (host === 'localhost') return false;
-  return ALLOWED_EXTERNAL_HOST_SUFFIXES.some(
-    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-  );
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (host.endsWith('.internal') || host.endsWith('.intranet') || host.endsWith('.lan')) return true;
+  if (host === 'metadata.google.internal' || host === 'metadata' || host.startsWith('metadata.')) return true;
+  // Bare IPv4 — never open raw IPs via shell (includes cloud metadata 169.254.169.254).
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
+  // IPv6 / bracket forms
+  if (host.includes(':')) return true;
+  return false;
+}
+
+/** @deprecated kept for callers that expect the old name — now means “safe to open”. */
+function hostAllowed(hostname) {
+  return !isBlockedHost(hostname);
 }
 
 async function openExternal(url) {
@@ -92,7 +44,12 @@ async function openExternal(url) {
   if (parsed.username || parsed.password) {
     throw new Error('URLs with credentials are not allowed');
   }
-  if (!hostAllowed(parsed.hostname)) {
+  // Block weird ports that are not standard web (reduce accidental local-service opens).
+  const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+  if (port !== 443 && port !== 80) {
+    throw new Error(`Port not allowed for external open: ${port}`);
+  }
+  if (isBlockedHost(parsed.hostname)) {
     throw new Error(`Host not allowed for external open: ${parsed.hostname}`);
   }
   await shell.openExternal(parsed.toString());
@@ -102,4 +59,5 @@ async function openExternal(url) {
 module.exports = {
   openExternal,
   hostAllowed,
+  isBlockedHost,
 };

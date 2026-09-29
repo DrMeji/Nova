@@ -11,7 +11,9 @@ const IMPLEMENT_GO_NEG_RE =
   /\b(?:don'?t|do\s+not|never|not\s+yet|later|just\s+plan|keep\s+planning|don'?t\s+build|do\s+not\s+build)\b/i;
 
 export function isPlanPrefixedMessage(message: string): boolean {
-  return /^\[Plan\]\s*/i.test(String(message || '').trim());
+  const t = String(message || '');
+  if (/<!--nova-plan-mode-->/i.test(t)) return true;
+  return /^\[Plan\]\s*/i.test(t.trim());
 }
 
 export function looksLikeImplementGo(message: string): boolean {
@@ -39,6 +41,8 @@ export function looksLikeImplementGo(message: string): boolean {
 
 /** Plan turns must not write files until user explicitly says go. */
 export function shouldBlockChatFileWrites(message: string, composerMode: string | null): boolean {
+  // “Lets build this” must escape the Plan write-gate.
+  if (looksLikeImplementGo(message)) return false;
   if (composerMode === 'plan') return true;
   if (isPlanPrefixedMessage(message)) return true;
   if (/^\[Plan\]/i.test(message)) return true;
@@ -46,7 +50,13 @@ export function shouldBlockChatFileWrites(message: string, composerMode: string 
 }
 
 export function planModeSystemHint(): string {
-  return 'The user is in **Plan** mode. Output a step-by-step plan only. no @@@FILE blocks, no file writes. End with: *Say “lets build this” when you want me to create files.*';
+  return [
+    'The user is in **Plan** mode. Take your time. Produce a thorough, accurate build plan only.',
+    'No @@@FILE blocks, no file writes, no scaffolding.',
+    'Restate what they want, then numbered steps with concrete detail, then 0–3 open questions.',
+    'Prefer product decisions over tech-stack quizzes. NOVA picks sensible defaults.',
+    'End ready for “lets build this” — do not create files yet.',
+  ].join(' ');
 }
 
 /** Soft planning chat. thorough unique advice, never scaffold. */

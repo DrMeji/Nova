@@ -41,7 +41,8 @@ assert.ok(/planApproveGate:\s*false/.test(prefs), 'planApproveGate default off')
 
 const modes = fs.readFileSync(path.join(root, 'src/lib/novaStudioModes.ts'), 'utf8');
 assert.ok(/formatBuildPlanReply/.test(modes), 'plan reply missing');
-assert.ok(/no paywall/i.test(modes), 'plan must say no paywall');
+assert.ok(!/\*\*Build checklist\*\*/.test(modes), 'legacy Build checklist stub must stay removed');
+assert.ok(/ok start building/i.test(modes), 'plan must still mention ok start building');
 
 const create = fs.readFileSync(path.join(root, 'src/lib/chatTurnHandlers/create.ts'), 'utf8');
 assert.ok(/runNovaCreateBuildLoop/.test(create), 'create must call Nova build loop');

@@ -164,19 +164,35 @@ export function ProjectsView() {
 
   const deleteListItem = async (item: ListItem) => {
     markProjectDeleted(item.id, item.diskPath, item.name);
-    if (item.diskPath && window.novaDesktop?.workspaceDeleteFolder) {
-      await window.novaDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
-    } else if (item.id.startsWith('nova-folder:') || item.id.startsWith('ark-folder:')) {
-      const disk = item.id.replace(/^(?:nova|ark)-folder:/, '');
-      await window.novaDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
-      markProjectDeleted(item.id, disk, item.name);
+    let diskErr: string | null = null;
+    const targetPath =
+      item.diskPath
+      || ((item.id.startsWith('nova-folder:') || item.id.startsWith('ark-folder:'))
+        ? item.id.replace(/^(?:nova|ark)-folder:/, '')
+        : '');
+    if (targetPath && window.novaDesktop?.workspaceDeleteFolder) {
+      const del = await window.novaDesktop.workspaceDeleteFolder({ targetPath });
+      if (del && del.ok === false) {
+        diskErr = String(del.error || 'Could not delete folder on disk');
+      }
     }
     if (item.source === 'remote') {
       try { await deleteProject(item.id); } catch { /* offline / already gone */ }
       setRemote(prev => prev.filter(p => p.id !== item.id));
     }
     removeRecent(item.id);
-    setNovaFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
+    setNovaFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath && f.path !== targetPath));
+    // Re-scan so a failed disk delete cannot leave a ghost that looks "gone" until refresh.
+    try {
+      const next = await listNovaProjectFolders();
+      setNovaFolders(next.filter(f => !isProjectDeleted(f.id, f.path, f.name)));
+    } catch {
+      /* keep local filter */
+    }
+    if (diskErr) {
+      setNotice(`Removed from list, but folder delete failed: ${diskErr}`);
+      window.setTimeout(() => setNotice(null), 6000);
+    }
   };
 
   const handleCreate = async () => {
@@ -444,15 +460,11 @@ export function ProjectsView() {
                       toggleSelect(item.id);
                     }
                   }}
-                  className={`w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-2 py-3 rounded-xl transition-colors group cursor-pointer ${
-                    selected
-                      ? 'bg-sky-500/15 ring-1 ring-sky-500/30'
-                      : 'hover:bg-surface-hover/70'
-                  }`}
+                  className="w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-2 py-3 rounded-xl transition-colors group cursor-pointer hover:bg-surface-hover/70"
                 >
                   <span className="flex items-center gap-3 min-w-0">
                     <span
-                      className={`w-4 h-4 rounded-full border shrink-0 transition-colors ${
+                      className={`w-4 h-4 rounded-full border shrink-0 transition-colors shadow-none ${
                         selected
                           ? 'border-sky-400 bg-sky-400'
                           : 'border-content-tertiary/50 bg-transparent group-hover:border-content-tertiary'

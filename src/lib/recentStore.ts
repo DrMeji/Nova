@@ -122,7 +122,21 @@ export function renameRecentChatTitle(chatId: string, title: string): RecentChat
 }
 
 export function removeRecentProject(id: string, diskPath?: string | null, name?: string | null): RecentProject[] {
-  markProjectDeleted(id, diskPath, name);
+  // Always tombstone path/name from the stored row so a re-bind with a new proj-* id
+  // cannot resurrect the same folder after delete.
+  let existing: RecentProject | undefined;
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    const list = raw ? (JSON.parse(raw) as RecentProject[]) : [];
+    existing = Array.isArray(list) ? list.find((p) => p.id === id) : undefined;
+  } catch {
+    existing = undefined;
+  }
+  markProjectDeleted(
+    id,
+    diskPath || existing?.diskPath || null,
+    name || existing?.name || null,
+  );
   const list = loadRecentProjects().filter(p => p.id !== id);
   saveRecentProjects(list);
   try {
@@ -191,6 +205,8 @@ export function isProjectDeleted(id?: string | null, diskPath?: string | null, n
 export function ensureRecentProject(id: string, name?: string, diskPath?: string): RecentProject[] {
   if (!id || id.startsWith('demo-')) return loadRecentProjects();
   if (isProjectDeleted(id, diskPath, name)) return loadRecentProjects();
+  // Also block path-only resurrection when id is new but folder was deleted before.
+  if (diskPath && isProjectDeleted(null, diskPath, name || null)) return loadRecentProjects();
   const list = loadRecentProjects();
   const label = (name || '').trim() || 'Code project';
   const existing = list.find(p => p.id === id);
@@ -429,6 +445,13 @@ export function deleteRecentChatPermanently(chatId: string) {
     /* ignore */
   }
 
+  // Drop studio snapshot for this thread so a resurrected id cannot rehydrate a folder.
+  try {
+    localStorage.removeItem(`NOVA:chat-studio-files:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-studio:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-code-pill:${chatId}`);
+  } catch { /* ignore */ }
+
   const nextChats = loadRecentChats().filter(c => c.id !== chatId);
   saveRecentChats(nextChats);
 
@@ -609,7 +632,13 @@ export function titleFromPrompt(prompt: string): string {
     .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^Agent mode\.[^\n]*\n+/i, '')
     .replace(/^Plan this out step by step[^\n]*\n+/i, '')
-    .replace(/^Debug this\.[^\n]*\n+/i, '')
+    .replace(/^Debug this\.[^\n]*/i, '')
+    .replace(/<!--nova-debug-clinic-->\s*/gi, '')
+    .replace(/<!--nova-plan-mode-->\s*/gi, '')
+    .replace(/<!--nova-agent-mode-->\s*/gi, '')
+    .replace(/<!--nova-multi-agent-->\s*/gi, '')
+    .replace(/^\[Debug\]\s*/i, '')
+    .replace(/^\[Agent\]\s*/i, '')
     .replace(/^\[Multi-agent\]\s*/i, '')
     .trim()
     .replace(/\s+/g, ' ');

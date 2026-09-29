@@ -230,11 +230,25 @@ export async function openVoiceInputStream(): Promise<MediaStream | null> {
   const prefs = getLocalPrefs();
   if (prefs.voiceInputAuto) await syncAutoVoiceDevices();
   const deviceId = getVoiceInputDeviceId();
-  const audio: boolean | MediaTrackConstraints = deviceId
-    ? { deviceId: { exact: deviceId } }
-    : true;
+  const base: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio });
+    if (deviceId) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { ...base, deviceId: { ideal: deviceId } },
+        });
+      } catch {
+        /* fall through — exact can fail after device re-plug */
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { ...base, deviceId: { exact: deviceId } },
+        });
+      }
+    }
+    return await navigator.mediaDevices.getUserMedia({ audio: base });
   } catch {
     try {
       return await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -242,6 +256,71 @@ export async function openVoiceInputStream(): Promise<MediaStream | null> {
       return null;
     }
   }
+}
+
+export type MicLevelHandle = {
+  stop: () => void;
+};
+
+/**
+ * Live mic level (0–1) via AnalyserNode — used by Settings → Test microphone meter.
+ * Keeps the selected device stream open while monitoring.
+ */
+export async function startMicrophoneLevelMonitor(
+  onLevel: (level: number) => void,
+): Promise<{ ok: true; handle: MicLevelHandle } | { ok: false; error: string }> {
+  const stream = await openVoiceInputStream();
+  if (!stream) {
+    return { ok: false, error: 'Could not open the microphone. Check permissions and device.' };
+  }
+  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) {
+    stream.getTracks().forEach(t => t.stop());
+    return { ok: false, error: 'Web Audio not available.' };
+  }
+  const ctx = new Ctx();
+  try {
+    if (ctx.state === 'suspended') await ctx.resume();
+  } catch { /* ignore */ }
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.75;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.fftSize);
+  let raf = 0;
+  let stopped = false;
+
+  const tick = () => {
+    if (stopped) return;
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    // Sensible speech range → 0–1 meter fill.
+    const level = Math.min(1, Math.pow(rms * 3.2, 0.85));
+    onLevel(level);
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+
+  return {
+    ok: true,
+    handle: {
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        cancelAnimationFrame(raf);
+        try { source.disconnect(); } catch { /* ignore */ }
+        try { void ctx.close(); } catch { /* ignore */ }
+        stream.getTracks().forEach(t => t.stop());
+        onLevel(0);
+      },
+    },
+  };
 }
 
 type SinkCapable = AudioContext & { setSinkId?: (id: string) => Promise<void> };
@@ -275,7 +354,7 @@ export async function playOutputTestTone(): Promise<{ ok: boolean; error?: strin
   }
 }
 
-/** Quick mic level check — returns true if input stream opens. */
+/** Quick mic open check (legacy) — prefer startMicrophoneLevelMonitor for UI. */
 export async function testMicrophoneInput(): Promise<{ ok: boolean; error?: string }> {
   const stream = await openVoiceInputStream();
   if (!stream) return { ok: false, error: 'Could not open the microphone. Check permissions and device.' };

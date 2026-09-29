@@ -27,8 +27,22 @@ import {
   updateCreateJob,
 } from '@/lib/createJobStore';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { clearChatStudio, clearLastDiskTarget } from '@/lib/chatStudioStore';
+import { clearChatStudio, clearLastDiskTarget, setLastPendingGreenfield } from '@/lib/chatStudioStore';
 import type { CreateSuccess } from '@/lib/productContract';
+import {
+  isCreateV2Active,
+  CREATE_V2_SOFT_BIND_MS,
+  CREATE_V2_AUTO_OPEN_CODE,
+  CREATE_V2_STREAM_PAINT_FILES,
+  CREATE_V2_MAX_CRAFT_ATTEMPTS,
+  CREATE_V2_FIRST_TOKEN_MS,
+  createV2AttemptWallMs,
+  createV2PathWallMs,
+  createV2IdleStallMs,
+  createV2StallRetryPath,
+  isCreateV2ScaffoldPath,
+  createV2StatusCraft,
+} from '@/lib/createV2';
 import {
   resetBuildDiagnostics,
   pushBuildDiag,
@@ -36,6 +50,8 @@ import {
   noteBuildGateResult,
   noteBuildFail,
   getBuildDiagnostics,
+  markBuildDiagnosticsEnded,
+  tickBuildHeartbeat,
 } from '@/lib/buildDiagnostics';
 
 export { pendingCreateBootstrap };
@@ -73,16 +89,16 @@ function softBindCreateStudio(
     force?: boolean;
   },
 ): void {
-  // Throttle React file-tree + editor paints during scaffold/polish streams.
-  // Early scaffolds have ≤4 files — never force every write (that freezes the desktop).
+  const v2 = isCreateV2Active();
   const key = String(host.chatId || opts.projectId || 'create');
   const now = Date.now();
   const last = softBindLastAt.get(key) || 0;
   const count = softBindCount.get(key) || 0;
-  // Hard cap: at most ~1 paint / 900ms; after first bind require 1.6s unless force.
-  if (!opts.force && now - last < 900) return;
-  if (!opts.force && count >= 1 && now - last < 1600) return;
-  if (!opts.force && count > 24) return;
+  const minGap = v2 ? CREATE_V2_SOFT_BIND_MS : 900;
+  const secondGap = v2 ? CREATE_V2_SOFT_BIND_MS : 1600;
+  if (!opts.force && now - last < minGap) return;
+  if (!opts.force && count >= 1 && now - last < secondGap) return;
+  if (!opts.force && count > (v2 ? 8 : 24)) return;
   softBindLastAt.set(key, now);
   softBindCount.set(key, count + 1);
   try {
@@ -90,6 +106,7 @@ function softBindCreateStudio(
       kind: 'soft-bind',
       detail: `Studio paint #${count + 1} (${Object.keys(opts.files).length} files)`,
     });
+    tickBuildHeartbeat(`Studio · ${Object.keys(opts.files).length} files`);
   } catch { /* ignore */ }
   try {
     host.commitStudio({
@@ -124,12 +141,10 @@ function softBindCreateStudio(
 export type { CreateSuccess };
 
 /**
- * Sequential multi-model create (plan→craft→verify) — one GGUF at a time.
- * Always allowed when a coder is ready; does NOT require dual-load 32GB RAM.
- * Legacy `multiModelCreate` pref still gates the older parallel-style path only.
+ * Create always allowed when a coder is ready (no dual-VRAM gate).
+ * Multi-hop ensemble is opt-in via `multiModelCreate` — default is single-coder.
  */
 export async function assertCreateMultiModelOk(): Promise<{ ok: boolean; reason?: string }> {
-  // Sequential ensemble is the default path — hardware dual-load gate is separate.
   return { ok: true };
 }
 
@@ -182,6 +197,8 @@ export type CreateTurnHost = {
     slug?: string;
     kind?: string;
     summary?: string;
+    problemLine?: string;
+    planLog?: string[];
   } | null;
   previewFromText: (text: string) => string | undefined;
   /** Prefer sticky/preferred coder for rich create UI polish (mirrors edit.ts). */
@@ -267,6 +284,7 @@ export async function resolveCreateUiPolishCoder(host: {
   const { getActiveBrainId, isWeakCoderId } = await import('@/lib/brainRoles');
   const { getEngineStatus } = await import('@/lib/novaEngine');
   const { pickReadyCreatePolishCoder, isCoderEngineId } = await import('@/lib/enginePick');
+  const { isVisionEngineId } = await import('@/lib/createRuntime');
   const { getLocalPrefs } = await import('@/lib/localPrefs');
 
   const profile = await getBrainProfile();
@@ -283,7 +301,11 @@ export async function resolveCreateUiPolishCoder(host: {
     getActiveBrainId('coder'),
   ]
     .map((s) => String(s || '').trim())
-    .filter((id) => id && id !== 'NOVA-auto' && !isWeakCoderId(id) && isCoderEngineId(id));
+    .filter((id) => id
+      && id !== 'NOVA-auto'
+      && !isWeakCoderId(id)
+      && !isVisionEngineId(id)
+      && isCoderEngineId(id));
 
   const alreadySelectedCoder = explicitIds[0] || null;
 
@@ -303,7 +325,7 @@ export async function resolveCreateUiPolishCoder(host: {
   const seen = new Set<string>();
   const push = (id: string | null | undefined, name?: string | null, source: 'local' | 'auto' = 'local') => {
     const clean = String(id || '').trim();
-    if (!clean || clean === 'NOVA-auto' || isWeakCoderId(clean) || !isCoderEngineId(clean) || seen.has(clean)) return;
+    if (!clean || clean === 'NOVA-auto' || isWeakCoderId(clean) || isVisionEngineId(clean) || !isCoderEngineId(clean) || seen.has(clean)) return;
     seen.add(clean);
     candidates.push({ id: clean, name: String(name || clean), source });
   };
@@ -367,9 +389,19 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   const userLines = host.messages.filter(m => m.role === 'user').map(m => String(m.content || ''));
   const userBrief = recoverOriginalUserBrief(host.messages as never);
   const bestBrief = findBestProductBrief(userLines);
-  const richestBrief = [pending?.summary, userBrief, bestBrief, intent.summary]
-    .filter((x): x is string => Boolean(x && String(x).trim()))
-    .sort((a, b) => b.length - a.length)[0] || intent.summary;
+  // Prefer a saved Plan card brief over a longer chat monologue (keeps steps + children).
+  const pendingIsPlan = Boolean(
+    (Array.isArray(pending?.planLog) && pending!.planLog!.length > 0)
+    || /\bfrom your plan\b/i.test(String(pending?.problemLine || ''))
+    || /\bBuild steps \(follow in order\):/i.test(String(pending?.summary || '')),
+  );
+  const richestBrief = (
+    pendingIsPlan && String(pending?.summary || '').trim().length >= 40
+      ? String(pending!.summary).trim()
+      : [pending?.summary, userBrief, bestBrief, intent.summary]
+        .filter((x): x is string => Boolean(x && String(x).trim()))
+        .sort((a, b) => b.length - a.length)[0]
+  ) || intent.summary;
 
   const lockedFromAsk = extractProjectName(host.content)
     || host.content.match(/\b(?:called|named|name\s+it|call\s+it)\s+[\"“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i)?.[1]
@@ -453,21 +485,31 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   softBindCount.set(String(host.chatId || 'create'), 0);
   resetBuildDiagnostics({ chatId: host.chatId, productName: lockedProductName });
   noteBuildContext({ productName: lockedProductName, chatId: host.chatId });
+  /** createV2: lock Code follow to App during craft — never package.json / index.css. */
+  let createFollowLock: string | null = null;
   {
     const origPush = host.pushStatus;
     host.pushStatus = (label: string, writingPath?: string | null) => {
       const text = String(label || '').slice(0, 220);
-      pushBuildDiag({ kind: 'status', detail: text, path: writingPath ?? null });
+      let follow = writingPath ?? null;
+      // After craft starts, never park Code on package.json / index.css.
+      if (isCreateV2Active() && createFollowLock && follow && isCreateV2ScaffoldPath(follow)) {
+        follow = createFollowLock;
+      }
+      pushBuildDiag({ kind: 'status', detail: text, path: follow });
+      tickBuildHeartbeat(text);
       if (/hop|ensemble|Spec|Design|Copy|Craft|Critic|Verify|Contract floor|Build team/i.test(text)) {
         const hops = getBuildDiagnostics().snap.ensembleHops;
         noteBuildContext({ ensembleHops: [...hops, text].slice(-12) });
       }
-      noteBuildContext({ lastStatus: text, writingPath: writingPath ?? null, phase: text.slice(0, 80) });
-      return origPush(label, writingPath);
+      noteBuildContext({ lastStatus: text, writingPath: follow, phase: text.slice(0, 80) });
+      return origPush(label, follow);
     };
   }
 
-  // Optional Plan → approve gate (Settings). Default off — one-shot create stays free & fast.
+  // Optional Plan → approve gate (Settings). Never use the old stub checklist
+  // (“Plan — X” + echo brief + “Nova is free”). Soft explores already route to chat;
+  // if a create still lands here without an approve phrase, hand them a real Plan card.
   {
     const prefs = getLocalPrefs();
     if (prefs.planApproveGate) {
@@ -477,7 +519,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         savePendingBuildPlan,
         clearPendingBuildPlan,
         buildPlanFromBrief,
-        formatBuildPlanReply,
         modeStatusLabel,
       } = await import('@/lib/novaStudioModes');
       const approving = isBuildApprovePhrase(host.content);
@@ -485,6 +526,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       if (!approving) {
         host.pushStatus(modeStatusLabel('plan', lockedProductName));
         const { createBriefSpecFromAsk } = await import('@/lib/createIdentity');
+        const {
+          runPlanMode,
+          formatPlanReportMessage,
+          findLatestPlanReport,
+          serializePlanReportForCreate,
+          planReportToPlanLog,
+        } = await import('@/lib/planReport');
         const spec = createBriefSpecFromAsk(lockedProductName, String(buildIntent.summary || host.content));
         const plan = buildPlanFromBrief({
           chatId: host.chatId,
@@ -493,7 +541,40 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           mustHaves: spec.mustHave || [],
         });
         savePendingBuildPlan(plan);
-        await host.finishPlainReply(formatBuildPlanReply(plan), 'NOVA · plan');
+        try {
+          const priorPlan = findLatestPlanReport(host.messages || []);
+          const report = await runPlanMode({
+            userMessage: String(buildIntent.summary || host.content),
+            projectName: priorPlan?.title || lockedProductName,
+            preferredModelId: host.preferredModelId ?? undefined,
+            priorPlan,
+            onProgress: (msg) => host.pushStatus(msg),
+          });
+          try {
+            setLastPendingGreenfield(host.chatId, {
+              name: report.title || lockedProductName,
+              slug: String(buildIntent.slug || 'app'),
+              kind: String(buildIntent.kind || 'vite-react'),
+              summary: serializePlanReportForCreate(report),
+              planLog: planReportToPlanLog(report),
+              problemLine: `Build ${report.title || lockedProductName} from your plan.`,
+            });
+          } catch { /* ignore persist */ }
+          await host.finishPlainReply(formatPlanReportMessage(report), 'NOVA · Plan');
+        } catch {
+          // Fallback: short talk + invite Plan mode — never the old echo checklist.
+          await host.finishPlainReply(
+            [
+              `Got it — **${lockedProductName}**. Before any files are created, let’s shape the plan.`,
+              '',
+              String(buildIntent.summary || host.content).trim().slice(0, 400),
+              '',
+              'Want a sharper outline? Press **+** under the chat box, choose **Plan**, then send your brief again.',
+              'Or say **ok start building** when you want the folder on disk.',
+            ].join('\n'),
+            'NOVA · plan',
+          );
+        }
         return { status: 'handled' };
       }
       if (pendingPlan) {
@@ -505,7 +586,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   }
 
   // Gate BEFORE scaffolding: switch to a ready coder (or stop with a clear next step).
-  const coderGate = await resolveCreateUiPolishCoder(host);
+  // No prebuilt / micro shortcuts — every create goes through a real coder.
+  type CoderGate = Awaited<ReturnType<typeof resolveCreateUiPolishCoder>>;
+  let coderGate: CoderGate;
+  coderGate = await resolveCreateUiPolishCoder(host);
   if (!coderGate.ok) {
     await host.finishPlainReply(
       [
@@ -529,8 +613,28 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     host.pushStatus(`Craft · **${coderGate.name}**…`);
   }
 
-  // Team readiness — warn when Chat/Design missing before scaffold (coder-only = lower quality).
-  try {
+  const { createWallBudgetMs, createPolishAttemptBudgetMs, createBudgetProfile, createBudgetExceededReply, yieldToUi, isVisionEngineId } = await import('@/lib/createRuntime');
+  const createBriefForBudget = String(host.content || intent?.summary || '');
+  const budgetProfile = createBudgetProfile(createBriefForBudget);
+  const createWallMs = createWallBudgetMs(createBriefForBudget);
+  const createStartedAt = Date.now();
+  const createTimedOut = () => Date.now() - createStartedAt > createWallMs;
+  if (isVisionEngineId(coderGate.id)) {
+    await host.finishPlainReply(
+      [
+        '**Cannot craft with a vision model.**',
+        '',
+        'Create needs a **coder** GGUF (not Qwen2-VL / vision). Install a coder under **Models**, then say **ok start building** again.',
+      ].join('\n'),
+      'NOVA · create',
+    );
+    return { status: 'handled' };
+  }
+  host.pushStatus(`Build uses **${coderGate.name}** · ${budgetProfile} budget…`);
+  await yieldToUi(0);
+  // Default coder-only create: never block on missing Design/Copy brains.
+  const allowEnsembleHops = Boolean(getLocalPrefs().multiModelCreate);
+  if (allowEnsembleHops) try {
     const { getEngineStatus } = await import('@/lib/novaEngine');
     const { getBrainProfile } = await import('@/lib/brainProfile');
     const {
@@ -567,8 +671,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
   } catch { /* readiness best-effort */ }
 
-  host.pushStatus(`Build uses **${coderGate.name}** for craft (plan/copy may use Instruct)…`);
-
+  host.pushStatus(
+    allowEnsembleHops
+      ? `Craft · **${coderGate.name}** (plan/copy may use Instruct)…`
+      : `Craft · **${coderGate.name}** (single coder)…`,
+  );
+  await yieldToUi(0);
   // Sequential ensemble: floors first, LLM refine only when distinct brains exist.
   let ensemblePlanText = '';
   let ensembleAttribution = coderGate.name;
@@ -576,6 +684,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   let ensembleContract: import('@/lib/createLayoutContract').LayoutContract | null = null;
   let ensembleCopy: import('@/lib/createLayoutContract').CopyPack | null = null;
   let ensembleContractBlock = '';
+  /** Web research notes for craft — hoisted so polish prompts can see them after the ensemble try. */
+  let createResearchNotes = '';
   try {
     const { getEngineStatus, setEngineModel } = await import('@/lib/novaEngine');
     const { getBrainProfile } = await import('@/lib/brainProfile');
@@ -596,6 +706,35 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const profile = await getBrainProfile();
     const status = await getEngineStatus();
     const briefSeed = buildIntent.summary || host.content;
+    // Always research before craft — brief-literal web notes, not a canned product catalog.
+    // Keep this short so research cannot add minutes before coding starts.
+    try {
+      const { looksLikeNeedsCreateResearch, researchCreateReferences } = await import('@/lib/createResearchBrief');
+      const researchBrief = [buildIntent.summary, host.content].filter(Boolean).join('\n');
+      if (looksLikeNeedsCreateResearch(researchBrief)) {
+        host.pushStatus('Researching what you asked for…');
+        const researchBudgetMs = budgetProfile === 'simple' ? 14_000 : 28_000;
+        const researched = await Promise.race([
+          researchCreateReferences({
+            brief: researchBrief,
+            projectName: lockedProductName,
+          }),
+          new Promise<{ ok: false; notes: string; sources: [] }>((resolve) => {
+            window.setTimeout(() => {
+              resolve({
+                ok: false,
+                notes: 'Research timed out — build strictly from the user ask. Do not invent a booking/marketing shell.',
+                sources: [],
+              });
+            }, researchBudgetMs);
+          }),
+        ]);
+        createResearchNotes = researched.notes || '';
+        host.pushStatus(researched.ok
+          ? 'Research ready — building from those notes…'
+          : 'Research thin — building from your ask…');
+      }
+    } catch { /* offline / blocked — craft from brief alone */ }
     // Deterministic floors immediately — never wait on LLM for Spec/Contract.
     ensembleSpec = buildProductSpec({ brief: briefSeed, productName: lockedProductName });
     ensembleContract = genreFloor(ensembleSpec.genre);
@@ -608,12 +747,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     } catch { /* keep floor */ }
     ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
     ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
+    if (createResearchNotes) {
+      ensembleContractBlock = [
+        ensembleContractBlock,
+        '',
+        createResearchNotes.slice(0, 3500),
+      ].filter(Boolean).join('\n');
+    }
     host.pushStatus(`Contract floor · ${ensembleSpec.genre}…`);
 
     const team = resolveCreateEnsembleTeam(status.models, {
       ramGb: profile.ramGB,
       maxCoderParamsB: profile.maxCoderParamsB,
       craftId: coderGate.id,
+      allowMultiHop: allowEnsembleHops,
     });
     const ensGate = assertSequentialEnsembleOk(team);
     if (ensGate.ok && team.multiHop) {
@@ -696,6 +843,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   } catch {
     /* ensemble is best-effort — never block create */
   }
+  // Layout-contract floor when ensemble hops did not produce a spec.
   if (!ensembleSpec) {
     try {
       const { buildProductSpec, genreFloor, defaultCopyPack, formatEnsembleBriefBlock } = await import('@/lib/createLayoutContract');
@@ -715,12 +863,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
     } catch { /* ignore */ }
   }
-  // Create: auto-open Code so the user can watch files write live (follow path).
-  try {
-    window.dispatchEvent(new CustomEvent('NOVA:open-code-overlay', {
-      detail: { openOverlay: true, name: lockedProductName },
-    }));
-  } catch { /* ignore */ }
+  // createV2: do not auto-open Code mid-craft (tree+editor freezes the shell).
+  if (CREATE_V2_AUTO_OPEN_CODE || !isCreateV2Active()) {
+    try {
+      window.dispatchEvent(new CustomEvent('NOVA:open-code-overlay', {
+        detail: { openOverlay: true, name: lockedProductName },
+      }));
+    } catch { /* ignore */ }
+  }
 
   const jobId = `create-${crypto.randomUUID().slice(0, 8)}`;
   host.pushStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
@@ -746,15 +896,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       onFileWrite: (rel, content) => {
         const path = String(rel || '').replace(/\\/g, '/');
         if (content != null) scaffoldAcc = { ...scaffoldAcc, [path]: content };
-        // Never park Code live-follow on .gitignore (scaffold last-write trap).
         const followPath = /\.gitignore$/i.test(path) ? undefined : path;
         host.pushStatus(createFileBuildLabel(path, 'Building'), followPath);
-        softBindCreateStudio(host, {
-          files: scaffoldAcc,
-          projectId: newProjectId,
-          name: lockedProductName,
-          diskRoot: null,
-        });
+        // createV2: status only during scaffold; paint studio once after scaffold completes.
+        if (!isCreateV2Active()) {
+          softBindCreateStudio(host, {
+            files: scaffoldAcc,
+            projectId: newProjectId,
+            name: lockedProductName,
+            diskRoot: null,
+          });
+        }
       },
     });
     if (await host.stopIfSuperseded()) {
@@ -785,8 +937,37 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
       );
     } catch { /* optional */ }
-    // Apple.com / arcade briefs: seed a real floor BEFORE craft so Live never
-    // shows Band-N stubs or title-only shells while the coder is still thrashing.
+    // createV2 D: scaffold must always include a complete Vite package.json before craft.
+    try {
+      const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+      const repaired = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
+      createFilesAcc = repaired.files;
+      if (repaired.repaired.length) {
+        host.pushStatus('Scaffold · Vite package.json verified…');
+        if (originDiskRoot) {
+          const pkg = createFilesAcc['package.json'];
+          if (pkg) {
+            await applyChatReplyEdits({
+              reply: `@@@FILE package.json\n${pkg}`,
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: host.content,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+        }
+      }
+    } catch { /* best-effort */ }
+    softBindCreateStudio(host, {
+      files: createFilesAcc,
+      projectId: originProjectId,
+      name: lockedProductName,
+      diskRoot: originDiskRoot,
+      force: true,
+    });
+    // createV2: no prebuilt App seeds (apple/arcade floors). Coder writes App from the brief.
+    if (!isCreateV2Active()) {
     try {
       const { briefLooksLikeAppleStyleHomepage } = await import('@/lib/createBuildQuality');
       const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
@@ -817,6 +998,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         }
       }
     } catch { /* seed best-effort */ }
+    }
     updateCreateJob(jobId, {
       path: originDiskRoot || '',
       projectId: originProjectId,
@@ -840,6 +1022,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       name: lockedProductName,
       diskRoot: originDiskRoot,
     });
+    await yieldToUi(0);
 
     // Prefer the longest brief: thin intent.summary must not hide host.content / thread brief.
     const briefBase = [buildIntent.summary, richestBrief, host.content]
@@ -855,6 +1038,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       briefNeedsCreateUiPolish,
       briefLooksLikeMarketingLanding,
       briefLooksLikeChatApp,
+      briefLooksLikeMicroWebToy,
       briefRequiresInteractiveApp,
       isPreviewReady,
       looksLikeFillerStubAppSource,
@@ -905,8 +1089,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     let uiPolishReasons: string[] = [];
     // Every real create must leave a working UI — never claim success on the Vite title splash.
     // Marketing / quiet-luxury briefs always polish even if blank-solid heuristics misfire.
-    const needsUiPolish = !blankSolidColor || briefNeedsCreateUiPolish(briefForUi)
-      || briefLooksLikeMarketingLanding(briefForUi);
+    // No prebuilt micro shortcuts — coder (tool loop / polish) owns App.jsx for every create.
+    const needsUiPolish = (
+      !blankSolidColor || briefNeedsCreateUiPolish(briefForUi)
+      || briefLooksLikeMarketingLanding(briefForUi)
+    );
     const {
       createBriefSpecFromAsk,
       polishPromptLinesFromBrief,
@@ -916,16 +1103,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const briefSpec = createBriefSpecFromAsk(lockedProductName, briefForUi);
     const chatAppBrief = briefLooksLikeChatApp(briefForUi);
 
-    // Do not apply pre-baked Discord/marketing/interactive shells — real UI must come from the coder.
-
+    // createV2: single-coder craft only — never enter the tool-loop → handoff → polish thrash.
     if (needsUiPolish && uiPolishOk !== true) {
-      // One craft owner: tool loop when enabled; legacy dump only when loop is off.
       let usedNovaLoop = false;
       let loopAttempted = false;
+      const skipLegacyLoop = isCreateV2Active();
       try {
         const { shouldUseNovaCreateBuildLoop, runNovaCreateBuildLoop } = await import('@/lib/novaBuildLoop');
         const { modeStatusLabel } = await import('@/lib/novaStudioModes');
-        if (shouldUseNovaCreateBuildLoop() && coderGate.ok) {
+        if (!skipLegacyLoop && shouldUseNovaCreateBuildLoop() && coderGate.ok) {
           loopAttempted = true;
           usedNovaLoop = true;
           try {
@@ -999,16 +1185,30 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         );
       }
 
-      // Dump polish when loop is off, or when the tool loop stalled / failed Ready (handoff).
+      // createV2 / loop-off: one craft owner writes App via stream (no loop handoff).
       if (uiPolishOk !== true && (!usedNovaLoop || (loopAttempted && uiPolishOk === false))) {
       let polishSnapshot = { ...createFilesAcc };
-      // Don't pin Code to App until bytes actually grow — empty shell ≠ stall.
       host.pushStatus(
-        usedNovaLoop
-          ? `Full UI polish · **${coderGate.ok ? coderGate.name : 'coder'}**…`
-          : 'Planning UI from your brief…',
-        null,
+        isCreateV2Active()
+          ? createV2StatusCraft(coderGate.ok ? coderGate.name : 'coder')
+          : usedNovaLoop
+            ? `Full UI polish · **${coderGate.ok ? coderGate.name : 'coder'}**…`
+            : 'Planning UI from your brief…',
+        // Clear leftover scaffold follow (index.css) so Code does not show a fake stall.
+        isCreateV2Active()
+          ? (createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx'] ? 'src/App.tsx' : 'src/App.jsx')
+          : null,
       );
+      if (isCreateV2Active()) {
+        try {
+          noteBuildContext({
+            writingPath: createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+              ? 'src/App.tsx'
+              : 'src/App.jsx',
+            phase: 'craft',
+          });
+        } catch { /* ignore */ }
+      }
       try {
         const { setEngineModel } = await import('@/lib/novaEngine');
         if (coderGate.ok) void setEngineModel?.(coderGate.id);
@@ -1022,31 +1222,95 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           uiPolishReasons = [coder.reason || 'No suitable coder for UI polish'];
         } else {
           const { answerStudio } = await import('@/lib/studioAnswerEngine');
-          const { startProgressHeartbeat, POLISH_ALMOST_DONE_LABEL, POLISH_FINAL_PASS_LABEL } = await import('@/lib/createProgressCopy');
-          const stopPolishBeat = startProgressHeartbeat(host.pushStatus, 'polish', 5500);
+          // createV2: no fake "Polishing visuals…" heartbeat — status follows real focus path.
+          const stopPolishBeat = isCreateV2Active()
+            ? () => {}
+            : (await import('@/lib/createProgressCopy')).startProgressHeartbeat(host.pushStatus, 'polish', 5500);
           try {
           const preferTs = Boolean(
             createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx'],
           );
           const appPath = preferTs ? 'src/App.tsx' : 'src/App.jsx';
-          const basePromptLines = polishPromptLinesFromBrief(briefSpec, appPath, briefForUi);
+          createFollowLock = appPath;
+          const basePromptLines = [
+            ...polishPromptLinesFromBrief(briefSpec, appPath, briefForUi),
+            ...(isCreateV2Active()
+              ? [
+                  'createV2 RULES:',
+                  `- Write ONLY @@@FILE ${appPath} and @@@FILE src/App.css.`,
+                  '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
+                  '- Put the full working product UI in App — not a title stub.',
+                ]
+              : []),
+            'FRESH BUILD RULES:',
+            '- Build exactly the product in the USER ASK + research notes above.',
+            '- Do not substitute a different product category (booking, shop, marketing landing, Core/Day/Reserve cards) unless the user asked for that.',
+            '- Interactive controls must match the ask (real useState flows) — not a decorative shell.',
+            ...(createResearchNotes
+              ? ['- Prefer the PRODUCT RESEARCH / IMPLEMENTATION NOTES over inventing a layout.']
+              : []),
+          ];
           const polishStarted = Date.now();
-          const polishBudgetMs = 480_000;
-          const polishTotalBudgetMs = 900_000;
+          const attemptWallMs = isCreateV2Active()
+            ? createV2AttemptWallMs(budgetProfile)
+            : createPolishAttemptBudgetMs(briefForUi);
+          const polishBudgetMs = attemptWallMs;
+          const polishTotalBudgetMs = isCreateV2Active()
+            ? attemptWallMs * CREATE_V2_MAX_CRAFT_ATTEMPTS
+            : Math.min(
+              createWallMs - (Date.now() - createStartedAt),
+              createWallBudgetMs(briefForUi),
+            );
+          if (polishTotalBudgetMs < 20_000 || createTimedOut()) {
+            // Walls are uncapped (Infinity). This branch only fires if remaining budget
+            // was already consumed by a prior hard limit — keep as safety stop.
+            uiPolishOk = false;
+            uiPolishReasons = ['Create interrupted before UI polish'];
+            markBuildDiagnosticsEnded();
+            await host.finishPlainReply(
+              createBudgetExceededReply(budgetProfile, lockedProductName),
+              'NOVA · create',
+            );
+            return { status: 'handled' };
+          }
           /** No byte growth for this long → cancel GGUF and retry that file. */
-          const POLISH_STALL_ABORT_MS = 18_000;
+          const POLISH_STALL_ABORT_MS = budgetProfile === 'simple' ? 10_000 : 14_000;
+          const { POLISH_ALMOST_DONE_LABEL, POLISH_FINAL_PASS_LABEL } = await import('@/lib/createProgressCopy');
+          /** Tiny scaffold files finish fast then sit in stream focus — don't hard-abort on them (legacy only). */
+          const isScaffoldStallExempt = (p: string) => (
+            !isCreateV2Active()
+            && /(?:^|\/)(?:package\.json|package-lock\.json|tsconfig.*\.json|vite\.config\.\w+|index\.html|main\.[jt]sx?|README\.md|\.gitignore)$/i
+              .test(String(p || '').replace(/\\/g, '/'))
+          );
           let modelReply = '';
           let lastError = '';
           let streamBuf = '';
           let stalledPathHint = '';
-          // Ready means stop — at most 2 craft attempts.
-          const maxPolishAttempts = 2;
+          // createV2: craft + one stall retry. Legacy: simple=1, else 2.
+          const maxPolishAttempts = isCreateV2Active()
+            ? CREATE_V2_MAX_CRAFT_ATTEMPTS
+            : (budgetProfile === 'simple' ? 1 : 2);
           for (let attempt = 0; attempt < maxPolishAttempts; attempt++) {
-            const enrichPass = attempt > 0 && !stalledPathHint;
+            await yieldToUi(0);
+            if (host.shouldAbort?.() || createTimedOut()) {
+              lastError = createTimedOut() ? 'Create time cap reached' : 'Create stopped';
+              break;
+            }
+            const enrichPass = !isCreateV2Active() && attempt > 0 && !stalledPathHint;
             const stallRetry = Boolean(stalledPathHint);
+            const stallRetryPath = stallRetry
+              ? (isCreateV2Active()
+                ? createV2StallRetryPath(stalledPathHint, preferTs)
+                : stalledPathHint)
+              : '';
             const elapsedSoFar = Date.now() - polishStarted;
-            if (elapsedSoFar > polishTotalBudgetMs) {
+            if (elapsedSoFar > polishTotalBudgetMs || createTimedOut()) {
               lastError = 'UI polish budget exceeded';
+              break;
+            }
+            // createV2: never "enrich" — only initial craft or stall rewrite.
+            if (isCreateV2Active() && attempt > 0 && !stallRetry) {
+              lastError = lastError || 'Craft did not reach Ready';
               break;
             }
             const prompt = attempt === 0
@@ -1054,8 +1318,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               : stallRetry
                 ? [
                     `STALL RETRY: the previous pass froze while writing ${stalledPathHint}.`,
-                    `Rewrite ONLY ${stalledPathHint} from scratch for THIS brief — finish every tag/brace.`,
-                    'Keep other project files as-is. Output @@@FILE for that path (and App.css if needed).',
+                    `Rewrite ONLY ${stallRetryPath} from scratch for THIS brief — finish every tag/brace.`,
+                    ...(isCreateV2Active()
+                      ? [
+                          'Do NOT write index.css, main, index.html, or package.json.',
+                          'Put the full working UI in App + App.css.',
+                        ]
+                      : ['Keep other project files as-is. Output @@@FILE for that path (and App.css if needed).']),
                     'No ./components. No remote placeholder images. No paywalls.',
                     ...basePromptLines.slice(1),
                   ].join('\n')
@@ -1066,7 +1335,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   ...basePromptLines.slice(1),
                 ].join('\n');
             if (stallRetry) {
-              host.pushStatus(`Retrying stalled write: ${stalledPathHint}…`, stalledPathHint);
+              host.pushStatus(`Retrying stalled write: ${stallRetryPath}…`, stallRetryPath);
               stalledPathHint = '';
             } else if (enrichPass) {
               host.pushStatus('Deepening the product UI: flows, confirmation, and premium layout…', null);
@@ -1078,11 +1347,68 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             let lastFocusPath = '';
             let lastFocusLen = 0;
             let lastGrowthAt = Date.now();
+            let pathFocusedAt = Date.now();
+            let lastStreamAt = Date.now();
+            let sawStreamToken = false;
             let stallAbort = false;
             let stallAbortPath = '';
             let stallCancelFired = false;
+            // External watchdog — fires even when the model emits zero chunks (silent GGUF load).
+            let craftWatchId: number | null = null;
+            let lastWaitStatusAt = 0;
+            if (isCreateV2Active()) {
+              craftWatchId = window.setInterval(() => {
+                if (stallAbort || host.shouldAbort?.()) return;
+                const now = Date.now();
+                const waited = now - attemptStarted;
+                if (!sawStreamToken) {
+                  // Status only — do NOT rotate Code files every few seconds (that freezes the shell).
+                  if (now - lastWaitStatusAt >= 8_000) {
+                    lastWaitStatusAt = now;
+                    host.pushStatus(
+                      waited < 20_000
+                        ? `Loading coder · waiting for first App tokens… (${Math.round(waited / 1000)}s)`
+                        : `Coder still loading · will cancel if quiet past ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s… (${Math.round(waited / 1000)}s)`,
+                      appPath,
+                    );
+                    tickBuildHeartbeat(`waiting · ${appPath}`);
+                  }
+                }
+                if (!sawStreamToken && now - attemptStarted > CREATE_V2_FIRST_TOKEN_MS) {
+                  stallAbort = true;
+                  stallAbortPath = createV2StallRetryPath(appPath, preferTs);
+                  if (!stallCancelFired) {
+                    stallCancelFired = true;
+                    host.pushStatus(
+                      `No App output after ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s — cancelling…`,
+                      appPath,
+                    );
+                    void import('@/lib/novaEngine')
+                      .then(({ engineGenerateCancel }) => engineGenerateCancel())
+                      .catch(() => {});
+                  }
+                  return;
+                }
+                if (sawStreamToken && now - lastStreamAt > createV2IdleStallMs(lastFocusPath || appPath)) {
+                  stallAbort = true;
+                  stallAbortPath = createV2StallRetryPath(lastFocusPath || appPath, preferTs);
+                  if (!stallCancelFired) {
+                    stallCancelFired = true;
+                    host.pushStatus(
+                      `Stream idle — cancelling to retry App…`,
+                      stallAbortPath,
+                    );
+                    void import('@/lib/novaEngine')
+                      .then(({ engineGenerateCancel }) => engineGenerateCancel())
+                      .catch(() => {});
+                  }
+                }
+              }, 500);
+            }
             const { extractStreamingFileEdits } = await import('@/lib/projectCodeEdit');
-            const result = await answerStudio(
+            let result: Awaited<ReturnType<typeof answerStudio>>;
+            try {
+            result = await answerStudio(
               {
                 userMessage: prompt,
                 files: createFilesAcc,
@@ -1095,6 +1421,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 stickyModelName: host.stickyModelName || undefined,
                 stickyPinnedSource: host.stickyModelId ? 'local' : undefined,
                 allowFileEdits: true,
+                // Hard wall — never inherit the legacy 12-minute build timeout.
+                timeoutMs: Math.min(polishBudgetMs, isCreateV2Active() ? createV2AttemptWallMs(budgetProfile) : polishBudgetMs),
                 shouldAbort: () =>
                   stallAbort
                   || Boolean(host.shouldAbort?.())
@@ -1103,6 +1431,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               },
               (delta) => {
                 streamBuf = String(delta || '');
+                // Only real @@@FILE craft counts as "alive" — thinking/trickle text must not
+                // defeat the first-token cancel (that caused 7+ minute App stub stalls).
+                if (/@@@FILE\b/i.test(streamBuf)) {
+                  sawStreamToken = true;
+                  lastStreamAt = Date.now();
+                }
                 let focusPath = '';
                 try {
                   // Prefer the in-progress @@@FILE (last header), not the last completed extract.
@@ -1119,68 +1453,142 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     for (const e of streamed) {
                       const rel = String(e.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
                       if (!rel || !e.content) continue;
+                      // createV2: ignore mid-stream writes to scaffold chrome (index.css etc).
+                      if (isCreateV2Active() && isCreateV2ScaffoldPath(rel)) continue;
                       merged[rel] = e.content;
                       if (!focusPath) focusPath = rel;
                     }
                     createFilesAcc = merged;
                     const now = Date.now();
+                    // Never use streamBuf.length for growth — whole stream always grows and defeats idle abort.
                     const focusLen = focusPath
                       ? String(createFilesAcc[focusPath] || '').length
                       : 0;
-                    const pathChanged = Boolean(focusPath && !seenCodingPaths.has(focusPath));
+                    const pathChanged = Boolean(focusPath && focusPath !== lastFocusPath);
                     const contentGrew = Boolean(focusPath)
                       && focusPath === lastFocusPath
-                      && focusLen > lastFocusLen;
+                      && !isCreateV2ScaffoldPath(focusPath)
+                      && focusLen > lastFocusLen + 24; // ignore tiny trickle bumps
                     if (pathChanged) {
                       lastFocusPath = focusPath;
                       lastFocusLen = focusLen;
                       lastGrowthAt = now;
+                      pathFocusedAt = now;
                       seenCodingPaths.add(focusPath);
                     } else if (contentGrew) {
                       lastFocusLen = focusLen;
                       lastGrowthAt = now;
+                      // Activity pulse — Code UI must not show "stall" while App is still growing.
+                      tickBuildHeartbeat(createFileBuildLabel(focusPath, 'Coding'));
+                    } else if (
+                      isCreateV2Active()
+                      && focusPath
+                      && isCreateV2ScaffoldPath(focusPath)
+                      && focusPath === lastFocusPath
+                    ) {
+                      // Scaffold focus with no merged bytes: still count time toward path wall.
                     }
-                    const stalled = Boolean(focusPath) && now - lastGrowthAt > 12_000;
-                    // Hard stall: cancel the GGUF turn and retry just this file on the next attempt.
+                    const stallExempt = Boolean(focusPath) && isScaffoldStallExempt(focusPath);
+                    const idleLimitMs = isCreateV2Active() && focusPath
+                      ? createV2IdleStallMs(focusPath)
+                      : (/App\.(tsx|jsx)|App\.css$/i.test(String(focusPath || ''))
+                        ? 22_000
+                        : POLISH_STALL_ABORT_MS);
+                    const pathWallMs = isCreateV2Active() && focusPath
+                      ? createV2PathWallMs(focusPath)
+                      : Number.POSITIVE_INFINITY;
+                    const idleStalled = Boolean(focusPath)
+                      && !stallExempt
+                      && now - lastGrowthAt > idleLimitMs;
+                    const pathWalled = Boolean(focusPath)
+                      && !stallExempt
+                      && now - pathFocusedAt > pathWallMs;
+                    const stalled = idleStalled || pathWalled;
+                    // Hard abort: idle with no real growth OR same path wall (trickle tokens).
                     if (
                       focusPath
-                      && now - lastGrowthAt > POLISH_STALL_ABORT_MS
+                      && !stallExempt
+                      && (idleStalled || pathWalled)
                       && !stallAbort
                     ) {
                       stallAbort = true;
-                      stallAbortPath = focusPath;
+                      stallAbortPath = isCreateV2Active()
+                        ? createV2StallRetryPath(focusPath, preferTs)
+                        : focusPath;
                       if (!stallCancelFired) {
                         stallCancelFired = true;
+                        host.pushStatus(
+                          pathWalled
+                            ? `Path wall on ${focusPath.split('/').pop()} — cancelling…`
+                            : `Stalled on ${focusPath.split('/').pop()} — cancelling…`,
+                          focusPath,
+                        );
                         void import('@/lib/novaEngine')
                           .then(({ engineGenerateCancel }) => engineGenerateCancel())
                           .catch(() => {});
                       }
                     }
-                    // Paint on path switch / growth (throttled) or honest stall notice (status only).
+                    // createV2: status + heartbeat only mid-stream — never soft-bind full files map.
                     if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 220) {
                       lastStudioPaint = now;
                       const base = focusPath.split('/').pop() || focusPath;
                       host.pushStatus(
                         stallAbort
-                          ? `Stalled on ${base} — cancelling to retry that file…`
+                          ? `Stalled on ${base} — cancelling to retry App…`
                           : stalled && !contentGrew && !pathChanged
                             ? `Still waiting on the coder for ${base}…`
                             : createFileBuildLabel(focusPath, 'Coding'),
                         focusPath,
                       );
-                      if (pathChanged || contentGrew) {
-                        softBindCreateStudio(host, {
-                          files: createFilesAcc,
-                          projectId: originProjectId,
-                          name: lockedProductName,
-                          diskRoot: originDiskRoot,
-                        });
+                      tickBuildHeartbeat(createFileBuildLabel(focusPath, 'Coding'));
+                      if (
+                        (pathChanged || contentGrew)
+                        && (CREATE_V2_STREAM_PAINT_FILES || !isCreateV2Active())
+                      ) {
+                        // Live paint only when App / App.css is growing — never mid-stream package.json.
+                        const paintOk = !isCreateV2Active()
+                          || !focusPath
+                          || !isCreateV2ScaffoldPath(focusPath);
+                        if (paintOk) {
+                          softBindCreateStudio(host, {
+                            files: createFilesAcc,
+                            projectId: originProjectId,
+                            name: lockedProductName,
+                            diskRoot: originDiskRoot,
+                          });
+                        }
+                      }
+                    }
+                  } else if (isCreateV2Active() && focusPath) {
+                    // @@@FILE header only (incomplete body) — still enforce path wall.
+                    const now = Date.now();
+                    if (focusPath !== lastFocusPath) {
+                      lastFocusPath = focusPath;
+                      pathFocusedAt = now;
+                      lastGrowthAt = now;
+                      host.pushStatus(createFileBuildLabel(focusPath, 'Coding'), focusPath);
+                    }
+                    if (now - pathFocusedAt > createV2PathWallMs(focusPath) && !stallAbort) {
+                      stallAbort = true;
+                      stallAbortPath = createV2StallRetryPath(focusPath, preferTs);
+                      if (!stallCancelFired) {
+                        stallCancelFired = true;
+                        host.pushStatus(
+                          `Path wall on ${focusPath.split('/').pop()} — cancelling…`,
+                          focusPath,
+                        );
+                        void import('@/lib/novaEngine')
+                          .then(({ engineGenerateCancel }) => engineGenerateCancel())
+                          .catch(() => {});
                       }
                     }
                   }
                 } catch { /* ignore stream paint */ }
               },
             );
+            } finally {
+              if (craftWatchId != null) window.clearInterval(craftWatchId);
+            }
             if (stallAbort && stallAbortPath) {
               stalledPathHint = stallAbortPath;
               lastError = `Coder stalled on ${stallAbortPath}`;
@@ -1227,6 +1635,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               continue;
             }
             createFilesAcc = applied.files;
+            softBindCreateStudio(host, {
+              files: createFilesAcc,
+              projectId: originProjectId,
+              name: lockedProductName,
+              diskRoot: originDiskRoot,
+              force: true,
+            });
             // Never let a thinner/truncated App.css wipe a richer prior write.
             {
               const prevCss = String(polishSnapshot['src/App.css'] || '');
@@ -1484,13 +1899,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
         const { wireCreatePublicAssets } = await import('@/lib/createBuildQuality');
         const isArcadeBrief = looksLikePlayableCanvasGame(briefForUi) || looksLikeFpsGame(briefForUi);
-        const tryMaterialize = !isArcadeBrief && (
+        // Skip hero fetch on short/simple creates — research-driven utility UIs don't need stock photos.
+        const isUtilityToy = briefLooksLikeMicroWebToy(briefForUi) || budgetProfile === 'simple';
+        const tryMaterialize = !isArcadeBrief && !isUtilityToy && (
           uiPolishOk === true
           || briefLooksLikeMarketingLanding(briefForUi)
           || briefNeedsCreateUiPolish(briefForUi)
         );
         if (isArcadeBrief) {
           host.pushStatus('Skipping hero fetch for playable game…');
+        } else if (isUtilityToy) {
+          host.pushStatus('Skipping hero fetch for simple utility UI…');
         } else if (uiPolishOk === true) {
           host.pushStatus('Fetching images for this brief…');
         } else {
@@ -1596,6 +2015,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ramGb: profile.ramGB,
             maxCoderParamsB: profile.maxCoderParamsB,
             craftId: coderGate.id,
+            allowMultiHop: false,
           });
           const styler = ensembleMember(team, 'style')
             || ensembleMember(team, 'design')
@@ -1655,6 +2075,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           ramGb: profile.ramGB,
           maxCoderParamsB: profile.maxCoderParamsB,
           craftId: coderGate.id,
+          allowMultiHop: false,
         });
         const verifier = ensembleMember(team, 'verify')
           || (coderGate.ok ? { id: coderGate.id, name: coderGate.name, role: 'verify' as const, source: 'local' as const } : null);
@@ -1738,6 +2159,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ramGb: profile.ramGB,
             maxCoderParamsB: profile.maxCoderParamsB,
             craftId: coderGate.id,
+            allowMultiHop: false,
           });
           const critic = ensembleMember(team, 'critic') || ensembleMember(team, 'verify');
           let shot: string | null = null;
@@ -1921,8 +2343,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       // Floors:
       // - Apple: replace shells missing Mac/iPad/Watch/AirPods (generic "Band 1"
       //   multi-section craft is NOT finished apple.com — realizeBriefUi owns that).
-      // - Other: only when App is truly empty/broken — never tablet-stub overwrite
-      //   of a real multi-section craft.
+      // - Games: playable floor when empty.
+      // - Never inject a canned booking/marketing/todo template — that fights research-first fresh builds.
       try {
         const appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
         const hasStructure = /<(?:section|nav|main|header|footer)\b/i.test(appBody)
@@ -1931,7 +2353,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           || isEmptyOrStubAppSource(appBody)
           || appBody.replace(/\s+/g, '').length < 900;
         const {
-          buildBriefInteractiveFloor,
           previewReadyForBrief,
           briefLooksLikeAppleStyleHomepage: appleBrief,
           appleHomepageHasProductBands,
@@ -2019,37 +2440,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 }
               }
             } else {
-            host.pushStatus('Materializing brief floor from empty stub…');
-            const floor = buildBriefInteractiveFloor(lockedProductName, briefForUi);
-            const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
-            createFilesAcc = {
-              ...createFilesAcc,
-              [appKey]: floor.app,
-              'src/App.css': floor.css,
-            };
-            if (originDiskRoot) {
-              await applyChatReplyEdits({
-                reply: `@@@FILE ${appKey}\n${floor.app}\n@@@FILE src/App.css\n${floor.css}`,
-                projectId: originProjectId,
-                projectName: lockedProductName,
-                files: createFilesAcc,
-                userMessage: briefForUi,
-                diskRoot: originDiskRoot,
-              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
-            }
-            const gate = previewReadyForBrief(createFilesAcc, {
-              productName: lockedProductName,
-              brief: briefForUi,
-              spec: ensembleSpec,
-              contract: ensembleContract,
-            });
-            if (gate.ok) {
-              uiPolishOk = true;
-              uiPolishReasons = [];
-              host.pushStatus('Brief floor cleared Preview Ready…');
-            } else {
-              uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
-            }
+              host.pushStatus('App still empty after craft — no canned floor (say rebuild the UI)…');
             }
           }
         }
@@ -2059,6 +2450,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
 
     if (uiPolishOk === false) {
+      if (createTimedOut()) {
+        try {
+          host.onCreatePhaseModel?.({ id: coderGate.id, name: coderGate.name, role: 'done' });
+        } catch { /* ignore */ }
+        markBuildDiagnosticsEnded();
+        await host.finishPlainReply(
+          createBudgetExceededReply(budgetProfile, lockedProductName),
+          'NOVA · create',
+        );
+        return { status: 'handled' };
+      }
       softBindCreateStudio(host, {
         files: createFilesAcc,
         projectId: originProjectId,
@@ -2126,6 +2528,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       markCreateJobFailed(jobId, uiPolishReasons[0] || 'UI polish failed: scaffold only');
       // Do NOT auto-npm on fail-closed — overlapping Defender scans freeze the desktop.
       // finishPlainReply clears status and snapshots Done — do not pushStatus after.
+      markBuildDiagnosticsEnded();
       await host.finishPlainReply(`${failAnswer}${grantNote}`, `${ensembleAttribution || 'NOVA'} · scaffold`);
       return { status: 'handled' };
     }
@@ -2166,12 +2569,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     let bootstrap: ProjectBootstrapResult = { npmInstalled: true };
     if (originDiskRoot && projectUsesNpm(scaffoldKind)) {
-      host.pushStatus('Installing project dependencies (npm)…');
+      host.pushStatus('Installing project dependencies (npm) — downloading packages…');
       markCreateJobNpm(jobId);
       try {
         bootstrap = await bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
           files: createFilesAcc,
           preferPreviewUrl: null,
+          npmTimeoutMs: 180_000,
+          onStatus: (label) => {
+            host.pushStatus(label);
+            tickBuildHeartbeat(label);
+          },
         });
         if (bootstrap.npmInstalled && uiPolishOk === true) {
           bootstrap = { ...bootstrap, codeVerified: true };
@@ -2242,11 +2650,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               : (bootstrap.npmPending ? 'Installing project dependencies' : 'Setup incomplete')),
       ],
     });
-    const createMeta = ensembleAttribution && ensembleAttribution.includes('→')
-      ? `NOVA · ensemble · ${ensembleAttribution}`
-      : (coderGate.ok && coderGate.name
-        ? `NOVA · create · ${coderGate.name}`
-        : 'NOVA · create');
+    const createMeta = (ensembleAttribution && ensembleAttribution.includes('→')
+        ? `NOVA · ensemble · ${ensembleAttribution}`
+        : (coderGate.ok && coderGate.name
+          ? (isCreateV2Active()
+            ? `NOVA · createV2 · ${coderGate.name}`
+            : `NOVA · create · ${coderGate.name}`)
+          : 'NOVA · create'));
+    try {
+      host.onCreatePhaseModel?.({ id: coderGate.id, name: coderGate.name, role: 'done' });
+    } catch { /* ignore */ }
+    markBuildDiagnosticsEnded();
     // finishPlainReply clears status and snapshots Done — do not pushStatus after.
     await host.finishPlainReply(createAnswer, createMeta);
     return { status: 'handled' };
@@ -2257,6 +2671,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     );
     markCreateJobFailed(jobId, msg);
     unbindCreateChat(host, host.chatId);
+    markBuildDiagnosticsEnded();
     await host.finishPlainReply(msg);
     return { status: 'handled' };
   }

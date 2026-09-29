@@ -417,7 +417,13 @@ function npmInstallLooksFailed(outcome: { ok?: boolean; reply?: string; handled?
 export async function bootstrapProjectWorkspace(
   projectPath: string,
   kind: NewProjectIntent['kind'],
-  opts?: { files?: Record<string, string>; preferPreviewUrl?: string | null },
+  opts?: {
+    files?: Record<string, string>;
+    preferPreviewUrl?: string | null;
+    onStatus?: (label: string) => void;
+    /** Hard wall for npm install (default 3 minutes). */
+    npmTimeoutMs?: number;
+  },
 ): Promise<ProjectBootstrapResult> {
   if (!projectPath) {
     return { npmInstalled: true };
@@ -443,11 +449,64 @@ export async function bootstrapProjectWorkspace(
     return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
   }
 
-  const install = await runAgentCommand({
-    command: 'npm install',
-    cwd: projectPath,
-    skipConfirm: true,
-  });
+  const npmTimeoutMs = Math.max(60_000, opts?.npmTimeoutMs ?? 180_000);
+  const depHint = (() => {
+    const pkgRaw = opts?.files
+      && Object.entries(opts.files).find(([p]) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')))?.[1];
+    if (!pkgRaw) return 'react, vite, and friends';
+    try {
+      const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+      const names = [
+        ...Object.keys(pkg.dependencies || {}),
+        ...Object.keys(pkg.devDependencies || {}),
+      ].filter(Boolean);
+      if (!names.length) return 'react, vite, and friends';
+      const head = names.slice(0, 4).join(', ');
+      return names.length > 4 ? `${head}, +${names.length - 4} more` : head;
+    } catch {
+      return 'react, vite, and friends';
+    }
+  })();
+  opts?.onStatus?.(
+    `Installing npm packages (${depHint}) — up to ${Math.round(npmTimeoutMs / 60_000)} min…`,
+  );
+  let npmBeat: number | null = null;
+  const npmStarted = Date.now();
+  if (typeof window !== 'undefined') {
+    npmBeat = window.setInterval(() => {
+      const s = Math.round((Date.now() - npmStarted) / 1000);
+      const m = Math.floor(s / 60);
+      const rem = s % 60;
+      const clock = m > 0 ? `${m}m ${rem}s` : `${s}s`;
+      opts?.onStatus?.(
+        s < 45
+          ? `npm downloading ${depHint}… ${clock}`
+          : `npm still unpacking node_modules (${depHint})… ${clock} — first install is slow on Windows`,
+      );
+    }, 5_000);
+  }
+  let install: Awaited<ReturnType<typeof runAgentCommand>>;
+  try {
+    install = await Promise.race([
+      runAgentCommand({
+        command: 'npm install',
+        cwd: projectPath,
+        skipConfirm: true,
+        timeoutMs: npmTimeoutMs,
+      }),
+      new Promise<Awaited<ReturnType<typeof runAgentCommand>>>((resolve) => {
+        window.setTimeout(() => {
+          resolve({
+            handled: true,
+            ok: false,
+            reply: `npm install timed out after ${Math.round(npmTimeoutMs / 1000)}s. Say **install npm dependencies** to retry.`,
+          });
+        }, npmTimeoutMs + 2_000);
+      }),
+    ]);
+  } finally {
+    if (npmBeat != null) window.clearInterval(npmBeat);
+  }
 
   if (npmInstallLooksFailed(install)) {
     // No winget — tell the user once. Background hammer freezes weak PCs.

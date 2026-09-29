@@ -32,6 +32,7 @@ import { winningChatRoute } from '@/lib/chatMessageRouter';
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { classifyDiskIntent } from '@/lib/chatDiskIntent';
 import { looksLikeConversationalEditShorthand } from '@/lib/editAskResolve';
+import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 
 export type TurnKind =
   | 'chat'
@@ -108,11 +109,49 @@ export function classifyTurn(
     return { kind: explicit, reason: 'explicit-ark-kind' };
   }
 
-  // 1a. Requirements / exploratory "I want to build…" — plain chat only when
-  // there is no named product and no go-build signal (otherwise fall through to create).
+  // Soft explore (“help me create…”, “can you help me make…”) — talk first, never instant-create stubs.
+  // Hard go (“build it”, “on disk”, “start building”) still create below.
   if (looksLikeTalkBeforeCreateAsk(t)) {
     return { kind: 'chat', reason: 'talk-before-create' };
   }
+
+  // Simple build toys (todo / timer / counter / name dance) — CREATE only when they
+  // clearly command a build, not when they are still exploring.
+  {
+    const toyCreate = /\b(?:build|create|make|scaffold)\b/i.test(t)
+      && /\b(?:todo(?:s)?|to-?dos?|checklist|timer|stopwatch|pomodoro|counter|click\s+count|name\s+danc|css\s+animation)\b/i.test(t)
+      && !/\b(?:do\s+not|don't|dont)\s+(?:create|build)\b/i.test(t)
+      && !wantsPlanningOnly(t)
+      && !/\b(?:help\s+me|can\s+you|could\s+you|i'?d\s+like|i\s+want\s+to|what\s+if|thinking\s+about)\b/i.test(t)
+      && !/\?/.test(t);
+    if (toyCreate) {
+      return {
+        kind: 'create',
+        reason: 'simple-toy-create',
+        createName: extractProjectName(t) || fallbackCreateProjectName(t) || 'App',
+      };
+    }
+  }
+
+  // Bare “Build a simple X” with product-ish noun → create (avoids chat prose dumps).
+  // Must look like an imperative build, not exploratory “Build me / I want to build / help me”.
+  if (
+    /^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
+    && !/^(?:please\s+)?(?:can\s+you|could\s+you|help\s+me|build\s+me|make\s+me)\b/i.test(t)
+    && /\b(?:todo|to-?do|timer|counter|page|site|app|website|dashboard|landing|list)\b/i.test(t)
+    && t.length < 280
+    && !/\b(?:how\s+(?:do|can|would)|what\s+is|explain|tell\s+me|familiar|want\s+to\s+build|thinking\s+about|are\s+you|i'?d\s+like|help\s+me)\b/i.test(t)
+    && !wantsPlanningOnly(t)
+  ) {
+    return {
+      kind: 'create',
+      reason: 'simple-build-ask',
+      createName: extractProjectName(t) || fallbackCreateProjectName(t) || 'App',
+    };
+  }
+
+  // 1a. Requirements / exploratory "I want to build…" — plain chat only when
+  // there is no named product and no go-build signal (otherwise fall through to create).
   if (looksLikeRequirementsAsk(t)) {
     const named = extractProjectName(t);
     const goBuild = looksLikeGreenfieldCreateGo(t) || looksLikeBuildStart(t);
@@ -206,6 +245,10 @@ export function classifyTurn(
     }
     if (/\b(?:add|put|place|change|update|fix|remove|delete)\b/i.test(t)) {
       return { kind: 'edit', reason: 'mutate-verb-bound' };
+    }
+    // Bound folder + problem language (no fix verb yet) → chat diagnose (explain only).
+    if (looksLikeProjectDebugAsk(t)) {
+      return { kind: 'chat', reason: 'diagnose-explain-bound' };
     }
   }
 

@@ -23,7 +23,6 @@ import {
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
 import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
-import { FreezeReportButton, startFreezeDiagnostics } from '@/components/FreezeReportButton';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { NovaMark } from '@/components/NovaMark';
@@ -150,6 +149,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('NOVA:features-changed', onFeat);
   }, []);
 
+  const voiceFocus = route.name === 'chat' && route.mode === 'voice';
+
+  // Keep ambient orbs in sync when leaving/entering Voice (sidebar hops, etc.).
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('NOVA:voice-visual', {
+      detail: { mode: voiceFocus ? 'voice' : 'chat' },
+    }));
+  }, [route, voiceFocus]);
+
   const NAV_GROUPS = useMemo(() => getNavGroups(), [navTick]);
 
   useEffect(() => {
@@ -167,8 +175,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     sync();
     return subscribeChatInflight(sync);
   }, []);
-
-  useEffect(() => startFreezeDiagnostics(), []);
 
   useEffect(() => {
     const bump = () => setNotifUnread(countUnreadLocalNotifications(myNovaIdForNotifs));
@@ -639,8 +645,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
     if (item.comingSoon) {
-      // Navigate into the route so the blur "Coming Soon" overlay is shown.
-      if (item.route) navigate(item.route);
+      // Parked — visible with Soon, but not navigable.
       return;
     }
     if (item.activity) clearActivity(item.activity);
@@ -662,25 +667,32 @@ export function AppShell({ children }: { children: ReactNode }) {
     const isNotifications = item.label === 'Notifications';
     const notifAttention = isNotifications && (notifUnread > 0 || Boolean(activity.notifications));
     const busy = Boolean(item.activity && activity[item.activity]) && !notifAttention;
-    const unreadCount = item.label === 'Message' && !item.comingSoon ? unreadFrom.length : 0;
+    const unreadCount = item.label === 'Message' && !item.comingSoon && !isSocialParked('message')
+      ? unreadFrom.length
+      : 0;
     const attention = notifAttention || busy || unreadCount > 0;
     if (item.comingSoon) {
       return (
         <button
           key={item.label}
           type="button"
+          disabled
+          aria-disabled="true"
           aria-label={`${item.label} (coming soon)`}
           title={`${item.label} · Coming Soon`}
-          onClick={() => handleNavClick(item)}
-          className={`nova-nav-item w-full opacity-55 ${collapsed ? 'nova-nav-item-rail' : ''}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className={`nova-nav-item w-full opacity-55 cursor-not-allowed pointer-events-none ${collapsed ? 'nova-nav-item-rail' : ''}`}
         >
           <span className="nova-nav-icon">
             <item.icon />
           </span>
-          <span className={`flex-1 text-left nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
+          <span className={`flex-1 min-w-0 text-left truncate nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             {item.label}
           </span>
-          <span className={`text-[9px] uppercase tracking-wide text-content-tertiary nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
+          <span className={`shrink-0 mr-1.5 text-[9px] uppercase tracking-wide text-content-tertiary nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             Soon
           </span>
         </button>
@@ -719,29 +731,30 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="h-full min-w-0 flex overflow-hidden relative bg-nova-navy-950">
       <AuthAmbientOrbs variant="app" />
+      {!voiceFocus ? (
       <aside
-        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border bg-nova-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] nova-sidebar-panel ${
+        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border nova-sidebar-panel nova-glass ${
           collapsed ? 'is-collapsed' : ''
         }`}
         onMouseEnter={openSidebarHover}
         onMouseLeave={scheduleSidebarClose}
       >
-          <div className="flex-none pt-3 pb-2">
+          <div className="flex-none h-12 flex items-center">
             {collapsed ? (
               <button
                 type="button"
                 onClick={() => setSearchOpen(true)}
-                className="nova-nav-item w-full nova-nav-item-rail"
+                className="nova-nav-item w-full nova-nav-item-rail !py-0 !min-h-0 h-12"
                 title="Search (Ctrl+K)"
                 aria-label="Search"
               >
-                <span className="nova-nav-icon">
+                <span className="nova-nav-icon !h-12">
                   <Search />
                 </span>
               </button>
             ) : (
-              <div className="flex items-center justify-between gap-2 min-w-0 pr-2">
-                <span className="nova-nav-icon">
+              <div className="flex items-center justify-between gap-2 min-w-0 w-full h-12 pr-2">
+                <span className="nova-nav-icon !h-12">
                   <NovaMark className="w-7 h-7 text-content-primary" title="NOVA" />
                 </span>
                 <div className="flex items-center gap-0.5 shrink-0">
@@ -781,8 +794,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div key={group.id} className={group.label ? 'mt-2 first:mt-0' : ''}>
                   {group.label ? (
                     <p
-                      className={`pb-1 text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 nova-nav-label ${
-                        collapsed ? 'nova-nav-label-hide' : ''
+                      className={`nova-nav-section-label text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 ${
+                        collapsed ? 'opacity-0' : ''
                       }`}
                       aria-hidden={collapsed || undefined}
                     >
@@ -862,7 +875,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               data-status-menu
             >
             <JobsStrip variant="sidebar" collapsed={collapsed} />
-            <FreezeReportButton collapsed={collapsed} />
             {statusMenuOpen && (
               <div
                 className={`absolute z-50 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
@@ -913,11 +925,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => setStatusMenuOpen(v => !v)}
                   title="Change status"
-                  className={`w-9 h-9 border flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${presenceRingClass(presence)}`}
+                  className={`w-9 h-9 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${presenceRingClass(presence)}`}
                   aria-label="Change status"
                   aria-expanded={statusMenuOpen}
                 >
-                  <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                  {profile?.avatar_url ? (
+                    <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                  )}
                 </button>
               </div>
             ) : (
@@ -950,12 +966,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => setStatusMenuOpen(v => !v)}
-                    className={`w-8 h-8 shrink-0 rounded-full border flex items-center justify-center overflow-hidden ${presenceRingClass(presence)}`}
+                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden ${presenceRingClass(presence)}`}
                     title="Change status"
                     aria-label="Change status"
                     aria-expanded={statusMenuOpen}
                   >
-                    <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                    )}
                   </button>
                   <button
                     type="button"
@@ -967,7 +987,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {displayName}
                     </span>
                     {(profile?.nova_id || isNovaDevEmail(user?.email)) ? (
-                      <span className="block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 text-content-tertiary">
+                      <span className="block text-[10px] font-mono truncate mt-0.5 text-content-tertiary">
                         {isNovaDevEmail(user?.email)
                           ? 'DEV'
                           : formatNovaId(profile!.nova_id!)}
@@ -988,8 +1008,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
       </aside>
+      ) : null}
 
-        <main className="relative z-10 flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 flex flex-col">
+        <main className={`relative z-10 flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col ${
+          voiceFocus ? 'm-0' : 'm-2 ml-2'
+        }`}>
           <PostLoginSafetyTip />
           <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col h-full">
           {children}

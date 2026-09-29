@@ -430,7 +430,18 @@ export async function runGitHubLive(
     ].filter(Boolean).join('\n');
   }
 
-  if (/issue/.test(lower)) {
+  if (
+    /\b(?:github\s+)?(?:open\s+)?issues?\b/i.test(userText)
+    && (
+      /\bgithub\b/i.test(userText)
+      || /\bopen\s+issues\b/i.test(userText)
+      || /\blist\s+(?:my\s+)?issues\b/i.test(userText)
+      || /\bissues?\s+(?:on|from|in)\s+github\b/i.test(userText)
+      || /\bmy\s+issues\b/i.test(userText)
+    )
+    && !/\bfind\s+(?:the\s+)?(?:issue|problem|bug)/i.test(userText)
+    && !/<!--nova-debug-clinic-->/i.test(userText)
+  ) {
     const [user, issues] = await Promise.all([
       verifyGitHubToken(token),
       listGitHubIssues(token),
@@ -483,5 +494,9 @@ export async function runGitHubLive(
 
 export function isGitHubIntent(userText: string) {
   const lower = userText.toLowerCase();
-  return /github|repo|repositor|pull request|\bpr\b|issue|clone |commit |git push/.test(lower);
+  if (/<!--nova-debug-clinic-->/i.test(userText)) return false;
+  if (/\bfind\s+(?:the\s+)?(?:issue|problem|bug)/i.test(lower) && !/\bgithub\b/i.test(lower)) {
+    return false;
+  }
+  return /github|repo|repositor|pull request|\bpr\b|clone |commit |git push|\bopen\s+issues\b|\blist\s+(?:my\s+)?issues\b|\bgithub\s+issues?\b/.test(lower);
 }

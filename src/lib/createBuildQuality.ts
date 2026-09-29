@@ -689,10 +689,84 @@ export function restaurantBriefBuiltAsCoffeeShop(app: string, brief: string): bo
   return false;
 }
 
+/**
+ * Tiny one-screen toys: name dance, click counters, simple timers.
+ * These must ship in seconds — never run marketing/landing polish for 20+ minutes.
+ */
+export function briefLooksLikeClickCounter(brief: string): boolean {
+  const t = String(brief || '').trim();
+  if (!t || t.length > 420) return false;
+  if (/\b(?:landing|marketing|dashboard|discord|checkout|ecommerce)\b/i.test(t)) return false;
+  const hasButton = /\bbutton\b/i.test(t);
+  const hasCount = /\b(?:count(?:s|er|ing)?|how\s+many\s+times|click(?:s|ed|ing)?)\b/i.test(t);
+  const simple = /\b(?:simple|basic|small|tiny|quick|just|only|page|site|app)\b/i.test(t) || t.length < 160;
+  return hasButton && hasCount && simple;
+}
+
+export function briefLooksLikeTodoList(brief: string): boolean {
+  // Create appends ensemble plan / contract — only score the user ask head so we
+  // never miss "build a todo list" just because the brief grew past 420 chars.
+  const raw = String(brief || '').trim();
+  if (!raw) return false;
+  const head = raw
+    .split(/\n##\s+Ensemble|\n##\s+Layout contract|\ncreateV2 RULES:/i)[0]
+    .trim()
+    .slice(0, 520);
+  const t = head || raw.slice(0, 520);
+  if (/\b(?:landing\s+page|marketing\s+site|dashboard|discord|checkout|ecommerce|cafe|restaurant)\b/i.test(t)
+    && !/\b(?:todo|to-?do|checklist|task\s*list)\b/i.test(t)) {
+    return false;
+  }
+  const wantsTodo = /\b(?:todo(?:s)?|to-?dos?|to\s+do\s+list|checklist|task\s*list)\b/i.test(t);
+  const wantsActions = /\b(?:add|check|delete|remove|complete|mark)\b/i.test(t) || t.length < 220;
+  return wantsTodo && wantsActions;
+}
+
+export function briefLooksLikeSimpleTimer(brief: string): boolean {
+  const t = String(brief || '').trim();
+  if (!t || t.length > 360) return false;
+  if (/\b(?:landing|marketing|dashboard|discord)\b/i.test(t)) return false;
+  return /\b(?:timer|stopwatch|pomodoro|countdown)\b/i.test(t)
+    && /\b(?:build|create|make|simple|basic|page|app|site)\b/i.test(t);
+}
+
+export function briefLooksLikeMicroWebToy(brief: string): boolean {
+  const t = String(brief || '').trim();
+  if (!t || t.length > 520) return false;
+  // Explicit marketing / multi-section product sites are not toys.
+  if (/\b(?:landing\s+page|marketing\s+site|restaurant|cafe|menu\s+highlights|apple\.com|product\s+band|quiet\s+luxury|dashboard|kanban|discord|slack|checkout|ecommerce)\b/i.test(t)) {
+    return false;
+  }
+  if (looksLikePlayableCanvasGame(t) || looksLikeSpatialApp(t) || looksLikeFpsGame(t)) return false;
+  if (briefLooksLikeClickCounter(t)) return true;
+  if (briefLooksLikeTodoList(t)) return true;
+  if (briefLooksLikeSimpleTimer(t)) return true;
+
+  const wantsName = /\b(?:enter(?:\s+their)?\s+name|type\s+(?:your|their)\s+name|name\s+(?:input|field)|user(?:'s)?\s+name)\b/i.test(t)
+    || (/\bname\b/i.test(t) && /\b(?:input|textbox|form|type|enter)\b/i.test(t));
+  const wantsAnim = /\b(?:css\s+animation|@keyframes|animat(?:e|ion|ing)|danc(?:e|ing)|bounce|wiggle|float(?:ing)?|spin(?:ning)?)\b/i.test(t);
+  const simpleSite = /\b(?:simple|basic|small|tiny|quick|just|only)\b/i.test(t)
+    || /\b(?:website|site|page|app)\b/i.test(t);
+  if (wantsName && wantsAnim) return true;
+  if (wantsAnim && simpleSite && t.length < 280 && !/\b(?:hero|footer|nav|section|brand|marketing)\b/i.test(t)) {
+    return true;
+  }
+  // Bare “CSS animation with X” micros.
+  if (wantsAnim && /\b(?:with\s+(?:my|their|the|a)\s+name|name\s+danc)/i.test(t)) return true;
+  return false;
+}
+
+/** @deprecated Micro prebuilt Ready gate removed — use isPreviewReady. */
+export function isMicroWebToyReady(files: Record<string, string>): PreviewReadyResult {
+  return isPreviewReady(files);
+}
+
 /** Marketing / restaurant / landing briefs need real page depth before Preview Ready. */
 export function briefLooksLikeMarketingLanding(brief: string): boolean {
   const t = String(brief || '');
   if (!t.trim()) return false;
+  // Tiny interactive toys (name dance, CSS animation demos) must NEVER use landing depth.
+  if (briefLooksLikeMicroWebToy(t)) return false;
   // Games / 3D / interactive apps are never marketing landings — use playable/interactive Ready.
   if (looksLikePlayableCanvasGame(t) || looksLikeSpatialApp(t) || looksLikeFpsGame(t)) return false;
   if (/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(t)
@@ -725,6 +799,7 @@ export function briefLooksLikeMarketingLanding(brief: string): boolean {
 export function briefNeedsCreateUiPolish(brief: string): boolean {
   const t = String(brief || '').trim();
   if (!t) return false;
+  if (briefLooksLikeMicroWebToy(t)) return false;
   if (/^(?:build|create|make)\s+(?:me\s+)?(?:a\s+)?(?:simple\s+)?(?:website|site|app|project)\s*[.!]?\s*$/i.test(t)) {
     return false;
   }
@@ -1717,6 +1792,10 @@ export function isPreviewReady(
     const token = wantName.split(/\s+/).find((w) => w.length >= 4) || wantName.split(/\s+/)[0];
     if (token && token.length >= 3 && !new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(blob)) {
       reasons.push(`App is missing product brand "${wantName}"`);
+    }
+    // Reject leftover demo brands when building a different product.
+    if (!/\bnightglass\b/i.test(wantName) && /\bNightglass\b/.test(app) && token && token.length >= 4) {
+      reasons.push('App still shows Nightglass instead of this product');
     }
   }
 
@@ -2733,6 +2812,8 @@ export function buildBriefInteractiveFloor(productName: string, brief = ''): { a
   const title = String(identity.name || productName || 'Product').replace(/[*/\\<>]/g, '').slice(0, 48) || 'Product';
   const p = identity.palette;
   const t = String(brief || identity.brief || '');
+  // Prefer marketing/shop when the ask is clearly that — never a silent default for utility asks.
+  // (create fail-closed no longer injects this floor for empty crafts; research-first owns those.)
   const boatish = /\b(?:boat|skiff|harbor|dock|clipper|marina|sail)\b/i.test(t);
   const machineish = /\b(?:machine|laser|cnc|makerspace|forge|printer)\b/i.test(t);
   const reefish = /\b(?:aquarium|saltwater|reef|coral|fish\s+shop|livestock)\b/i.test(t);

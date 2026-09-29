@@ -47,6 +47,98 @@ export function isBuildArtifactPath(path: string): boolean {
     || /\.map$/i.test(p);
 }
 
+/**
+ * Strip regex literals (and comments) before security pattern matching.
+ * Without this, scanners flag their own rules — e.g. a pattern that looks for eval calls.
+ * String/template contents are kept so embedded generators (calculator eval, etc.) still match.
+ */
+export function stripRegexLiteralsForScan(src: string): string {
+  return String(src || '')
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(Math.min(m.length, 2)))
+    .replace(/(^|[^:\\])\/\/.*$/gm, '$1')
+    // JSDoc / block-comment body when scanned line-by-line (no surrounding /* */)
+    .replace(/^\s*\/\*+.*$/gm, '')
+    .replace(/^\s*\*.*$/gm, '')
+    .replace(/^\s*\*\/\s*$/gm, '')
+    .replace(
+      /(^|[=(:,\s!&|?{~[\n;])\/(?:\\\/|\\.|\[(?:\\.|[^\]])+\]|[^/\n\\])+\/[gimsuy]*/gm,
+      '$1 ',
+    );
+}
+
+/** Blank out quotes so message/fix copy ("Avoid shell:true") is not flagged as a finding. */
+function stripQuotedStringsForScan(src: string): string {
+  return String(src || '')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+}
+
+/** Strip one-line templates (push/message copy). Keep multi-line templates that may embed real code. */
+function stripSingleLineTemplatesForScan(src: string): string {
+  return String(src || '').replace(/`(?:\\.|[^`\\\n$]|\$\{[^}\n]*\})*`/g, '``');
+}
+
+function codeSurfaceForRiskWords(src: string): string {
+  return stripSingleLineTemplatesForScan(
+    stripQuotedStringsForScan(stripRegexLiteralsForScan(src)),
+  );
+}
+
+/** True when this line/file surface has a real eval( / new Function( call site. */
+export function hasRealDynamicCodeCall(src: string): boolean {
+  // Line-by-line avoids quote-desync across the whole file and still catches
+  // embedded generator lines (e.g. calculator `eval(...)` inside a template).
+  for (const line of String(src || '').split(/\n/)) {
+    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*\/\*+/.test(line)) continue;
+    const surface = stripSingleLineTemplatesForScan(
+      stripQuotedStringsForScan(stripRegexLiteralsForScan(line)),
+    );
+    if (/(?:^|[^\w.$])eval\s*\(/.test(surface) || /\bnew\s+Function\s*\(/.test(surface)) return true;
+  }
+  return false;
+}
+
+/** True when shell:true appears as a real option, not inside a scanner regex or message string. */
+export function hasRealShellTrue(src: string): boolean {
+  for (const line of String(src || '').split(/\n/)) {
+    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue;
+    if (/shell\s*:\s*true\b/i.test(codeSurfaceForRiskWords(line))) return true;
+  }
+  return false;
+}
+
+/** True when innerHTML / dangerouslySetInnerHTML is assigned/used outside regex rules / copy. */
+export function hasRealHtmlInjection(src: string): boolean {
+  for (const line of String(src || '').split(/\n/)) {
+    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue;
+    if (/\bdangerouslySetInnerHTML\b|\.innerHTML\s*=/.test(codeSurfaceForRiskWords(line))) return true;
+  }
+  // Multi-line templates (HTML generators)
+  for (const m of String(src || '').matchAll(/`[^`]*\n[^`]*`/g)) {
+    if (/\bdangerouslySetInnerHTML\b|\.innerHTML\s*=/.test(stripRegexLiteralsForScan(m[0]))) return true;
+  }
+  return false;
+}
+
+/** True when webSecurity:false is a real Electron option, not scanner copy. */
+export function hasRealWebSecurityFalse(src: string): boolean {
+  for (const line of String(src || '').split(/\n/)) {
+    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue;
+    if (/webSecurity\s*:\s*false\b/i.test(codeSurfaceForRiskWords(line))) return true;
+  }
+  return false;
+}
+
+/** True when exec( is a real call — not RegExp.prototype.exec / something.exec. */
+export function hasRealExecCall(src: string): boolean {
+  for (const line of String(src || '').split(/\n/)) {
+    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue;
+    const surface = stripRegexLiteralsForScan(line);
+    if (/(?:^|[^\w.$])exec\s*\(/.test(surface) && !/\bexecFile\s*\(/.test(surface)) return true;
+  }
+  return false;
+}
+
 function sourceTwinOfArtifact(path: string, flat: Record<string, string>): boolean {
   const p = path.replace(/\\/g, '/');
   if (!/(^|\/)dist(-electron)?\//i.test(p)) return false;
@@ -87,35 +179,44 @@ export function isInspectAsk(message: string): boolean {
     );
 }
 
-/** First-time “what is this repo?”. not “how do we make it better.” */
+/** First-time "what is this repo?". not "how do we make it better." */
 export function isExplainAsk(message: string): boolean {
   const t = String(message || '').trim();
   if (isImproveAsk(t)) return false;
-  if (/\b(debug|fix the|find the (bug|issue)|crash|better|improv)\b/i.test(t)
+  const clearlyAbout =
+    /\bwhat\s+(?:is|are)\s+(?:my|the|this|our)\s+projects?\s+(?:is\s+|are\s+)?about\b/i.test(t)
+    || /\b(?:tell me|can you tell me)\s+(?:exactly\s+)?what\s+(?:my|the|this|our)\s+projects?\s+(?:is|are)?\s*about\b/i.test(t)
+    || /\bwhat\s+(?:my|the|this|our)\s+projects?\s+(?:is|are)\s+about\b/i.test(t)
+    || /\bwhat can you tell me about (?:my|the|this|our)\s+projects?\b/i.test(t);
+  if (
+    !clearlyAbout
+    && /\b(debug|fix the|find the (bug|issue)|crash|better|improv)\b/i.test(t)
     && !/\bwhat is this (project|app|code|folder) about\b/i.test(t)
     && !/\bwhat this (project|app|code|folder) is about\b/i.test(t)
     && !/\bsummarize\b/i.test(t)
-    && !/\bflag any\b/i.test(t)) {
+  ) {
     return false;
   }
-  return /\bwhat is this(\s+(project|app|code|folder|repo))?\b/i.test(t)
+  return clearlyAbout
+    || /\bwhat is this(\s+(project|app|code|folder|repo))?\b/i.test(t)
+    || /\bwhat (is|are) (?:my|the|this|our) (projects?|folder|app|code|repo) about\b/i.test(t)
     || /\bwhat (is|are) this (project|app|code|folder|repo) about\b/i.test(t)
     || /\bwhat this (project|app|code|folder|repo) is(\s+about)?\b/i.test(t)
     || /\bwhat does this (project|app|code|folder) do\b/i.test(t)
     || /\bwhat (am i|i'?m|im) (trying to )?build\b/i.test(t)
-    || /\b(can you |do you )?see (exactly )?what (i'?m|im|i am) (trying to )?build\b/i.test(t)
-    || /\bwhat can you tell me about (this |the )?(project|app|code|folder|repo|files?)?\b/i.test(t)
+    || /\b(can you |do you )?see (exactly )?what (i'?m|im|i am|i) (trying to )?build\b/i.test(t)
+    || /\bwhat can you tell me about (this |the |my |our )?(project|app|code|folder|repo|files?)?\b/i.test(t)
+    || /\btell me (exactly )?what (?:my|the|this|our) (projects?|app|code|folder|repo) (?:is|are)(\s+about)?\b/i.test(t)
     || /\btell me (exactly )?what this (project|app|code|folder|repo) is(\s+about)?\b/i.test(t)
     || /\btell me what this (project|app|code|folder|repo) is about\b/i.test(t)
-    || /\btell me about this (project|app|code|folder|repo)\b/i.test(t)
-    || /\bexplain (this|the) (project|app|code|folder|repo)\b/i.test(t)
+    || /\btell me about (?:my|the|this|our) (projects?|app|code|folder|repo)\b/i.test(t)
+    || /\bexplain (this|the|my|our) (project|app|code|folder|repo)\b/i.test(t)
     || /\bsummarize\b/i.test(t)
     || /\bhow (?:it|this|the project|the app) works\b/i.test(t)
-    || /\bflag any (?:bugs?|issues?|rough)\b/i.test(t)
     || /\bwhat (do|does) these files\b/i.test(t)
     || /\bhow (do|does) (they|these|the files) fit\b/i.test(t)
-    || /\b(all about|overview of) (this|the|these)\b/i.test(t)
-    || /\bwalk me through (this|the) (project|app|code|folder|repo)\b/i.test(t)
+    || /\b(all about|overview of) (this|the|these|my|our)\b/i.test(t)
+    || /\bwalk me through (this|the|my|our) (project|app|code|folder|repo)\b/i.test(t)
     || /\bwhat'?s going on (here|in this (project|app|code|folder|repo))\b/i.test(t);
 }
 
@@ -378,6 +479,7 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
 
     lines.forEach((line, i) => {
       const t = line.trim();
+      const surface = stripRegexLiteralsForScan(line);
       if (/\bTODO\b|\bFIXME\b|\bHACK\b|\bXXX\b/.test(line)) {
         push(path, `Line ${i + 1}: unfinished marker. ${t.slice(0, 120)}`);
       }
@@ -388,19 +490,39 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
       if (/except\s*:\s*$|except\s+Exception\s*:\s*pass\b/i.test(line)) {
         push(path, `Line ${i + 1}: bare/silent exception handler hides errors.`);
       }
-      if (/\beval\s*\(|\bexec\s*\(/.test(line)) {
+      // Real call sites only — ignore scanner regexes / RegExp.exec / message strings.
+      if (hasRealDynamicCodeCall(surface) || hasRealExecCall(surface)) {
         push(path, `Line ${i + 1}: uses eval/exec. risky if fed untrusted input.`);
       }
-      if (/\bdangerouslySetInnerHTML\b|\.innerHTML\s*=/.test(line) && !/sanitize|DOMPurify/i.test(line)) {
+      if (hasRealHtmlInjection(surface) && !/sanitize|DOMPurify/i.test(line)) {
         push(path, `Line ${i + 1}: HTML injection risk (innerHTML / dangerouslySetInnerHTML).`);
       }
-      if (/\bchild_process\b|\bexecSync\s*\(|\bspawnSync\s*\(/.test(line)) {
-        push(path, `Line ${i + 1}: shell/process spawn. risky if args come from untrusted input.`);
-      }
-      if (/shell\s*:\s*true/i.test(line)) {
+      // Flag risky shell/process use — not every child_process import / fixed-argv execFile.
+      if (hasRealShellTrue(surface)) {
         push(path, `Line ${i + 1}: shell:true enables shell injection if args are unsanitized.`);
+      } else if (
+        (/\b(?:execSync|spawnSync)\s*\(/.test(surface) || /\bspawn\s*\(/.test(surface))
+        && !/nova-secure:\s*fixed-argv/i.test(content)
+        && !/shell\s*:\s*false/i.test(surface)
+      ) {
+        // spawn/execSync with a single string arg (shell form) is the risky shape.
+        // File-level nova-secure marker means Agent already hardened this module.
+        if (/\b(?:execSync|spawnSync|spawn)\s*\(\s*['"`][^'"`]+['"`]\s*[,)]/.test(surface)
+          && !/\b(?:execSync|spawnSync|spawn)\s*\(\s*['"`][^'"`]+['"`]\s*,\s*\[/.test(surface)) {
+          push(path, `Line ${i + 1}: shell/process spawn. risky if args come from untrusted input.`);
+        }
+      } else if (
+        /\bchild_process\b/.test(surface)
+        && !/nova-secure:\s*fixed-argv/i.test(content)
+        && !/\bexecFile\b/.test(content)
+      ) {
+        // Bare require('child_process') without fixed-argv marker — soft signal only when shell helpers sit nearby.
+        const nearby = stripRegexLiteralsForScan(lines.slice(Math.max(0, i), Math.min(lines.length, i + 12)).join('\n'));
+        if (/\bexec\s*\(\s*['"`]/.test(nearby) || hasRealShellTrue(nearby)) {
+          push(path, `Line ${i + 1}: shell/process spawn. risky if args come from untrusted input.`);
+        }
       }
-      if (/webSecurity\s*:\s*false/i.test(line)) {
+      if (hasRealWebSecurityFalse(surface)) {
         push(path, `Line ${i + 1}: webSecurity:false weakens Electron renderer isolation.`);
       }
     });
@@ -711,11 +833,14 @@ export function collectProjectFindings(
 
 export function formatLocalFindings(findings: InspectFinding[]): string {
   if (!findings.length) return '';
-  return [
-    'Problems found in the attached files:',
-    '',
-    ...findings.map((f, i) => `${i + 1}. \`${f.path}\`. ${f.detail}`),
-  ].join('\n');
+  const blocks = findings.map((f, i) => {
+    const path = String(f.path || '').trim() || '(unknown file)';
+    const detail = String(f.detail || '').replace(/\s+/g, ' ').trim();
+    // Path chip on its own line; detail on the next — never “`path`. Line …”
+    return [`${i + 1}. \`${path}\``, detail ? `   ${detail}` : ''].filter(Boolean).join('\n');
+  });
+  // Trailing blank line is intentional so markdown lists don’t swallow the next section.
+  return ['Problems found in the attached files:', '', ...blocks].join('\n\n') + '\n';
 }
 
 export function buildInspectPrompt(

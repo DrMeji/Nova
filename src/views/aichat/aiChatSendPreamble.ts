@@ -212,6 +212,7 @@ import {
 import type { ClassifyTurnResult } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
+  forgetFinishedChatTurnStatus,
   setChatTurnStatus,
   pushChatTurnStatus,
 } from '@/lib/chatTurnStatusStore';
@@ -320,6 +321,8 @@ import {
 import {
   detectPluginIntent,
   getChatEnabledPlugins,
+  getConnectedPlugins,
+  getPluginById,
   getPluginRuntime,
   loadPluginState,
   runPluginAction,
@@ -456,6 +459,7 @@ export type AIChatSendPrepResult =
       previewUrlRef: any;
       setFailoverNote: (...args: any[]) => void;
       setThreadBrain: (...args: any[]) => void;
+      setCreateLiveModelLabel?: (label: string | null) => void;
       setIpcFallbackDev: (...args: any[]) => void;
       addCreation: (...args: any[]) => void;
       failoverChipText: any;
@@ -536,6 +540,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     setModelRatio,
     setPreviewUrl,
     setThreadBrain,
+    setCreateLiveModelLabel,
+    setDropHint,
     setTokenRatio,
     skipChatLoadIdsRef,
     stickToBottomRef,
@@ -546,10 +552,14 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     user,
     userDetachScrollRef,
     videoDurationSec,
+    setComposerMode,
   } = ctx;
 
   // Guest hydrate lag must not silent-drop Enter (Grok audit).
   const userId = user?.id || 'guest-local';
+  try {
+    setCreateLiveModelLabel?.(null);
+  } catch { /* ignore */ }
   if (mode === 'voice') {
     if (!isVoiceTabEnabled()) return { status: 'done' };
     if (!content.trim()) content = '<!--nova-voice-turn-->';
@@ -677,11 +687,22 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     created_at: new Date().toISOString(),
   };
 
-  const enabledIds = chatPlugins.map(p => p.id);
+  const livePlugins = (() => {
+    const map = loadPluginState();
+    const connected = getConnectedPlugins(map);
+    if (connected.length) return connected;
+    return getChatEnabledPlugins(map);
+  })();
+  const enabledIds = livePlugins.length
+    ? livePlugins.map(p => p.id)
+    : chatPlugins.map(p => p.id);
   const pluginId = detectPluginIntent(content, enabledIds);
   const pluginState = pluginId ? getPluginRuntime(pluginId, loadPluginState()) : null;
+  const pluginMeta = pluginId
+    ? (livePlugins.find(p => p.id === pluginId) || chatPlugins.find(p => p.id === pluginId) || getPluginById(pluginId))
+    : null;
   const providerLabel = pluginId
-    ? `${chatPlugins.find(p => p.id === pluginId)?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
+    ? `${pluginMeta?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
     : pinnedModel.source === 'auto'
       ? 'Nova Multimodal'
       : `${pinnedModel.source === 'local' ? 'Local' : 'Cloud'} · ${pinnedModel.name}`;
@@ -730,7 +751,24 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     && String(lastMsg.content || '').trim() === String(content || '').trim();
   const regenerating = Boolean(ctx.regeneratePendingRef?.current) || sameUserOpen;
   if (ctx.regeneratePendingRef) ctx.regeneratePendingRef.current = false;
-  const nextThread: ChatMessage[] = sameUserOpen ? [...normalized] : [...normalized, userMsg];
+  let nextThread: ChatMessage[] = sameUserOpen ? [...normalized] : [...normalized, userMsg];
+  // One-reply rule: Try again / regenerate replaces assistants after the last user
+  // bubble — never stack a second answer under the same prompt.
+  if (regenerating) {
+    let lastUserIdx = -1;
+    for (let i = nextThread.length - 1; i >= 0; i--) {
+      if (nextThread[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx >= 0) {
+      for (const m of nextThread.slice(lastUserIdx + 1)) {
+        if (m.role === 'assistant') forgetFinishedChatTurnStatus(m.id);
+      }
+      nextThread = nextThread.filter((m, i) => !(i > lastUserIdx && m.role === 'assistant'));
+    }
+  }
   if (shouldOfferCloudKeyNudge({
     chatId: activeChatId,
     message: content,
@@ -805,6 +843,13 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   };
 
   const finishPlainReply = async (replyText: string, providerUsed?: string) => {
+    // One-reply rule: never commit a superseded turn's text into a new bubble.
+    const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) ?? genSeqRef.current;
+    if (mySeq !== liveSeq) {
+      clearChatTurnStatus(assistantId);
+      endInflightOnce();
+      return;
+    }
     clearChatTurnStatus(assistantId);
     const safeText = redactArkSelfLeak(replyText);
     const reply: ChatMessage = {
@@ -851,7 +896,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     )));
     clearGeneratingIfMineEarly();
     notifyChatDone(threadChatId);
-    endTurnAndFlush(mySeq);
+    endTurnAndFlush(mySeq, threadChatId);
   };
 
   const stopIfSuperseded = async (note?: string) => {
@@ -985,7 +1030,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   }
 
   const pushAssistantStatus = (label: string, writingPath?: string | null) => {
-    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+    const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) ?? genSeqRef.current;
+    const stopped = Boolean(
+      stopRequestedByChatRef?.current?.[activeChatId]
+      || (stopRequestedRef.current && activeGenChatIdRef.current === activeChatId),
+    );
+    if (mySeq !== liveSeq || stopped) return;
     // Status lives in a store — never remount chat messages every tick (S007).
     pushChatTurnStatus({
       chatId: activeChatId,
@@ -1512,6 +1562,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     userId: user?.id || 'guest-local',
     finishPlainReply,
     pushAssistantStatus,
+    setDropHint,
+    setComposerMode,
     stopIfSuperseded,
     clearGeneratingIfMineEarly,
     commitStudioForChat,
@@ -1571,6 +1623,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     previewUrlRef,
     setFailoverNote,
     setThreadBrain,
+    setCreateLiveModelLabel,
     setIpcFallbackDev,
     addCreation,
     failoverChipText,

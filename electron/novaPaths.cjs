@@ -20,6 +20,11 @@ function defaultBinDir() {
   return path.join(app.getPath('userData'), 'nova-engine', 'bin');
 }
 
+/** Engine binaries (llama-cli, etc.) — same as default unless we add a custom override later. */
+function binDir() {
+  return defaultBinDir();
+}
+
 function readConfig() {
   try {
     const raw = fs.readFileSync(configPath(), 'utf8');
@@ -84,6 +89,7 @@ function modelsDirInfo() {
 
 module.exports = {
   modelsDir,
+  binDir,
   setModelsDir,
   resetModelsDir,
   modelsDirInfo,

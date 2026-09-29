@@ -129,41 +129,58 @@ export function looksLikeRequirementsAsk(text: string): boolean {
 /**
  * Exploratory product talk — discuss first, never scaffold.
  * Familiarity / requirements questions stay chat.
- * Clear build asks ("build me…", "I want to build X called Y", "create a Discord-like app") create.
+ * Clear build asks ("ok start building", "I want you to build…") create.
+ * Soft explores ("build me…", "help me create…", "I want to build…") stay chat.
  */
 export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
 
-  const explicitGo =
-    /\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|on\s+disk|open\s+preview|build\s+this\s+out|start\s+building)\b/i.test(t)
-    || /\b(?:create|scaffold|spin\s+up)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)
-    || /\b(?:build|make)\s+me\s+(?:an?\s+)?(?:new\s+)?(?:app|website|site|project|page)\b/i.test(t)
-    || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t)
-    || (/\b(?:called|named)\b/i.test(t) && /\b(?:build|create|make|scaffold|want\s+to\s+build)\b/i.test(t) && !/\b(?:are\s+you\s+familiar|do\s+you\s+know|what\s+(?:do|would|will)\s+i)\b/i.test(t))
-    || (
-      /\b(?:discord|slack|twitch|netflix)(?:-|\s+)?like\b/i.test(t)
-      && /\b(?:build|create|make|scaffold)\b/i.test(t)
-      && !/\b(?:are\s+you\s+familiar|do\s+you\s+know|what\s+(?:do|would|will)\s+i|requirements?)\b/i.test(t)
-      && !/\?\s*$/.test(t)
-    );
+  const hardGo =
+    /\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|on\s+disk|open\s+preview|build\s+this\s+out|start\s+building|ok(?:ay)?\s+start\s+building)\b/i.test(t)
+    || /\b(?:create|scaffold|spin\s+up)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\s+(?:on\s+disk|now|here)\b/i.test(t)
+    || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t);
 
-  if (explicitGo) return false;
+  if (hardGo) return false;
+
+  // Soft asks — talk first (Plan nudge), never instant create stubs.
+  // “Build me a portfolio / restaurant / todo…” is conversation, not a disk create.
+  if (
+    /^(?:please\s+)?(?:build|make)\s+me\b/i.test(t)
+    && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:can\s+you\s+(?:help(?:\s+me)?|please)|could\s+you\s+(?:help(?:\s+me)?|please)|help\s+me)\b/i.test(t)
+    && /\b(?:build|create|make|develop)\b/i.test(t)
+    && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /\bi'?d\s+like\s+to\s+(?:build|make|create|develop)\b/i.test(t)
+    && !/\b(?:on\s+disk|right\s+now|start\s+building)\b/i.test(t)
+  ) {
+    return true;
+  }
 
   // Familiarity / check-in questions with product wording.
   if (/\b(?:are\s+you\s+familiar|do\s+you\s+know|have\s+you\s+(?:seen|used|heard)|familiar\s+with)\b/i.test(t)) {
     return true;
   }
 
-  // Soft desire is talk ONLY when they are asking / planning — not commanding a build.
+  // Soft desire — talk + Plan nudge unless they hard-command a build.
   if (/\bi\s+want\s+to\s+(?:build|make|create|start)\b/i.test(t)) {
     if (
-      /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advise|advice|recommend|explain|how\s+(?:do|would|should)|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)
+      /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advice|recommend|explain|how\s+(?:do|would|should)|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)
       || /\?/.test(t)
     ) {
       return true;
     }
-    // "I want to build a Discord app" with no question → treat as build intent (not talk).
+    if (!/\b(?:on\s+disk|right\s+now|start\s+building|scaffold|build\s+it\s+now)\b/i.test(t)) {
+      return true;
+    }
     return false;
   }
 

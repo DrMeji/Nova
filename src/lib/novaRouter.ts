@@ -49,6 +49,13 @@ import { getEngineStatus } from '@/lib/novaEngine';
 import { classifyChatIntent } from '@/lib/chatIntent';
 import { isCoderEngineId, isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
 import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
+import {
+  preferEnglishSafeReply,
+  replyHasUnexpectedForeignBleed,
+  scrubUnexpectedForeignScript,
+  userAskedForOtherLanguage,
+  userMessageLooksEnglish,
+} from '@/lib/scrubForeignBleed';
 
 type HuntRunOutOpts = {
   kind: 'chat' | 'coding' | 'image' | 'video';
@@ -574,42 +581,97 @@ async function tryLocalChat(
           /* keep first reply */
         }
       }
+      // Qwen-class GGUFs sometimes open in English then dump CJK. Scrub + English-only retry.
+      if (
+        kind === 'chat'
+        && userMessageLooksEnglish(message)
+        && !userAskedForOtherLanguage(message)
+        && (
+          replyHasUnexpectedForeignBleed(cleaned || rawText, message)
+          || replyHasUnexpectedForeignBleed(livePaintedDraft, message)
+        )
+      ) {
+        const firstClean = scrubUnexpectedForeignScript(cleaned || rawText, message).trim();
+        const englishOnlyPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL RETRY: Reply in English only. Do not use Chinese, Japanese, Korean, or any other script. '
+          + 'Write the full answer in English from start to finish. No bilingual mix.',
+        ].join('\n');
+        try {
+          const retry = await genQuiet(englishOnlyPrompt, id);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          const retryBest = scrubUnexpectedForeignScript(retryClean || retryRaw, message).trim();
+          if (
+            retryBest
+            && !replyHasUnexpectedForeignBleed(retryBest, message)
+            && retryBest.length >= Math.max(48, Math.floor(firstClean.length * 0.6))
+          ) {
+            cleaned = retryBest;
+            rawText = retryRaw;
+            silentUpgrade = true;
+            Object.assign(result, retry);
+          } else if (firstClean) {
+            cleaned = firstClean;
+            rawText = firstClean;
+          }
+        } catch {
+          if (firstClean) {
+            cleaned = firstClean;
+            rawText = firstClean;
+          }
+        }
+      }
+
       let finalReply = (kind === 'coding' ? (cleaned || rawText) : (cleaned || rawText)) || reply;
+      if (kind === 'chat') {
+        finalReply = scrubUnexpectedForeignScript(finalReply, message) || finalReply;
+      }
       // One-paint rule for talk: never retract a solid live stream with a quieter rewrite.
       // That is the “long answer appears → disappears → shorter answer” flash.
-      if (live && kind === 'chat' && onChunk && livePaintedDraft) {
-        const liveLen = livePaintedDraft.length;
+      // Never restore a foreign-script bleed draft over a scrubbed English reply.
+      const liveDraftSafe = kind === 'chat'
+        ? scrubUnexpectedForeignScript(livePaintedDraft, message).trim()
+        : livePaintedDraft;
+      if (live && kind === 'chat' && onChunk && liveDraftSafe) {
+        const liveLen = liveDraftSafe.length;
         const nextLen = String(finalReply || '').trim().length;
         const liveLooksJunk = liveLen < 48
-          || isCannedGreetingReply(livePaintedDraft, message)
-          || /^(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css))/i.test(livePaintedDraft);
+          || isCannedGreetingReply(liveDraftSafe, message)
+          || /^(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css))/i.test(liveDraftSafe)
+          || replyHasUnexpectedForeignBleed(livePaintedDraft, message);
         const nextIsSnippetDump = /^here'?s what turned up live/i.test(String(finalReply || '').trim());
-        const liveIsProse = liveLen >= 160 && !/^here'?s what turned up live/i.test(livePaintedDraft);
+        const liveIsProse = liveLen >= 160 && !/^here'?s what turned up live/i.test(liveDraftSafe);
         if (!liveLooksJunk) {
           // Keep live unless the quiet upgrade is clearly longer + richer.
           if (!silentUpgrade || nextLen <= Math.floor(liveLen * 1.12) || (nextIsSnippetDump && liveIsProse)) {
-            finalReply = livePaintedDraft;
+            finalReply = preferEnglishSafeReply(liveDraftSafe, finalReply, message);
             silentUpgrade = false;
           }
         }
       }
       // Live first draft already painted. Quiet upgrades + quiet hops paint once here.
       if ((!live || silentUpgrade) && onChunk && finalReply.trim()) {
-        // Never commit a shorter bubble over a longer live paint.
+        // Never commit a shorter bubble over a longer live paint — unless the live
+        // paint was a foreign-language bleed and the final reply is clean English.
         if (
           live
-          && livePaintedDraft
-          && livePaintedDraft.length >= 48
-          && String(finalReply).trim().length < livePaintedDraft.length
+          && liveDraftSafe
+          && liveDraftSafe.length >= 48
+          && String(finalReply).trim().length < liveDraftSafe.length
+          && !replyHasUnexpectedForeignBleed(livePaintedDraft, message)
         ) {
-          finalReply = livePaintedDraft;
+          finalReply = preferEnglishSafeReply(liveDraftSafe, finalReply, message);
           silentUpgrade = false;
         } else {
           commitBubble(finalReply);
         }
       }
       return {
-        reply: finalReply,
+        reply: kind === 'chat'
+          ? (scrubUnexpectedForeignScript(finalReply, message) || finalReply)
+          : finalReply,
         media: result.media,
         modelName: result.modelName || 'NOVA Engine',
         modelId: id || result.modelName,
@@ -712,8 +774,11 @@ async function tryOllama(
     const cleaned = looksCoding
       ? String(reply || '').trim()
       : sanitizeAssistantReply(reply, message, prevAsst);
+    const safe = looksCoding
+      ? (cleaned || reply)
+      : (scrubUnexpectedForeignScript(cleaned || reply, message) || cleaned || reply);
     return {
-      reply: cleaned || reply,
+      reply: safe,
       modelName: model,
       source: 'ollama',
       tier: 'optional',

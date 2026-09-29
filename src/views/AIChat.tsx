@@ -14,7 +14,6 @@ export function AIChat() {
       attachInputRef={p.attachInputRef}
       attachUploading={p.attachUploading}
       autoModelLabel={p.autoModelLabel}
-      bindTypedPath={p.bindTypedPath}
       browseBindFolder={p.browseBindFolder}
       capacity={p.capacity}
       chatPlugins={p.chatPlugins}
@@ -48,7 +47,6 @@ export function AIChat() {
       engineReadyIds={p.engineReadyIds}
       failoverNote={p.failoverNote}
       flushQueuedSend={p.flushQueuedSend}
-      freeKeyOpen={p.freeKeyOpen}
       generating={p.generating}
       generatingRef={p.generatingRef}
       githubOfferId={p.githubOfferId}
@@ -90,9 +88,6 @@ export function AIChat() {
       openCodeWorkspace={p.openCodeWorkspace}
       openProjectFolder={p.openProjectFolder}
       openProjectPreview={p.openProjectPreview}
-      pathBindDraft={p.pathBindDraft}
-      pathBindInputRef={p.pathBindInputRef}
-      pathBindOpen={p.pathBindOpen}
       pendingAttaches={p.pendingAttaches}
       pendingImages={p.pendingImages}
       pendingQueueRef={p.pendingQueueRef}
@@ -118,12 +113,9 @@ export function AIChat() {
       setEditingQueueId={p.setEditingQueueId}
       setEditingQueueText={p.setEditingQueueText}
       setFailoverNote={p.setFailoverNote}
-      setFreeKeyOpen={p.setFreeKeyOpen}
       setGithubPickerOpen={p.setGithubPickerOpen}
       setInput={p.setInput}
       setModelMenuOpen={p.setModelMenuOpen}
-      setPathBindDraft={p.setPathBindDraft}
-      setPathBindOpen={p.setPathBindOpen}
       setPendingAttaches={p.setPendingAttaches}
       setPendingImages={p.setPendingImages}
       setQueueLen={p.setQueueLen}

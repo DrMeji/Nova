@@ -3,7 +3,7 @@
  * Execution mode always comes from stored workspace grants — never from the renderer.
  */
 
-const { execFile, spawn } = require('child_process');
+const { execFile, spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -44,9 +44,11 @@ async function attachLivePreviewSession(cwd) {
     if (cwdKey) devServersByCwd.delete(cwdKey);
     return null;
   }
-  if (await httpProbePortAny(port)) {
+  if (await httpProbePortAny(port) && await vitePreviewLooksHealthy(existing.url)) {
     return { ok: true, cwd: existing.cwd || cwdKey, url: existing.url, attached: true, reused: true };
   }
+  // Port up but serving raw/broken TSX — kill and let caller start a healthy web-only Vite.
+  try { killProcessTree(Number(existing.pid || existing.child?.pid || 0)); } catch { /* ignore */ }
   try { existing.child?.kill?.(); } catch { /* ignore */ }
   if (cwdKey) devServersByCwd.delete(cwdKey);
   return null;
@@ -55,12 +57,10 @@ async function attachLivePreviewSession(cwd) {
 /** Kill every project Vite preview — call on app quit so orphans do not linger. */
 function stopAllPreviews() {
   for (const [key, session] of [...devServersByCwd.entries()]) {
+    const pid = Number(session?.pid || session?.child?.pid || 0);
+    // Windows: npm run dev → vite is a grandchild. Soft kill leaves dozens of node.exe orphans.
+    try { killProcessTree(pid); } catch { /* ignore */ }
     try { session.child?.kill?.(); } catch { /* ignore */ }
-    try {
-      if (session.pid && session.pid !== session.child?.pid) {
-        process.kill(session.pid);
-      }
-    } catch { /* ignore */ }
     devServersByCwd.delete(key);
   }
   return { ok: true };
@@ -71,6 +71,20 @@ function stopAllPreviews() {
  * freeze the whole PC (Defender + disk) — YouTube and everything hitch.
  */
 let packageInstallChain = Promise.resolve();
+
+function killProcessTree(pid) {
+  if (!pid || !Number.isFinite(pid)) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(pid), '/t', '/f'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      return;
+    }
+  } catch { /* ignore */ }
+  try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+}
 
 function isHeavyPackageInstall(command) {
   const cmd = String(command || '').trim();
@@ -273,7 +287,9 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
       let stderr = '';
       let settled = false;
       const timer = setTimeout(() => {
+        try { killProcessTree(child.pid); } catch { /* ignore */ }
         try { child.kill(); } catch { /* ignore */ }
+        done(Object.assign(new Error(`Command timed out after ${Math.round(timeoutMs / 1000)}s`), { code: 'ETIMEDOUT', killed: true }));
       }, timeoutMs);
       const done = (err) => {
         if (settled) return;
@@ -336,7 +352,11 @@ async function agentRun(payload) {
   const cwdRes = resolveCwd(payload?.cwd, command);
   if (!cwdRes.ok) return cwdRes;
 
-  const ran = await runCommand(command, cwdRes.path);
+  // Heavy package installs can take longer on cold cache / Defender PCs.
+  const timeoutMs = typeof payload?.timeoutMs === 'number' && payload.timeoutMs > 0
+    ? payload.timeoutMs
+    : (isHeavyPackageInstall(command) ? 180_000 : 120_000);
+  const ran = await runCommand(command, cwdRes.path, timeoutMs);
   const out = [ran.stdout, ran.stderr].filter(Boolean).join('\n').trim();
   return {
     ok: ran.ok,
@@ -433,6 +453,329 @@ function spawnHiddenDevServer(cwd, port) {
   return child;
 }
 
+/**
+ * Prefer real Node over Electron's binary. Spawning Vite with process.execPath
+ * leaves @vitejs/plugin-react unloaded → raw TSX → blank Live + crash sound.
+ */
+function resolveSystemNodeBin() {
+  const candidates = [];
+  if (process.env.NOVA_NODE_BIN) candidates.push(String(process.env.NOVA_NODE_BIN));
+  if (process.platform === 'win32') {
+    candidates.push(
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs', 'node.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs', 'node.exe'),
+    );
+  } else {
+    candidates.push('/usr/local/bin/node', '/usr/bin/node');
+  }
+  // ELECTRON_RUN_AS_NODE can make Electron act like Node, but only as last resort.
+  for (const c of candidates) {
+    if (c && fs.existsSync(c) && !/electron/i.test(c)) return c;
+  }
+  try {
+    const which = process.platform === 'win32'
+      ? spawnSync('where.exe', ['node'], { encoding: 'utf8', windowsHide: true })
+      : spawnSync('which', ['node'], { encoding: 'utf8' });
+    const line = String(which.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+    if (line && fs.existsSync(line) && !/electron/i.test(line)) return line;
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * Prebundle React as ESM for Live Preview. Vite's optimizeDeps crashes on many
+ * vite-plugin-electron trees (depsInfo.imports), and raw CJS react has no default export.
+ */
+function ensureLiveReactVendor(cwd) {
+  const vendorDir = path.join(cwd, '.nova-live-vendor');
+  const reactOut = path.join(vendorDir, 'react.js');
+  const reactDomOut = path.join(vendorDir, 'react-dom.js');
+  const reactDomClientOut = path.join(vendorDir, 'react-dom-client.js');
+  const bundlePath = path.join(vendorDir, 'bundle.js');
+  const nm = path.join(cwd, 'node_modules');
+  const reactEntry = path.join(nm, 'react', 'index.js');
+  const reactDomEntry = path.join(nm, 'react-dom', 'index.js');
+  const reactDomClientEntry = path.join(nm, 'react-dom', 'client.js');
+  if (!fs.existsSync(reactEntry) || !fs.existsSync(reactDomEntry)) {
+    return { ok: false, error: 'React is not installed in this project (need react + react-dom).' };
+  }
+  const stampPath = path.join(vendorDir, '.nova-stamp');
+  let stamp = '';
+  try {
+    stamp = [
+      fs.statSync(reactEntry).mtimeMs,
+      fs.existsSync(reactDomEntry) ? fs.statSync(reactDomEntry).mtimeMs : 0,
+      fs.existsSync(reactDomClientEntry) ? fs.statSync(reactDomClientEntry).mtimeMs : 0,
+      'shared-bundle-v1',
+    ].join(':');
+  } catch { /* ignore */ }
+  if (
+    fs.existsSync(reactOut)
+    && fs.existsSync(reactDomOut)
+    && fs.existsSync(reactDomClientOut)
+    && fs.existsSync(bundlePath)
+    && fs.existsSync(stampPath)
+    && String(fs.readFileSync(stampPath, 'utf8') || '') === stamp
+  ) {
+    return { ok: true, vendorDir };
+  }
+
+  let esbuild;
+  try {
+    esbuild = require(path.join(nm, 'esbuild'));
+  } catch {
+    try { esbuild = require('esbuild'); } catch {
+      return { ok: false, error: 'esbuild is missing — cannot prep Live Preview React bundles.' };
+    }
+  }
+
+  try {
+    fs.mkdirSync(vendorDir, { recursive: true });
+    const React = require(reactEntry);
+    const ReactDOM = require(reactDomEntry);
+    const toPosix = (p) => String(p || '').replace(/\\/g, '/');
+
+    // One shared bundle = one React instance (split+external CJS require breaks hooks).
+    esbuild.buildSync({
+      stdin: {
+        contents: [
+          `import __ReactMod from "${toPosix(reactEntry)}";`,
+          `import __ReactDOMMod from "${toPosix(reactDomEntry)}";`,
+          'export const React = __ReactMod?.default ?? __ReactMod;',
+          'export const ReactDOM = __ReactDOMMod?.default ?? __ReactDOMMod;',
+          'export default React;',
+          '',
+        ].join('\n'),
+        resolveDir: cwd,
+        sourcefile: 'nova-live-react-bundle.js',
+      },
+      outfile: bundlePath,
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      target: ['es2020'],
+      logLevel: 'silent',
+    });
+
+    const reactKeys = Object.keys(React || {}).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k));
+    const reactDomKeys = Object.keys(ReactDOM || {}).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k));
+
+    fs.writeFileSync(
+      reactOut,
+      [
+        'import { React } from "./bundle.js";',
+        'export default React;',
+        ...reactKeys.map((k) => `export const ${k} = React.${k};`),
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    fs.writeFileSync(
+      reactDomOut,
+      [
+        'import { ReactDOM } from "./bundle.js";',
+        'export default ReactDOM;',
+        ...reactDomKeys.map((k) => `export const ${k} = ReactDOM.${k};`),
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    fs.writeFileSync(
+      reactDomClientOut,
+      [
+        'import { ReactDOM } from "./bundle.js";',
+        'export const createRoot = ReactDOM.createRoot;',
+        'export const hydrateRoot = ReactDOM.hydrateRoot;',
+        'export default { createRoot, hydrateRoot };',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    fs.writeFileSync(stampPath, stamp, 'utf8');
+    return { ok: true, vendorDir };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Failed to prebundle React for Live Preview.' };
+  }
+}
+
+/**
+ * Vite without vite-plugin-electron — Live Preview must not open the desktop shell.
+ * Writes a project-local config + ESM React vendor so JSX always transforms
+ * (Electron-as-Node / broken optimizeDeps were serving raw TSX or CJS React → blank + crash sound).
+ */
+function spawnHiddenWebOnlyVite(cwd, port) {
+  const vendor = ensureLiveReactVendor(cwd);
+  if (!vendor.ok) {
+    const err = new Error(vendor.error || 'Live React vendor prep failed');
+    err.code = 'NOVA_LIVE_VENDOR';
+    throw err;
+  }
+
+  const cfgPath = path.join(cwd, '.nova-live-vite.config.mjs');
+  const cfg = [
+    'import { createRequire } from "module";',
+    'import path from "path";',
+    'import { fileURLToPath } from "url";',
+    'const __dirname = path.dirname(fileURLToPath(import.meta.url));',
+    'const require = createRequire(path.join(__dirname, "package.json"));',
+    'const { defineConfig } = require("vite");',
+    'const vendor = path.join(__dirname, ".nova-live-vendor");',
+    'export default defineConfig({',
+    '  root: __dirname,',
+    '  base: "/",',
+    '  // Skip @vitejs/plugin-react — it force-includes jsx-runtime into optimizeDeps and crashes Vite 5.',
+    '  plugins: [],',
+    '  esbuild: { jsx: "transform", jsxFactory: "__novaReact.createElement", jsxFragment: "__novaReact.Fragment", jsxInject: "import * as __novaReact from \\"react\\"" },',
+    `  server: { host: "127.0.0.1", port: ${Number(port) || 5200}, strictPort: true },`,
+    '  resolve: {',
+    '    alias: {',
+    '      "@": path.join(__dirname, "src"),',
+    '      react: path.join(vendor, "react.js"),',
+    '      "react-dom/client": path.join(vendor, "react-dom-client.js"),',
+    '      "react-dom": path.join(vendor, "react-dom.js"),',
+    '    },',
+    '    dedupe: ["react", "react-dom"],',
+    '  },',
+    '  optimizeDeps: { noDiscovery: true, include: [] },',
+    '});',
+    '',
+  ].join('\n');
+  fs.writeFileSync(cfgPath, cfg, 'utf8');
+
+  // Stale electron-plugin dep cache under node_modules/.vite causes blank Live crashes.
+  try {
+    const viteCache = path.join(cwd, 'node_modules', '.vite');
+    if (fs.existsSync(viteCache)) {
+      fs.rmSync(viteCache, { recursive: true, force: true });
+    }
+  } catch { /* ignore */ }
+
+  const viteJs = path.join(cwd, 'node_modules', 'vite', 'bin', 'vite.js');
+  const env = { ...process.env, BROWSER: 'none' };
+  // Do not inherit ELECTRON_RUN_AS_NODE — Vite must run as plain Node.
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ASAR;
+  const logPath = path.join(os.tmpdir(), `nova-live-vite-${Number(port) || 0}.log`);
+  try { fs.writeFileSync(logPath, '', 'utf8'); } catch { /* ignore */ }
+  const outFd = (() => {
+    try { return fs.openSync(logPath, 'a'); } catch { return 'ignore'; }
+  })();
+  const stdio = outFd === 'ignore' ? 'ignore' : ['ignore', outFd, outFd];
+  const nodeBin = resolveSystemNodeBin();
+  if (fs.existsSync(viteJs) && nodeBin) {
+    const child = spawn(nodeBin, [viteJs, '--config', cfgPath, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+      cwd,
+      stdio,
+      windowsHide: true,
+      env,
+    });
+    lowerChildPriority(child.pid);
+    return child;
+  }
+  if (fs.existsSync(viteJs) && !nodeBin) {
+    // Last resort: Electron-as-Node. Prefer failing health check over silent blank.
+    const elecEnv = { ...env, ELECTRON_RUN_AS_NODE: '1' };
+    const child = spawn(process.execPath, [viteJs, '--config', cfgPath, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+      cwd,
+      stdio,
+      windowsHide: true,
+      env: elecEnv,
+    });
+    lowerChildPriority(child.pid);
+    return child;
+  }
+  const run = `npx --yes vite --config "${cfgPath}" --host 127.0.0.1 --port ${port} --strictPort`;
+  if (process.platform === 'win32') {
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', run], {
+      cwd,
+      stdio,
+      windowsHide: true,
+      env,
+    });
+    lowerChildPriority(child.pid);
+    return child;
+  }
+  const child = spawn('npx', ['--yes', 'vite', '--config', cfgPath, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd,
+    stdio,
+    windowsHide: true,
+    env,
+  });
+  lowerChildPriority(child.pid);
+  return child;
+}
+
+async function waitForViteDepsReady(cwd, timeoutMs = 8_000) {
+  // Prefer our ESM vendor (bypasses broken Vite optimizeDeps on electron trees).
+  const vendorReact = path.join(cwd, '.nova-live-vendor', 'react.js');
+  if (fs.existsSync(vendorReact)) return true;
+  const meta = path.join(cwd, 'node_modules', '.vite', 'deps', '_metadata.json');
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      if (fs.existsSync(meta)) {
+        const raw = fs.readFileSync(meta, 'utf8');
+        if (/react-dom\/client|"react-dom"/i.test(raw) || /"react"/.test(raw)) return true;
+      }
+    } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return fs.existsSync(vendorReact);
+}
+
+/** True when Vite is actually transforming TSX (not serving raw source that crashes the preview). */
+function httpGetText(url, headers = {}, timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    try {
+      const req = http.get(url, { timeout: timeoutMs, headers }, (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c; if (body.length > 50_000) res.destroy(); });
+        res.on('end', () => resolve(body));
+        res.on('error', () => resolve(''));
+      });
+      req.on('error', () => resolve(''));
+      req.on('timeout', () => { try { req.destroy(); } catch { /* ignore */ } resolve(''); });
+    } catch {
+      resolve('');
+    }
+  });
+}
+
+async function vitePreviewLooksHealthy(url) {
+  const base = String(url || '').trim();
+  if (!base) return false;
+  const port = portFromUrl(base);
+  if (!port || !(await httpProbePortAny(port))) return false;
+  // Prefer transformed module probe — raw `!)`.render` / JSX means blank Live preview.
+  let sawEntry = false;
+  for (const rel of ['/src/main.tsx', '/src/main.jsx', '/src/index.tsx', '/src/index.jsx']) {
+    const body = await httpGetText(new URL(rel, base).href, {
+      Accept: 'text/javascript, application/javascript, */*',
+    });
+    if (!body) continue;
+    sawEntry = true;
+    if (/getElementById\([^)]*\)!/.test(body)) return false;
+    if (/<React\.StrictMode>|<App\s*\/>/.test(body) && !/jsxDEV|createElement/.test(body)) return false;
+    if (/jsxDEV|createElement|createRoot/.test(body)) {
+      // Warm App too — Vite 5 can crash on the second module after "ready".
+      await httpGetText(new URL('/src/App.tsx', base).href, {
+        Accept: 'text/javascript, application/javascript, */*',
+      });
+      await new Promise((r) => setTimeout(r, 250));
+      if (!(await httpProbePortAny(port))) return false;
+      return true;
+    }
+    // Served something for main — if it still looks like raw TSX, unhealthy.
+    if (/\bimport\s+React\b/.test(body) && /from\s+['"]react['"]/.test(body) && /<[A-Z]/.test(body)) {
+      return false;
+    }
+    return true;
+  }
+  // No main entry — still allow HTML-only / other stacks if port is up.
+  return !sawEntry;
+}
+
 /** Ensure node_modules exists before Vite — blank Localhost is usually a missing install. */
 async function ensureNodeModules(cwd, opts = {}) {
   const nm = path.join(cwd, 'node_modules');
@@ -493,6 +836,34 @@ async function agentStartDevServer(payload) {
     const child = spawnHiddenDevServer(cwdRes.path, port);
     // Keep child referenced in the Map (no unref) so the console stays hidden and we can kill later.
     const url = await waitForDevServerUrl(port, 45_000);
+    if (!(await vitePreviewLooksHealthy(url))) {
+      try { killProcessTree(child.pid); } catch { /* ignore */ }
+      try { child.kill?.(); } catch { /* ignore */ }
+      // npm run dev without JSX transform (common with broken electron Vite) — web-only fallback.
+      const webPort = await findFreeDevPort();
+      if (!webPort) {
+        return {
+          ok: false,
+          error: 'Live preview started but JSX was not transforming (blank window). Reinstall deps and try Live again.',
+        };
+      }
+      try {
+        const webChild = spawnHiddenWebOnlyVite(cwdRes.path, webPort);
+        const webUrl = await waitForDevServerUrl(webPort, 45_000);
+        if (!(await vitePreviewLooksHealthy(webUrl))) {
+          try { killProcessTree(webChild.pid); } catch { /* ignore */ }
+          try { webChild.kill?.(); } catch { /* ignore */ }
+          return {
+            ok: false,
+            error: 'Live preview started but JSX was not transforming (blank window). Reinstall deps (`npm install`) and try Live again.',
+          };
+        }
+        devServersByCwd.set(cwdKey, { url: webUrl, pid: webChild.pid, child: webChild });
+        return { ok: true, cwd: cwdRes.path, url: webUrl, webOnly: true };
+      } catch (webErr) {
+        return { ok: false, error: webErr?.message || 'Could not start web-only preview fallback.' };
+      }
+    }
     devServersByCwd.set(cwdKey, { url, pid: child.pid, child });
     return { ok: true, cwd: cwdRes.path, url };
   } catch (err) {
@@ -534,9 +905,33 @@ function spawnHiddenUvicorn(cwd, port) {
   });
 }
 
+function packageLooksLikeElectronApp(cwd) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    if (deps.electron || deps['electron-builder'] || deps['vite-plugin-electron'] || deps['@electron-forge/cli']) {
+      return true;
+    }
+    const main = String(pkg.main || '');
+    if (/electron|dist-electron/i.test(main)) return true;
+    const scripts = pkg.scripts || {};
+    for (const key of Object.keys(scripts)) {
+      const cmd = String(scripts[key] || '');
+      // Pure electron launchers (no vite/webpack) — never use for Live Preview.
+      if (/^\s*electron(\s|$)/i.test(cmd) || /electron\s+\.|electron-forge|electron-builder/i.test(cmd)) {
+        if (!/vite|webpack|parcel|next\s+dev/i.test(cmd)) return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Start (or reuse) whatever this folder already uses for Preview:
  * Vite npm run dev, an already-running bat localhost, or FastAPI/uvicorn.
+ * Never launch Electron desktop apps — Live Preview is in-app / localhost only.
  */
 async function agentStartFolderPreview(payload) {
   const cwdRes = resolveCwd(payload?.cwd);
@@ -552,6 +947,40 @@ async function agentStartFolderPreview(payload) {
   // to another project or a leftover process.
   const pkgPath = path.join(cwd, 'package.json');
   if (fs.existsSync(pkgPath)) {
+    // vite-plugin-electron / Electron apps: `npm run dev` opens the desktop shell.
+    // Start a web-only Vite (temp config, no electron plugin) for Live Preview.
+    if (packageLooksLikeElectronApp(cwd)) {
+      const deps = await ensureNodeModules(cwd, {});
+      if (!deps.ok) {
+        return { ok: false, error: deps.error || 'npm install failed before starting the preview server.' };
+      }
+      const port = await findFreeDevPort();
+      if (!port) {
+        return { ok: false, error: 'No free port in 5200–5350 for the project preview server.' };
+      }
+      try {
+        const child = spawnHiddenWebOnlyVite(cwd, port);
+        const url = await waitForDevServerUrl(port, 45_000);
+        await waitForViteDepsReady(cwd, 20_000);
+        if (!(await vitePreviewLooksHealthy(url))) {
+          try { killProcessTree(child.pid); } catch { /* ignore */ }
+          try { child.kill?.(); } catch { /* ignore */ }
+          return {
+            ok: false,
+            error: 'Live preview started but JSX was not transforming (blank window). Reinstall deps (`npm install`) and try Live again.',
+            electronApp: true,
+          };
+        }
+        devServersByCwd.set(cwdKey, { url, pid: child.pid, child });
+        return { ok: true, cwd, url, webOnly: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err?.message || 'Could not start web-only preview (Electron shell skipped).',
+          electronApp: true,
+        };
+      }
+    }
     return agentStartDevServer({ cwd });
   }
 

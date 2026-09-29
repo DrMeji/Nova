@@ -19,6 +19,10 @@ export type EngineDownloadJob = {
   progress: number;
   phase: string;
   source: 'models' | 'local-ai';
+  /** Expected size in GB — used for combined / weighted progress. */
+  sizeGb?: number;
+  /** Wall-clock start for ETA estimates. */
+  startedAt?: number;
   error?: string;
   canceling?: boolean;
 };
@@ -152,6 +156,7 @@ export async function startEngineDownload(opts: {
   name: string;
   source: 'models' | 'local-ai';
   hunt?: { url: string; sizeGb: number; detail?: string; category?: 'coding' | 'chat' | 'design' | 'vision' | 'reasoning' };
+  sizeGb?: number;
   forceUnknownDisk?: boolean;
 }) {
   if (!opts.forceUnknownDisk && window.novaDesktop?.engineDiskSpace) {
@@ -174,12 +179,18 @@ export async function startEngineDownload(opts: {
     return;
   }
 
+  const sizeGb = opts.sizeGb
+    ?? opts.hunt?.sizeGb
+    ?? undefined;
+
   jobs.set(opts.id, {
     id: opts.id,
     name: opts.name,
     progress: 1,
     phase: 'queued',
     source: opts.source,
+    sizeGb,
+    startedAt: Date.now(),
   });
   emit();
 
@@ -206,6 +217,8 @@ export async function startEngineDownload(opts: {
       progress: 0,
       phase: 'error',
       source: opts.source,
+      sizeGb,
+      startedAt: Date.now(),
       error: err instanceof Error ? err.message : 'Download failed',
     });
     emit();

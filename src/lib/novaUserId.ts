@@ -28,6 +28,11 @@ export function isNovaUserId(value: string) {
 export function formatNovaId(id: string) {
   const raw = String(id || '').trim();
   if (isDevNovaAlias(raw)) return NOVA_DEV_ID;
+  // GitHub-only identity: @login (or bare login with letters) — do not strip to digits.
+  if (raw.startsWith('@')) return raw;
+  if (/[a-zA-Z_]/.test(raw) && !NOVA_ID_RE.test(raw)) {
+    return `@${raw.replace(/^@/, '')}`;
+  }
   const digits = raw.replace(/\D/g, '');
   return digits.length === 7 ? digits : raw;
 }

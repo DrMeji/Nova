@@ -675,6 +675,17 @@ export function scoreFunctionalReady(
     score -= 20;
   }
 
+  // Wrong-product shell: canned booking cards when the ask was not a booking/reserve product.
+  const bookingShell = /\bCore\b/.test(app)
+    && /\bDay\b/.test(app)
+    && /\bReserve\b/.test(app)
+    && /ready when you are|Browse what is open|Primary offer for this brief/i.test(app);
+  const askIsBooking = /\b(?:book|reserv|harbor|marina|boat|skiff|cnc|makerspace)\b/i.test(brief);
+  if (bookingShell && !askIsBooking) {
+    reasons.push('App is a booking/reserve shell that does not match the user ask');
+    score -= 45;
+  }
+
   score = Math.max(0, score);
   return { ok: reasons.length === 0 && score >= 70, score, reasons };
 }

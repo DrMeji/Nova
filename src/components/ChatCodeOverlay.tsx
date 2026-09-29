@@ -7,6 +7,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Code2, FileCode, Folder, FolderOpen, X } from 'lucide-react';
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass } from '@/lib/syntaxHighlight';
+import {
+  getBuildLiveClock,
+  subscribeBuildDiagnostics,
+  type BuildFileTiming,
+} from '@/lib/buildDiagnostics';
 
 type TreeNode = {
   name: string;
@@ -52,6 +57,8 @@ function TreeRows({
   expanded,
   onToggle,
   onPick,
+  fileMs,
+  activePath,
 }: {
   nodes: TreeNode[];
   depth: number;
@@ -59,6 +66,8 @@ function TreeRows({
   expanded: Set<string>;
   onToggle: (path: string) => void;
   onPick: (path: string) => void;
+  fileMs?: Record<string, number>;
+  activePath?: string | null;
 }) {
   return (
     <>
@@ -94,11 +103,16 @@ function TreeRows({
                   expanded={expanded}
                   onToggle={onToggle}
                   onPick={onPick}
+                  fileMs={fileMs}
+                  activePath={activePath}
                 />
               ) : null}
             </div>
           );
         }
+        const ms = fileMs?.[node.path] ?? 0;
+        const isActive = activePath === node.path;
+        const stalled = isActive && ms >= 8000;
         return (
           <button
             key={node.path}
@@ -112,7 +126,16 @@ function TreeRows({
             onClick={() => onPick(node.path)}
           >
             <FileCode className={`w-3.5 h-3.5 shrink-0 ${fileTintClass(node.name)}`} />
-            <span className="truncate">{node.name}</span>
+            <span className="truncate flex-1 min-w-0">{node.name}</span>
+            {ms > 400 ? (
+              <span
+                className={`shrink-0 text-[9px] tabular-nums font-mono ${
+                  stalled ? 'text-amber-300' : isActive ? 'text-violet-300' : 'text-content-tertiary/80'
+                }`}
+              >
+                {(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s
+              </span>
+            ) : null}
           </button>
         );
       })}
@@ -126,6 +149,65 @@ function followMatchesOpenFile(follow: string | null | undefined, selected: stri
   if (!want || !got) return false;
   if (want === got) return true;
   return want.replace(/\.tsx$/i, '.jsx') === got || want.replace(/\.jsx$/i, '.tsx') === got;
+}
+
+function shortPath(path: string | null | undefined): string {
+  const p = String(path || '').replace(/\\/g, '/');
+  if (!p) return '';
+  return p.split('/').pop() || p;
+}
+
+function BuildTimerBadge({
+  live,
+  clock,
+}: {
+  live: boolean;
+  clock: ReturnType<typeof getBuildLiveClock>;
+}) {
+  const show = clock.totalMs > 0 || clock.active || live;
+  if (!show) return null;
+
+  const fileName = shortPath(clock.currentPath);
+  const topFiles = clock.fileTimings.slice(0, 3);
+
+  return (
+    <div
+      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 pointer-events-none select-none"
+      title={
+        topFiles.length
+          ? topFiles.map((f: BuildFileTiming) => `${shortPath(f.path)} ${Math.round(f.ms / 100) / 10}s`).join('\n')
+          : 'Build elapsed'
+      }
+    >
+      <div
+        className={`font-mono text-[13px] font-semibold tracking-wide tabular-nums ${
+          clock.stalled ? 'text-amber-300' : clock.active || live ? 'text-violet-100' : 'text-content-secondary'
+        }`}
+      >
+        {clock.totalLabel}
+        {(clock.active || live) ? (
+          <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-violet-300 animate-pulse align-middle" aria-hidden />
+        ) : clock.totalMs > 0 ? (
+          <span className="ml-1.5 text-[10px] font-sans font-medium text-content-tertiary align-middle">done</span>
+        ) : null}
+      </div>
+      {fileName ? (
+        <div
+          className={`text-[10px] tabular-nums max-w-[14rem] truncate ${
+            clock.stalled ? 'text-amber-200/90' : 'text-content-tertiary'
+          }`}
+        >
+          {clock.stalled ? 'idle · ' : 'coding · '}
+          {fileName}
+          {clock.currentFileMs > 0 ? ` · ${clock.currentFileLabel}` : ''}
+        </div>
+      ) : clock.phase ? (
+        <div className="text-[10px] text-content-tertiary max-w-[16rem] truncate">
+          {String(clock.phase).replace(/\*\*/g, '').slice(0, 48)}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function ChatCodeOverlay({
@@ -158,6 +240,25 @@ export function ChatCodeOverlay({
   const [selected, setSelected] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const userPickedRef = useRef(false);
+  const [clock, setClock] = useState(() => getBuildLiveClock());
+
+  useEffect(() => {
+    if (!open) return;
+    const sync = () => setClock(getBuildLiveClock());
+    sync();
+    const unsub = subscribeBuildDiagnostics(sync);
+    const id = window.setInterval(sync, 250);
+    return () => {
+      unsub();
+      window.clearInterval(id);
+    };
+  }, [open]);
+
+  const fileMs = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const f of clock.fileTimings) map[f.path] = f.ms;
+    return map;
+  }, [clock.fileTimings]);
 
   const pickPreferred = (list: string[], focus?: string | null) => {
     if (focus) {
@@ -280,6 +381,25 @@ export function ChatCodeOverlay({
     ? (files[selected] ?? (altPath ? files[altPath] : '') ?? '')
     : '';
 
+  const waitingBanner = (() => {
+    if (!readOnly || !clock.active) return null;
+    const phase = String(clock.phase || '');
+    const waitingCoder = /waiting for (?:first tokens|App)|Loading coder|Coder is thinking|still waiting/i.test(phase);
+    const appSelected = /App\.(tsx|jsx)$/i.test(selected || '');
+    const stubby = value.trim().length < 120
+      || /Todo List\s*\d*|export default function App\(\)\s*\{\s*return\s*\(\s*<div[^>]*>\s*<h1/i.test(value);
+    if (waitingCoder || (appSelected && stubby && clock.totalMs > 4_000)) {
+      const target = clock.currentPath?.split('/').pop() || 'App';
+      return waitingCoder
+        ? `Coder is loading in the background — watching ${selected?.split('/').pop() || 'scaffold'} while ${target} prepares…`
+        : `Still building ${target} — cancel kicks in if no App code appears (~40s)…`;
+    }
+    if (clock.stalled) {
+      return `Working on ${clock.currentPath?.split('/').pop() || 'files'} — retry kicks in if this stays quiet…`;
+    }
+    return null;
+  })();
+
   const onPick = (path: string) => {
     // Watch-only during Live create/edit — never steal auto-follow by clicking the tree.
     if (readOnly) return;
@@ -289,6 +409,7 @@ export function ChatCodeOverlay({
 
   return (
     <div
+      data-nova-code-overlay="1"
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
@@ -304,8 +425,8 @@ export function ChatCodeOverlay({
         className="relative z-10 flex flex-col rounded-2xl border border-violet-500/25 bg-nova-navy-950 shadow-2xl shadow-black/50 overflow-hidden"
         style={{ width: 'min(98vw, 88rem)', height: 'min(94vh, 58rem)' }}
       >
-        <div className="shrink-0 h-11 px-3 flex items-center justify-between gap-2 border-b border-surface-border/80 bg-nova-navy-900/80">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="shrink-0 h-11 px-3 flex items-center justify-between gap-2 border-b border-surface-border/80 bg-nova-navy-900/80 relative">
+          <div className="flex items-center gap-2 min-w-0 z-[1]">
             <Code2 className="w-4 h-4 text-violet-300 shrink-0" />
             <p className="text-sm font-medium text-content-primary truncate">
               {projectName || 'Project files'}
@@ -324,10 +445,11 @@ export function ChatCodeOverlay({
               </span>
             )}
           </div>
+          <BuildTimerBadge live={readOnly} clock={clock} />
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover z-[1]"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -359,6 +481,8 @@ export function ChatCodeOverlay({
                   });
                 }}
                 onPick={onPick}
+                fileMs={fileMs}
+                activePath={clock.currentPath}
               />
             ) : (
               <p className="px-3 text-[12px] text-content-tertiary">No files yet.</p>
@@ -377,6 +501,19 @@ export function ChatCodeOverlay({
                 </span>
               ) : null}
             </div>
+            {waitingBanner ? (
+              <div
+                className="shrink-0 px-3 py-1.5 text-[11px] leading-snug border-b border-violet-500/20 bg-violet-500/10 text-violet-100/90 flex items-center gap-2"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+                  <span className="absolute inset-0 rounded-full bg-violet-300/50 animate-ping" />
+                  <span className="relative h-2 w-2 rounded-full bg-violet-300" />
+                </span>
+                <span className="min-w-0">{waitingBanner}</span>
+              </div>
+            ) : null}
             <div className="flex-1 min-h-0">
               {selected ? (
                 <CodeEditor

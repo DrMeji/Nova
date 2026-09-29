@@ -1,15 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Eye, EyeOff, User, Zap } from 'lucide-react';
+import { AlertCircle, Check, Copy, Loader2, Zap } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
-import {
-  formatForgotPasswordHelp,
-  getLocalLoginRecoveryInfo,
-  revealLocalLoginRecovery,
-} from '@/lib/localAuthRecovery';
-import { accountForgotPageUrl } from '@/lib/accountWeb';
 import { NovaMark } from '@/components/NovaMark';
-import { supabaseCloudWarning, isSupabaseConfigured } from '@/lib/supabase';
 
 const TYPE_PHRASES = [
   'NOVA',
@@ -23,8 +16,6 @@ const TYPE_PHRASES = [
   'Your studio',
   'Code and ship',
 ];
-
-type AuthMode = 'signin' | 'signup';
 
 function TypewriterHero() {
   const [phraseIndex, setPhraseIndex] = useState(0);
@@ -76,109 +67,146 @@ function TypewriterHero() {
   );
 }
 
+function GitHubMark({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  );
+}
+
 export function AuthScreen() {
-  const { signIn, signUp, bypassLogin, resetPassword } = useAuth();
-  const [mode, setMode] = useState<AuthMode>('signin');
+  const { signInWithGitHub, bypassLogin } = useAuth();
   const [showBypass, setShowBypass] = useState(false);
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const [needsClientId, setNeedsClientId] = useState(false);
+  const [clientIdDraft, setClientIdDraft] = useState('');
+  const [savingClient, setSavingClient] = useState(false);
+  const [deviceUserCode, setDeviceUserCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   useEffect(() => {
     void window.novaDesktop?.appMeta?.()
       .then(meta => {
-        // Dev / Open-NOVA-Build.bat only — never on packaged Setup.exe installs.
         setShowBypass(!meta?.isPackaged);
       })
       .catch(() => setShowBypass(false));
   }, []);
 
-  const switchMode = (next: AuthMode) => {
-    setMode(next);
+  useEffect(() => {
+    void window.novaDesktop?.pluginOAuthStatus?.()
+      .then(s => {
+        if (s?.ok && s.github === false) setNeedsClientId(true);
+        const stored = s?.stored?.github;
+        if (stored) setClientIdDraft(stored);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.novaDesktop?.onPluginOAuthProgress?.((payload) => {
+      if (payload?.cancelled) {
+        setDeviceUserCode(null);
+        return;
+      }
+      if (payload?.userCode) {
+        setDeviceUserCode(String(payload.userCode));
+        setInfo(payload.message || 'Enter this code on GitHub, then Authorize.');
+      } else if (payload?.mode === 'browser' && payload.message) {
+        setDeviceUserCode(null);
+        setInfo(payload.message);
+      }
+    });
+    return () => {
+      try { unsub?.(); } catch { /* ignore */ }
+    };
+  }, []);
+
+  const saveClientId = async () => {
+    const id = clientIdDraft.trim();
+    if (!id) {
+      setError('Paste your GitHub OAuth App Client ID or a personal access token first.');
+      return false;
+    }
+    if (/^(ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)/i.test(id)) {
+      setNeedsClientId(false);
+      return true;
+    }
+    if (!window.novaDesktop?.pluginOAuthSetClient) {
+      setError('Saving a Client ID needs the NOVA desktop app.');
+      return false;
+    }
+    setSavingClient(true);
     setError(null);
-    setInfo(null);
-    setPassword('');
-    if (next === 'signin') setFullName('');
+    try {
+      const res = await window.novaDesktop.pluginOAuthSetClient('github', id);
+      if (!res?.ok) {
+        setError(res?.message || 'Could not save the Client ID. Try again.');
+        return false;
+      }
+      setNeedsClientId(false);
+      setInfo('Client ID saved. Continue with GitHub when you are ready.');
+      return true;
+    } catch {
+      setError('Could not save the Client ID. Try again.');
+      return false;
+    } finally {
+      setSavingClient(false);
+    }
   };
 
-  const handleForgotPassword = async () => {
-    setError(null);
+  const handleCancel = () => {
+    void window.novaDesktop?.pluginOAuthCancel?.();
+    setLoading(false);
+    setSavingClient(false);
+    setDeviceUserCode(null);
+    setCodeCopied(false);
     setInfo(null);
-    const trimmed = email.trim();
-    if (!trimmed || !trimmed.includes('@')) {
-      setError('Enter your account email first, then tap Forgot password.');
-      return;
-    }
+    setError(null);
+  };
+
+  const handleGitHub = async () => {
+    setError(null);
+    setDeviceUserCode(null);
+    setCodeCopied(false);
+    const draft = clientIdDraft.trim();
+    const draftIsPat = /^(ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)/i.test(draft);
+    setInfo(draftIsPat
+      ? 'Verifying your GitHub token…'
+      : 'Opening GitHub in your browser…');
     setLoading(true);
     try {
-      const res = await resetPassword(trimmed);
-      if (!res.error) {
-        setInfo(`If an account exists for ${trimmed}, check your email for a reset link.`);
+      if (needsClientId && draft && !draftIsPat) {
+        const saved = await saveClientId();
+        if (!saved) {
+          setInfo(null);
+          return;
+        }
+      }
+      if (needsClientId && !draft) {
+        setError('Paste your GitHub OAuth Client ID or a personal access token first.');
+        setInfo(null);
         return;
       }
-      // Configured email path failed — show that error only (do not stack local recovery unless unconfigured).
-      const unconfigured = /VITE_NOVA_WEBSITE_ORIGIN|not configured/i.test(res.error);
-      setError(res.error);
-      if (!unconfigured) return;
-      const forgotUrl = accountForgotPageUrl();
-      if (forgotUrl && window.novaDesktop?.openExternal) {
-        void window.novaDesktop.openExternal(forgotUrl);
-        setInfo('Opened the NOVA account site so you can reset there.');
+      const res = await signInWithGitHub(draftIsPat ? { accessToken: draft } : undefined);
+      if (res.cancelled) {
+        setInfo(null);
+        setDeviceUserCode(null);
         return;
       }
-      const recovery = await getLocalLoginRecoveryInfo();
-      setInfo(formatForgotPasswordHelp(recovery));
-      if (recovery.exists || recovery.folder) {
-        void revealLocalLoginRecovery();
+      if (res.error) {
+        setError(res.error);
+        setInfo(null);
+        setDeviceUserCode(null);
+        if (res.needsConfig) setNeedsClientId(true);
+      } else if (draftIsPat) {
+        setClientIdDraft('');
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !email.includes('@')) {
-      setError('Enter a valid email to continue.');
-      return;
-    }
-    if (mode === 'signup' && fullName.trim().length < 2) {
-      setError('Enter your name (first and last is fine in one field).');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-
-    setError(null);
-    setInfo(null);
-    setLoading(true);
-
-    if (mode === 'signin') {
-      const signedIn = await signIn(email.trim(), password);
-      setLoading(false);
-      if (signedIn.error) setError(signedIn.error);
-      return;
-    }
-
-    const created = await signUp(email.trim(), password, fullName.trim());
-    if (created.error) {
-      setLoading(false);
-      setError(created.error);
-      return;
-    }
-
-    const signedIn = await signIn(email.trim(), password);
-    setLoading(false);
-    if (signedIn.error) {
-      setError('Account created. If email confirmation is required, check your inbox, then sign in.');
-      setMode('signin');
+      setDeviceUserCode(null);
     }
   };
 
@@ -194,150 +222,114 @@ export function AuthScreen() {
           </div>
 
           <div className="rounded-2xl border border-surface-border bg-nova-navy-900 p-7 sm:p-8 shadow-2xl animate-slide-up">
-            <div className="mb-6">
-              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-nova-navy-950 p-1">
-                <button
-                  type="button"
-                  onClick={() => switchMode('signin')}
-                  className={`h-10 rounded-lg text-sm font-medium transition-colors ${
-                    mode === 'signin'
-                      ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-tertiary hover:text-content-secondary'
-                  }`}
-                >
-                  Sign in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => switchMode('signup')}
-                  className={`h-10 rounded-lg text-sm font-medium transition-colors ${
-                    mode === 'signup'
-                      ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-tertiary hover:text-content-secondary'
-                  }`}
-                >
-                  Sign up
-                </button>
-              </div>
+            <div className="mb-6 text-center">
+              <p className="text-lg font-semibold text-content-primary tracking-tight">Continue with GitHub</p>
+              <p className="mt-1.5 text-sm text-content-tertiary leading-relaxed">
+                Secure access to your studio and projects.
+              </p>
             </div>
 
-            {!isSupabaseConfigured && (
-              <div className="mb-3 flex items-start gap-2 text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
-                <span>
-                  {supabaseCloudWarning
-                    || 'Cloud sign-in is off. Add Supabase keys to .env.local and relaunch.'}
-                  {showBypass ? ' Use Continue as guest below for local create.' : ''}
-                </span>
+            {error && (
+              <div className="flex items-start gap-2 text-sm text-nova-accent-red bg-nova-accent-red/10 border border-nova-accent-red/20 rounded-xl px-3 py-2.5 mb-3">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{error}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="flex flex-col">
-              <div
-                className={`grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out ${
-                  mode === 'signup'
-                    ? 'grid-rows-[1fr] opacity-100 mb-3'
-                    : 'grid-rows-[0fr] opacity-0 mb-0'
-                }`}
-                aria-hidden={mode !== 'signup'}
+            {info && !error && (
+              <div className="flex items-start gap-2 text-sm text-violet-200/90 bg-violet-500/10 border border-violet-500/20 rounded-xl px-3 py-2.5 mb-3">
+                <span>{info}</span>
+              </div>
+            )}
+
+            {deviceUserCode && loading && (
+              <button
+                type="button"
+                title={codeCopied ? 'Copied' : 'Click to copy'}
+                aria-label={codeCopied ? 'Copied' : 'Copy GitHub device code'}
+                onClick={() => {
+                  void navigator.clipboard.writeText(deviceUserCode).then(() => {
+                    setCodeCopied(true);
+                    window.setTimeout(() => setCodeCopied(false), 1600);
+                  }).catch(() => undefined);
+                }}
+                className="group mb-4 w-full rounded-xl border border-surface-border bg-nova-navy-950/80 px-4 py-3 text-center hover:border-sky-400/40 hover:bg-surface-hover/40 transition-colors cursor-pointer"
               >
-                <div className="min-h-0 overflow-hidden">
-                  <div className={`relative ${mode === 'signup' ? '' : 'pointer-events-none'}`}>
-                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
-                    <input
-                      type="text"
-                      required={mode === 'signup'}
-                      tabIndex={mode === 'signup' ? 0 : -1}
-                      minLength={2}
-                      maxLength={80}
-                      value={fullName}
-                      onChange={e => setFullName(e.target.value)}
-                      placeholder="Your name"
-                      className="nova-input pl-10 h-12 rounded-xl"
-                      autoComplete="name"
-                      disabled={mode !== 'signup'}
-                    />
-                  </div>
+                <p className="text-[11px] text-content-tertiary mb-1.5">
+                  {codeCopied ? 'Copied' : 'Enter this code on GitHub · click to copy'}
+                </p>
+                <span className="inline-flex items-center justify-center gap-2.5">
+                  <span className="text-2xl font-mono tracking-[0.2em] text-content-primary">
+                    {deviceUserCode}
+                  </span>
+                  <span className="opacity-50 group-hover:opacity-100 transition-opacity text-content-tertiary group-hover:text-content-secondary">
+                    {codeCopied
+                      ? <Check className="w-4 h-4 text-emerald-400" />
+                      : <Copy className="w-4 h-4" />}
+                  </span>
+                </span>
+              </button>
+            )}
+
+            {needsClientId && !loading && (
+              <div className="mb-4 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-content-secondary">GitHub Client ID (one-time setup)</label>
+                  <button
+                    type="button"
+                    className="text-[11px] text-sky-400 hover:text-sky-300"
+                    onClick={() => void window.novaDesktop?.openExternal?.('https://github.com/settings/developers')}
+                  >
+                    Open OAuth Apps
+                  </button>
                 </div>
-              </div>
-
-              <div className="relative mb-3">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
                 <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="nova-input pl-10 h-12 rounded-xl"
-                  autoComplete="email"
+                  type="password"
+                  value={clientIdDraft}
+                  onChange={e => setClientIdDraft(e.target.value)}
+                  placeholder="OAuth Client ID (not a PAT)"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="nova-input w-full text-sm"
+                  disabled={savingClient}
                 />
+                <p className="text-[11px] text-content-tertiary leading-relaxed">
+                  Publisher only — end users never paste this. Add redirect URI{' '}
+                  <span className="font-mono text-content-secondary">http://127.0.0.1:17887/callback</span>
+                  {' '}on the OAuth App for one-click Authorize.
+                </p>
               </div>
+            )}
 
-              <div className="relative mb-3">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
-                <input
-                  ref={passwordRef}
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'Create a password' : 'Your password'}
-                  className="nova-input pl-10 pr-12 h-12 rounded-xl"
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                />
+            {loading ? (
+              <div className="grid grid-cols-[1fr_auto] gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-secondary"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  disabled
+                  className="nova-btn-primary w-full h-12 rounded-xl gap-2.5 text-[15px] font-medium opacity-90"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Waiting for GitHub…
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="nova-btn-secondary h-12 rounded-xl px-4"
+                >
+                  Cancel
                 </button>
               </div>
-
-              <div
-                className={`grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out ${
-                  mode === 'signin'
-                    ? 'grid-rows-[1fr] opacity-100 mb-3'
-                    : 'grid-rows-[0fr] opacity-0 mb-0'
-                }`}
-                aria-hidden={mode !== 'signin'}
+            ) : (
+              <button
+                type="button"
+                disabled={savingClient}
+                onClick={() => void handleGitHub()}
+                className="nova-btn-primary w-full h-12 rounded-xl gap-2.5 text-[15px] font-medium"
               >
-                <div className="min-h-0 overflow-hidden">
-                  <div className="flex justify-end -mt-1">
-                    <button
-                      type="button"
-                      onClick={() => void handleForgotPassword()}
-                      disabled={loading || mode !== 'signin'}
-                      tabIndex={mode === 'signin' ? 0 : -1}
-                      className="text-xs text-content-tertiary hover:text-content-secondary"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {error && (
-                <div className="flex items-start gap-2 text-sm text-nova-accent-red bg-nova-accent-red/10 border border-nova-accent-red/20 rounded-xl px-3 py-2.5 mb-3">
-                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              {info && (
-                <div className="flex items-start gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 mb-3">
-                  <span>{info}</span>
-                </div>
-              )}
-
-              <button type="submit" disabled={loading} className="nova-btn-primary w-full h-11 rounded-xl">
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {mode === 'signin' ? 'Sign in' : 'Create account'}
+                {savingClient ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitHubMark />}
+                {savingClient ? 'Saving…' : 'Continue with GitHub'}
               </button>
-            </form>
+            )}
 
             <p className="text-center text-[11px] text-content-tertiary mt-4 leading-relaxed">
               By continuing, you agree to our{' '}
@@ -356,13 +348,15 @@ export function AuthScreen() {
               >
                 Privacy Policy
               </button>
-              .
             </p>
           </div>
 
-          {/* Temporary: Open-NOVA-Build.bat / unpackaged only — remove before retail. */}
+          <p className="mt-3 text-right text-[11px] text-content-tertiary/70 tracking-wide">
+            Powered by Lotus
+          </p>
+
           {showBypass && (
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-8 grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => bypassLogin({ skipSetup: false })}

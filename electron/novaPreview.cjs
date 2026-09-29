@@ -258,6 +258,47 @@ function fitPreviewZoom(win) {
   }
 }
 
+/** Blank Live is usually a SyntaxError from raw TSX — surface it instead of a silent black window. */
+function attachPreviewLoadGuards(win) {
+  if (!win || win.isDestroyed() || win.__novaPreviewGuards) return;
+  win.__novaPreviewGuards = true;
+  let shown = false;
+  const showFail = async (reason) => {
+    if (shown || !win || win.isDestroyed()) return;
+    shown = true;
+    const safe = String(reason || 'Preview failed to load.')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\r?\n/g, ' ')
+      .slice(0, 280);
+    // Overlay in-place — never loadURL (that races and throws ERR_ABORTED).
+    try {
+      await win.webContents.executeJavaScript(`(() => {
+        if (document.getElementById('nova-preview-fail')) return true;
+        const el = document.createElement('div');
+        el.id = 'nova-preview-fail';
+        el.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#0b0d10;color:#e8eaed;font:14px/1.45 system-ui,sans-serif;padding:18vh 1.5rem;box-sizing:border-box');
+        el.innerHTML = '<div style="max-width:34rem;margin:0 auto"><h1 style="font-size:1.15rem;font-weight:600;margin:0 0 .6rem">Live Preview could not render</h1><p style="margin:0;opacity:.82">' + '${safe}'.replace(/</g,'&lt;') + '</p><p style="margin-top:1rem;opacity:.65">Close this window, fix the project (or reinstall deps), then click Live again.</p></div>';
+        document.documentElement.appendChild(el);
+        return true;
+      })()`, true);
+    } catch { /* ignore */ }
+  };
+  win.webContents.on('console-message', (_e, _level, message) => {
+    const msg = String(message || '');
+    if (/SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named/i.test(msg)) {
+      showFail(msg.slice(0, 280)).catch(() => {});
+    }
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc, validatedURL, isMainFrame) => {
+    if (!isMainFrame || code === -3) return; // -3 = aborted
+    showFail(`Load failed (${code}): ${desc || 'unknown'} ${validatedURL || ''}`.trim()).catch(() => {});
+  });
+  win.webContents.on('render-process-gone', (_e, details) => {
+    showFail(`Preview crashed (${details?.reason || 'render-process-gone'}).`).catch(() => {});
+  });
+}
+
 async function loadDeviceIntoWindow(win, id, url, device, title) {
   try {
     win.setTitle(String(title || `${device.label} · NOVA Preview`));
@@ -317,6 +358,7 @@ async function openPreviewWindow(payload) {
 
   const existing = previewWindows.get(id);
   if (existing && !existing.isDestroyed()) {
+    attachPreviewLoadGuards(existing);
     if (kind === 'device' && device) {
       await loadDeviceIntoWindow(existing, id, url, device, title);
     } else {
@@ -359,6 +401,7 @@ async function openPreviewWindow(payload) {
     },
   });
   previewWindows.set(id, win);
+  attachPreviewLoadGuards(win);
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
   });

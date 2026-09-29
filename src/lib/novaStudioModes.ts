@@ -62,22 +62,19 @@ export function clearPendingBuildPlan(chatId: string): void {
   } catch { /* ignore */ }
 }
 
-/** User-facing plan card — Nova voice, free product, no upsell. */
+/**
+ * Legacy stub — do not use for user-facing replies.
+ * Instant “Plan — X / Build checklist / Nova is free” echoes are gone;
+ * create + Plan mode use runPlanMode / formatPlanReportMessage instead.
+ */
 export function formatBuildPlanReply(plan: PendingBuildPlan): string {
-  const bullets = (plan.bullets.length ? plan.bullets : plan.mustHaves.slice(0, 5))
-    .slice(0, 6)
-    .map((b) => `- ${b}`)
-    .join('\n');
+  const name = String(plan.productName || 'your idea').trim() || 'your idea';
   return [
-    `**Plan — ${plan.productName}**`,
+    `Got it — **${name}**. Let’s shape this before any files are created.`,
     '',
-    plan.summary.trim().slice(0, 600),
-    '',
-    bullets ? `**Build checklist**\n${bullets}` : '',
-    '',
-    'Nova is free — no paywall. Say **build it** (or **ok start building**) when you want me to create the project on disk.',
-    'Or tweak the plan in your next message before we build.',
-  ].filter(Boolean).join('\n');
+    'Press **+** under the chat box, choose **Plan**, then send your brief again for a deeper outline.',
+    'Or say **ok start building** when you want the folder on disk.',
+  ].join('\n');
 }
 
 export function buildPlanFromBrief(opts: {

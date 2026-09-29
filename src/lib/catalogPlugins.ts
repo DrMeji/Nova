@@ -569,31 +569,31 @@ export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
       return { label: user.login || user.name || 'GitHub' };
     },
     runLive: (t, u, o) => runGitHubLive(t, u, o),
-    mention: /github|repo|pull request|\bpr\b|issue/i,
+    mention: /github|repos?|repositor|pull request|\bpr\b|list my repos|\bgithub\s+issues?\b|\bopen\s+issues\b|\blist\s+(?:my\s+)?issues\b|\bissues?\s+(?:on|from|in)\s+github\b/i,
   },
-  notion: { verify: verifyNotionToken, runLive: (t, u, o) => runNotionLive(t, u, o), mention: /notion|spec|brief|workspace/i },
-  gmail: { verify: verifyGmailToken, runLive: (t, u, o) => runGmailLive(t, u, o), mention: /gmail|inbox|email|mail|unread/i },
+  notion: { verify: verifyNotionToken, runLive: (t, u, o) => runNotionLive(t, u, o), mention: /notion|spec|brief|workspace|search docs|pull a brief/i },
+  gmail: { verify: verifyGmailToken, runLive: (t, u, o) => runGmailLive(t, u, o), mention: /gmail|inbox|email|\bmail\b|unread|inbox summary|draft a reply/i },
   // Do NOT match bare "channel" / "dm" — those fire on YouTube "channel + views", UI DMs, etc.
-  // Require "slack" or a #channel with an explicit Slack action verb.
+  // Require "slack" or a #channel with an explicit Slack action verb — or Try-in-chat labels.
   slack: {
     verify: verifySlackToken,
     runLive: (t, u, o) => runSlackLive(t, u, o),
-    mention: /\bslack\b|(?:\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b[^.\n]{0,80}#[a-z][\w-]{1,80}\b)|(?:#[a-z][\w-]{1,80}\b[^.\n]{0,80}\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b)/i,
+    mention: /\bslack\b|unread channels|post a summary|(?:\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b[^.\n]{0,80}#[a-z][\w-]{1,80}\b)|(?:#[a-z][\w-]{1,80}\b[^.\n]{0,80}\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b)/i,
   },
-  linear: { verify: verifyLinearToken, runLive: (t, u, o) => runLinearLive(t, u, o), mention: /linear|ticket|issue/i },
-  figma: { verify: verifyFigmaToken, runLive: (t, u, o) => runFigmaLive(t, u, o), mention: /figma|design file|frame/i },
-  gdrive: { verify: verifyDriveToken, runLive: (t, u, o) => runDriveLive(t, u, o), mention: /drive|google drive|docs|sheets/i },
-  gcal: { verify: verifyCalendarToken, runLive: (t, u, o) => runCalendarLive(t, u, o), mention: /calendar|schedule|meeting|agenda|gcal/i },
-  vercel: { verify: verifyVercelToken, runLive: (t, u, o) => runVercelLive(t, u, o), mention: /vercel|deploy/i },
+  linear: { verify: verifyLinearToken, runLive: (t, u, o) => runLinearLive(t, u, o), mention: /linear|ticket|\bmy issues\b/i },
+  figma: { verify: verifyFigmaToken, runLive: (t, u, o) => runFigmaLive(t, u, o), mention: /figma|design file|frame|open a file/i },
+  gdrive: { verify: verifyDriveToken, runLive: (t, u, o) => runDriveLive(t, u, o), mention: /(?:google\s+)?drive|docs|sheets|recent files/i },
+  gcal: { verify: verifyCalendarToken, runLive: (t, u, o) => runCalendarLive(t, u, o), mention: /calendar|schedule|meeting|agenda|gcal|upcoming events/i },
+  vercel: { verify: verifyVercelToken, runLive: (t, u, o) => runVercelLive(t, u, o), mention: /vercel|deploy|recent deploys/i },
   // Do NOT match bare "discord" / "server" / "guild" — those fire on Discord.com-style website builds.
   // Require an explicit Discord *integration* ask (using/via Discord, post to Discord, Discord bot, etc.).
   discord: {
     verify: verifyDiscordToken,
     runLive: (t, u, o) => runDiscordLive(t, u, o),
-    mention: /\b(?:using|via|from|in|to)\s+discord\b|\bdiscord\s+(?:plugin|integration|bot|api|webhook)\b|\bpost\s+(?:to\s+)?discord\b|\bdiscord\s+(?:post|send|message|list|unread)\b/i,
+    mention: /\b(?:using|via|from|in|to)\s+discord\b|\bdiscord\s+(?:plugin|integration|bot|api|webhook)\b|\bpost\s+(?:to\s+)?discord\b|\bdiscord\s+(?:post|send|message|list|unread)\b|\bmy servers\b/i,
   },
   telegram: { verify: verifyTelegramToken, runLive: (t, u) => runTelegramLive(t, u), mention: /telegram|bot/i },
-  stripe: { verify: verifyStripeToken, runLive: (t, u) => runStripeLive(t, u), mention: /stripe|charge|payment/i },
+  stripe: { verify: verifyStripeToken, runLive: (t, u) => runStripeLive(t, u), mention: /stripe|charge|payment|recent charges/i },
   exa: { verify: verifyExaToken, runLive: (t, u) => runExaLive(t, u), mention: /exa|web search|search the web/i },
   supabase: { verify: verifySupabaseMgmtToken, runLive: (t, u) => runSupabaseLive(t, u), mention: /supabase|postgres|database/i },
 

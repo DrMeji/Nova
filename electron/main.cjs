@@ -30,7 +30,9 @@ function refreshArkSelfGuard() {
     resourcesPath: process.resourcesPath,
     execPath: process.execPath,
     isPackaged: app.isPackaged,
-    allowDevSelfAccess: !app.isPackaged && process.env.NOVA_DEV === '1',
+    // Unpackaged source builds (Open-NOVA-Build) must bind/audit this tree for Debug clinic.
+    // Packaged installs stay locked out of their own app.asar / resources.
+    allowDevSelfAccess: !app.isPackaged,
   });
 }
 refreshArkSelfGuard();
@@ -836,7 +838,11 @@ ipcMain.handle('NOVA:open-path', async (_event, targetPath) => {
 });
 
 ipcMain.handle('NOVA:open-external', async (_event, url) => {
-  return novaOpenExternal.openExternal(url);
+  try {
+    return await novaOpenExternal.openExternal(url);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Open failed' };
+  }
 });
 
 ipcMain.handle('NOVA:secrets-status', async () => ({
@@ -1044,6 +1050,14 @@ ipcMain.handle('NOVA:web-search', async (_e, payload) => {
     return await novaWebSearch.searchWeb(payload?.query || payload?.q || '');
   } catch (err) {
     return { ok: false, text: '', sources: [], error: err instanceof Error ? err.message : 'Web search failed' };
+  }
+});
+
+ipcMain.handle('NOVA:image-search', async (_e, payload) => {
+  try {
+    return await novaWebSearch.searchImages(payload?.query || payload?.q || '');
+  } catch (err) {
+    return { ok: false, images: [], error: err instanceof Error ? err.message : 'Image search failed' };
   }
 });
 
@@ -1725,13 +1739,35 @@ ipcMain.handle('NOVA:git-set-origin', async (_e, payload) => {
   }
 });
 
-ipcMain.handle('NOVA:plugin-oauth-start', async (_e, pluginId) => novaOAuth.startPluginOAuth(pluginId));
+ipcMain.handle('NOVA:plugin-oauth-start', async (_e, pluginId, opts) => {
+  try {
+    return await novaOAuth.startPluginOAuth(pluginId, opts && typeof opts === 'object' ? opts : {});
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'OAuth failed' };
+  }
+});
+ipcMain.handle('NOVA:plugin-oauth-cancel', async () => {
+  try {
+    return novaOAuth.cancelPluginOAuth();
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Cancel failed' };
+  }
+});
 ipcMain.handle('NOVA:plugin-oauth-status', async () => ({ ok: true, ...novaOAuth.oauthConfigStatus() }));
 ipcMain.handle('NOVA:plugin-oauth-set-client', async (_e, payload) => {
   const id = payload?.pluginId;
   const clientId = payload?.clientId;
   if (!id) return { ok: false, error: 'Missing pluginId' };
-  const stored = novaOAuth.setClientId(String(id), clientId == null ? '' : String(clientId));
+  const raw = clientId == null ? '' : String(clientId).trim();
+  // Never persist PATs as OAuth client ids — they belong in the vault after sign-in.
+  if (String(id) === 'github' && /^(ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)/i.test(raw)) {
+    return {
+      ok: false,
+      error: 'pat_not_client_id',
+      message: 'That is a personal access token, not an OAuth Client ID. Use Continue with GitHub to sign in with it.',
+    };
+  }
+  const stored = novaOAuth.setClientId(String(id), raw);
   return { ok: true, stored, ...novaOAuth.oauthConfigStatus() };
 });
 

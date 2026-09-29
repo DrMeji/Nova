@@ -3,27 +3,25 @@ import type { Session, User } from '@supabase/supabase-js';
 import {
   supabase,
   clearAuthLocalFallback,
-  healSessionExpires,
-  persistHealedAuthSession,
   isSupabaseConfigured,
-  supabaseCloudWarning,
 } from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
 import {
   clearSetupCompleted,
   ensureFirstRunGate,
-  isFreshInstallGate,
   isSetupCompleted,
   markSetupCompleted,
   prepareLaunchForTesting,
 } from '@/lib/setup';
-import { hydrateProviderApiKeys } from '@/lib/localPrefs';
-import { ensureNovaId, formatNovaId, readLocalNovaId } from '@/lib/novaUserId';
-import { mergeGuestSocialToCloud } from '@/lib/novaSocial';
-import { deleteOwnAccountPermanently } from '@/lib/deleteAccount';
-import { accountResetRedirectUrl } from '@/lib/accountWeb';
+import { hydrateProviderApiKeys, getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
+import {
+  clearGitHubSession,
+  formatGitHubIdentity,
+  loadGitHubSession,
+  saveGitHubSession,
+  type GitHubSession,
+} from '@/lib/githubSession';
 
-// Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'NOVA:bypass-enabled';
 const GUEST_USER = {
   id: 'guest-local',
@@ -47,9 +45,45 @@ function guestProfile(): Profile {
     id: 'guest-local',
     display_name: 'Guest',
     avatar_url: null,
-    nova_id: readLocalNovaId('guest-local'),
+    nova_id: 'guest',
     onboarding_completed: isSetupCompleted(),
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function githubUserFromSession(s: GitHubSession): User {
+  return {
+    id: `github:${s.githubId}`,
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: `${s.login}@users.noreply.github.com`,
+    email_confirmed_at: new Date().toISOString(),
+    phone: '',
+    confirmed_at: new Date().toISOString(),
+    last_sign_in_at: new Date().toISOString(),
+    app_metadata: { provider: 'github', providers: ['github'] },
+    user_metadata: {
+      display_name: s.name || s.login,
+      user_name: s.login,
+      avatar_url: s.avatarUrl || undefined,
+      github_id: s.githubId,
+    },
+    identities: [],
+    created_at: s.at,
+    updated_at: new Date().toISOString(),
+    is_anonymous: false,
+  } as unknown as User;
+}
+
+function githubProfileFromSession(s: GitHubSession): Profile {
+  return {
+    id: `github:${s.githubId}`,
+    display_name: s.name || s.login,
+    avatar_url: s.avatarUrl,
+    nova_id: formatGitHubIdentity(s.login),
+    onboarding_completed: isSetupCompleted(),
+    created_at: s.at,
     updated_at: new Date().toISOString(),
   };
 }
@@ -65,13 +99,16 @@ interface AuthContextValue {
   settings: UserSettings | null;
   loading: boolean;
   bypass: boolean;
+  /** Primary gate — browser GitHub device/OAuth flow (or PAT). */
+  signInWithGitHub: (opts?: { accessToken?: string }) => Promise<{ error: string | null; needsConfig?: boolean; cancelled?: boolean }>;
+  /** @deprecated Email/password removed — use signInWithGitHub. */
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  /** @deprecated Email/password removed — use signInWithGitHub. */
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
+  /** @deprecated Email/password removed. */
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  /** Permanently delete the signed-in account immediately. */
   deleteAccountPermanently: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  /** Guest login. skipSetup: true jumps straight into the app; false runs first-run optimize. */
   bypassLogin: (options?: { skipSetup?: boolean }) => void;
   refreshProfile: () => Promise<void>;
   updateSettings: (updates: Partial<UserSettings>) => Promise<void>;
@@ -91,452 +128,138 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [packaged, setPackaged] = useState(false);
   const bypassRef = useRef(false);
   bypassRef.current = bypass;
-  /** Last known-good session — used to undo spurious SIGNED_OUT within seconds of login. */
-  const lastGoodSessionRef = useRef<Session | null>(null);
-  const intentionalSignOutRef = useRef(false);
-  const restoringSessionRef = useRef(false);
-  /** Ignore nested SIGNED_OUT while / shortly after we rehydrate a healed session. */
-  const restoreHoldUntilRef = useRef(0);
+  const githubModeRef = useRef(false);
 
-  const rememberSession = (next: Session | null) => {
-    if (next?.access_token && next.refresh_token) {
-      lastGoodSessionRef.current = healSessionExpires(next) as Session;
-      return;
-    }
-    // Only clear the safety net on intentional wipe paths (caller nulls after sign-out).
-    if (next === null && intentionalSignOutRef.current) {
-      lastGoodSessionRef.current = null;
-    }
-  };
-
-  const sessionStillUsable = (s: Session | null | undefined) => {
-    if (!s?.access_token || !s.refresh_token) return false;
-    // Prefer JWT exp — stored expires_at can be wrong when the OS clock is skewed
-    // vs Supabase (that skew is what caused the post-login refresh storm).
+  const applyGitHubSession = (s: GitHubSession) => {
+    githubModeRef.current = true;
+    setSession(null);
+    setUser(githubUserFromSession(s));
+    setProfile(githubProfileFromSession(s));
+    setSettings(null);
+    setBypass(false);
+    bypassRef.current = false;
     try {
-      const payload = JSON.parse(atob(s.access_token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')));
-      const exp = Number(payload?.exp);
-      if (Number.isFinite(exp) && exp * 1000 > Date.now() + 15_000) return true;
-    } catch {
-      /* fall through */
-    }
-    const healed = healSessionExpires(s);
-    const expMs = (healed.expires_at ?? 0) * 1000;
-    if (expMs > Date.now() + 15_000) return true;
-    // Refresh token can still revive the session even if access looks expired locally.
-    return s.refresh_token.length > 10;
-  };
-
-  const restoreSessionInUi = async (raw: Session) => {
-    const healed = (await persistHealedAuthSession(raw)) as Session;
-    rememberSession(healed);
-    setSession(healed);
-    setUser(healed.user);
-    setLoading(false);
-    restoreHoldUntilRef.current = Date.now() + 12_000;
-  };
-
-  // Never call supabase.auth.getUser() here — in auth-js 2.112.x a transient
-  // session_not_found still runs _removeSession() and fires SIGNED_OUT, which
-  // looks like a random sign-out after Code pill / typing / login.
-  const loadProfileAndSettings = async (userId: string, authUser?: User | null) => {
-    await ensureFirstRunGate();
-    const setupDone = isSetupCompleted();
-    const [profileRes, settingsRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-      supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
-    ]);
-    const accountEmail = authUser?.email || null;
-    if (profileRes.data) {
-      const p = profileRes.data as Profile;
-      const metaName = authUser?.user_metadata?.display_name as string | undefined;
-      const display = p.display_name || metaName || null;
-      setProfile({
-        ...p,
-        display_name: display,
-        // Machine install flag wins. never skip first-run because of a cloud profile.
-        onboarding_completed: setupDone,
-      });
-      const novaId = await ensureNovaId(userId, accountEmail);
-      setProfile(prev => prev ? { ...prev, nova_id: novaId } : prev);
-      if (display) {
-        try {
-          const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
-          const prefs = getLocalPrefs();
-          if (display && (!prefs.displayName || prefs.displayName === 'Guest')) {
-            setLocalPrefs({ displayName: display });
-          }
-        } catch {
-          /* ignore */
-        }
+      const prefs = getLocalPrefs();
+      const display = s.name || s.login;
+      if (display && (!prefs.displayName || prefs.displayName === 'Guest')) {
+        setLocalPrefs({ displayName: display });
       }
-    } else {
-      setProfile({
-        id: userId,
-        display_name: null,
-        avatar_url: null,
-        nova_id: await ensureNovaId(userId, accountEmail),
-        onboarding_completed: setupDone,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    }
-    if (settingsRes.data) setSettings(settingsRes.data as UserSettings);
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      // Must finish before any auth profile load. otherwise signup can skip setup.
       await ensureFirstRunGate();
       if (cancelled) return;
 
-      // Migrate any browser localStorage auth session into Electron userData.
-      try {
-        if (window.novaDesktop?.authStorageSet) {
-          const legacy = Object.keys(localStorage).filter(k => /auth-token/i.test(k));
-          for (const k of legacy) {
-            const v = localStorage.getItem(k);
-            if (!v) continue;
-            const existing = await window.novaDesktop.authStorageGet?.(k);
-            if (!existing) await window.novaDesktop.authStorageSet(k, v);
-            if (k !== 'ark-auth-token') {
-              const primary = await window.novaDesktop.authStorageGet?.('ark-auth-token');
-              if (!primary) await window.novaDesktop.authStorageSet('ark-auth-token', v);
-            }
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-
-      // Chat and Models read provider keys synchronously on first render.
-      // Hydrate the encrypted desktop vault before mounting those surfaces so
-      // saved providers do not briefly appear disconnected and get overwritten.
       try {
         await hydrateProviderApiKeys();
-      } catch {
-        /* keep auth usable if secure-key hydration is unavailable */
-      }
+      } catch { /* ignore */ }
 
-      let isPackaged = false;
       try {
         const meta = await window.novaDesktop?.appMeta?.();
-        isPackaged = Boolean(meta?.isPackaged);
-        if (!cancelled) setPackaged(isPackaged);
-      } catch {
-        /* ignore */
-      }
+        if (!cancelled) setPackaged(Boolean(meta?.isPackaged));
+      } catch { /* ignore */ }
 
-      // Packaged releases never auto-enter as guest.
-      // Unpackaged / bat builds: clear leftover bypass so Auth is first every launch.
-      // Bypass buttons only apply for the current Electron session.
-      localStorage.removeItem(BYPASS_KEY);
-
-      // Fresh / reinstalled desktop: wipe leftover sessions so AuthScreen is first.
-      // Only once at cold start — never after a live sign-in in this Electron session.
-      if (isPackaged && isFreshInstallGate()) {
-        intentionalSignOutRef.current = true;
-        localStorage.removeItem(BYPASS_KEY);
-        clearAuthLocalFallback();
-        try {
-          await supabase.auth.signOut({ scope: 'local' });
-        } catch {
-          /* ignore */
-        }
-        try {
-          await window.novaDesktop?.authStorageRemove?.('ark-auth-token');
-        } catch {
-          /* ignore */
-        }
-        if (!cancelled) {
-          lastGoodSessionRef.current = null;
-          setBypass(false);
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-          setSettings(null);
-          setLoading(false);
-        }
-        // Allow a real Sign in in this same Electron session.
-        intentionalSignOutRef.current = false;
-        return;
-      }
-
-      // Do not restore guest bypass from a previous session.
-
-      const { data } = await supabase.auth.getSession();
+      // GitHub session is the primary gate — no Supabase required.
+      const gh = await loadGitHubSession();
       if (cancelled) return;
-      if (data.session) {
-        const healed = (await persistHealedAuthSession(data.session)) as Session;
-        rememberSession(healed);
-        setSession(healed);
-        setUser(healed.user ?? null);
-        if (healed.user) {
-          await loadProfileAndSettings(healed.user.id, healed.user);
-          if (!cancelled) setLoading(false);
-        } else {
-          setLoading(false);
-        }
-      } else {
-        setSession(null);
-        setUser(null);
+      if (gh) {
+        applyGitHubSession(gh);
         setLoading(false);
+        return;
       }
+
+      // Never auto-restore guest bypass across restarts.
+      localStorage.removeItem(BYPASS_KEY);
+      setLoading(false);
     })();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, newSession) => {
-      // Guest bypass is in-memory only; ignore sign-out events that clear the real token.
-      if (!newSession?.user && bypassRef.current) {
-        setLoading(false);
-        return;
-      }
-
-      if (newSession?.user) {
-        intentionalSignOutRef.current = false;
-        const healed = healSessionExpires(newSession) as Session;
-        rememberSession(healed);
-        setSession(healed);
-        setUser(healed.user);
-        void (async () => {
-          try {
-            await persistHealedAuthSession(healed);
-          } catch {
-            /* ignore */
-          }
-          await ensureFirstRunGate();
-          if (cancelled) return;
-          await loadProfileAndSettings(healed.user.id, healed.user);
-          if (!cancelled) setLoading(false);
-        })();
-        return;
-      }
-
-      // Null session / SIGNED_OUT — ignore non-sign-out noise (refresh races).
-      if (event !== 'SIGNED_OUT') {
-        setLoading(false);
-        return;
-      }
-
-      // Explicit Sign out button — always clear.
-      if (intentionalSignOutRef.current) {
-        lastGoodSessionRef.current = null;
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setSettings(null);
-        setLoading(false);
-        return;
-      }
-
-      // Nested kickout while we are already rehydrating — do not clear UI / call getSession
-      // (getSession re-triggers the refresh storm that caused this SIGNED_OUT).
-      if (restoringSessionRef.current || Date.now() < restoreHoldUntilRef.current) {
-        return;
-      }
-
-      // Spurious kickout (often ~2s after login on skewed Windows clocks): restore
-      // from memory + re-persist healed expires_at. Never call getSession here.
-      void (async () => {
-        if (cancelled || bypassRef.current || restoringSessionRef.current) return;
-
-        const last = lastGoodSessionRef.current;
-        if (sessionStillUsable(last)) {
-          restoringSessionRef.current = true;
-          try {
-            await restoreSessionInUi(last!);
-            return;
-          } catch {
-            /* fall through */
-          } finally {
-            restoringSessionRef.current = false;
-          }
-        }
-
-        if (cancelled || bypassRef.current) return;
-        lastGoodSessionRef.current = null;
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setSettings(null);
-        setLoading(false);
-      })();
-    });
 
     return () => {
       cancelled = true;
-      authListener.subscription.unsubscribe();
     };
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signInWithGitHub = async (opts?: { accessToken?: string }) => {
     await ensureFirstRunGate();
-    intentionalSignOutRef.current = false;
-    if (!isSupabaseConfigured) {
-      return {
-        error:
-          supabaseCloudWarning
-          || 'Cloud sign-in is off. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local, then relaunch.',
-      };
+    intentionalClear();
+    if (!window.novaDesktop?.pluginOAuthStart) {
+      return { error: 'GitHub sign-in needs the NOVA desktop app.' };
     }
-    const wasGuest = bypass;
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (!error && data.session) {
-      const healed = (await persistHealedAuthSession(data.session)) as Session;
-      rememberSession(healed);
-      setSession(healed);
-      setUser(healed.user ?? null);
-      restoreHoldUntilRef.current = Date.now() + 12_000;
+    try {
+      const tokenOverride = String(opts?.accessToken || '').trim();
+      if (!tokenOverride) {
+        const status = await window.novaDesktop.pluginOAuthStatus?.();
+        if (status && status.github === false) {
+          return {
+            error:
+              'Add your GitHub OAuth Client ID or a personal access token below, then try again.',
+            needsConfig: true,
+          };
+        }
+      }
+      const res = await window.novaDesktop.pluginOAuthStart(
+        'github',
+        tokenOverride ? { accessToken: tokenOverride } : undefined,
+      );
+          if (!res?.ok || !res.accessToken) {
+        if (res?.cancelled) {
+          return { error: null, cancelled: true };
+        }
+        return {
+          error: res?.message
+            || (res?.needsConfig
+              ? 'Add your GitHub OAuth Client ID or a personal access token below, then try again.'
+              : 'GitHub sign-in was cancelled or failed.'),
+          needsConfig: Boolean(res?.needsConfig),
+        };
+      }
+      const login = String(res.accountLabel || '').trim();
+      const githubId = String(res.githubId || '').trim() || login;
+      if (!login) {
+        return { error: 'GitHub did not return a username. Try again.' };
+      }
+      const next: GitHubSession = {
+        githubId,
+        login,
+        avatarUrl: res.avatarUrl ?? null,
+        name: res.name ?? null,
+        at: new Date().toISOString(),
+      };
+      await saveGitHubSession(next, res.accessToken);
+      applyGitHubSession(next);
       localStorage.setItem('NOVA:last-auth', JSON.stringify({
-        method: 'supabase',
-        email,
+        method: 'github',
+        login,
         at: new Date().toISOString(),
       }));
-      // TEMP: local recovery note on this PC only (not uploaded). See localAuthRecovery.ts.
-      void import('@/lib/localAuthRecovery')
-        .then(({ saveLocalLoginRecovery }) => saveLocalLoginRecovery(email, password))
-        .catch(() => undefined);
-      if (wasGuest && data.user?.id) {
-        localStorage.removeItem(BYPASS_KEY);
-        setBypass(false);
-        void mergeGuestSocialToCloud(data.user.id);
-      }
-      // Force profile load immediately so we don't wait on a flaky auth event.
-      if (healed.user) {
-        void loadProfileAndSettings(healed.user.id, healed.user);
-      }
+      setLoading(false);
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'GitHub sign-in failed.' };
     }
-    if (error) {
-      const msg = String(error.message || '');
-      if (/failed to fetch|networkerror|fetch failed|placeholder\.invalid/i.test(msg)) {
-        return {
-          error:
-            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
-        };
-      }
-      if (/rate limit|too many requests|email rate limit/i.test(msg)) {
-        return {
-          error:
-            'Auth is rate-limited by Supabase right now. Wait a minute, or Sign in if the account already exists.',
-        };
-      }
-    }
-    return { error: error?.message ?? null };
   };
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
-    await ensureFirstRunGate();
-    if (!isSupabaseConfigured) {
-      return {
-        error:
-          supabaseCloudWarning
-          || 'Cloud sign-up is off. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local, then relaunch.',
-      };
-    }
-    const wasGuest = bypass;
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      // If the caller does not provide a displayName, we leave user_metadata empty.
-      // We'll assign the NOVA ID display name after we generate/claim their 7-digit NOVA ID.
-      options: { data: { display_name: displayName?.trim() || undefined } },
-    });
-    if (error) {
-      const msg = String(error.message || '');
-      if (/failed to fetch|networkerror|fetch failed|placeholder\.invalid/i.test(msg)) {
-        return {
-          error:
-            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
-        };
-      }
-      if (/rate limit|too many requests|email rate limit/i.test(msg)) {
-        return {
-          error:
-            'Email rate limit hit (Supabase built-in mail is ~2/hour). Fix: add custom SMTP in Supabase Auth settings, temporarily disable Confirm email for testing, wait, or Sign in if the account already exists.',
-        };
-      }
-      return { error: msg };
-    }
-    if (!error && data.user) {
-      // TEMP: local recovery note on this PC only (not uploaded).
-      void import('@/lib/localAuthRecovery')
-        .then(({ saveLocalLoginRecovery }) => saveLocalLoginRecovery(email, password))
-        .catch(() => undefined);
-      try {
-        const trimmed = displayName?.trim() || null;
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          display_name: trimmed,
-          // Cloud flag is informational; local install setup still gates the UI.
-          onboarding_completed: isSetupCompleted(),
-        });
-        const novaId = await ensureNovaId(data.user.id, email);
+  function intentionalClear() {
+    /* marker for future spurious-sign-out guards */
+  }
 
-        // Enforce: users do not choose their own username at signup.
-        // If no displayName was provided, set display_name to the 7-digit NOVA ID.
-        if (!trimmed) {
-          const auto = formatNovaId(novaId);
-          await supabase.from('profiles').update({ display_name: auto }).eq('id', data.user.id);
-          const { setLocalPrefs } = await import('@/lib/localPrefs');
-          setLocalPrefs({ displayName: auto });
-        }
-      } catch {
-        /* profile row may be created by trigger */
-      }
-      // If a caller provided a displayName, keep the prior behavior.
-      if (displayName?.trim()) {
-        try {
-          const { setLocalPrefs } = await import('@/lib/localPrefs');
-          setLocalPrefs({ displayName: displayName.trim() });
-        } catch {
-          /* ignore */
-        }
-      }
-      if (wasGuest && data.user?.id) {
-        localStorage.removeItem(BYPASS_KEY);
-        setBypass(false);
-        void mergeGuestSocialToCloud(data.user.id);
-      }
-    }
-    return { error: (error as { message?: string } | null)?.message ?? null };
-  };
+  const signIn = async () => ({
+    error: 'Email sign-in is retired. Use Continue with GitHub.',
+  });
 
-  const resetPassword = async (email: string) => {
-    const trimmed = String(email || '').trim();
-    if (!trimmed) {
-      return { error: 'Enter your account email first.' };
-    }
-    if (!isSupabaseConfigured) {
-      return {
-        error:
-          'Cloud auth is off in this build. Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY to .env.local, relaunch, then try again.',
-      };
-    }
-    const redirectTo = accountResetRedirectUrl();
-    if (!redirectTo) {
-      return {
-        error:
-          'Email reset is not configured for this build (missing VITE_NOVA_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your NOVA account site → Forgot password.',
-      };
-    }
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
-    if (error) {
-      const msg = String(error.message || '');
-      if (/failed to fetch|networkerror|fetch failed/i.test(msg)) {
-        return {
-          error:
-            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
-        };
-      }
-      return { error: error.message || 'Could not send reset email.' };
-    }
-    return { error: null };
-  };
+  const signUp = async () => ({
+    error: 'Email sign-up is retired. Use Continue with GitHub.',
+  });
+
+  const resetPassword = async () => ({
+    error: 'Password reset is retired. Sign in with GitHub.',
+  });
 
   const bypassLogin = (options?: { skipSetup?: boolean }) => {
     if (packaged) return;
-    // Session-only — do not persist across bat / Electron restarts.
     localStorage.removeItem(BYPASS_KEY);
     localStorage.setItem('NOVA:last-auth', JSON.stringify({
       method: 'bypass',
@@ -547,6 +270,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       clearSetupCompleted();
     }
+    githubModeRef.current = false;
     bypassRef.current = true;
     setBypass(true);
     setSession(null);
@@ -554,71 +278,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(guestProfile());
     setSettings(null);
     setLoading(false);
-    // Drop any real auth token so the next cold start lands on Auth, not a restored session.
-    void supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
-    void ensureNovaId('guest-local').then(id => {
-      setProfile(prev => prev ? { ...prev, nova_id: id } : prev);
-    });
   };
 
   const signOut = async () => {
-    intentionalSignOutRef.current = true;
-    lastGoodSessionRef.current = null;
+    intentionalClear();
     localStorage.removeItem(BYPASS_KEY);
     clearAuthLocalFallback();
+    githubModeRef.current = false;
     setBypass(false);
     setSession(null);
     setUser(null);
     setProfile(null);
     setSettings(null);
-    try {
-      await supabase.auth.signOut({ scope: 'local' });
-    } catch {
-      // ignore
-    }
-    try {
-      await window.novaDesktop?.authStorageRemove?.('nova-auth-token');
-      await window.novaDesktop?.authStorageRemove?.('ark-auth-token');
-    } catch {
-      /* ignore */
+    await clearGitHubSession();
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch { /* ignore */ }
     }
   };
 
   const deleteAccountPermanently = async () => {
-    const result = await deleteOwnAccountPermanently();
-    if (!result.ok) return result;
-    localStorage.removeItem(BYPASS_KEY);
-    setBypass(false);
-    setSession(null);
-    setUser(null);
-    setProfile(null);
-    setSettings(null);
-    try {
-      await supabase.auth.signOut({ scope: 'local' });
-    } catch {
-      /* ignore */
-    }
+    await signOut();
     return { ok: true as const };
   };
 
   const refreshProfile = async () => {
     if (user?.id === 'guest-local' || bypass) {
-      const id = await ensureNovaId('guest-local');
-      setProfile({ ...guestProfile(), nova_id: id });
+      setProfile(guestProfile());
       return;
     }
-    if (user) await loadProfileAndSettings(user.id, user);
+    const gh = await loadGitHubSession();
+    if (gh) {
+      applyGitHubSession(gh);
+    }
   };
 
-  const updateSettings = async (updates: Partial<UserSettings>) => {
-    if (!user || user.id === 'guest-local') return;
-    const { data } = await supabase
-      .from('user_settings')
-      .update(updates)
-      .eq('user_id', user.id)
-      .select()
-      .maybeSingle();
-    if (data) setSettings(data as UserSettings);
+  const updateSettings = async (_updates: Partial<UserSettings>) => {
+    // Local-first GitHub gate — no cloud user_settings until social returns.
   };
 
   return (
@@ -629,6 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       settings,
       loading,
       bypass,
+      signInWithGitHub,
       signIn,
       signUp,
       resetPassword,

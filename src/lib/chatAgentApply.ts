@@ -131,9 +131,9 @@ async function listDirItems(abs: string): Promise<{ name: string; isDirectory?: 
 async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
   if (!window.novaDesktop?.readTextFile) return {};
   const out: ProjectFileMap = {};
-  const maxFiles = 80;
-  const codeRe = /\.(jsx?|tsx?|css|html|json|md)$/i;
-  const skipDir = /^(node_modules|dist|build|\.git|\.vite|coverage)$/i;
+  const maxFiles = 220;
+  const codeRe = /\.(jsx?|tsx?|css|scss|html|json|md|svg)$/i;
+  const skipDir = /^(node_modules|dist|build|release|\.git|\.vite|coverage|out)$/i;
 
   const readRel = async (rel: string) => {
     if (Object.keys(out).length >= maxFiles) return;
@@ -148,7 +148,7 @@ async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMa
   };
 
   const walk = async (relDir: string, depth: number) => {
-    if (depth > 4 || Object.keys(out).length >= maxFiles) return;
+    if (depth > 6 || Object.keys(out).length >= maxFiles) return;
     const abs = relDir ? joinDisk(diskRoot, relDir) : diskRoot;
     const entries = await listDirItems(abs);
     for (const ent of entries) {
@@ -170,8 +170,10 @@ async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMa
     }
   };
 
-  // Prefer src/ first, then project roots.
+  // Prefer src/ first (full tree), then electron/public, then project roots.
   await walk('src', 0);
+  await walk('electron', 0);
+  await walk('public', 0);
   for (const rootFile of [
     'index.html', 'package.json', 'vite.config.js', 'vite.config.ts',
     'css/styles.css', 'js/app.js', 'README.md',

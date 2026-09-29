@@ -1,35 +1,89 @@
 /**
  * Plugin OAuth helpers for Electron.
- * Supports GitHub device flow when NOVA_GITHUB_CLIENT_ID (or prefs) is set,
- * plus a localhost redirect callback for providers that use auth-code flow.
+ * GitHub: prefer browser Authorize (PKCE + localhost) like ChatGPT;
+ * fall back to Device Flow (shows user_code in the app). Cancel supported.
  */
 
 const http = require('http');
-const { shell } = require('electron');
+const crypto = require('crypto');
+const { shell, BrowserWindow } = require('electron');
 const { URL } = require('url');
 const novaOAuthConfig = require('./novaOAuthConfig.cjs');
 
 /** @type {http.Server | null} */
 let callbackServer = null;
+let oauthCancelled = false;
+let oauthTimeout = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let oauthCancelPoll = null;
+
+function resetOAuthCancel() {
+  oauthCancelled = false;
+}
+
+function clearOAuthTimers() {
+  if (oauthTimeout) {
+    try { clearTimeout(oauthTimeout); } catch { /* ignore */ }
+    oauthTimeout = null;
+  }
+  if (oauthCancelPoll) {
+    try { clearInterval(oauthCancelPoll); } catch { /* ignore */ }
+    oauthCancelPoll = null;
+  }
+}
+
+function cancelPluginOAuth() {
+  oauthCancelled = true;
+  clearOAuthTimers();
+  if (callbackServer) {
+    try { callbackServer.close(); } catch { /* ignore */ }
+    callbackServer = null;
+  }
+  broadcastOAuthProgress({ cancelled: true });
+  return { ok: true };
+}
+
+function broadcastOAuthProgress(payload) {
+  try {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed()) continue;
+      try {
+        w.webContents.send('NOVA:plugin-oauth-progress', payload);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 function readClientId(pluginId) {
   const fromFile = novaOAuthConfig.get(pluginId);
   if (fromFile) return fromFile;
   const envMap = {
-    github: process.env.NOVA_GITHUB_CLIENT_ID || process.env.GITHUB_CLIENT_ID,
-    google: process.env.NOVA_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
+    github:
+      process.env.NOVA_GITHUB_CLIENT_ID
+      || process.env.GITHUB_CLIENT_ID
+      || process.env.ARK_GITHUB_CLIENT_ID,
+    google:
+      process.env.NOVA_GOOGLE_CLIENT_ID
+      || process.env.GOOGLE_CLIENT_ID
+      || process.env.ARK_GOOGLE_CLIENT_ID,
     notion: process.env.NOVA_NOTION_CLIENT_ID || process.env.NOTION_CLIENT_ID,
   };
   return (envMap[pluginId] || '').trim() || null;
 }
 
-function json(res, status, body) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-  });
-  res.end(payload);
+function readGithubClientSecret() {
+  const fromFile = novaOAuthConfig.get('github_secret');
+  if (fromFile) return fromFile;
+  return (
+    process.env.NOVA_GITHUB_CLIENT_SECRET
+    || process.env.GITHUB_CLIENT_SECRET
+    || process.env.ARK_GITHUB_CLIENT_SECRET
+    || ''
+  ).trim() || null;
 }
 
 async function fetchJson(url, init) {
@@ -42,33 +96,141 @@ async function fetchJson(url, init) {
   return data;
 }
 
-/**
- * GitHub device flow — user enters a code at github.com/login/device.
- * Requires a registered OAuth App client id (public; no secret for device flow).
- */
-async function startGitHubDeviceFlow() {
-  const clientId = readClientId('github');
-  if (!clientId) {
+function isGithubPat(value) {
+  const t = String(value || '').trim();
+  return /^(ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)/i.test(t);
+}
+
+function looksLikeOauthClientId(value) {
+  const t = String(value || '').trim();
+  if (!t || isGithubPat(t)) return false;
+  if (t.length < 10 || t.length > 80) return false;
+  if (/\s/.test(t)) return false;
+  return true;
+}
+
+function pkcePair() {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
+
+async function authWithGithubToken(accessToken) {
+  const token = String(accessToken || '').trim();
+  if (!token) {
+    return { ok: false, message: 'Missing GitHub token.' };
+  }
+  try {
+    const me = await fetchJson('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'NOVA-Desktop',
+      },
+    });
+    const label = me.login || 'GitHub';
+    return {
+      ok: true,
+      accessToken: token,
+      accountLabel: label,
+      githubId: me.id != null ? String(me.id) : label,
+      avatarUrl: me.avatar_url || null,
+      name: me.name || null,
+      provider: 'github',
+      mode: 'token',
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Token login failed';
     return {
       ok: false,
-      needsConfig: true,
       message:
-        'Set NOVA_GITHUB_CLIENT_ID to your GitHub OAuth App client id to use one-click device login. Paste a PAT as a fallback.',
+        /bad credentials|401|unauthorized/i.test(msg)
+          ? 'That GitHub token was rejected. Create a fine-grained or classic PAT with repo access, or use an OAuth App Client ID.'
+          : msg,
     };
   }
+}
 
-  const start = await fetchJson('https://github.com/login/device/code', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'NOVA-Desktop',
-    },
-    body: JSON.stringify({
-      client_id: clientId,
-      scope: 'read:user repo',
-    }),
+/**
+ * ChatGPT-style browser authorize (Authorize NOVA → redirect to localhost).
+ * Uses PKCE so a client secret is optional; secret used when present.
+ */
+async function startGitHubBrowserFlow(clientId) {
+  const { verifier, challenge } = pkcePair();
+  const state = crypto.randomBytes(16).toString('hex');
+  const secret = readGithubClientSecret();
+
+  broadcastOAuthProgress({
+    mode: 'browser',
+    message: 'Approve NOVA in your browser…',
   });
+
+  const result = await startLocalCallback({
+    authorizeUrl:
+      `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}`
+      + '&redirect_uri=http%3A%2F%2F127.0.0.1%3A{PORT}%2Fcallback'
+      + `&scope=${encodeURIComponent('read:user repo')}`
+      + `&state=${encodeURIComponent(state)}`
+      + `&code_challenge=${encodeURIComponent(challenge)}`
+      + '&code_challenge_method=S256',
+    expectedState: state,
+    exchange: async (code, redirectUri) => {
+      const body = {
+        client_id: clientId,
+        code,
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      };
+      if (secret) body.client_secret = secret;
+      const data = await fetchJson('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'NOVA-Desktop',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!data.access_token) {
+        throw new Error(data.error_description || data.error || 'No access token from GitHub');
+      }
+      return authWithGithubToken(data.access_token);
+    },
+  });
+
+  return result;
+}
+
+/**
+ * Device flow fallback — shows a short user_code in the app (and opens GitHub).
+ */
+async function startGitHubDeviceFlow(clientId) {
+  let start;
+  try {
+    start = await fetchJson('https://github.com/login/device/code', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'NOVA-Desktop',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        scope: 'read:user repo',
+      }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Device flow failed';
+    if (/not found|404/i.test(msg)) {
+      return {
+        ok: false,
+        needsConfig: true,
+        message:
+          'GitHub did not recognize that Client ID. Confirm the OAuth App exists and Device Flow is enabled.',
+      };
+    }
+    return { ok: false, message: msg };
+  }
 
   const deviceCode = start.device_code;
   const userCode = start.user_code;
@@ -76,17 +238,39 @@ async function startGitHubDeviceFlow() {
   const verificationUri = start.verification_uri || 'https://github.com/login/device';
   const expiresIn = Number(start.expires_in) || 900;
 
-  if (verificationUri) {
-    try {
-      await shell.openExternal(verificationUri);
-    } catch {
-      /* ignore */
-    }
+  if (!deviceCode || !userCode) {
+    return {
+      ok: false,
+      needsConfig: true,
+      message:
+        'GitHub did not start device login. Confirm Device Flow is enabled on your OAuth App.',
+    };
+  }
+
+  broadcastOAuthProgress({
+    mode: 'device',
+    userCode,
+    verificationUri,
+    message: 'Enter this code on GitHub, then Authorize.',
+  });
+
+  try {
+    const openUrl = start.verification_uri_complete
+      || `${verificationUri}${verificationUri.includes('?') ? '&' : '?'}user_code=${encodeURIComponent(userCode)}`;
+    await shell.openExternal(openUrl);
+  } catch {
+    /* ignore */
   }
 
   const deadline = Date.now() + expiresIn * 1000;
   while (Date.now() < deadline) {
+    if (oauthCancelled) {
+      return { ok: false, cancelled: true, message: 'Cancelled.' };
+    }
     await new Promise((r) => setTimeout(r, interval));
+    if (oauthCancelled) {
+      return { ok: false, cancelled: true, message: 'Cancelled.' };
+    }
     try {
       const tokenRes = await fetchJson('https://github.com/login/oauth/access_token', {
         method: 'POST',
@@ -102,26 +286,7 @@ async function startGitHubDeviceFlow() {
         }),
       });
       if (tokenRes.access_token) {
-        let label = 'GitHub';
-        try {
-          const me = await fetchJson('https://api.github.com/user', {
-            headers: {
-              Authorization: `Bearer ${tokenRes.access_token}`,
-              Accept: 'application/vnd.github+json',
-              'User-Agent': 'NOVA-Desktop',
-            },
-          });
-          label = me.login || label;
-        } catch {
-          /* keep default */
-        }
-        return {
-          ok: true,
-          accessToken: tokenRes.access_token,
-          accountLabel: label,
-          provider: 'github',
-          mode: 'device',
-        };
+        return authWithGithubToken(tokenRes.access_token);
       }
       if (tokenRes.error === 'authorization_pending' || tokenRes.error === 'slow_down') {
         continue;
@@ -130,24 +295,78 @@ async function startGitHubDeviceFlow() {
         return { ok: false, message: tokenRes.error_description || tokenRes.error };
       }
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : 'Device flow failed' };
+      const msg = err instanceof Error ? err.message : 'Device flow failed';
+      if (/authorization_pending|slow_down/i.test(msg)) continue;
+      return { ok: false, message: msg };
     }
   }
-  return { ok: false, message: 'GitHub device login timed out. Try again or paste a PAT.' };
+  return { ok: false, message: 'GitHub device login timed out. Try again.' };
+}
+
+async function startGitHubOAuth(opts = {}) {
+  resetOAuthCancel();
+  const override = String(opts.accessToken || opts.clientId || '').trim();
+  let clientId = override || readClientId('github');
+
+  if (!clientId) {
+    return {
+      ok: false,
+      needsConfig: true,
+      message:
+        'Add your GitHub OAuth App Client ID once (publisher setup), or paste a personal access token.',
+    };
+  }
+
+  if (isGithubPat(clientId)) {
+    if (!override) {
+      try { novaOAuthConfig.set('github', ''); } catch { /* ignore */ }
+    }
+    return authWithGithubToken(clientId);
+  }
+
+  if (!looksLikeOauthClientId(clientId)) {
+    return {
+      ok: false,
+      needsConfig: true,
+      message:
+        'That does not look like a GitHub OAuth Client ID. Use the Client ID from your OAuth App, or a personal access token.',
+    };
+  }
+
+  // Prefer ChatGPT-style Authorize page (browser + localhost callback).
+  try {
+    const browser = await startGitHubBrowserFlow(clientId);
+    if (browser?.ok && browser.accessToken) return browser;
+    if (browser?.cancelled) return browser;
+    // Fall through to device flow when redirect URI isn't registered / PKCE rejected.
+  } catch {
+    /* device fallback */
+  }
+
+  if (oauthCancelled) {
+    return { ok: false, cancelled: true, message: 'Cancelled.' };
+  }
+
+  resetOAuthCancel();
+  return startGitHubDeviceFlow(clientId);
 }
 
 /**
  * Generic localhost callback for auth-code providers.
  * Opens authorizeUrl; waits for ?code= on http://127.0.0.1:port/callback
  */
-function startLocalCallback({ authorizeUrl, exchange }) {
+function startLocalCallback({ authorizeUrl, exchange, expectedState }) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearOAuthTimers();
+      resolve(value);
+    };
+
     if (callbackServer) {
-      try {
-        callbackServer.close();
-      } catch {
-        /* ignore */
-      }
+      try { callbackServer.close(); } catch { /* ignore */ }
       callbackServer = null;
     }
 
@@ -159,13 +378,23 @@ function startLocalCallback({ authorizeUrl, exchange }) {
           res.end('Not found');
           return;
         }
+        if (expectedState) {
+          const got = u.searchParams.get('state');
+          if (got && got !== expectedState) {
+            res.writeHead(400);
+            res.end('Invalid state');
+            cleanup();
+            finish({ ok: false, message: 'OAuth state mismatch. Try again.' });
+            return;
+          }
+        }
         const code = u.searchParams.get('code');
         const err = u.searchParams.get('error');
         if (err) {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end('<html><body><h2>NOVA</h2><p>Authorization denied. You can close this window.</p></body></html>');
           cleanup();
-          resolve({ ok: false, message: err });
+          finish({ ok: false, message: err, cancelled: err === 'access_denied' });
           return;
         }
         if (!code) {
@@ -177,21 +406,17 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>NOVA connected</h2><p>You can close this window and return to NOVA.</p></body></html>');
         cleanup();
-        resolve({ ok: true, ...tokens });
+        finish(tokens?.ok === false ? tokens : { ok: true, ...tokens });
       } catch (e) {
         res.writeHead(500);
         res.end('OAuth error');
         cleanup();
-        resolve({ ok: false, message: e instanceof Error ? e.message : 'OAuth failed' });
+        finish({ ok: false, message: e instanceof Error ? e.message : 'OAuth failed' });
       }
     });
 
     function cleanup() {
-      try {
-        server.close();
-      } catch {
-        /* ignore */
-      }
+      try { server.close(); } catch { /* ignore */ }
       if (callbackServer === server) callbackServer = null;
     }
 
@@ -204,7 +429,7 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         await shell.openExternal(url);
       } catch (err) {
         cleanup();
-        resolve({ ok: false, message: err instanceof Error ? err.message : 'Could not open browser' });
+        finish({ ok: false, message: err instanceof Error ? err.message : 'Could not open browser' });
       }
     };
     server.once('error', (err) => {
@@ -213,25 +438,32 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         return;
       }
       cleanup();
-      resolve({ ok: false, message: err instanceof Error ? err.message : 'OAuth listen failed' });
+      finish({ ok: false, message: err instanceof Error ? err.message : 'OAuth listen failed' });
     });
     server.listen(preferred, '127.0.0.1', onListening);
 
-    setTimeout(() => {
+    oauthCancelPoll = setInterval(() => {
+      if (!oauthCancelled) return;
       cleanup();
-      resolve({ ok: false, message: 'OAuth timed out. Try again or paste a token.' });
+      finish({ ok: false, cancelled: true, message: 'Cancelled.' });
+    }, 250);
+
+    oauthTimeout = setTimeout(() => {
+      cleanup();
+      finish({ ok: false, message: 'OAuth timed out. Try again.' });
     }, 5 * 60 * 1000);
   });
 }
 
-async function startPluginOAuth(pluginId) {
+async function startPluginOAuth(pluginId, opts = {}) {
   const id = String(pluginId || '');
 
   if (id === 'github') {
-    return startGitHubDeviceFlow();
+    return startGitHubOAuth(opts || {});
   }
 
   if (id === 'google' || id === 'gmail' || id === 'gdrive' || id === 'gcal') {
+    resetOAuthCancel();
     const clientId = readClientId('google');
     if (!clientId) {
       return {
@@ -252,9 +484,6 @@ async function startPluginOAuth(pluginId) {
     if (id === 'gcal' || id === 'google') {
       scopes.push('https://www.googleapis.com/auth/calendar.readonly');
     }
-    if (id === 'gmail' || id === 'google') {
-      // already has gmail.readonly
-    }
     const scopeParam = encodeURIComponent(scopes.join(' '));
     return startLocalCallback({
       authorizeUrl:
@@ -263,8 +492,6 @@ async function startPluginOAuth(pluginId) {
         + `&scope=${scopeParam}`
         + '&access_type=offline&prompt=consent',
       exchange: async (code, redirectUri) => {
-        // Public clients still need a client secret for some Google setups;
-        // if NOVA_GOOGLE_CLIENT_SECRET is missing, return the code for manual exchange.
         const secret = process.env.NOVA_GOOGLE_CLIENT_SECRET || '';
         if (!secret) {
           return {
@@ -314,6 +541,7 @@ function oauthConfigStatus() {
 
 module.exports = {
   startPluginOAuth,
+  cancelPluginOAuth,
   oauthConfigStatus,
   readClientId,
   setClientId: (pluginId, clientId) => novaOAuthConfig.set(pluginId, clientId),

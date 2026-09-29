@@ -48,8 +48,37 @@ const APPLE_RECIPE: LayoutReferenceRecipe = {
   ],
 };
 
+const LINEAR_RECIPE: LayoutReferenceRecipe = {
+  id: 'linear',
+  label: 'linear.app product marketing + app chrome',
+  site: 'linear.app',
+  composition: 'app-chrome',
+  heroFullBleed: false,
+  overlaysForbidden: true,
+  typography: {
+    display: 'Inter, "Segoe UI", system-ui, sans-serif',
+    body: 'Inter, "Segoe UI", system-ui, sans-serif',
+    scale: 'utility',
+  },
+  motion: ['soft-fade-up', 'subtle-hover'],
+  craftRules: [
+    'REFERENCE BAR (linear.app layout inspiration — NOT a Linear brand clone):',
+    '- Marketing page: tight sticky nav, sharp headline + short support + primary CTA, then feature sections with hairline borders and calm spacing.',
+    '- Prefer a dark or near-black surface with one indigo/violet accent — not purple glow stacks or glassmorphism.',
+    '- Dense but readable type; small labels, clear hierarchy; no emoji, no pill-stat strips in the hero.',
+    '- If the brief asks for an app: left sidebar + main canvas, subtle separators, list/detail feel — original product name and copy only.',
+    '- Rebuild for THIS product — never copy Linear marks, screenshots, or proprietary assets.',
+  ],
+  forbidExtra: [
+    'floating-sticker-overlays',
+    'purple-glow-hero',
+    'emoji-stat-row',
+  ],
+};
+
 const KNOWN: Array<{ re: RegExp; recipe: LayoutReferenceRecipe }> = [
   { re: /\bapple\.com\b|\biphone\b.*\bmac\b|\blike\s+apple\b|\bapple[- ]?style\b/i, recipe: APPLE_RECIPE },
+  { re: /\blinear\.app\b|\blike\s+linear\b|\blinear[- ]?style\b/i, recipe: LINEAR_RECIPE },
 ];
 
 /** Detect named reference sites / URLs the user asked to emulate for layout. */
@@ -89,6 +118,9 @@ export function detectLayoutReference(brief: string): {
   }
   if (!recipe && (named === 'apple.com' || (url && /apple\.com/i.test(url)))) {
     recipe = APPLE_RECIPE;
+  }
+  if (!recipe && (named === 'linear.app' || (url && /linear\.app/i.test(url)))) {
+    recipe = LINEAR_RECIPE;
   }
 
   return {

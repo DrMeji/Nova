@@ -4,7 +4,7 @@
  */
 
 import { classifyTurn, type ClassifyTurnResult, type TurnKind } from '@/lib/classifyTurn';
-import { handlePlanTurnReply } from './plan';
+import { runPlanTurn } from './plan';
 import { runCreateTurn, type CreateTurnHost, type CreateTurnOutcome } from './create';
 import { runDeleteTurn, type DeleteTurnHost } from './delete';
 import { runOpenFolderTurn, type OpenFolderTurnHost } from './openFolder';
@@ -55,7 +55,10 @@ export type DispatchHost = {
 
   planName?: string | null;
   planSummary?: string | null;
-  savePlanBrief?: (brief: { name: string; summary: string }) => void;
+  planMessages?: Array<{ role?: string; content?: string } | null | undefined>;
+  planPreferredModelId?: string | null;
+  planOnProgress?: (msg: string) => void;
+  savePlanBrief?: (brief: { name: string; summary: string; planLog?: string[] }) => void;
   finishPlainReply?: (text: string, provider?: string) => Promise<void> | void;
 
   createHost?: CreateTurnHost;
@@ -80,12 +83,17 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
   switch (classified.kind) {
     case 'plan': {
       if (!modeOk) return { status: 'continue', classified };
-      const reply = handlePlanTurnReply({
+      if (!host.finishPlainReply) return { status: 'continue', classified };
+      await runPlanTurn({
+        userMessage: host.content,
         name: host.planName,
         summary: host.planSummary,
+        preferredModelId: host.planPreferredModelId,
+        messages: host.planMessages,
         savePlanBrief: host.savePlanBrief,
+        finishPlainReply: host.finishPlainReply,
+        onProgress: host.planOnProgress,
       });
-      if (host.finishPlainReply) await host.finishPlainReply(reply);
       return { status: 'handled', classified };
     }
 
@@ -99,6 +107,7 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
         classifiedCreateName: host.createHost.classifiedCreateName ?? classified.createName,
       });
       if (createOutcome.status === 'fallthrough_edit') {
+        // Invariant: fallthrough must NOT have called finishPlainReply — edit owns the bubble.
         if (host.editHost) {
           const editOutcome = await runEditTurn({
             ...host.editHost,
@@ -108,6 +117,7 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
         }
         return { status: 'edit', classified };
       }
+      // Create owns the single reply (finishPlainReply inside runCreateTurn).
       return { status: 'handled', classified, createOutcome };
     }
 
