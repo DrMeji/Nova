@@ -6,7 +6,7 @@ Chat with local or cloud models, generate images and video, build and edit proje
 
 ## Download (this is what you want)
 
-Current release track: **v0.1.230** (installers on Releases when published).
+Current release track: **v0.1.250** (installers on Releases when published).
 
 Get the Windows installer from **[Releases](https://github.com/DrMeji/Nova/releases)**:
 
