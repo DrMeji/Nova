@@ -4,6 +4,14 @@ Product release notes for Settings → Update and release packaging.
 
 > **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`NOVA_CHANGELOG`).
 
+## 0.1.250
+
+- Bound-folder asks (what is this project / more info / full report) stay on disk — no web search or GitHub plugin hijacks, no invented book links
+- Overview vs diagnose vs Debug Clinic: answer the question asked
+- Debug Clinic severity tabs + compact expandable rows; Repair all pill
+- Natural-language diagnose → cause → fix offer; NovaClinicGym test project
+- Live Preview HashRouter / base path harden for gym-style Vite apps
+
 ## 0.1.230
 
 - Public harden: chat isolation smokes, Stop-by-chatId, preview `:0` reject, quit kills Vite
