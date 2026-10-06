@@ -569,7 +569,8 @@ export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
       return { label: user.login || user.name || 'GitHub' };
     },
     runLive: (t, u, o) => runGitHubLive(t, u, o),
-    mention: /github|repos?|repositor|pull request|\bpr\b|list my repos|\bgithub\s+issues?\b|\bopen\s+issues\b|\blist\s+(?:my\s+)?issues\b|\bissues?\s+(?:on|from|in)\s+github\b/i,
+    // Use \brepos?\b — bare `repos?` also matches inside “report” and steals project asks.
+    mention: /github|\brepos?\b|repositor|pull request|\bprs?\b|list my repos|\bgithub\s+issues?\b|\bopen\s+issues\b|\blist\s+(?:my\s+)?issues\b|\bissues?\s+(?:on|from|in)\s+github\b/i,
   },
   notion: { verify: verifyNotionToken, runLive: (t, u, o) => runNotionLive(t, u, o), mention: /notion|spec|brief|workspace|search docs|pull a brief/i },
   gmail: { verify: verifyGmailToken, runLive: (t, u, o) => runGmailLive(t, u, o), mention: /gmail|inbox|email|\bmail\b|unread|inbox summary|draft a reply/i },

@@ -394,8 +394,8 @@ export function BuildRun() {
                                 Live
                               </span>
                             ) : (
-                              <span className="text-[10px] rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 shrink-0">
-                                Ready
+                              <span className="text-[10px] rounded-full bg-white/10 text-content-tertiary px-1.5 py-0.5 shrink-0">
+                                Coming soon
                               </span>
                             )}
                           </span>

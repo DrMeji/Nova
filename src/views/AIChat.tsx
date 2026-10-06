@@ -26,6 +26,9 @@ export function AIChat() {
       clonePickedRepo={p.clonePickedRepo}
       codeOverlayOpen={p.codeOverlayOpen}
       codePillSticky={p.codePillSticky}
+      planOverlayOpen={p.planOverlayOpen}
+      planPillSticky={p.planPillSticky}
+      planLiveDrafting={p.planLiveDrafting}
       composerMode={p.composerMode}
       copiedMsgId={p.copiedMsgId}
       createJobLive={p.createJobLive}
@@ -86,6 +89,9 @@ export function AIChat() {
       onMessagesWheel={p.onMessagesWheel}
       onPickCodeFiles={p.onPickCodeFiles}
       openCodeWorkspace={p.openCodeWorkspace}
+      closeCodeOverlay={p.closeCodeOverlay}
+      openPlanWorkspace={p.openPlanWorkspace}
+      setPlanOverlayOpen={p.setPlanOverlayOpen}
       openProjectFolder={p.openProjectFolder}
       openProjectPreview={p.openProjectPreview}
       pendingAttaches={p.pendingAttaches}

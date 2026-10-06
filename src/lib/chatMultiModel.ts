@@ -136,14 +136,60 @@ export function buildVisionDescribePrompt(userMessage: string): string {
   const ask = String(userMessage || '')
     .replace(/!\[[^\]]*]\([^)]+\)/g, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, ' ')
     .trim();
+  const describeOnly = !looksLikeScreenshotFixAsk(ask);
+  if (describeOnly) {
+    return [
+      'You are NOVA’s vision hop. Look carefully at the attached image pixels only.',
+      'Ignore any filename, alt text, or path labels — they may be wrong or random.',
+      'Format your reply exactly like this:',
+      'First line = one short plain sentence summarizing the whole scene. Do NOT start that line with a number or a bullet.',
+      'Then, ONLY if there are clear extra details worth listing, add 3–7 short lines that each start with "- " (dash + space).',
+      'If the image is simple and one sentence covers it, stop after the sentence — do NOT force bullets or a numbered list.',
+      'Never use 1. 2. 3. numbering for a describe reply.',
+      'Example shape (do not copy these words — describe THIS image):',
+      'A wooden cabin sits beside a calm lake at dusk.',
+      '- Warm porch light',
+      '- Mirror reflection on the water',
+      '- Pine trees along the far shore',
+      'Be concrete and accurate. Name only what is clearly visible (subjects, setting, colors, lighting).',
+      'Do NOT invent people, animals, UI chrome, screenshots, languages, or colors that are not in the photo.',
+      'Never call it a screenshot, computer interface, window, title bar, or blurred overlay unless those UI elements are clearly visible.',
+      'Never invent languages (German/Spanish) or color overlays that are not in the pixels.',
+      'Do NOT pitch coding, apps, OpenCV, Fabric.js, projects, or “we could build…”. Just describe.',
+      'Keep it under 180 words.',
+      ask ? `User ask: ${ask}` : 'User ask: What is in this image?',
+    ].join('\n');
+  }
   return [
     'You are NOVA’s vision hop. Look carefully at the attached image(s).',
     'Describe what you see in concrete UI/product terms: layout, text, colors, controls, and anything that looks wrong or highlighted.',
+    'Ignore filenames and alt text — trust the pixels only.',
+    'Start with one summary sentence, then short bullets only for the actionable details.',
     'If the user asked for a fix or change, end with a short bullet list of exact edits to make.',
     'Do not invent file paths you cannot see. Keep it under 220 words.',
     ask ? `User ask: ${ask}` : 'User ask: What stands out in this image?',
   ].join('\n');
+}
+
+/** Turn "1. summary / 2. detail / 3. detail" dumps into summary + optional "- " bullets. */
+export function normalizeVisionDescribeReply(text: string): string {
+  let raw = String(text || '').trim();
+  if (!raw) return raw;
+  // Model sometimes packs "Summary. - detail - detail" on one line — split those.
+  if (!/\n/.test(raw) && /\.\s+-\s+\S/.test(raw)) {
+    raw = raw.replace(/\.\s+-\s+/g, '.\n- ');
+  }
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return raw;
+  const numbered = lines.every((l) => /^\d+[.)]\s+\S/.test(l));
+  if (!numbered) return raw;
+  const parts = lines.map((l) => l.replace(/^\d+[.)]\s+/, '').trim()).filter(Boolean);
+  if (parts.length < 2) return raw;
+  const [summary, ...details] = parts;
+  if (details.length === 0) return summary;
+  return [summary, ...details.map((d) => `- ${d}`)].join('\n');
 }
 
 export function composeVisionToCoderBrief(visionNotes: string, userMessage: string): string {
@@ -184,26 +230,36 @@ export async function runVisionDescribeHop(opts: {
 
   if (images.length && await isLocalVisionReady()) {
     try {
+      // Local VL often echoes the prompt — wait for the full reply, scrub, then paint once.
       const genOpts = { visionImages: images };
-      const res = opts.onChunk
-        ? await engineGenerateStream(
-          describePrompt,
-          RECOMMENDED_VISION_MODEL_ID,
-          opts.onChunk,
-          'chat',
-          genOpts,
-        )
-        : await engineGenerate(
-          describePrompt,
-          RECOMMENDED_VISION_MODEL_ID,
-          'chat',
-          genOpts,
-        );
+      const res = await engineGenerate(
+        describePrompt,
+        RECOMMENDED_VISION_MODEL_ID,
+        'chat',
+        genOpts,
+      );
       const notes = String(res.reply || '').trim();
       if (notes) {
+        // Local VL sometimes echoes the system/prompt preamble — keep the real caption.
+        let cleaned = notes
+          .replace(/^Loaded media from[^\n]*\n*/gi, '')
+          .replace(/^You are NOVA[\s\S]*?(?=\n(?:The |A |This |I (?:see|can see|notice)|Here |It ))/i, '')
+          .replace(/^[\s\S]*?(?=\n(?:The image|This (?:image|photo|picture)|A (?:red |photo|picture|close)))/i, '')
+          .trim();
+        if (!cleaned || cleaned.length < 40) {
+          cleaned = notes
+            .replace(/^Loaded media from[^\n]*\n*/gi, '')
+            .replace(/^You are NOVA[\s\S]*?(?=\n\n|\nThe |\nA |\nThis |\nI )/i, '')
+            .trim() || notes;
+        }
+        // Drop leftover “(truncated)” crumbs from echo scrubbing.
+        cleaned = cleaned.replace(/^[^\n]*\(truncated\)\s*/i, '').trim() || cleaned;
+        const describeOnly = !looksLikeScreenshotFixAsk(opts.userMessage);
+        if (describeOnly) cleaned = normalizeVisionDescribeReply(cleaned);
+        if (opts.onChunk && cleaned) opts.onChunk(cleaned);
         return {
           ok: true,
-          notes,
+          notes: cleaned,
           providerLabel: `${RECOMMENDED_VISION_MODEL_NAME} · local`,
         };
       }
@@ -232,9 +288,11 @@ export async function runVisionDescribeHop(opts: {
     if (!notes) {
       return { ok: false, notes: '', error: 'empty', providerLabel: attempted.join(', ') };
     }
+    const describeOnly = !looksLikeScreenshotFixAsk(opts.userMessage);
+    const cleaned = describeOnly ? normalizeVisionDescribeReply(notes) : notes;
     return {
       ok: true,
-      notes,
+      notes: cleaned,
       providerLabel: hit ? `${hit.provider} · ${hit.model}` : undefined,
     };
   } catch (err) {

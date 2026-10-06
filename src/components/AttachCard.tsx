@@ -33,20 +33,34 @@ const AUTO_READ_RE = /<!--nova-auto-read-->/g;
 export function AttachMessageBody({
   content,
   children,
+  cardsOnly = false,
+  hideImageChips = false,
 }: {
   content: string;
   children?: ReactNode;
+  /** When true, only chips — parent renders the rest (e.g. markdown images). */
+  cardsOnly?: boolean;
+  /** Hide image chips when the photo is already rendered as markdown media. */
+  hideImageChips?: boolean;
 }) {
-  const metas = parseChatAttaches(content);
-  if (!metas.length) return null;
-  const rest = stripChatAttach(content).replace(AUTO_READ_RE, '').trim();
+  const metas = parseChatAttaches(content).filter(m => !(hideImageChips && m.kind === 'image'));
+  if (!metas.length && cardsOnly) return null;
+  if (!metas.length && !cardsOnly) {
+    const restOnly = stripChatAttach(content).replace(AUTO_READ_RE, '').trim();
+    if (!restOnly && !children) return null;
+  }
+  const rest = cardsOnly
+    ? ''
+    : stripChatAttach(content).replace(AUTO_READ_RE, '').trim();
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1.5">
-        {metas.map(meta => (
-          <AttachCard key={`${meta.kind}:${meta.projectId || ''}:${meta.name}`} meta={meta} />
-        ))}
-      </div>
+      {metas.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {metas.map(meta => (
+            <AttachCard key={`${meta.kind}:${meta.projectId || ''}:${meta.name}:${meta.id || ''}`} meta={meta} />
+          ))}
+        </div>
+      ) : null}
       {children}
       {rest && !children ? (
         <p className="text-sm text-content-primary whitespace-pre-wrap leading-relaxed">{rest}</p>

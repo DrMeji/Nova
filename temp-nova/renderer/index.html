@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Temp Nova</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <strong>Temp Nova</strong>
+        <span class="sub">Simple chat · Nova Brain</span>
+      </div>
+      <div id="brainBadge" class="badge">checking…</div>
+    </header>
+
+    <section class="models">
+      <div class="row">
+        <span>Choose a model</span>
+        <button type="button" id="refreshModels">Refresh</button>
+      </div>
+      <div id="modelList" class="model-list"></div>
+      <p id="modelHint" class="hint">Open full Nova first so your downloaded models are available.</p>
+    </section>
+
+    <section class="chat">
+      <div id="messages" class="messages"></div>
+      <form id="chatForm" class="composer">
+        <textarea id="input" rows="2" placeholder="Message…"></textarea>
+        <button type="submit" id="sendBtn">Send</button>
+      </form>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -46,11 +46,23 @@ function getGgufCtx() {
  * Cap llama threads so local inference cannot pin every logical core
  * (that freezes YouTube / the desktop while chat or create polish runs).
  * Leave UI headroom; scale the cap up on strong multi-core PCs.
+ *
+ * Hybrid use: CUDA builds still pass -ngl 99 (layers on GPU). Threads here
+ * keep CPU + system RAM busy for prompt eval, batching, and any layers that
+ * do not fit in VRAM — GPU is not the only worker.
  */
 function getGgufThreads() {
   const n = Math.max(1, (os.cpus() || []).length || 1);
-  const leaveFree = n >= 16 ? 4 : n >= 8 ? 2 : 1;
-  const hardCap = n >= 16 ? 10 : n >= 8 ? 6 : 4;
+  const cuda = (() => {
+    try { return Boolean(llamaLooksCuda()); } catch { return false; }
+  })();
+  // Leave more cores for Windows UI / Electron so create does not freeze the desktop.
+  const leaveFree = cuda
+    ? (n >= 16 ? 4 : n >= 8 ? 3 : 2)
+    : (n >= 16 ? 4 : n >= 8 ? 2 : 1);
+  const hardCap = cuda
+    ? (n >= 16 ? 10 : n >= 8 ? 6 : 4)
+    : (n >= 16 ? 8 : n >= 8 ? 6 : 4);
   return Math.max(2, Math.min(n - leaveFree, hardCap));
 }
 
@@ -133,11 +145,27 @@ function writeTempVisionImages(b64List) {
   const paths = [];
   for (let i = 0; i < b64List.length; i++) {
     const buf = Buffer.from(b64List[i], 'base64');
-    const p = path.join(os.tmpdir(), `NOVA-vl-${process.pid}-${Date.now()}-${i}.png`);
+    // Sniff real format — never force .png on JPEG bytes (breaks llama --image decode).
+    let ext = 'png';
+    if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) ext = 'jpg';
+    else if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+      && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) ext = 'webp';
+    else if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) ext = 'gif';
+    const p = path.join(os.tmpdir(), `NOVA-vl-${process.pid}-${Date.now()}-${i}.${ext}`);
     fs.writeFileSync(p, buf);
     paths.push(p);
   }
   return paths;
+}
+
+/** llama.cpp multimodal: image_data alone is ignored unless the prompt references [img-N]. */
+function withVisionImageMarkers(prompt, imageCount) {
+  const n = Math.max(0, Number(imageCount) || 0);
+  if (n <= 0) return String(prompt || '');
+  const body = String(prompt || '');
+  if (/\[img-\d+\]|<image>/i.test(body)) return body;
+  const markers = Array.from({ length: n }, (_, i) => `[img-${i}]`).join('');
+  return `${markers}\n${body}`;
 }
 
 function findNamedBinary(names) {
@@ -166,12 +194,23 @@ function cliNames() {
     : ['llama-cli', 'main'];
 }
 
+function vlCliNames() {
+  return process.platform === 'win32'
+    ? ['llama-qwen2vl-cli.exe', 'llama-mtmd-cli.exe', 'llama-cli.exe']
+    : ['llama-qwen2vl-cli', 'llama-mtmd-cli', 'llama-cli'];
+}
+
 function serverNames() {
   return process.platform === 'win32' ? ['llama-server.exe'] : ['llama-server'];
 }
 
 function findLlamaBinary() {
   return findNamedBinary(cliNames());
+}
+
+/** Prefer Qwen2-VL / mtmd CLIs when a vision projector is in play. */
+function findLlamaVlBinary() {
+  return findNamedBinary(vlCliNames()) || findLlamaBinary();
 }
 
 function findLlamaServer() {
@@ -193,16 +232,34 @@ function findLlamaServer() {
   return null;
 }
 
-function listGgufFiles() {
+/** Short TTL cache — getStatus() used to readdir+stat the models folder 3× per poll. */
+let _ggufListCache = { at: 0, dir: '', files: [] };
+const GGUF_LIST_TTL_MS = 4000;
+
+function listGgufFiles(force = false) {
   const dir = modelsDir();
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
+  const now = Date.now();
+  if (
+    !force
+    && _ggufListCache.dir === dir
+    && (now - _ggufListCache.at) < GGUF_LIST_TTL_MS
+    && Array.isArray(_ggufListCache.files)
+  ) {
+    return _ggufListCache.files;
+  }
+  if (!fs.existsSync(dir)) {
+    _ggufListCache = { at: now, dir, files: [] };
+    return [];
+  }
+  const files = fs.readdirSync(dir)
     .filter((f) => f.toLowerCase().endsWith('.gguf'))
     .map((f) => ({
       file: f,
       path: path.join(dir, f),
       sizeMb: Math.round(fs.statSync(path.join(dir, f)).size / (1024 * 1024)),
     }));
+  _ggufListCache = { at: now, dir, files };
+  return files;
 }
 
 function llamaCpuUrl() {
@@ -737,6 +794,17 @@ async function pingServer(port = serverPort) {
 async function bindLlamaServer(bin, gguf, modelId) {
   lastServerError = null;
   const mmproj = findMmprojForModel(modelId);
+  // Item 14: stick to a healthy server for the same GGUF — avoid multi-second reload churn.
+  if (
+    serverChild
+    && serverGguf === gguf
+    && serverMmproj === mmproj
+    && serverCtx === getGgufCtx()
+    && !serverChild.killed
+    && await pingServer(serverPort)
+  ) {
+    return true;
+  }
   for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_MAX; candidate += 1) {
     stopServer();
     const args = [
@@ -765,7 +833,12 @@ async function bindLlamaServer(bin, gguf, modelId) {
         serverCtx = 0;
       }
     });
-    const deadline = Date.now() + 20_000;
+    // Large GGUFs (14B/32B) often need >20s to load into llama-server.
+    const ggufMb = (() => {
+      try { return Math.round(fs.statSync(gguf).size / (1024 * 1024)); } catch { return 0; }
+    })();
+    const bindWaitMs = ggufMb >= 12000 ? 180_000 : ggufMb >= 4000 ? 90_000 : 45_000;
+    const deadline = Date.now() + bindWaitMs;
     while (Date.now() < deadline) {
       if (cancelRequested) {
         stopServer();
@@ -811,8 +884,9 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null) {
-  const promptStr = wrapChatPrompt(modelId, prompt);
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null, kind = null) {
+  const images = normalizeVisionImages(visionImages);
+  const promptStr = wrapChatPrompt(modelId, withVisionImageMarkers(prompt, images.length), kind);
   const started = Date.now();
   cancelRequested = false;
   const ac = new AbortController();
@@ -820,7 +894,6 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
   if (jobEntry) jobEntry.abort = ac;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   let out = '';
-  const images = normalizeVisionImages(visionImages);
   try {
     const body = {
       prompt: promptStr,
@@ -828,7 +901,9 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
       temperature,
       stream: true,
       cache_prompt: true,
-      stop: [stopToken(modelId)],
+      stop: (kind === 'coding' || /\b@@@FILE\b/i.test(String(prompt || '')))
+        ? ['// STRESS_END_MARKER_OK', '\nNo changes needed', '\nThe file src/', '\nIf you want to', '\nNotes:', '\n- This keeps', '\nMatch this EXAMPLE']
+        : [stopToken(modelId)],
     };
     if (images.length) {
       body.image_data = images.map((data, id) => ({ data, id }));
@@ -863,7 +938,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
         }
       }
       if (typeof onChunk === 'function') {
-        const cleaned = cleanGgufReply(promptStr, out);
+        const cleaned = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
         if (cleaned && cleaned.length > emitted.length) {
           const delta = cleaned.slice(emitted.length);
           emitted = cleaned;
@@ -873,7 +948,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
         }
       }
     }
-    const text = cleanGgufReply(promptStr, out);
+    const text = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
     writeGgufDebug({
       at: new Date().toISOString(),
       ms: Date.now() - started,
@@ -890,7 +965,8 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
     }
     return {
       ok: true,
-      reply: text.slice(-6000) || (cancelRequested ? '(stopped)' : ''),
+      // Full reply — never truncate to last 6k (that cut craft @@@FILE bodies mid-file).
+      reply: text || (cancelRequested ? '(stopped)' : ''),
       modelFile: path.basename(findGgufForModel(modelId) || ''),
       source: 'nova-gguf',
       streamed: Boolean(onChunk),
@@ -954,12 +1030,18 @@ function isPackedArkPrompt(body) {
   return /^You are NOVA(?:,|\s)/i.test(String(body || '').trim());
 }
 
+const NOVA_CODING_SYSTEM =
+  'Output @@@FILE code only. Do not echo instructions.';
+
 /** ChatML for Qwen/Mistral/Gemma; Llama 3 headers for llama3*. */
-function wrapChatPrompt(modelId, prompt) {
+function wrapChatPrompt(modelId, prompt, kind) {
   const body = promptBody(prompt);
   if (/<\|im_start\|>/.test(body) || /<\|start_header_id\|>/.test(body)) {
     return body.endsWith('\n') ? body : `${body}\n`;
   }
+  const coding = kind === 'coding'
+    || /\b@@@FILE\b/i.test(body)
+    || /\bOutput ONLY (?:one )?file block/i.test(body);
   // packHistoryPrompt() already includes NOVA's identity/instructions for local single-string
   // engines. Wrapping that again as a second system message makes some GGUFs (notably Qwen)
   // parrot the prompt instead of answering.
@@ -968,22 +1050,42 @@ function wrapChatPrompt(modelId, prompt) {
       return (
         `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
         + `<|start_header_id|>assistant<|end_header_id|>\n\n`
+        + (coding ? '@@@FILE ' : '')
       );
     }
     return (
       `<|im_start|>user\n${body}<|im_end|>\n`
       + `<|im_start|>assistant\n`
+      + (coding ? '@@@FILE ' : '')
     );
   }
+  // Coding: prefer raw @@@FILE continuation when the ask is already a file body
+  // (stops ChatML prompt-echo on large/weak GGUFs).
+  if (coding) {
+    if (/^\s*@@@FILE\b/i.test(body)) {
+      return body.endsWith('\n') ? body : `${body}\n`;
+    }
+    if (llamaFamily(modelId)) {
+      return (
+        `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
+        + `<|start_header_id|>assistant<|end_header_id|>\n\n@@@FILE `
+      );
+    }
+    return (
+      `<|im_start|>user\n${body}<|im_end|>\n`
+      + `<|im_start|>assistant\n@@@FILE `
+    );
+  }
+  const system = novaSystemWithToday();
   if (llamaFamily(modelId)) {
     return (
-      `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${novaSystemWithToday()}<|eot_id|>`
+      `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${system}<|eot_id|>`
       + `<|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
       + `<|start_header_id|>assistant<|end_header_id|>\n\n`
     );
   }
   return (
-    `<|im_start|>system\n${novaSystemWithToday()}<|im_end|>\n`
+    `<|im_start|>system\n${system}<|im_end|>\n`
     + `<|im_start|>user\n${body}<|im_end|>\n`
     + `<|im_start|>assistant\n`
   );
@@ -991,6 +1093,20 @@ function wrapChatPrompt(modelId, prompt) {
 
 function stopToken(modelId) {
   return llamaFamily(modelId) ? '<|eot_id|>' : '<|im_end|>';
+}
+
+/** Prefill "@@@FILE " is consumed by the prompt and not re-emitted — restore for craft parsers. */
+function restoreCodingPrefill(kind, prompt, text, modelId) {
+  const raw = String(text || '');
+  if (!raw) return raw;
+  // Raw @@@FILE continuation prompts already include the header — don't double-prefix.
+  if (/^\s*@@@FILE\b/i.test(String(prompt || ''))) {
+    return raw;
+  }
+  const coding = kind === 'coding' || /\b@@@FILE\b/i.test(String(prompt || ''));
+  if (!coding) return raw;
+  if (/^\s*@@@FILE\b/i.test(raw)) return raw;
+  return `@@@FILE ${raw}`;
 }
 
 /**
@@ -1144,8 +1260,11 @@ function writeGgufDebug(payload) {
  */
 function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, extra = {}) {
   const visionImages = normalizeVisionImages(extra?.images);
+  const kind = extra?.kind;
   if (generateBusy || activeChild) {
-    const err = new Error('Generation already running — stop the current reply or wait, then try again');
+    const err = new Error(
+      'Local brain is busy (loading a model or finishing another reply). Press Stop, wait a few seconds, then send again — do not start a second create while one is running.',
+    );
     err.code = 'RATE_LIMITED';
     return Promise.reject(err);
   }
@@ -1157,14 +1276,16 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
   });
   return (async () => {
     try {
-      if (await ensureLlamaServer(modelId)) {
+      // Vision: prefer dedicated qwen2vl/mtmd CLI — generic /completion often ignores pixels.
+      const forceVlCli = visionImages.length > 0;
+      if (!forceVlCli && await ensureLlamaServer(modelId)) {
         try {
           if (cancelRequested) {
             const stopped = new Error('Generation stopped');
             stopped.code = 'CANCELED';
             throw stopped;
           }
-          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry);
+          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry, kind);
           if (hit?.cancelled) return hit;
           if (hit?.reply) return hit;
         } catch (err) {
@@ -1181,7 +1302,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
         stopped.code = 'CANCELED';
         throw stopped;
       }
-      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry);
+      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry, kind);
     } finally {
       generateBusy = false;
       clearGgufJob(jobId);
@@ -1189,11 +1310,12 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null, kind = null) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const mmproj = findMmprojForModel(modelId);
-    const bin = findLlamaBinary();
+    const imagesEarly = normalizeVisionImages(visionImages);
+    const bin = imagesEarly.length || mmproj ? findLlamaVlBinary() : findLlamaBinary();
     if (!gguf) {
       reject(new Error('No GGUF weights found in NOVA Engine models folder'));
       return;
@@ -1207,13 +1329,15 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
 
     cancelRequested = false;
     if (activeChild) {
-      const err = new Error('Another local generation is already running — stop it or wait, then try again');
+      const err = new Error(
+        'Local brain is busy (loading a model or finishing another reply). Press Stop, wait a few seconds, then send again.',
+      );
       err.code = 'RATE_LIMITED';
       reject(err);
       return;
     }
 
-    const promptStr = wrapChatPrompt(modelId, prompt);
+    const promptStr = wrapChatPrompt(modelId, withVisionImageMarkers(prompt, normalizeVisionImages(visionImages).length), kind);
     const started = Date.now();
     const promptFile = path.join(os.tmpdir(), `nova-gguf-prompt-${process.pid}-${started}.txt`);
     try {
@@ -1265,7 +1389,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       const piece = d.toString();
       out += piece;
       if (typeof onChunk !== 'function') return;
-      const cleaned = cleanGgufReply(promptStr, out);
+      const cleaned = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
       if (!cleaned) return;
       if (cleaned.length > emitted.length) {
         const delta = cleaned.slice(emitted.length);
@@ -1288,7 +1412,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       cleanupPrompt();
       if (activeChild === child) activeChild = null;
       if (jobEntry && jobEntry.child === child) jobEntry.child = null;
-      const text = cleanGgufReply(promptStr, out);
+      const text = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
       writeGgufDebug({
         at: new Date().toISOString(),
         ms: Date.now() - started,
@@ -1304,7 +1428,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       if (cancelRequested) {
         resolve({
           ok: true,
-          reply: text.slice(-6000) || '(stopped)',
+          reply: text || '(stopped)',
           modelFile: path.basename(gguf),
           source: 'nova-gguf',
           streamed: Boolean(onChunk),
@@ -1323,7 +1447,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       }
       resolve({
         ok: true,
-        reply: text.slice(-6000),
+        reply: text,
         modelFile: path.basename(gguf),
         source: 'nova-gguf',
         streamed: Boolean(onChunk),

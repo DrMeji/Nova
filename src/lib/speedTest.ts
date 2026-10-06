@@ -70,7 +70,7 @@ export function shortReplyModelLabel(providerUsed?: string | null): string {
     .replace(/\s+Instruct\s*$/i, '')
     .replace(/\s*·\s*(?:create craft|attached files|scaffold|plan|chat).*$/i, '')
     .trim();
-  if (/^nova multimodal$/i.test(t)) return 'Multimodal';
+  if (/^nova multimodal$/i.test(t) || /^nova auto$/i.test(t)) return 'Auto';
   return t.length > 28 ? `${t.slice(0, 26).trim()}…` : (t || 'NOVA');
 }
 

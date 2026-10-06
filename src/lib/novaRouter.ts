@@ -45,9 +45,10 @@ import {
   ollamaChat,
   probeOllamaOptional,
 } from '@/lib/ollamaOptional';
+import { looksLikeSimpleBuildToyChatAsk } from '@/lib/chatIntent';
 import { getEngineStatus } from '@/lib/novaEngine';
 import { classifyChatIntent } from '@/lib/chatIntent';
-import { isCoderEngineId, isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
+import { isCoderEngineId, isUiDesignEngineId, isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
 import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
 import {
   preferEnglishSafeReply,
@@ -140,7 +141,7 @@ function askCloudRetryReply(attempted: string[]): ArkRouterResult {
       '',
       '**Retry with cloud?** Choose a cloud model, then resend your message.',
     ].join('\n'),
-    modelName: 'Nova Multimodal',
+    modelName: 'Nova Auto',
     source: 'none',
     tier: 'local-free',
     attempted,
@@ -724,9 +725,18 @@ async function tryLocalChat(
     }
   }
 
+  // One-seat mode (ensemble parked): stay on the locked brain — no quiet coder cascade.
+  // Exhaustion handoff is prepareBrainRotation’s job on the next turn, not mid-turn hops.
+  let ensembleParked = true;
+  try {
+    const { isEnsembleAutoParked } = await import('@/lib/localPrefs');
+    ensembleParked = isEnsembleAutoParked();
+  } catch { /* default parked */ }
+
   // Coding: hop only along ranked coder GGUFs (never Instruct chat brains).
   // Up to 2 backups so a strong PC can fall 32B → 14B → 7B when one stalls.
   if (kind === 'coding') {
+    if (ensembleParked && modelId) return null;
     const coderExtras = extras.filter((id) =>
       /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id),
     );
@@ -739,7 +749,8 @@ async function tryLocalChat(
   }
 
   // Chat: one quiet backup max. Never live-stream a second answer over the first.
-  const maxLocalFailover = modelId ? 0 : 1;
+  // Locked seat (sticky/preferred id) never hops while ensemble is parked.
+  const maxLocalFailover = (modelId || ensembleParked) ? 0 : 1;
   for (const id of extras.slice(0, maxLocalFailover)) {
     const hit = await runOne(id, { live: false });
     if (hit && isStrongLocal(hit.source)) return hit;
@@ -879,7 +890,13 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // Normal chat must never load a coder GGUF (sticky or pinned). Coders are build-only —
   // Instruct↔Coder unload/load mid-thread is the freeze / multi-flash path.
-  if (brainKind === 'chat') {
+  // One-seat parked + explicit lock: keep the locked brain (user/Auto picked it for the chat).
+  let oneSeatLocked = false;
+  try {
+    const { isEnsembleAutoParked } = await import('@/lib/localPrefs');
+    oneSeatLocked = isEnsembleAutoParked() && Boolean(opts.stickyModelId && opts.stickyPinnedSource);
+  } catch { /* ignore */ }
+  if (brainKind === 'chat' && !oneSeatLocked) {
     if (isCoderEngineId(opts.stickyModelId) || isCoderEngineId(opts.stickyModelName)) {
       opts = { ...opts, stickyModelId: undefined, stickyModelName: undefined, stickyPinnedSource: undefined };
     }
@@ -890,15 +907,28 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // Wave 2: block weak / oversized local coder before any coding generate hop.
   if (brainKind === 'coding') {
-    // Create/edit must never sticky-load chat Instruct (qwen25-7b) as if it were a coder.
+    // Explicit create pins (UIGEN / Instruct / VL) must stay — demoting to Auto causes
+    // silent GGUF unload/reload and "nothing for 15 minutes" stalls.
+    const isExplicitCreatePin = (id?: string | null, name?: string | null) => {
+      const s = `${id || ''} ${name || ''}`;
+      if (!String(id || '').trim() || id === 'NOVA-auto') return false;
+      if (isCoderEngineId(id) || isCoderEngineId(name)) return true;
+      if (isUiDesignEngineId(id) || isUiDesignEngineId(name)) return true;
+      // Instruct / VL stress pins the user (or ladder) selected on purpose.
+      if (/\b(?:instruct|qwen25-7b|qwen2\.?5\s*7b|qwen2-?vl|vision)\b/i.test(s)) return true;
+      return false;
+    };
     if (
       opts.stickyModelId
-      && !isCoderEngineId(opts.stickyModelId)
-      && !isCoderEngineId(opts.stickyModelName)
+      && !isExplicitCreatePin(opts.stickyModelId, opts.stickyModelName)
     ) {
       opts = { ...opts, stickyModelId: undefined, stickyModelName: undefined, stickyPinnedSource: undefined };
     }
-    if (preferredId && !isCoderEngineId(preferredId) && preferredId !== 'NOVA-auto') {
+    if (
+      preferredId
+      && preferredId !== 'NOVA-auto'
+      && !isExplicitCreatePin(preferredId, preferredName)
+    ) {
       preferredId = 'NOVA-auto';
       preferredName = 'NOVA Auto';
       pinnedLocalEngine = false;
@@ -1174,6 +1204,52 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       if (sticky && sticky.source !== 'none') return sticky;
     }
 
+    // Mini demos (calculator / todo) — free cloud first when Auto; weak local GGUFs stall mid-code.
+    // Reject prose-only “here's an example” replies and keep trying free keys until one fences code.
+    const toyDemo = looksLikeSimpleBuildToyChatAsk(opts.message);
+    const toyAccept = (reply: string) => {
+      const toyReply = String(reply || '');
+      if (toyReply.length < 140) return false;
+      // Prefer a real markdown fence with body.
+      if (/```[\s\S]{40,}```/.test(toyReply)) return true;
+      // Complete HTML document (not a lone DOCTYPE crumb glued into prose).
+      if (/<html[\s\S]{80,}<\/html>/i.test(toyReply)) return true;
+      if (/<!DOCTYPE\s+html[\s\S]{80,}<\/html>/i.test(toyReply)) return true;
+      // Inline demo with real tags + script (still usable unfenced).
+      if (
+        /<script[\s\S]{40,}<\/script>/i.test(toyReply)
+        && /<(?:button|input|ul|div|style)[\s\S]{20,}/i.test(toyReply)
+      ) {
+        return true;
+      }
+      return false;
+    };
+    if (toyDemo && isAuto && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
+      // Fail fast: a couple free hops, then honest gap — never burn minutes on weak dumps.
+      for (let hop = 0; hop < 2; hop++) {
+        const freeToy = await tryFreeCloud();
+        if (!freeToy) break;
+        if (toyAccept(freeToy.reply)) {
+          return withContinued({
+            reply: freeToy.reply,
+            modelName: `${freeToy.provider} · ${freeToy.model}`,
+            modelId: freeToy.model,
+            source: hitSource(freeToy.provider),
+            tier: 'free-key',
+            attempted,
+          }, history);
+        }
+      }
+      // Soft toys: do not fall through into slow local GGUF / more cloud thrash.
+      return {
+        reply: '',
+        modelName: 'Nova Auto',
+        source: 'none',
+        tier: 'local-free',
+        attempted,
+      };
+    }
+
     if (brainKind === 'coding' && opts.preferCloudCoding && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
       const freeCloud = await tryFreeCloud();
       if (freeCloud && acceptCodingReply(freeCloud.reply)) {
@@ -1212,7 +1288,9 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.onAttemptReset,
         livePainted,
       );
-      if (local && isStrongLocal(local.source)) return local;
+      if (local && isStrongLocal(local.source) && (!toyDemo || toyAccept(local.reply))) {
+        return local;
+      }
       if (shouldAskBeforeCloud(prefs) && modeAllowsCloud(mode)) {
         return askCloudRetryReply(attempted);
       }
@@ -1250,17 +1328,21 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     }
 
     // Tiny 1.5B-only (or no GGUF): free cloud for quality, then weak Engine.
+    // Soft toys: never accept a prose-only cloud miss here after the toy gate above rejected it.
     if (modeAllowsCloud(mode) && hasAnyCloudChatKey() && !capableLocal) {
       const free = await tryFreeCloud();
       if (free) {
-        return withContinued({
-          reply: free.reply,
-          modelName: `${free.provider} · ${free.model}`,
-          modelId: free.model,
-          source: hitSource(free.provider),
-          tier: 'free-key',
-          attempted,
-        }, history);
+        const toyMiss = toyDemo && !toyAccept(free.reply);
+        if (!toyMiss) {
+          return withContinued({
+            reply: free.reply,
+            modelName: `${free.provider} · ${free.model}`,
+            modelId: free.model,
+            source: hitSource(free.provider),
+            tier: 'free-key',
+            attempted,
+          }, history);
+        }
       }
     }
 
@@ -1284,31 +1366,48 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       if (hasAnyCloudChatKey()) {
         const free = await tryFreeCloud();
         if (free) {
-          return withContinued({
-            reply: free.reply,
-            modelName: `${free.provider} · ${free.model}`,
-            modelId: free.model,
-            source: hitSource(free.provider),
-            tier: 'free-key',
-            attempted,
-          }, history);
+          const toyMiss = toyDemo && !toyAccept(free.reply);
+          if (!toyMiss) {
+            return withContinued({
+              reply: free.reply,
+              modelName: `${free.provider} · ${free.model}`,
+              modelId: free.model,
+              source: hitSource(free.provider),
+              tier: 'free-key',
+              attempted,
+            }, history);
+          }
         }
       }
       const paid = await cloudChatPaidKeys(opts.message, attempted, history, opts.onChunk);
       if (paid) {
-        return withContinued({
-          reply: paid.reply,
-          modelName: `${paid.provider} · ${paid.model}`,
-          modelId: paid.model,
-          source: hitSource(paid.provider),
-          tier: 'paid',
-          attempted,
-        }, history);
+        const toyMiss = toyDemo && !toyAccept(paid.reply);
+        if (!toyMiss) {
+          return withContinued({
+            reply: paid.reply,
+            modelName: `${paid.provider} · ${paid.model}`,
+            modelId: paid.model,
+            source: hitSource(paid.provider),
+            tier: 'paid',
+            attempted,
+          }, history);
+        }
       }
     }
 
     const ollama = await tryOllama(history, opts.message, preferredId, attempted);
-    if (ollama) return ollama;
+    if (ollama && (!toyDemo || toyAccept(ollama.reply))) return ollama;
+
+    // Soft toys: every hop missed a usable demo — empty reply so chat finalize shows the honest gap.
+    if (toyDemo) {
+      return {
+        reply: '',
+        modelName: 'Nova Auto',
+        source: 'none',
+        tier: 'local-free',
+        attempted,
+      };
+    }
 
     // Models may be installed but every hop failed (timeout / busy / OOM).
     // Never claim “no live model” when we clearly attempted local Engine.
@@ -1319,9 +1418,9 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           'Your local brain is installed, but that reply did not finish (busy, timed out, or overloaded).',
           '',
           'Try again in a moment. If the desktop feels frozen while a reply runs, wait for it to finish or press Stop, then resend.',
-          'For smoother chat, keep Multimodal on Auto and prefer the 7B instruct brain for normal conversation (coders are for file builds).',
+          'For smoother chat, keep Nova Auto and prefer the 7B instruct brain for normal conversation (coders are for file builds).',
         ].join('\n'),
-        modelName: 'Nova Multimodal',
+        modelName: 'Nova Auto',
         source: 'none',
         tier: 'local-free',
         attempted,
@@ -1330,7 +1429,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
     return {
       reply: honestNoLiveChatReply(),
-      modelName: 'Nova Multimodal',
+      modelName: 'Nova Auto',
       source: 'none',
       tier: 'local-free',
       attempted,
@@ -1403,7 +1502,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   // Never return NOVA Core template as a finished answer. be honest.
   return {
     reply: honestNoLiveChatReply(),
-    modelName: 'Nova Multimodal',
+    modelName: 'Nova Auto',
     source: 'none',
     tier: 'local-free',
     attempted,

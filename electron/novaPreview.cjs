@@ -6,13 +6,46 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 
 /** @type {Map<string, { server: import('http').Server, port: number, root: string }>} */
 const sessions = new Map();
 /** @type {Map<string, import('electron').BrowserWindow>} */
 const previewWindows = new Map();
 
+/** Isolated from the NOVA shell session — Chromium zoom is per-host+partition. */
+const PREVIEW_PARTITION = 'nova-live-preview';
+
+function previewSession() {
+  return session.fromPartition(PREVIEW_PARTITION);
+}
+
+/**
+ * Live/preview used to call setZoomFactor on 127.0.0.1 pages. That zoom is stored
+ * per host in the shared session and leaked into the main NOVA window (also 127.0.0.1),
+ * so opening Live made the chat shell shrink and closing Live restored it.
+ */
+function restoreShellChromeZoom() {
+  try {
+    const previewSet = new Set([...previewWindows.values()]);
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w || w.isDestroyed() || previewSet.has(w)) continue;
+      try {
+        w.webContents.setZoomFactor(1);
+        w.webContents.setZoomLevel(0);
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+}
+
+/** True when this window uses the isolated Live preview partition. */
+function isPreviewPartitionWindow(win) {
+  try {
+    return Boolean(win && !win.isDestroyed() && win.webContents.session === previewSession());
+  } catch {
+    return false;
+  }
+}
 function previewRoot(projectId) {
   // Windows paths cannot contain ":" — chat ids used to be "chat:uuid".
   const safe = String(projectId || 'default')
@@ -223,15 +256,44 @@ function enableDeviceZoom(win) {
     if (!(input.control || input.meta) || input.type !== 'keyDown') return;
     if (input.key === '=' || input.key === '+') {
       event.preventDefault();
-      win.webContents.setZoomFactor(Math.min(3, win.webContents.getZoomFactor() + 0.1));
+      void bumpPreviewCssZoom(win, 0.1);
     } else if (input.key === '-') {
       event.preventDefault();
-      win.webContents.setZoomFactor(Math.max(0.5, win.webContents.getZoomFactor() - 0.1));
+      void bumpPreviewCssZoom(win, -0.1);
     } else if (input.key === '0') {
       event.preventDefault();
-      win.webContents.setZoomFactor(1);
+      void setPreviewCssZoom(win, 1);
     }
   });
+}
+
+async function setPreviewCssZoom(win, factor) {
+  if (!win || win.isDestroyed()) return;
+  const z = Math.max(0.5, Math.min(3, Number(factor) || 1));
+  try {
+    // Never use Chromium setZoomFactor here — it pollutes 127.0.0.1 host zoom for the shell.
+    win.webContents.setZoomFactor(1);
+    win.webContents.setZoomLevel(0);
+  } catch { /* ignore */ }
+  try {
+    await win.webContents.executeJavaScript(
+      `document.documentElement.style.zoom = ${JSON.stringify(String(z))}; true;`,
+      true,
+    );
+  } catch { /* ignore */ }
+}
+
+async function bumpPreviewCssZoom(win, delta) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const cur = await win.webContents.executeJavaScript(
+      `(() => { const z = parseFloat(document.documentElement.style.zoom || '1'); return Number.isFinite(z) ? z : 1; })()`,
+      true,
+    );
+    await setPreviewCssZoom(win, (Number(cur) || 1) + delta);
+  } catch {
+    await setPreviewCssZoom(win, 1 + delta);
+  }
 }
 
 function deviceWindowSize(device) {
@@ -245,17 +307,115 @@ function deviceWindowSize(device) {
   };
 }
 
-/** Scale web dashboards down in small Preview windows so cards don't overflow/collide. */
+/** Scale web dashboards in the preview window only (CSS zoom — never Chromium host zoom). */
 function fitPreviewZoom(win) {
   if (!win || win.isDestroyed()) return;
   try {
     const [cw] = win.getContentSize();
     const designWidth = 1280;
     const factor = Math.max(0.55, Math.min(1, (Number(cw) || designWidth) / designWidth));
-    win.webContents.setZoomFactor(factor);
+    void setPreviewCssZoom(win, factor);
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * User-facing Live fail copy — basename + short reason only.
+ * Never echo absolute paths, stack frames, or source snippets (privacy).
+ */
+function sanitizePreviewFailMessage(raw) {
+  const s = String(raw || '');
+  const fileHit = s.match(/(?:^|[/\\])((?:src[/\\])?[\w.-]+\.(?:tsx?|jsx?|css|html|mjs|cjs|json))\b/i)
+    || s.match(/\b([\w.-]+\.(?:tsx?|jsx?|css|html))\b/i);
+  const file = fileHit
+    ? String(fileHit[1] || fileHit[0]).replace(/\\/g, '/').split('/').pop()
+    : '';
+  let reason = '';
+  if (/Expected corresponding JSX closing tag/i.test(s)) {
+    reason = 'JSX tag mismatch — a tag was left open or closed wrong';
+  } else if (/Unexpected token|SyntaxError/i.test(s)) {
+    reason = 'syntax error in this file';
+  } else if (/Failed to resolve|Cannot find module|does not provide an export/i.test(s)) {
+    reason = 'a required import or file is missing';
+  } else if (/Transform failed|plugin:vite/i.test(s)) {
+    reason = 'code could not be compiled';
+  } else if (/Failed to fetch dynamically imported module/i.test(s)) {
+    reason = 'a module failed to load';
+  } else if (/blank Live|never mounted/i.test(s)) {
+    reason = 'React never mounted into the page';
+  } else if (/Load failed|ERR_/i.test(s)) {
+    reason = 'the preview page failed to load';
+  } else if (/render-process-gone|crashed/i.test(s)) {
+    reason = 'the preview crashed';
+  } else {
+    reason = 'something in this file is broken';
+  }
+  if (file) {
+    return `${file} is failing (${reason}). That's why you can't see Live.`;
+  }
+  return `Live can't show the app (${reason}).`;
+}
+
+/** Hide Vite's red overlay (full paths + source) and replace with a private NOVA card. */
+async function installViteOverlayShield(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    await win.webContents.insertCSS(`
+      vite-error-overlay {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+      }
+    `);
+  } catch { /* ignore */ }
+  // Keep injected JS simple — parse file basename only; never paint paths/stacks/source.
+  const script = [
+    '(() => {',
+    '  if (window.__novaViteShield) return true;',
+    '  window.__novaViteShield = true;',
+    '  function sanitize(raw) {',
+    '    var s = String(raw || "");',
+    '    var fileHit = s.match(/(?:^|[\\/\\\\])((?:src[\\/\\\\])?[\\w.-]+\\.(?:tsx?|jsx?|css|html))\\b/i)',
+    '      || s.match(/\\b([\\w.-]+\\.(?:tsx?|jsx?|css|html))\\b/i);',
+    '    var file = fileHit ? String(fileHit[1] || fileHit[0]).replace(/\\\\/g, "/").split("/").pop() : "";',
+    '    var reason = "something in this file is broken";',
+    '    if (/Expected corresponding JSX closing tag/i.test(s)) reason = "JSX tag mismatch — a tag was left open or closed wrong";',
+    '    else if (/Unexpected token|SyntaxError/i.test(s)) reason = "syntax error in this file";',
+    '    else if (/Failed to resolve|Cannot find module|does not provide an export/i.test(s)) reason = "a required import or file is missing";',
+    '    else if (/Transform failed|plugin:vite/i.test(s)) reason = "code could not be compiled";',
+    '    else if (/Failed to fetch dynamically imported module/i.test(s)) reason = "a module failed to load";',
+    '    if (file) return file + " is failing (" + reason + "). That\\u2019s why you can\\u2019t see Live.";',
+    '    return "Live can\\u2019t show the app (" + reason + ").";',
+    '  }',
+    '  function showNova(raw) {',
+    '    try { document.querySelectorAll("vite-error-overlay").forEach(function(el){ el.remove(); }); } catch (e) {}',
+    '    try { var n = document.getElementById("nova-preview-fail"); if (n) n.remove(); } catch (e) {}',
+    '    try { window.__novaPreviewCompileFail = sanitize(raw); } catch (e) {}',
+    '  }',
+    '  function scan() {',
+    '    var el = document.querySelector("vite-error-overlay");',
+    '    if (!el) return;',
+    '    var text = "";',
+    '    try { text = el.shadowRoot ? (el.shadowRoot.textContent || "") : (el.textContent || ""); } catch (e) { text = ""; }',
+    '    showNova(text || "Vite compile error");',
+    '  }',
+    '  var obs = new MutationObserver(function(){ scan(); });',
+    '  obs.observe(document.documentElement, { childList: true, subtree: true });',
+    '  scan();',
+    '  var n = 0;',
+    '  var tick = window.setInterval(function(){',
+    '    scan();',
+    '    n += 1;',
+    '    if (n > 40 || window.__novaPreviewCompileFail) window.clearInterval(tick);',
+    '  }, 250);',
+    '  return true;',
+    '})()',
+  ].join('\n');
+  try {
+    await win.webContents.executeJavaScript(script, true);
+  } catch { /* ignore */ }
 }
 
 /** Blank Live is usually a SyntaxError from raw TSX — surface it instead of a silent black window. */
@@ -266,37 +426,236 @@ function attachPreviewLoadGuards(win) {
   const showFail = async (reason) => {
     if (shown || !win || win.isDestroyed()) return;
     shown = true;
-    const safe = String(reason || 'Preview failed to load.')
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/\r?\n/g, ' ')
-      .slice(0, 280);
-    // Overlay in-place — never loadURL (that races and throws ERR_ABORTED).
+    // Never paint the black "Live Preview could not render" card — close Live instead.
+    // Chat/create already owns the fix path; this overlay was the user-visible failure.
+    try {
+      win.__novaPreviewFailReason = sanitizePreviewFailMessage(reason).slice(0, 220);
+    } catch { /* ignore */ }
     try {
       await win.webContents.executeJavaScript(`(() => {
-        if (document.getElementById('nova-preview-fail')) return true;
-        const el = document.createElement('div');
-        el.id = 'nova-preview-fail';
-        el.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#0b0d10;color:#e8eaed;font:14px/1.45 system-ui,sans-serif;padding:18vh 1.5rem;box-sizing:border-box');
-        el.innerHTML = '<div style="max-width:34rem;margin:0 auto"><h1 style="font-size:1.15rem;font-weight:600;margin:0 0 .6rem">Live Preview could not render</h1><p style="margin:0;opacity:.82">' + '${safe}'.replace(/</g,'&lt;') + '</p><p style="margin-top:1rem;opacity:.65">Close this window, fix the project (or reinstall deps), then click Live again.</p></div>';
-        document.documentElement.appendChild(el);
+        try { document.querySelectorAll('vite-error-overlay').forEach((el) => el.remove()); } catch {}
+        try { const n = document.getElementById('nova-preview-fail'); if (n) n.remove(); } catch {}
         return true;
       })()`, true);
     } catch { /* ignore */ }
+    try {
+      if (!win.isDestroyed()) win.close();
+    } catch { /* ignore */ }
   };
-  win.webContents.on('console-message', (_e, _level, message) => {
+  win.__novaPreviewShowFail = showFail;
+  if (!Array.isArray(win.__novaConsoleErrors)) win.__novaConsoleErrors = [];
+  win.webContents.on('console-message', (_e, level, message) => {
     const msg = String(message || '');
-    if (/SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named/i.test(msg)) {
-      showFail(msg.slice(0, 280)).catch(() => {});
+    // Buffer error-level / Vite crash lines for create evidence (verify-before-success).
+    // Keep raw for host diagnostics — never show raw paths to the user overlay.
+    if (
+      level >= 2
+      || /SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named|TypeError|ReferenceError|Uncaught/i.test(msg)
+    ) {
+      try {
+        const buf = win.__novaConsoleErrors;
+        if (Array.isArray(buf)) {
+          buf.push(sanitizePreviewFailMessage(msg).slice(0, 220));
+          if (buf.length > 24) buf.splice(0, buf.length - 24);
+        }
+      } catch { /* ignore */ }
+    }
+    if (/SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named|plugin:vite|Transform failed|Expected corresponding JSX/i.test(msg)) {
+      showFail(msg).catch(() => {});
     }
   });
-  win.webContents.on('did-fail-load', (_e, code, desc, validatedURL, isMainFrame) => {
+  win.webContents.on('did-fail-load', (_e, code, desc, _validatedURL, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // -3 = aborted
-    showFail(`Load failed (${code}): ${desc || 'unknown'} ${validatedURL || ''}`.trim()).catch(() => {});
+    showFail(`Load failed (${code}): ${desc || 'unknown'}`).catch(() => {});
   });
   win.webContents.on('render-process-gone', (_e, details) => {
     showFail(`Preview crashed (${details?.reason || 'render-process-gone'}).`).catch(() => {});
   });
+  win.webContents.on('did-finish-load', () => {
+    void installViteOverlayShield(win);
+  });
+  win.webContents.on('dom-ready', () => {
+    void installViteOverlayShield(win);
+  });
+}
+
+/**
+ * After load, if #root stays empty the user only sees Electron's black chrome.
+ * Wait for Vite/React settle, then surface a clear fail instead of a void.
+ */
+function scheduleBlankRootCheck(win) {
+  if (!win || win.isDestroyed()) return;
+  const token = (win.__novaBlankRootToken = (win.__novaBlankRootToken || 0) + 1);
+  setTimeout(() => {
+    void (async () => {
+      if (!win || win.isDestroyed() || win.__novaBlankRootToken !== token) return;
+      let probe = null;
+      try {
+        probe = await win.webContents.executeJavaScript(`(() => {
+          if (document.getElementById('nova-preview-fail')) return { skip: true };
+          const root = document.getElementById('root');
+          if (!root) return { skip: true, reason: 'no-root' };
+          const html = (root.innerHTML || '').trim();
+          const text = (root.innerText || '').trim();
+          const kids = root.childElementCount || 0;
+          const viteErr = /\\[plugin:vite|Failed to resolve|Internal Server Error|does not provide an export/i.test(document.body?.innerText || '');
+          return {
+            skip: false,
+            htmlLen: html.length,
+            textLen: text.length,
+            kids,
+            viteErr,
+            title: document.title || '',
+          };
+        })()`, true);
+      } catch {
+        return;
+      }
+      if (!probe || probe.skip) return;
+      if (probe.viteErr) {
+        const showFail = win.__novaPreviewShowFail;
+        if (typeof showFail === 'function') {
+          let bodyHint = '';
+          try {
+            bodyHint = await win.webContents.executeJavaScript(
+              `(() => (document.body && (document.body.innerText || '')) || '')`,
+              true,
+            );
+          } catch { /* ignore */ }
+          await showFail(String(bodyHint || 'Vite compile error'));
+        }
+        return;
+      }
+      // Empty #root after settle = blank Live (classic create crash / missing mount).
+      if (probe.kids === 0 && probe.htmlLen < 8 && probe.textLen < 4) {
+        const showFail = win.__novaPreviewShowFail;
+        if (typeof showFail === 'function') {
+          await showFail(
+            'The page loaded but React never mounted into #root (blank Live). Re-run the build or say repair Live preview.',
+          );
+        }
+      }
+    })();
+  }, 3200);
+}
+
+/** Race a promise so a wedged BrowserWindow cannot hang create/Live forever. */
+function withTimeout(promise, ms, label) {
+  const limit = Math.max(500, Number(ms) || 8000);
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => {
+      if (timer != null) clearTimeout(timer);
+    }),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label || `timeout ${limit}ms`)), limit);
+    }),
+  ]);
+}
+
+/** Probe whether the Live window actually painted UI (for create “verified” honesty). */
+async function probePreviewMounted(payload) {
+  const url = String(payload?.url || '').trim();
+  const id = 'NOVA-live-preview';
+  // Hard wall for the whole probe — wedged preview JS used to freeze TipWise ~11m on Fixing.
+  const hardMs = Math.max(8_000, Math.min(20_000, Number(payload?.hardTimeoutMs) || 14_000));
+  const run = async () => {
+    let win = previewWindows.get(id);
+    if ((!win || win.isDestroyed()) && url) {
+      const opened = await withTimeout(
+        openPreviewWindow({
+          url,
+          title: String(payload?.title || 'Preview'),
+          projectId: id,
+          forceNavigate: true,
+        }),
+        Math.min(10_000, hardMs),
+        'openPreviewWindow timeout',
+      );
+      if (!opened?.ok) return { ok: false, mounted: false, error: opened?.error || 'open failed' };
+      win = previewWindows.get(id);
+    }
+    if (!win || win.isDestroyed()) {
+      return { ok: false, mounted: false, error: 'No preview window' };
+    }
+    // Give Vite + React a moment after navigate (first paint often needs >3s on cold Vite).
+    const waitMs = Math.min(8_000, Number(payload?.waitMs) || 5000);
+    await new Promise((r) => setTimeout(r, waitMs));
+    if (win.isDestroyed()) return { ok: false, mounted: false, error: 'window closed' };
+    const readProbe = () => withTimeout(
+      win.webContents.executeJavaScript(`(() => {
+      const root = document.getElementById('root') || document.getElementById('app');
+      const fail = Boolean(document.getElementById('nova-preview-fail'));
+      const html = (root?.innerHTML || '').trim();
+      const bodyHtml = (document.body?.innerHTML || '').trim();
+      const bodyText = (document.body?.innerText || '').trim();
+      let text = (root?.innerText || bodyText || '').trim();
+      // Some paints leave innerText empty while HTML already has labels — strip tags as fallback.
+      if (text.length < 8 && html.length >= 24) {
+        text = html.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
+          .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\\s+/g, ' ')
+          .trim();
+      }
+      const kids = root?.childElementCount || 0;
+      // React: kids in #root/#app. Static HTML: meaningful body text/markup without a root mount.
+      const hasUi = (kids > 0 && (html.length >= 24 || text.length >= 8))
+        || (!document.getElementById('root') && text.length >= 12 && bodyHtml.length >= 40);
+      const viteErr = /\\[plugin:vite|Failed to resolve|Internal Server Error|Unexpected token|Transform failed|Expected ">"/i.test(bodyText + bodyHtml);
+      return {
+        mounted: hasUi && !fail && !viteErr,
+        fail,
+        viteErr,
+        kids,
+        htmlLen: html.length || bodyHtml.length,
+        textLen: text.length,
+        title: document.title || '',
+        sample: (viteErr
+          ? ((bodyText.match(/\\b([\\w.-]+\\.(?:tsx?|jsx?))\\b/i) || [])[1] || 'App')
+            + ' compile error'
+          : text).slice(0, 240),
+      };
+    })()`, true),
+      6_000,
+      'preview executeJavaScript timeout',
+    );
+
+    try {
+      let probe = await readProbe();
+      // Blank shell: short re-probe (HMR / first React commit race) — was a fixed 4s stall.
+      if (!probe?.mounted && !probe?.viteErr && Number(probe?.kids || 0) === 0) {
+        await new Promise((r) => setTimeout(r, 1200));
+        if (!win.isDestroyed()) probe = await readProbe();
+      }
+      let consoleErrors = [];
+      try {
+        if (Array.isArray(win.__novaConsoleErrors)) {
+          consoleErrors = win.__novaConsoleErrors.slice(-12).map((m) => String(m || '').trim()).filter(Boolean);
+        }
+      } catch { /* ignore */ }
+      // Reset buffer after read so the next probe is fresh.
+      try { win.__novaConsoleErrors = []; } catch { /* ignore */ }
+      return { ok: true, ...probe, consoleErrors };
+    } catch (err) {
+      return {
+        ok: false,
+        mounted: false,
+        error: err instanceof Error ? err.message : 'probe failed',
+        consoleErrors: [],
+      };
+    }
+  };
+  try {
+    return await withTimeout(run(), hardMs, 'previewProbeMounted hard timeout');
+  } catch (err) {
+    return {
+      ok: false,
+      mounted: false,
+      error: err instanceof Error ? err.message : 'probe hard timeout',
+      consoleErrors: [],
+    };
+  }
 }
 
 async function loadDeviceIntoWindow(win, id, url, device, title) {
@@ -358,30 +717,39 @@ async function openPreviewWindow(payload) {
 
   const existing = previewWindows.get(id);
   if (existing && !existing.isDestroyed()) {
-    attachPreviewLoadGuards(existing);
-    if (kind === 'device' && device) {
-      await loadDeviceIntoWindow(existing, id, url, device, title);
+    // Pre-fix windows shared the shell session — drop them so zoom cannot leak again.
+    if (!isPreviewPartitionWindow(existing)) {
+      previewWindows.delete(id);
+      try { existing.close(); } catch { /* ignore */ }
     } else {
-      try {
-        existing.setResizable(true);
-        existing.setMaximizable(true);
-        existing.setMinimumSize(480, 360);
-        existing.setMaximumSize(4000, 3000);
-        existing.setTitle(title);
-        // Always navigate for live web preview — never reload another project's host.
-        await existing.loadURL(navigateUrl);
-      } catch {
+      attachPreviewLoadGuards(existing);
+      if (kind === 'device' && device) {
+        await loadDeviceIntoWindow(existing, id, url, device, title);
+      } else {
         try {
+          existing.setResizable(true);
+          existing.setMaximizable(true);
+          existing.setMinimumSize(480, 360);
+          existing.setMaximumSize(4000, 3000);
+          existing.setTitle(title);
+          // Always navigate for live web preview — never reload another project's host.
           await existing.loadURL(navigateUrl);
         } catch {
-          /* keep */
+          try {
+            await existing.loadURL(navigateUrl);
+          } catch {
+            /* keep */
+          }
         }
+        scheduleBlankRootCheck(existing);
+        try { fitPreviewZoom(existing); } catch { /* ignore */ }
       }
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+      restoreShellChromeZoom();
+      return { ok: true, reused: true };
     }
-    if (existing.isMinimized()) existing.restore();
-    existing.show();
-    existing.focus();
-    return { ok: true, reused: true };
   }
 
   const win = new BrowserWindow({
@@ -398,12 +766,15 @@ async function openPreviewWindow(payload) {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // Separate session so preview zoom/cookies never touch the NOVA shell (same 127.0.0.1 host).
+      partition: PREVIEW_PARTITION,
     },
   });
   previewWindows.set(id, win);
   attachPreviewLoadGuards(win);
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
+    restoreShellChromeZoom();
   });
   win.webContents.on('did-finish-load', () => {
     win.webContents.insertCSS(`
@@ -412,16 +783,26 @@ async function openPreviewWindow(payload) {
       ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 8px; }
       html, body { max-width: 100%; overflow-x: auto; }
       img, video, canvas, svg { max-width: 100%; height: auto; }
+      vite-error-overlay {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
     `).catch(() => {});
+    void installViteOverlayShield(win);
     try {
       fitPreviewZoom(win);
     } catch {
       /* ignore */
     }
+    // Vite React apps that never mount leave a silent black window — surface it.
+    scheduleBlankRootCheck(win);
+    restoreShellChromeZoom();
   });
   if (kind !== 'device') {
     win.on('resize', () => {
       try { fitPreviewZoom(win); } catch { /* ignore */ }
+      restoreShellChromeZoom();
     });
   }
   if (kind === 'device' && device) {
@@ -433,6 +814,7 @@ async function openPreviewWindow(payload) {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  restoreShellChromeZoom();
   return { ok: true };
 }
 
@@ -451,6 +833,7 @@ function closeLivePreviewWindow() {
       previewWindows.delete(key);
     }
   }
+  restoreShellChromeZoom();
   return { ok: true };
 }
 
@@ -472,6 +855,15 @@ async function updatePreview(payload) {
   const win = previewWindows.get(id);
   if (win && !win.isDestroyed()) {
     try {
+      const currentUrl = String(win.webContents.getURL() || '');
+      // Item 16: Vite Live on 52xx — prefer HMR (no cache-bust reload). Soft reload only if needed.
+      const viteLive = /127\.0\.0\.1:52\d{2}|localhost:52\d{2}/i.test(currentUrl);
+      if (viteLive) {
+        // Disk writes already landed; Vite HMR updates the page. Avoid reloadIgnoringCache thrash.
+        if (win.isMinimized()) win.restore();
+        win.show();
+        return { ok: true, url: currentUrl || url, reloaded: false, hmr: true };
+      }
       await win.webContents.reloadIgnoringCache();
       if (win.isMinimized()) win.restore();
       win.show();
@@ -550,4 +942,6 @@ module.exports = {
   updatePreview,
   reloadPreviewWindow,
   captureLivePreview,
+  probePreviewMounted,
+  restoreShellChromeZoom,
 };

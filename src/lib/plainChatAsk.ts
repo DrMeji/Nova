@@ -29,7 +29,45 @@ export function looksLikePureGreeting(message: string): boolean {
     .replace(/[!?.…]+$/g, '')
     .trim();
   if (!t || t.length > 36) return false;
-  return /^(?:hi|hii+|hello|heelo|hell+o|hey|yo|sup|howdy)(?:\s+(?:nova|there|friend|team))?$/i.test(t);
+  // Exact / near-exact greetings (incl. common typos: ehello, helo, helllo).
+  if (/^(?:hi|hii+|hello|heelo|hell+o|helo|ehello|hellp|hey|yo|sup|howdy)(?:\s+(?:nova|there|friend|team))?$/i.test(t)) {
+    return true;
+  }
+  const letters = t.toLowerCase().replace(/[^a-z]/g, '');
+  if (!letters || letters.length > 12) return false;
+  if (['hi', 'hii', 'hiii', 'hey', 'heyy', 'yo', 'sup', 'howdy'].includes(letters)) return true;
+  // Fuzzy hello family: ehello / helllo / hrllo / hewlo
+  return /^e?h+[ei]*l+o+$/.test(letters) && letters.length <= 10;
+}
+
+/** Instant greeting — no GGUF load (avoids 10–20s hangs + coding-tutor bleed). */
+export function instantGreetingReply(): string {
+  const opts = [
+    'Hey — good to see you. What do you need?',
+    'Hi. I’m here whenever you’re ready.',
+    'Hello. What’s on your mind?',
+  ];
+  return opts[Math.floor(Math.random() * opts.length)]!;
+}
+
+/**
+ * Soft check-in / “got a minute?” — still chat, never pivot to coding.
+ * Longer than pure hi/hello but not a product ask yet.
+ */
+export function looksLikeSoftCheckInAsk(message: string): boolean {
+  const t = String(message || '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
+    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .trim();
+  if (!t || t.length < 8 || t.length > 120) return false;
+  // Already a product / build ask — not a soft check-in.
+  if (/\b(?:build|app|website|plan|feature|code|create|scaffold)\b/i.test(t)) return false;
+  if (looksLikePureGreeting(t)) return true;
+  return (
+    /^(?:hey|hi|hello|yo)\b/i.test(t)
+    && /\b(?:got a (?:sec|second|minute|min)|quick question|quick ask|got a minute|if you(?:['’]ve| have) got a (?:sec|minute))\b/i.test(t)
+  );
 }
 
 /** “What can you do” — keep answers short and real (prompt shaping only). */
@@ -52,6 +90,7 @@ export function looksLikePlainChatAsk(message: string): boolean {
   if (!t || t.length < 2) return false;
 
   if (looksLikePureGreeting(t)) return true;
+  if (looksLikeSoftCheckInAsk(t)) return true;
   if (looksLikeCapabilityOverviewAsk(t)) return true;
   if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) return true;
 
@@ -170,9 +209,54 @@ export function isTalkFenceJunk(text: string): boolean {
 }
 
 /**
- * Exploratory / how-to chat must stay prose. Strip @@@FILE dumps and real code
- * fences, but keep planning outlines (markdown/list fences). Also strip glued
- * language tags like "Express:javascript" / "Code:cpp" that local models emit.
+ * Turn loose CSS property / selector dumps into a fenced ```css block so the
+ * chat renderer can show a professional code box (hex chips stay in prose).
+ */
+export function fenceLooseCssDumps(text: string): string {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  let cssBuf: string[] = [];
+  const isCssLine = (raw: string) => {
+    const t = raw.trim();
+    if (!t) return false;
+    if (/^(?:html|body|header|nav|footer|main|h[1-6]|p|a|ul|li|button|input|textarea|img|div|span|section|article)(?:\s*[.#:][\w-]+)*\s*\{?\s*$/i.test(t)) {
+      return true;
+    }
+    if (/^[.#][\w-]+(?:\s+[.#:][\w-]+)*(?:\s*:[\w-]+)?\s*\{?\s*$/i.test(t)) return true;
+    if (/^[.#\w:*-]+\s*\{[^{}]*\}\s*$/i.test(t)) return true;
+    if (/^(?:margin|padding|border|background|color|font|width|height|display|flex|grid|gap|opacity|outline|box-shadow|border-radius|letter-spacing|line-height|text-|min-|max-|overflow|position|top|left|right|bottom|z-index|cursor|transition|transform|align|justify|object-|box-sizing)[\w-]*\s*:\s*[^;{]+;?\s*$/i.test(t)) {
+      return true;
+    }
+    if (/^\}?\s*$/.test(t) && t.includes('}')) return true;
+    return false;
+  };
+  const flushCss = () => {
+    if (!cssBuf.length) return;
+    const code = cssBuf.join('\n').trim();
+    cssBuf = [];
+    if (!code) return;
+    // Tiny single-property crumbs stay inline in backticks.
+    if (code.split('\n').length < 2 && code.length < 48) {
+      out.push('`' + code.replace(/`/g, "'") + '`');
+      return;
+    }
+    out.push('```css', code, '```');
+  };
+  for (const line of lines) {
+    if (isCssLine(line) || (cssBuf.length > 0 && (/^\s{2,}\S/.test(line) || /^[{}]$/.test(line.trim())))) {
+      cssBuf.push(line);
+    } else {
+      flushCss();
+      out.push(line);
+    }
+  }
+  flushCss();
+  return out.join('\n');
+}
+
+/**
+ * Exploratory / how-to chat must stay readable. Strip @@@FILE dumps, keep
+ * planning outlines, and put leaked CSS/JS into fenced code boxes (not raw prose).
  */
 export function scrubTalkFirstCodeBleed(text: string): string {
   let body = String(text || '').replace(/\r\n/g, '\n').trim();
@@ -184,14 +268,18 @@ export function scrubTalkFirstCodeBleed(text: string): string {
   body = body.replace(/^[ \t]*@@@FILE[^\n]*$/gim, '');
   body = body.replace(/\b@@@FILE\b/gi, '');
 
-  // Unwrap planning fences first so outlines survive; then drop real code fences.
+  // Unwrap planning fences first so outlines survive as prose lists.
   body = unwrapPlanningFencesForTalk(body);
-  body = body.replace(/```[\w.+-]*[^\n]*\n[\s\S]*?```/g, '');
-  body = body.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/g, '');
-  // Any leftover bare ticks / opener crumbs
+  // Loose CSS → ```css boxes (do this BEFORE any fence stripping).
+  body = fenceLooseCssDumps(body);
+  // Talk-first: drop CSS dumps entirely (models paste stylesheet blobs mid-chat).
+  body = body.replace(/```css\b[\s\S]*?```/gi, '\n');
+  body = body.replace(/^(?:\s*[.#\w-]+(?:\s+[.#\w-]+)*\s*\{[^}]*\}\s*)$/gm, '');
+  body = body.replace(/\n(?:\s*\.[A-Za-z_][\w-]*[^{\n]*\{[^}]*\})+/g, '\n');
+  // Drop leftover bare ``` crumbs that aren't a real lang fence.
   body = body.replace(/(?:^|\n)\s*(?:markdown|md|text|plain|outline|plan)\s*```+\s*/gi, '\n');
-  body = body.replace(/```+\s*(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
-  body = body.replace(/(?:^|\n)\s*```+\s*/g, '\n');
+  // Strip empty or unmarked fence openers that would break rendering.
+  body = body.replace(/(?:^|\n)```\s*\n```/g, '\n');
 
   // Glued lang tags: "Express:javascript", "Firmware Code:cpp", "structure:python"
   body = body.replace(
@@ -204,20 +292,9 @@ export function scrubTalkFirstCodeBleed(text: string): string {
     '\n',
   );
 
-  // Raw CSS dumps (incl. ".nav-links li { … }" single-line rules).
-  body = body.replace(
-    /(?:^|\n)\s*(?:body|html|header|nav|footer|main|\.[\w-]+(?:\s+[\w.#:-]+)*)\s*\{[^{}]*\}/gim,
-    '\n',
-  );
-  body = body.replace(
-    /(?:^|\n)\s*(?:body|html|header|nav|footer|main|\.[\w-]+(?:\s+[\w.#:-]+)*)\s*\{[\s\S]*?\n\}/gim,
-    '\n',
-  );
-  body = body.replace(/(?:^|\n)\s*(?:color|background|font-size|margin|padding)\s*:[^;\n]+;?\s*/gim, '\n');
-
   // Cut off raw source dumps that start mid-prose (import / const app = / #include)
   const codeCut = body.search(
-    /\n(?:import\s+(?:express|react|mongoose|\{)|const\s+(?:app|express|router|server|User)\s*=|#include\s*<|from\s+flask\s+import|app\s*=\s*Flask\(|(?:body|html)\s*\{)/i,
+    /\n(?:import\s+(?:express|react|mongoose|\{)|const\s+(?:app|express|router|server|User)\s*=|#include\s*<|from\s+flask\s+import|app\s*=\s*Flask\()/i,
   );
   if (codeCut > 60) {
     const head = body.slice(0, codeCut).trim();
@@ -567,6 +644,28 @@ export function scrubBuildAggression(text: string): string {
   );
   cutTail(
     /\n+(?:For simplicity,? we can use (?:a )?web-based solution|We’ll handle data storage|Let’s start with the basic list|To start,? we can create a basic prototype|We can use a simple web framework|We can use a simple web framework like|Would you like to proceed with building)[^\n]*(?:\n(?![A-Z*\d★])[^\n]*)*/i,
+  );
+  // Image / casual asks — cut “given you’re into coding, we could build…” pitches.
+  cutTail(
+    /\n+(?:Given (?:that )?you(?:'re| are) interested in coding[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:We could (?:explore|build|create|make) (?:a |an )?(?:project|app|tool|filter)[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  cutTail(
+    /\n+(?:Perhaps we could build[^\n]*(?:\n(?![A-Z#*\d-])[^\n]*)*)/i,
+  );
+  body = body.replace(
+    /\s*(?:Given (?:that )?you(?:'re| are) interested in coding[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:Perhaps we could build[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
+  );
+  body = body.replace(
+    /\s*(?:using (?:libraries|tools) like OpenCV[^.!?\n]*)[.!]?\s*/gi,
+    ' ',
   );
   body = body.replace(
     /\n*(?:\d+\.\s*)?(?:Choose a Technology|Develop the Backend|Design the UI|Test and Iterate|Technology Stack|Implementation Considerations)\s*:[^\n]*/gi,

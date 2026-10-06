@@ -109,6 +109,8 @@ import {
 import { isTraceMessage, encodeTraceMessage, nextTraceStepId, traceThoughtFromAsk, countLineDiff, wrapReplyWithFileChanges, type AgentFileChange, type AgentTracePayload, type AgentTraceStep } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
 import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
+import { hasChatPlanPill, saveChatPlan, setChatPlanPill } from '@/lib/chatPlanStore';
+import type { PlanReport as PlanReportData } from '@/lib/planReport';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
@@ -130,7 +132,7 @@ import {
   harmfulContentBlockedReply,
   looksLikeHarmfulContentAsk,
 } from '@/lib/novaContentSafety';
-import { redactArkSelfLeak } from '@/lib/replySanitizer';
+import { redactArkSelfLeak, looksLikeAgentToolLeak } from '@/lib/replySanitizer';
 import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
 import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
@@ -475,20 +477,6 @@ export function useAIChatController() {
     );
     return defaultModelForKind(kind);
   });
-  // One-shot: chat is Multimodal-only — clear stale manual chat pins so Auto owns routing.
-  useEffect(() => {
-    try {
-      const prefs = getLocalPrefs();
-      const patch: Record<string, unknown> = {};
-      if (prefs.defaultModelId !== 'NOVA-auto') patch.defaultModelId = 'NOVA-auto';
-      if (prefs.lastChatModelId) patch.lastChatModelId = undefined;
-      if (prefs.aiMode !== 'automatic') patch.aiMode = 'automatic';
-      if (prefs.autoFailover !== true) patch.autoFailover = true;
-      if (Object.keys(patch).length) setLocalPrefs(patch as never);
-    } catch { /* ignore */ }
-    setActiveModel((prev) => (prev.kind === 'chat' ? defaultModelForKind('chat') : prev));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
-  }, []);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
@@ -744,6 +732,13 @@ export function useAIChatController() {
   const [imageSwitchDismissed, setImageSwitchDismissed] = useState(false);
   const [codePillSticky, setCodePillSticky] = useState(false);
   const [codeOverlayOpen, setCodeOverlayOpen] = useState(false);
+  /** Fake-code typing demo (Preview) — does not touch the real project files. */
+  const [codeTypingDemo, setCodeTypingDemo] = useState(false);
+  const [codeDemoFiles, setCodeDemoFiles] = useState<Record<string, string>>({});
+  const codeDemoTimerRef = useRef<number | null>(null);
+  const [planOverlayOpen, setPlanOverlayOpen] = useState(false);
+  const [planPillSticky, setPlanPillSticky] = useState(false);
+  const [planLiveDrafting, setPlanLiveDrafting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const activeChatId = route.name === 'chat' ? route.chatId : undefined;
@@ -1282,19 +1277,56 @@ export function useAIChatController() {
     }
     setMode(next);
     const kind = kindForMode(next);
-    // Chat is always Multimodal; never keep a manually pinned local/cloud chat brain.
+    // Restore pinned Multimodal / local / cloud chat model from prefs (not force-Auto).
     setActiveModel(prevModel => {
       if (kind === 'chat') return defaultModelForKind('chat');
       return prevModel.kind === kind ? prevModel : defaultModelForKind(kind);
     });
   }, [route, navigate]);
 
-  // Image / Video routes are retired — bounce to plain Chat. Voice stays.
   useEffect(() => {
-    if (route.name !== 'chat') return;
-    if (route.mode !== 'image' && route.mode !== 'video') return;
-    navigate({ name: 'chat', chatId: route.chatId, creationId: route.creationId });
-  }, [route, navigate]);
+    const onNew = () => {
+      navigate({ name: 'chat' });
+    };
+    window.addEventListener('NOVA:new-chat', onNew);
+    return () => window.removeEventListener('NOVA:new-chat', onNew);
+  }, [navigate]);
+
+  // After bulk History delete: unlock composer immediately (don't leave readOnly/generating stuck).
+  useEffect(() => {
+    const onBulkDeleted = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ chatIds?: string[] }>).detail;
+      const deleted = new Set((detail?.chatIds || []).map(String).filter(Boolean));
+      const viewing = routeChatIdRef.current || persistChatIdRef.current || null;
+      const genId = activeGenChatIdRef.current;
+      const hitView = Boolean(viewing && deleted.has(viewing));
+      const hitGen = Boolean(genId && deleted.has(genId));
+      if (!hitView && !hitGen && deleted.size === 0) {
+        // Still refocus — bulk wipe can steal focus / jam the main thread briefly.
+        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+        return;
+      }
+      if (hitGen || hitView) {
+        generatingRef.current = false;
+        activeGenChatIdRef.current = null;
+        setGenerating(false);
+        try {
+          clearChatTurnStatus();
+        } catch { /* ignore */ }
+        if (hitGen && genId) endChatInflight(genId);
+        if (hitView && viewing) endChatInflight(viewing);
+      }
+      if (hitView) {
+        setMessages([]);
+        messagesRef.current = [];
+        persistChatIdRef.current = null;
+        routeChatIdRef.current = undefined;
+      }
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+    };
+    window.addEventListener('NOVA:chats-bulk-deleted', onBulkDeleted);
+    return () => window.removeEventListener('NOVA:chats-bulk-deleted', onBulkDeleted);
+  }, []);
 
   useEffect(() => {
     if (mode !== 'voice') {
@@ -1579,6 +1611,9 @@ export function useAIChatController() {
       previewUrlRef.current = null;
       setPendingAttaches([]);
       setCodePillSticky(false);
+      setPlanPillSticky(false);
+      setPlanOverlayOpen(false);
+      setPlanLiveDrafting(false);
       setComposerMode(null);
       setDropHint(null);
       clearPendingStudioBind();
@@ -1638,6 +1673,7 @@ export function useAIChatController() {
         }
         if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
         setCodePillSticky(hasChatCodePill(switchChatId));
+        setPlanPillSticky(hasChatPlanPill(switchChatId));
         // Clear stale generating placeholders from a crashed prior turn.
         try {
           const rawInflight = sessionStorage.getItem('NOVA:inflight-media');
@@ -1740,6 +1776,16 @@ export function useAIChatController() {
     messagesRef.current = [];
     messagesChatIdRef.current = null;
     setThreadBrain(null);
+    // New chat always starts on Multimodal — user can pin a single model later.
+    // Thread memory stays with this chatId when they switch models mid-conversation.
+    try {
+      setLocalPrefs({
+        lastChatModelId: 'NOVA-auto',
+        defaultModelId: 'NOVA-auto',
+        activeChatId: 'NOVA-auto',
+      });
+    } catch { /* ignore */ }
+    setActiveModel(defaultModelForKind('chat'));
     if (persistTimerRef.current) {
       window.clearTimeout(persistTimerRef.current);
       persistTimerRef.current = undefined;
@@ -1864,7 +1910,9 @@ export function useAIChatController() {
               m.status === 'ready'
               && m.id !== 'NOVA-core'
               && m.id !== 'NOVA-image-core'
-              && m.id !== 'NOVA-video-core',
+              && m.id !== 'NOVA-video-core'
+              // Vision projector companion — not a chat/create model.
+              && !/mmproj/i.test(`${m.id || ''} ${m.name || ''}`),
             )
             .map(m => ({
               id: m.id,
@@ -1886,10 +1934,24 @@ export function useAIChatController() {
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
           setEngineReadyIds(readyIds);
-          // Chat stays on Nova Multimodal — installed models feed Auto, not a pinned pill.
+          // Hydrate a saved local chat pin once engines are ready — never force Multimodal.
           setActiveModel(prev => {
-            if (prev.kind === 'chat') {
-              return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') || prev;
+            if (prev.kind !== 'chat') return prev;
+            if (prev.source === 'auto' || prev.source === 'cloud') return prev;
+            if (prev.id.startsWith('ollama:')) return prev;
+            if (readyIds.has(prev.id)) {
+              const hit = ready.find(m => m.id === prev.id);
+              return hit || prev;
+            }
+            // Saved engine id that just became ready
+            const prefs = getLocalPrefs();
+            const want = String(prefs.lastChatModelId || prefs.defaultModelId || '').trim();
+            if (want && readyIds.has(want)) {
+              return ready.find(m => m.id === want) || prev;
+            }
+            // Pinned local no longer installed — fall back via prefs resolver
+            if (prev.source === 'local' && prev.id !== 'NOVA-auto' && !readyIds.has(prev.id)) {
+              return defaultModelForKind('chat');
             }
             return prev;
           });
@@ -1901,11 +1963,40 @@ export function useAIChatController() {
         });
     };
     loadEngine();
-    const t = window.setInterval(loadEngine, 2500);
+    // Item 8: poll rarely — GGUF list is cached; refresh on focus / model events instead of 2.5s thrash.
+    const t = window.setInterval(loadEngine, 15_000);
+    const onEngineEvt = () => loadEngine();
     window.addEventListener('focus', loadEngine);
+    window.addEventListener('NOVA:engine-changed', onEngineEvt);
+    window.addEventListener('NOVA:models-changed', onEngineEvt);
+    const onForceChatModel = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ id?: string; name?: string }>).detail || {};
+      const id = String(detail.id || '').trim();
+      if (!id || id === 'NOVA-auto') return;
+      setActiveModel({
+        id,
+        name: String(detail.name || id),
+        source: 'local',
+        kind: 'chat',
+      });
+      try {
+        setLocalPrefs({
+          activeChatId: id,
+          defaultModelId: id,
+          lastChatModelId: id,
+          activeCoderId: id,
+          defaultCodeModelId: id,
+        });
+      } catch { /* ignore */ }
+      void setEngineModel(id);
+    };
+    window.addEventListener('NOVA:force-chat-model', onForceChatModel);
     return () => {
       window.clearInterval(t);
       window.removeEventListener('focus', loadEngine);
+      window.removeEventListener('NOVA:engine-changed', onEngineEvt);
+      window.removeEventListener('NOVA:models-changed', onEngineEvt);
+      window.removeEventListener('NOVA:force-chat-model', onForceChatModel);
     };
   }, []);
 
@@ -1954,7 +2045,11 @@ export function useAIChatController() {
 
   useEffect(() => {
     // Only pin to bottom when the user is already near the end. never yank scroll while reading history.
-    if (!stickToBottomRef.current || userDetachScrollRef.current) return;
+    if (!stickToBottomRef.current || userDetachScrollRef.current) {
+      // Reading history while a reply finishes — keep them put; pulse the jump chip.
+      if (userDetachScrollRef.current) setShowJumpToBottom(true);
+      return;
+    }
     const el = messagesScrollRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
@@ -1962,6 +2057,12 @@ export function useAIChatController() {
     }
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages]);
+
+  // While detached, pulse the jump button when streaming starts/stops so they know new text landed.
+  useEffect(() => {
+    if (!userDetachScrollRef.current) return;
+    setShowJumpToBottom(true);
+  }, [generating, messages.length]);
 
   const onMessagesScroll = () => {
     const el = messagesScrollRef.current;
@@ -1980,10 +2081,15 @@ export function useAIChatController() {
       }
       return;
     }
-    // Hysteresis: leave stick early when scrolling up; re-stick only when clearly at bottom.
-    if (distFromBottom > 100) stickToBottomRef.current = false;
-    else if (distFromBottom < 48) stickToBottomRef.current = true;
-    setShowJumpToBottom(distFromBottom > 160);
+    // Leave stick early when scrolling up — lock detach so stream growth cannot re-stick.
+    if (distFromBottom > 80) {
+      stickToBottomRef.current = false;
+      userDetachScrollRef.current = true;
+      setShowJumpToBottom(true);
+      return;
+    }
+    if (distFromBottom < 48) stickToBottomRef.current = true;
+    setShowJumpToBottom(false);
   };
 
   const onMessagesWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
@@ -2066,6 +2172,15 @@ export function useAIChatController() {
       const next = (genSeqByChatRef.current[originGenChatId] || 0) + 1;
       genSeqByChatRef.current[originGenChatId] = next;
       stopRequestedByChatRef.current[originGenChatId] = true;
+      // Kill in-flight create immediately — otherwise craft/npm/verify keep going after "(stopped)".
+      try {
+        const job = getCreateJobForChat(originGenChatId);
+        if (job && (job.status === 'queued' || job.status === 'writing' || job.status === 'npm' || job.status === 'verifying')) {
+          void import('@/lib/createJobStore').then(({ markCreateJobFailed }) => {
+            markCreateJobFailed(job.id, 'Stopped');
+          }).catch(() => { /* ignore */ });
+        }
+      } catch { /* ignore */ }
     }
     genSeqRef.current += 1;
     stopRequestedRef.current = true;
@@ -2092,11 +2207,13 @@ export function useAIChatController() {
     if (stopChatId) endChatInflight(stopChatId);
     else while (hasChatInflight()) endChatInflight();
     setGenerating(false);
-    const stopPatch = (list: ChatMessage[]) => list.map(m => (
-      m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
-        ? { ...m, content: '(stopped)' }
-        : m
-    ));
+    const stopPatch = (list: ChatMessage[]) => list.map(m => {
+      if (m.role !== 'assistant') return m;
+      const c = String(m.content || '');
+      if (c.startsWith('__generating__:')) return { ...m, content: '(stopped)' };
+      if (looksLikeAgentToolLeak(c)) return { ...m, content: '(stopped)' };
+      return m;
+    });
     setMessages(prev => {
       const next = stopPatch(prev);
       const viewedId = persistChatIdRef.current || routeChatIdRef.current;
@@ -2178,12 +2295,84 @@ export function useAIChatController() {
 
   const openCodeWorkspace = (_seedPrompt?: string, _seedFiles?: Record<string, string>) => {
     // Code pill overlay is the only code UI — old ProjectWorkspace tab is retired.
+    if (codeDemoTimerRef.current != null) {
+      window.clearInterval(codeDemoTimerRef.current);
+      codeDemoTimerRef.current = null;
+    }
+    setCodeTypingDemo(false);
+    setCodeDemoFiles({});
     if (_seedFiles && Object.keys(_seedFiles).length) {
       setChatStudioFiles(_seedFiles);
       chatStudioFilesRef.current = _seedFiles;
     }
     setCodeOverlayOpen(true);
     setCodePillSticky(true);
+  };
+
+  /** Preview: open Code beside chat and type fake lines so you can judge smoothness. */
+  const startCodeTypingPreview = () => {
+    if (codeDemoTimerRef.current != null) {
+      window.clearInterval(codeDemoTimerRef.current);
+      codeDemoTimerRef.current = null;
+    }
+    const demoTsx = [
+      "import { useState } from 'react'",
+      '',
+      'export default function App() {',
+      "  const [note, setNote] = useState('')",
+      '  return (',
+      '    <main className="page">',
+      '      <h1>DemoPage</h1>',
+      '      <p>Watch this type line by line — not paste chunks.</p>',
+      '      <textarea',
+      '        value={note}',
+      '        onChange={(e) => setNote(e.target.value)}',
+      '        placeholder="Type something…"',
+      '      />',
+      '    </main>',
+      '  )',
+      '}',
+      '',
+    ].join('\n');
+    const demoCss = [
+      'body {',
+      '  margin: 0;',
+      '  font-family: Georgia, serif;',
+      '  background: #1a1410;',
+      '  color: #f5f0e8;',
+      '}',
+      '.page {',
+      '  max-width: 28rem;',
+      '  margin: 3rem auto;',
+      '  padding: 1.5rem;',
+      '}',
+      '',
+    ].join('\n');
+    setCodeTypingDemo(true);
+    setCodeDemoFiles({ 'src/App.tsx': '', 'src/App.css': '' });
+    setCodeOverlayOpen(true);
+    setCodePillSticky(true);
+    // Dump full targets after a beat — overlay typewriter reveals them smoothly.
+    codeDemoTimerRef.current = window.setTimeout(() => {
+      setCodeDemoFiles({ 'src/App.tsx': demoTsx, 'src/App.css': demoCss });
+      codeDemoTimerRef.current = null;
+    }, 120) as unknown as number;
+  };
+
+  const closeCodeOverlay = () => {
+    if (codeDemoTimerRef.current != null) {
+      window.clearTimeout(codeDemoTimerRef.current);
+      codeDemoTimerRef.current = null;
+    }
+    setCodeTypingDemo(false);
+    setCodeDemoFiles({});
+    setCodeOverlayOpen(false);
+  };
+
+  const openPlanWorkspace = () => {
+    setPlanOverlayOpen(true);
+    setPlanPillSticky(true);
+    setPlanLiveDrafting(false);
   };
 
   useEffect(() => {
@@ -2251,6 +2440,40 @@ export function useAIChatController() {
     return () => {
       window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
       window.removeEventListener('NOVA:close-code-overlay', onCloseCode);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onOpenPlan = (ev: Event) => {
+      const detail = (ev as CustomEvent<{
+        openOverlay?: boolean;
+        live?: boolean;
+        chatId?: string;
+        report?: PlanReportData;
+      }>).detail || {};
+      const shouldOpen = detail.openOverlay !== false;
+      const chatId = String(detail.chatId || routeChatIdRef.current || persistChatIdRef.current || '').trim();
+      if (detail.report?.steps?.length && chatId) {
+        saveChatPlan(chatId, detail.report);
+        setChatPlanPill(chatId, true);
+      }
+      setPlanPillSticky(true);
+      setPlanLiveDrafting(Boolean(detail.live));
+      if (shouldOpen) setPlanOverlayOpen(true);
+      if (!detail.live) {
+        // Allow a brief live pulse then settle once the outline is stored.
+        window.setTimeout(() => setPlanLiveDrafting(false), 400);
+      }
+    };
+    const onClosePlan = () => {
+      setPlanOverlayOpen(false);
+      setPlanLiveDrafting(false);
+    };
+    window.addEventListener('NOVA:open-plan-overlay', onOpenPlan);
+    window.addEventListener('NOVA:close-plan-overlay', onClosePlan);
+    return () => {
+      window.removeEventListener('NOVA:open-plan-overlay', onOpenPlan);
+      window.removeEventListener('NOVA:close-plan-overlay', onClosePlan);
     };
   }, []);
 
@@ -2364,28 +2587,95 @@ export function useAIChatController() {
     }
 
     if (!root) {
-      setDropHint('No folder path on this chat. Use + → Bind project…, then Preview.');
+      setDropHint('No folder path on this chat. Use + → clip → Project folder…, then Preview.');
       return null;
     }
 
-    // Sprint B: attach to create-job preview only when Ready (never during npm install).
+    // Never open a black Live window while create is still installing / verifying.
     const createJob = getCreateJobForChat(chatId);
-    if (createJob?.previewUrl && createJob.status === 'ready') {
-      const existing = String(createJob.previewUrl).trim();
-      if (existing && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(existing)) {
-        setPreviewUrl(existing);
+    if (createJob?.status === 'npm' || createJob?.status === 'writing' || createJob?.status === 'verifying') {
+      const age = Date.now() - (Number(createJob.updatedAt) || 0);
+      // Stale verifying (crash mid-CRL) — unlock recovery path instead of infinite wait.
+      if (createJob.status === 'verifying' && age > 8 * 60_000) {
         try {
-          await window.novaDesktop?.previewOpenWindow?.({
-            url: existing,
-            title: studioPathBasename(root) || createJob.name || 'Preview',
-            projectId: previewWindowIdForChat(chatId),
-          });
-        } catch { /* best-effort */ }
-        return existing;
+          const { markCreateJobFailed } = await import('@/lib/createJobStore');
+          markCreateJobFailed(createJob.id, 'Verify stalled — say rebuild the UI or run Preview again');
+        } catch { /* ignore */ }
+      } else {
+        setDropHint(
+          createJob.status === 'npm'
+            ? 'Still installing dependencies — Live unlocks when verified.'
+            : createJob.status === 'verifying'
+              ? 'Still verifying Live evidence — wait for Verified.'
+              : 'Still writing project files — Live unlocks when verified.',
+        );
+        window.setTimeout(() => {
+          setDropHint((prev) => (
+            prev && /Still (installing|writing|verifying)/i.test(prev) ? null : prev
+          ));
+        }, 4500);
+        return null;
       }
     }
 
-    // Attach-only when main already owns a session for this cwd.
+    if (createJob?.status === 'failed') {
+      const why = String(createJob.error || 'Live evidence failed').slice(0, 160);
+      setDropHint(`Live had a problem — ${why}. Opening anyway so you can see it.`);
+      window.setTimeout(() => {
+        setDropHint((prev) => (prev && /Live had a problem/i.test(prev) ? null : prev));
+      }, 6000);
+      // Still attach from disk — hiding Live after a failed verify leaves a dead chip.
+    }
+
+    // Sprint B: attach to create-job preview only when Ready (never during npm install).
+    if (createJob?.previewUrl && createJob.status === 'ready') {
+      const existing = String(createJob.previewUrl).trim();
+      if (existing && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(existing)) {
+        // Re-check mount briefly so stale Ready can't open a blank window.
+        try {
+          const { collectLiveEvidence, finalizeCreateEvidence, emptyCreateEvidence } = await import('@/lib/createEvidence');
+          const snap = loadChatStudio(chatId);
+          const live = await collectLiveEvidence({
+            liveUrl: existing,
+            productName: createJob.name,
+            files: snap?.files || {},
+            brief: createJob.name || '',
+            requireSmoke: false,
+          });
+          const ev = finalizeCreateEvidence(emptyCreateEvidence({
+            staticReady: true,
+            npmInstalled: true,
+            ...live,
+            smokeOk: null,
+          }));
+          if (!ev.mounted || !ev.httpOk) {
+            setDropHint('Saved Live URL is stale — re-attaching with evidence…');
+          } else {
+            setPreviewUrl(existing);
+            try {
+              await window.novaDesktop?.previewOpenWindow?.({
+                url: existing,
+                title: studioPathBasename(root) || createJob.name || 'Preview',
+                projectId: previewWindowIdForChat(chatId),
+              });
+            } catch { /* best-effort */ }
+            return existing;
+          }
+        } catch {
+          setPreviewUrl(existing);
+          try {
+            await window.novaDesktop?.previewOpenWindow?.({
+              url: existing,
+              title: studioPathBasename(root) || createJob.name || 'Preview',
+              projectId: previewWindowIdForChat(chatId),
+            });
+          } catch { /* best-effort */ }
+          return existing;
+        }
+      }
+    }
+
+    // Attach-only when main already owns a session for this cwd — require mount, not HTTP alone.
     try {
       const { attachPreviewIfExists, isPlaceholderPreviewUrl, verifyLivePreviewUrl } = await import('@/lib/projectPreview');
       const attached = await attachPreviewIfExists({
@@ -2395,18 +2685,37 @@ export function useAIChatController() {
       if (attached.ok && !isPlaceholderPreviewUrl(attached.url)) {
         const alive = await verifyLivePreviewUrl(attached.url);
         if (alive) {
-          setPreviewUrl(attached.url);
-          previewUrlRef.current = attached.url;
-          try {
-            await window.novaDesktop?.previewOpenWindow?.({
-              url: attached.url,
-              title: studioPathBasename(root) || createJob?.name || 'Preview',
-              projectId: previewWindowIdForChat(chatId),
-            });
-          } catch { /* best-effort */ }
-          return attached.url;
+          const probe = await window.novaDesktop?.previewProbeMounted?.({
+            url: attached.url,
+            title: studioPathBasename(root) || createJob?.name || 'Preview',
+            waitMs: 2400,
+          }).catch(() => null);
+          const mounted = Boolean(probe?.ok && probe?.mounted);
+          const consoleBad = Array.isArray(probe?.consoleErrors)
+            && probe!.consoleErrors!.some((e: string) => /error|exception|failed|vite|overlay/i.test(String(e || '')));
+          if (mounted && !consoleBad) {
+            setPreviewUrl(attached.url);
+            previewUrlRef.current = attached.url;
+            if (createJob?.status === 'failed' && createJob.id) {
+              try {
+                const { markCreateJobReady } = await import('@/lib/createJobStore');
+                markCreateJobReady(createJob.id, attached.url, 'Live opened — mount ok');
+              } catch { /* ignore */ }
+            }
+            try {
+              await window.novaDesktop?.previewOpenWindow?.({
+                url: attached.url,
+                title: studioPathBasename(root) || createJob?.name || 'Preview',
+                projectId: previewWindowIdForChat(chatId),
+              });
+            } catch { /* best-effort */ }
+            return attached.url;
+          }
+          if (consoleBad) {
+            setDropHint('Live has console errors — say rebuild the UI or fix the errors in chat.');
+          }
+          // Dead / unmounted session — fall through and start a fresh preview.
         }
-        // Dead session — fall through and start a fresh preview.
       }
     } catch { /* fall through to ensureBoundFolderPreview */ }
 
@@ -2498,6 +2807,12 @@ export function useAIChatController() {
         diskRoot: root,
         previewUrl: result.url,
       });
+      if (createJob?.status === 'failed' && createJob.id) {
+        try {
+          const { markCreateJobReady } = await import('@/lib/createJobStore');
+          markCreateJobReady(createJob.id, result.url, 'Live opened — mount ok');
+        } catch { /* ignore */ }
+      }
       setDropHint(null);
       return result.url;
     } catch (err) {
@@ -2612,6 +2927,9 @@ export function useAIChatController() {
     if (!next.length) return;
     // Stay pending on the composer until Send (lands in the thread with the message).
     setPendingImages(prev => [...prev, ...next].slice(0, 4));
+    setDropHint(null);
+    ignoreEnterUntilRef.current = Date.now() + 250;
+    requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
   };
 
   const applyDropResult = (result: Awaited<ReturnType<typeof resolveChatDrop>>) => {
@@ -2663,7 +2981,7 @@ export function useAIChatController() {
     } else if (!fileCount && !result.images.length) {
       setDropHint('Nothing readable in that drop. try another folder or file.');
     }
-    ignoreEnterUntilRef.current = Date.now() + 600;
+    ignoreEnterUntilRef.current = Date.now() + 250;
   };
 
   const removePendingAttach = (meta: ChatAttachMeta) => {
@@ -3047,42 +3365,68 @@ export function useAIChatController() {
     if (next.length) {
       setPendingImages(prev => [...prev, ...next].slice(0, 4));
       setDropHint(null);
+      ignoreEnterUntilRef.current = Date.now() + 250;
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
     } else {
       setDropHint('Could not read those images.');
     }
   };
 
   const attachFilesFromPaths = async (paths: string[]) => {
-    const first = paths[0];
-    if (!first) return;
-    if (paths.length > 1) {
-      setDropHint('Only one file can be uploaded into chat. Prefer Open folder (path bind) for projects.');
+    if (!paths.length) return;
+    const imagePaths = paths.filter(p => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p));
+    const filePaths = paths.filter(p => !/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p));
+    if (imagePaths.length) {
+      await attachImagesFromPaths(imagePaths);
     }
-    const abs = first;
-    const base = abs.split(/[/\\]/).pop() || 'file';
-    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
-      await attachImagesFromPaths([abs]);
-      return;
+    if (!filePaths.length) return;
+    if (filePaths.length > 4) {
+      setDropHint('Up to 4 files per attach. Prefer + → clip → Project folder for whole folders.');
     }
-    const read = await window.novaDesktop?.readTextFile?.({ path: abs });
-    const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
-    setChatStudioFiles({ [base]: text });
-    chatStudioFilesRef.current = { [base]: text };
-    setPendingAttaches([{
-      kind: 'file' as const,
-      name: base,
-      count: 1,
-      id: `file-${crypto.randomUUID().slice(0, 8)}`,
-    }]);
+    const nextFiles: Record<string, string> = {};
+    const metas: ChatAttachMeta[] = [];
+    for (const abs of filePaths.slice(0, 4)) {
+      const base = abs.split(/[/\\]/).pop() || 'file';
+      const read = await window.novaDesktop?.readTextFile?.({ path: abs });
+      const text = read?.ok && read.text != null
+        ? read.text
+        : `[Attached file: ${base}]`;
+      nextFiles[base] = text;
+      metas.push({
+        kind: 'file' as const,
+        name: base,
+        count: 1,
+        id: `file-${crypto.randomUUID().slice(0, 8)}`,
+      });
+    }
+    setChatStudioFiles(prev => ({ ...prev, ...nextFiles }));
+    chatStudioFilesRef.current = { ...chatStudioFilesRef.current, ...nextFiles };
+    setPendingAttaches(prev => {
+      const seen = new Set(prev.map(attachKey));
+      const merged = [...prev];
+      for (const m of metas) {
+        const k = attachKey(m);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        merged.push(m);
+      }
+      return merged.slice(0, 12);
+    });
     setDropHint(null);
-    ignoreEnterUntilRef.current = Date.now() + 600;
+    ignoreEnterUntilRef.current = Date.now() + 250;
+    requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
   };
 
   const handlePlusAction = (action: ComposerPlusAction) => {
     if (mode === 'image') {
-      if (action === 'image' || action === 'file') {
+      if (action === 'attach' || action === 'image' || action === 'file') {
         void pickPhotosIntoChat();
       }
+      return;
+    }
+    // Combined paperclip Attach — photos, PDFs, notes, any file.
+    if (action === 'attach') {
+      void pickFilesIntoChat();
       return;
     }
     if (action === 'image') {
@@ -3105,131 +3449,32 @@ export function useAIChatController() {
       void openFolderInChat(undefined, { mode: 'import' });
       return;
     }
-    if (action === 'plan') {
-      stopComposerDictation();
-      setComposerMode('plan');
-      setDropHint('Planning · deeper outline · no files until you say build.');
-      if (!String(inputRef.current || '').trim()) {
-        setInput(PLAN_MODE_SEED);
-        inputRef.current = PLAN_MODE_SEED;
-      }
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        try {
-          const n = el.value.length;
-          el.setSelectionRange(n, n);
-        } catch { /* ignore */ }
-      });
+    if (action === 'models-brain') {
+      setDropHint('Models · pick a brain or enable Ollama · not a plugin');
+      navigate({ name: 'models' });
       return;
     }
-    if (action === 'debug') {
-      stopComposerDictation();
-      setComposerMode('debug');
-      const chatId = route.name === 'chat' ? route.chatId : undefined;
-      const bound = hasActiveWorkspace({
-        files: chatStudioFilesRef.current || chatStudioFiles,
-        projectId: chatStudioProjectIdRef.current || chatStudioProjectId,
-        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
-        chatId,
-      });
-      if (!bound) {
-        setPathBindOpen(false);
-        setPathBindDraft('');
-        setDropHint('Grant access to the project folder you want audited.');
-        void openFolderInChat(undefined, { mode: 'path' }).then((res) => {
-          if (!res?.ok) return;
-          if (!String(inputRef.current || '').trim()) {
-            setInput(DEBUG_CLINIC_SEED);
-            inputRef.current = DEBUG_CLINIC_SEED;
-          }
-          requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
-        });
-      } else {
-        const name = workspaceBadgeLabel
-          || studioPathBasename(chatStudioDiskRootRef.current || chatStudioDiskRoot || '')
-          || 'Project';
-        const fileCount = Object.keys(chatStudioFilesRef.current || chatStudioFiles || {})
-          .filter((p) => !/(^|\/)(node_modules|dist|build|release|\.git)(\/|$)/i.test(p.replace(/\\/g, '/')))
-          .length;
-        setDropHint(`${name} · ${fileCount} files · Press Enter to scan.`);
-        if (!String(inputRef.current || '').trim()) {
-          setInput(DEBUG_CLINIC_SEED);
-          inputRef.current = DEBUG_CLINIC_SEED;
-        }
-        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
-      }
-      return;
-    }
-    if (action === 'agent' || action === 'multitask') {
-      stopComposerDictation();
-      setComposerMode(action);
-      const chatId = route.name === 'chat' ? route.chatId : undefined;
-      const bound = hasActiveWorkspace({
-        files: chatStudioFilesRef.current || chatStudioFiles,
-        projectId: chatStudioProjectIdRef.current || chatStudioProjectId,
-        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
-        chatId,
-      });
-      const seed = action === 'multitask' ? MULTI_AGENT_MODE_SEED : AGENT_MODE_SEED;
-      if (!bound) {
-        setPathBindOpen(false);
-        setPathBindDraft('');
-        setDropHint(
-          action === 'multitask'
-            ? 'Grant access to the project folder for Multi-agent.'
-            : 'Grant access to the project folder for Agent.',
-        );
-        void openFolderInChat(undefined, { mode: 'path' }).then((res) => {
-          if (!res?.ok) return;
-          if (!String(inputRef.current || '').trim()) {
-            setInput(seed);
-            inputRef.current = seed;
-          }
-          setDropHint(
-            action === 'multitask'
-              ? 'Multi-agent · Scout → Builder → Critic · Press Enter.'
-              : 'Agent · one task at a time · Press Enter.',
-          );
-          requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
-        });
-      } else {
-        const name = workspaceBadgeLabel
-          || studioPathBasename(chatStudioDiskRootRef.current || chatStudioDiskRoot || '')
-          || 'Project';
-        setDropHint(
-          action === 'multitask'
-            ? `${name} · Multi-agent · Scout → Builder → Critic`
-            : `${name} · Agent · one task at a time`,
-        );
-        if (!String(inputRef.current || '').trim()) {
-          setInput(seed);
-          inputRef.current = seed;
-        }
-        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
-      }
-      return;
-    }
-    if (action === 'ask') {
-      setComposerMode(action);
-      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+    // Plan / Agent / Multi-agent / Debug removed from composer — ignore if somehow invoked.
+    if (action === 'plan' || action === 'debug' || action === 'agent' || action === 'multitask' || action === 'ask') {
+      setComposerMode(null);
+      setDropHint(null);
     }
   };
 
   /** Native OS photo picker (Windows File Explorer). */
   const pickPhotosIntoChat = async () => {
     if (!window.novaDesktop?.pickFiles) {
-      attachInputRef.current?.click();
+      imageInputRef.current?.click();
       return;
     }
     const res = await window.novaDesktop.pickFiles({ imagesOnly: true });
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachImagesFromPaths(res.paths);
-    ignoreEnterUntilRef.current = Date.now() + 600;
+    // Soft guard against dialog-close Enter on an empty box — payload Enter still sends.
+    ignoreEnterUntilRef.current = Date.now() + 250;
   };
 
-  /** Native OS file picker. shows files inside folders. */
+  /** Native OS file picker (notes, PDF, code, anything readable). */
   const pickFilesIntoChat = async () => {
     if (!window.novaDesktop?.pickFiles) {
       attachInputRef.current?.click();
@@ -3238,6 +3483,7 @@ export function useAIChatController() {
     const res = await window.novaDesktop.pickFiles();
     if (res?.canceled || !res?.ok || !res.paths?.length) return;
     await attachFilesFromPaths(res.paths);
+    ignoreEnterUntilRef.current = Date.now() + 250;
   };
 
   const runEphemeralVoiceTurn = async (rawContent: string) => {
@@ -3399,100 +3645,31 @@ export function useAIChatController() {
       chatId: chatIdForBind,
     });
 
-    if (pillModeRef.current === 'debug' && !workspaceBoundForSend && !content && !images.length && !attaches.length) {
-      setPathBindOpen(false);
-      setDropHint('Grant access to the project folder you want audited.');
-      void openFolderInChat(undefined, { mode: 'path' });
-      return;
+    // Debug/Plan/Agent pills removed — clear any sticky mode before send.
+    if (pillModeRef.current) {
+      setComposerMode(null);
     }
 
     if (!content && !images.length && !attaches.length && !hasStudio) return;
     if (pillModeRef.current === 'debug' && !content && !images.length && !attaches.length && workspaceBoundForSend) {
       content = DEBUG_CLINIC_SEED;
     }
-    if (pillModeRef.current === 'plan' && !content && !images.length && !attaches.length) {
-      content = PLAN_MODE_SEED;
-    }
-    if (pillModeRef.current === 'agent' && !content && !images.length && !attaches.length) {
-      content = AGENT_MODE_SEED;
-    }
-    if (pillModeRef.current === 'multitask' && !content && !images.length && !attaches.length) {
-      content = MULTI_AGENT_MODE_SEED;
-    }
-    // Soft re-arm Plan when they ask to extend an existing outline (pill was cleared).
-    if (
-      !pillModeRef.current
-      && (mode === 'general' || mode === 'code')
-      && looksLikePlanRefineAsk(content)
-      && !looksLikeImplementGo(content)
-    ) {
-      setComposerMode('plan');
-      setDropHint('Planning · deeper outline · no files until you say build.');
-    }
-    // Soft re-arm Agent / Multi-agent when work-queue chips fire after the pill was cleared.
-    if (
-      !pillModeRef.current
-      && (mode === 'general' || mode === 'code')
-      && (looksLikeWorkQueueDoNext(content) || looksLikeWorkQueueFinishAll(content) || looksLikeWorkQueueStop(content))
-    ) {
-      const chatId = route.name === 'chat' ? route.chatId : undefined;
-      const q = chatId ? loadWorkQueue(chatId) : null;
-      const nextMode = q?.mode === 'multitask' ? 'multitask' : 'agent';
-      setComposerMode(nextMode);
-      setDropHint(
-        nextMode === 'multitask'
-          ? 'Multi-agent · continuing queue'
-          : 'Agent · continuing queue',
-      );
-    }
-    // Handoff: Plan → builder. Clear pill + hint so Plan UI disappears for the build turn.
-    if (
-      pillModeRef.current === 'plan'
-      && looksLikeImplementGo(content)
-    ) {
+    // Plan/Agent/Multi-agent/Debug pills removed — never soft-arm or inject mode markers.
+    if (pillModeRef.current || composerMode) {
       setComposerMode(null);
       setDropHint(null);
     }
-    if (pillModeRef.current === 'debug') {
-      // Hidden routing marker — never the old "find the issue" prose (that stole GitHub).
-      if (!/<!--nova-debug-clinic-->/i.test(content)) {
-        content = `${COMPOSER_MODE_PREFIX.debug}${content}`;
-      }
-    } else if (pillModeRef.current === 'plan') {
-      if (!/<!--nova-plan-mode-->/i.test(content) && !looksLikeImplementGo(content)) {
-        content = `${COMPOSER_MODE_PREFIX.plan}${content}`;
-      }
-    } else if (pillModeRef.current === 'agent') {
-      if (!/<!--nova-agent-mode-->/i.test(content)) {
-        content = `${COMPOSER_MODE_PREFIX.agent}${content}`;
-      }
-    } else if (pillModeRef.current === 'multitask') {
-      if (!/<!--nova-multi-agent-->/i.test(content) && !/^\[Multi-agent\]/i.test(content.trim())) {
-        content = `${COMPOSER_MODE_PREFIX.multitask}${content}`;
-      }
-    } else if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
-      content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
-    } else if (
-      !composerMode
-      && (mode === 'general' || mode === 'code')
-      && /\b(debug|find\s+(?:the\s+)?bugs?|fix\s+(?:this|the)\s+(?:bug|error|crash)|why\s+(?:is\s+)?(?:this|it)\s+broken)\b/i.test(content)
-    ) {
-      setComposerMode('debug');
-      content = `${COMPOSER_MODE_PREFIX.debug}${content}`;
-    } else if (
-      !composerMode
-      && (mode === 'general' || mode === 'code')
-      && Object.keys(chatStudioFilesRef.current || {}).length > 0
-      && /\b(faster|quicker|speed\s+this\s+up|multi[\s-]?agent|parallel\s+agents)\b/i.test(content)
-    ) {
-      // Soft nudge: equip multi-agent when user asks for speed on a bound project.
-      setComposerMode('multitask');
-      content = `${COMPOSER_MODE_PREFIX.multitask}${content}`;
-    }
+    // Strip leftover mode markers from pasted/old-thread content so they cannot steal the turn.
+    content = String(content || '')
+      .replace(/<!--nova-(?:plan-mode|agent-mode|multi-agent|debug-clinic)-->\s*/gi, '')
+      .replace(/^\[(?:Plan|Ask|Agent|Debug|Tasks|Multi-agent)\]\s*/i, '');
     const userTyped = Boolean(content.trim());
     const parts: string[] = [];
     // Folder binds stay as composer pills only — never dump into the chat transcript.
-    const chatAttaches = attaches.filter(a => a.kind === 'file' || a.kind === 'image' || a.kind === 'files');
+    // Photos go in as markdown thumbs only (ChatGPT-style) — not a filename attach chip.
+    const chatAttaches = [
+      ...attaches.filter(a => a.kind === 'file' || a.kind === 'files'),
+    ];
     if (chatAttaches.length) {
       parts.push(encodeChatAttaches(chatAttaches));
     }
@@ -3515,21 +3692,14 @@ export function useAIChatController() {
       parts.push(content);
     }
     if (images.length) {
-      parts.push(...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](nova-media:${img.id})`));
+      // Neutral alt — never the filename (models invent from misleading names like cat-portrait.jpg).
+      parts.push(...images.map(img => `![photo](nova-media:${img.id})`));
     }
     content = parts.join('\n\n');
     setPendingImages([]);
     setPendingAttaches([]);
-    // Debug + Plan + Agent + Multi-agent stay armed after Enter (work-queue modes).
-    // Plan only drops on “lets build this” handoff (above) or when the user dismisses the pill.
-    if (
-      pillModeRef.current !== 'debug'
-      && pillModeRef.current !== 'plan'
-      && pillModeRef.current !== 'agent'
-      && pillModeRef.current !== 'multitask'
-    ) {
-      setComposerMode(null);
-    }
+    // Modes stripped — always clear composer mode after Enter.
+    setComposerMode(null);
     // Queue only when THIS thread is already answering. Other chats / blank New Chat
     // can still start a send — per-chat seq keeps the background create alive.
     const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
@@ -3802,6 +3972,88 @@ export function useAIChatController() {
     resizeComposer();
   }, [input, resizeComposer]);
 
+  // Live/CDP helper: stage disk paths into pending attaches (images + files) without the OS dialog.
+  const attachFilesFromPathsRef = useRef(attachFilesFromPaths);
+  attachFilesFromPathsRef.current = attachFilesFromPaths;
+  useEffect(() => {
+    const w = window as Window & {
+      __novaLiveAttach?: (paths: string[]) => Promise<{ ok: boolean; error?: string }>;
+      __novaStressWrite?: (opts: {
+        path: string;
+        content: string;
+        projectId?: string;
+        projectName?: string;
+        diskRoot?: string;
+      }) => Promise<{ ok: boolean; error?: string; bytes?: number; lines?: number }>;
+      __novaStressOpenCode?: () => boolean;
+    };
+    w.__novaLiveAttach = async (paths: string[]) => {
+      try {
+        const list = (paths || []).map(String).filter(Boolean);
+        if (!list.length) return { ok: false, error: 'no paths' };
+        await attachFilesFromPathsRef.current(list);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+    w.__novaStressWrite = async (opts) => {
+      try {
+        const rel = String(opts?.path || '').replace(/\\/g, '/').replace(/^\.\//, '').trim();
+        const content = String(opts?.content || '');
+        if (!rel || !content) return { ok: false, error: 'path/content required' };
+        const diskRoot = String(opts?.diskRoot || chatStudioDiskRootRef.current || '').trim();
+        const projectId = String(opts?.projectId || chatStudioProjectIdRef.current || 'stress').trim();
+        if (!diskRoot) return { ok: false, error: 'diskRoot required' };
+        if (!window.novaDesktop?.workspaceWriteFile) {
+          return { ok: false, error: 'workspaceWriteFile unavailable' };
+        }
+        const targetPath = `${diskRoot.replace(/[\\/]+$/, '')}/${rel}`.replace(/\//g, '\\');
+        const started = Date.now();
+        const written = await window.novaDesktop.workspaceWriteFile({
+          targetPath,
+          content,
+        });
+        if (!written?.ok) {
+          return { ok: false, error: written?.error || 'write failed', elapsedMs: Date.now() - started };
+        }
+        // Verify from disk
+        let got = content;
+        if (window.novaDesktop.readTextFile) {
+          const check = await window.novaDesktop.readTextFile({ path: targetPath });
+          if (check?.ok && typeof check.text === 'string') got = check.text;
+        }
+        const next = { ...chatStudioFilesRef.current, [rel]: got };
+        setChatStudioFiles(next);
+        chatStudioFilesRef.current = next;
+        setChatStudioDiskRoot(diskRoot);
+        chatStudioDiskRootRef.current = diskRoot;
+        setChatStudioProjectId(projectId);
+        chatStudioProjectIdRef.current = projectId;
+        return {
+          ok: true,
+          bytes: got.length,
+          lines: got.split(/\r?\n/).length,
+          elapsedMs: Date.now() - started,
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+    w.__novaStressOpenCode = () => {
+      try {
+        setCodeOverlayOpen(true);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    return () => {
+      try { delete w.__novaLiveAttach; } catch { /* ignore */ }
+      try { delete w.__novaStressWrite; } catch { /* ignore */ }
+      try { delete w.__novaStressOpenCode; } catch { /* ignore */ }
+    };
+  }, []);
 
   return {
     activeModel,
@@ -3822,7 +4074,14 @@ export function useAIChatController() {
     chats,
     clonePickedRepo,
     codeOverlayOpen,
+    codeTypingDemo,
+    codeDemoFiles,
+    startCodeTypingPreview,
+    closeCodeOverlay,
     codePillSticky,
+    planOverlayOpen,
+    planPillSticky,
+    planLiveDrafting,
     composerMode,
     copiedMsgId,
     createJobLive,
@@ -3883,6 +4142,8 @@ export function useAIChatController() {
     onMessagesWheel,
     onPickCodeFiles,
     openCodeWorkspace,
+    openPlanWorkspace,
+    setPlanOverlayOpen,
     openProjectFolder,
     openProjectPreview,
     pathBindDraft,

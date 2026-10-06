@@ -14,6 +14,8 @@ type Props = {
   title?: string;
   modelName?: string;
   modelDetail?: string;
+  /** While the model is still generating — hide misleading 0% combined load. */
+  working?: boolean;
 };
 
 export function TokenUsageRing({
@@ -24,6 +26,7 @@ export function TokenUsageRing({
   title,
   modelName,
   modelDetail: _modelDetail,
+  working = false,
 }: Props) {
   const ctx = Math.max(0, Math.min(1, contextRatio));
   const mdl = Math.max(0, Math.min(1, modelRatio));
@@ -31,6 +34,7 @@ export function TokenUsageRing({
   const mdlPct = displayUsagePercent(mdl);
   /** Combined load — average of context + model pressure. */
   const combinedPct = displayUsagePercent(Math.min(1, (ctx + mdl) / 2));
+  const showPct = !working;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -91,11 +95,11 @@ export function TokenUsageRing({
               ? 'text-amber-300'
               : 'text-content-secondary'
         } ${className}`}
-        title={title || `${label} · ${combinedPct}%`}
-        aria-label={`${label}, ${combinedPct} percent`}
+        title={title || (working ? `${label} · working` : `${label} · ${combinedPct}% session budget`)}
+        aria-label={working ? `${label}, working` : `${label}, ${combinedPct} percent session budget`}
         aria-expanded={open}
       >
-        {combinedPct}%
+        {showPct ? `${combinedPct}%` : '…'}
       </button>
 
       {open && pos && createPortal(

@@ -460,6 +460,7 @@ export type AIChatSendPrepResult =
       setFailoverNote: (...args: any[]) => void;
       setThreadBrain: (...args: any[]) => void;
       setCreateLiveModelLabel?: (label: string | null) => void;
+      setActiveModel?: (...args: any[]) => void;
       setIpcFallbackDev: (...args: any[]) => void;
       addCreation: (...args: any[]) => void;
       failoverChipText: any;
@@ -541,6 +542,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     setPreviewUrl,
     setThreadBrain,
     setCreateLiveModelLabel,
+    setActiveModel,
     setDropHint,
     setTokenRatio,
     skipChatLoadIdsRef,
@@ -704,7 +706,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const providerLabel = pluginId
     ? `${pluginMeta?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
     : pinnedModel.source === 'auto'
-      ? 'Nova Multimodal'
+      ? 'Nova Auto'
       : `${pinnedModel.source === 'local' ? 'Local' : 'Cloud'} · ${pinnedModel.name}`;
 
   const assistantId = crypto.randomUUID();
@@ -832,24 +834,69 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   const replyStartedAt = Date.now();
 
   const clearGeneratingIfMineEarly = () => {
-    clearChatTurnStatus(assistantId);
+    // Drop Stop first — never paint Done while Stop is still visible.
     endInflightOnce();
-    if (mySeq !== genSeqRef.current) return;
+    if (mySeq !== genSeqRef.current) {
+      clearChatTurnStatus(assistantId);
+      return;
+    }
     generatingRef.current = false;
     if (activeGenChatIdRef.current === activeChatId) {
       activeGenChatIdRef.current = null;
     }
     setGenerating(false);
+    clearChatTurnStatus(assistantId);
   };
 
   const finishPlainReply = async (replyText: string, providerUsed?: string) => {
     // One-reply rule: never commit a superseded turn's text into a new bubble.
     const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) ?? genSeqRef.current;
-    if (mySeq !== liveSeq) {
+    const stopped = Boolean(
+      stopRequestedByChatRef?.current?.[activeChatId]
+      || stopRequestedRef.current,
+    );
+    const stopNote = /^(?:Stopped\.?|Stopped —)/i.test(String(replyText || '').trim());
+    // After Stop: only allow the stop note itself — never swap in a late create/craft reply.
+    if (stopped && !stopNote) {
       clearChatTurnStatus(assistantId);
       endInflightOnce();
       return;
     }
+    if (mySeq !== liveSeq && !stopNote) {
+      clearChatTurnStatus(assistantId);
+      endInflightOnce();
+      return;
+    }
+    // Continuity: never replace a solid streamed reply with an unrelated final draft.
+    try {
+      const cur = (messagesRef.current || []).find((m: { id?: string }) => m.id === assistantId);
+      const prevText = String(cur?.content || '').trim();
+      const nextText = String(replyText || '').trim();
+      if (
+        prevText
+        && nextText
+        && !prevText.startsWith('__generating__:')
+        && prevText !== '(stopped)'
+        && !/^(?:Stopped\.?|Stopped —)/i.test(prevText)
+        && prevText.length >= 24
+        && nextText !== prevText
+        && !stopNote
+      ) {
+        const prefixLen = Math.min(40, prevText.length, nextText.length);
+        const sameFamily = prefixLen >= 12
+          && (nextText.startsWith(prevText.slice(0, prefixLen)) || prevText.startsWith(nextText.slice(0, prefixLen)));
+        const intentionalRewrite = /I applied those updates on disk|Updating your project files on disk|I updated the project files|Created |Live /i.test(nextText);
+        if (!sameFamily && !intentionalRewrite) {
+          replyText = prevText;
+        }
+      }
+    } catch { /* keep replyText */ }
+    // Drop Stop immediately — never show Done + Stop together.
+    generatingRef.current = false;
+    if (activeGenChatIdRef.current === activeChatId) {
+      activeGenChatIdRef.current = null;
+    }
+    setGenerating(false);
     clearChatTurnStatus(assistantId);
     const safeText = redactArkSelfLeak(replyText);
     const reply: ChatMessage = {
@@ -901,11 +948,20 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
 
   const stopIfSuperseded = async (note?: string) => {
     const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) || genSeqRef.current;
+    // Stop must stick even after handleStop nulls activeGenChatIdRef — otherwise create
+    // keeps healing / Style hopping in the background after the UI shows "(stopped)".
     const stopped = Boolean(
       stopRequestedByChatRef?.current?.[activeChatId]
-      || (stopRequestedRef.current && activeGenChatIdRef.current === activeChatId),
+      || stopRequestedRef.current,
     );
     if (mySeq === liveSeq && !stopped) return false;
+    try {
+      const job = getCreateJobForChat(activeChatId);
+      if (job && (job.status === 'queued' || job.status === 'writing' || job.status === 'npm' || job.status === 'verifying')) {
+        const { markCreateJobFailed } = await import('@/lib/createJobStore');
+        markCreateJobFailed(job.id, 'Stopped');
+      }
+    } catch { /* ignore */ }
     await finishPlainReply(
       note
       || (stopped
@@ -1624,6 +1680,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     setFailoverNote,
     setThreadBrain,
     setCreateLiveModelLabel,
+    setActiveModel,
     setIpcFallbackDev,
     addCreation,
     failoverChipText,

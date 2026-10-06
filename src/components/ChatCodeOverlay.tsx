@@ -210,6 +210,35 @@ function BuildTimerBadge({
   );
 }
 
+/**
+ * Smooth “typing” reveal for Live / Preview — never dump whole model chunks at once.
+ * Catches up gently when the buffer races ahead so we stay watchable, not hours behind.
+ */
+function nextRevealSlice(prev: string, target: string): string {
+  if (!target) return '';
+  if (prev === target) return prev;
+  // Rewind / replace: keep common prefix, then ease forward.
+  let common = 0;
+  const maxCommon = Math.min(prev.length, target.length);
+  while (common < maxCommon && prev.charCodeAt(common) === target.charCodeAt(common)) common += 1;
+  if (common < prev.length) {
+    // Content changed under us — jump to common prefix (or a short ahead if target is shorter).
+    return target.slice(0, Math.min(target.length, Math.max(common, Math.min(common + 24, target.length))));
+  }
+  const lag = target.length - prev.length;
+  if (lag <= 0) return target;
+  const remain = target.slice(prev.length);
+  const nl = remain.indexOf('\n');
+  // Prefer finishing the current line so it reads like typing, not paste.
+  if (nl === 0) return target.slice(0, prev.length + 1);
+  if (nl > 0 && nl <= 56 && lag <= 120) {
+    return target.slice(0, prev.length + nl + 1);
+  }
+  // Soft catch-up when the model is far ahead — still stepwise, not one paste.
+  const step = lag > 800 ? 48 : lag > 320 ? 18 : lag > 120 ? 8 : lag > 40 ? 4 : 2;
+  return target.slice(0, prev.length + Math.min(step, lag));
+}
+
 export function ChatCodeOverlay({
   open,
   onClose,
@@ -218,6 +247,8 @@ export function ChatCodeOverlay({
   onChangeFile,
   readOnly = false,
   followPath = null,
+  /** When true, typewriter-reveal even if not mid-generate (Preview demo). */
+  smoothTyping = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -227,6 +258,7 @@ export function ChatCodeOverlay({
   readOnly?: boolean;
   /** While Nova is writing, auto-select this path so you can watch live. */
   followPath?: string | null;
+  smoothTyping?: boolean;
 }) {
   const paths = useMemo(
     () => Object.keys(files)
@@ -241,6 +273,11 @@ export function ChatCodeOverlay({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const userPickedRef = useRef(false);
   const [clock, setClock] = useState(() => getBuildLiveClock());
+  const [revealed, setRevealed] = useState('');
+  const revealPathRef = useRef('');
+  const revealedByPathRef = useRef<Record<string, string>>({});
+  const targetRef = useRef('');
+  const typingActive = readOnly || smoothTyping;
 
   useEffect(() => {
     if (!open) return;
@@ -340,9 +377,9 @@ export function ChatCodeOverlay({
     };
   }, [open, readOnly, followPath, paths]);
 
-  // Auto-scroll editor to bottom as live content grows — keep highlight + gutter in sync.
+  // Auto-scroll editor to bottom as live / typed content grows — keep highlight + gutter in sync.
   useEffect(() => {
-    if (!open || !readOnly) return;
+    if (!open || !typingActive) return;
     let cancelled = false;
     const sync = () => {
       if (cancelled) return;
@@ -358,12 +395,12 @@ export function ChatCodeOverlay({
       }
       if (gutter) gutter.scrollTop = el.scrollTop;
     };
-    const timer = window.setTimeout(() => requestAnimationFrame(sync), 120);
+    const timer = window.setTimeout(() => requestAnimationFrame(sync), 24);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, readOnly, followPath, files, selected]);
+  }, [open, typingActive, followPath, files, selected, revealed]);
 
   useEffect(() => {
     if (!open) return;
@@ -374,25 +411,96 @@ export function ChatCodeOverlay({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   const altPath = selected ? selected.split('/').join('\\') : '';
-  const value = selected
+  const fullValue = selected
     ? (files[selected] ?? (altPath ? files[altPath] : '') ?? '')
     : '';
+  // Always point the ticker at the latest buffer — do not restart the interval on each paint.
+  targetRef.current = fullValue;
+
+  // Typewriter toward the latest buffer while Live / Preview demo is on.
+  useEffect(() => {
+    if (!open) {
+      setRevealed('');
+      revealPathRef.current = '';
+      revealedByPathRef.current = {};
+      targetRef.current = '';
+      return;
+    }
+    if (!typingActive) {
+      setRevealed(targetRef.current);
+      return;
+    }
+    // Path switch: resume that file's prior reveal — never blank App.tsx just because
+    // follow hopped to App.css (looked like a full wipe + rewrite).
+    if (revealPathRef.current !== selected) {
+      revealPathRef.current = selected;
+      const target = targetRef.current;
+      const saved = revealedByPathRef.current[selected] || '';
+      let resume = '';
+      if (saved && target.startsWith(saved)) {
+        resume = saved;
+      } else if (saved && saved.startsWith(target) && target.length > 0) {
+        // File shrank (heal/truncation) — show current buffer, don't replay from empty.
+        resume = target;
+      } else if (target.length > 0 && saved.length === 0) {
+        // First visit mid-stream: catch up near the end so we don't replay thousands of chars.
+        resume = target.length > 400 ? target.slice(0, Math.max(0, target.length - 280)) : '';
+      } else {
+        resume = '';
+      }
+      setRevealed(resume);
+      if (selected) revealedByPathRef.current[selected] = resume;
+    }
+    const pathKey = selected;
+    const id = window.setInterval(() => {
+      setRevealed((prev) => {
+        const next = nextRevealSlice(prev, targetRef.current);
+        if (pathKey) revealedByPathRef.current[pathKey] = next;
+        // Keep the viewport glued to the growing tail while typewriter runs.
+        if (next !== prev) {
+          window.requestAnimationFrame(() => {
+            const el = document.querySelector('[data-nova-code-editor]');
+            if (!(el instanceof HTMLElement)) return;
+            el.scrollTop = el.scrollHeight;
+            const root = el.parentElement;
+            const pre = root?.querySelector('.nova-code-highlight') as HTMLElement | null;
+            const gutter = root?.querySelector('.nova-code-gutter') as HTMLElement | null;
+            if (pre) {
+              pre.scrollTop = el.scrollTop;
+              pre.scrollLeft = el.scrollLeft;
+            }
+            if (gutter) gutter.scrollTop = el.scrollTop;
+          });
+        }
+        return next;
+      });
+    }, 22);
+    return () => window.clearInterval(id);
+  }, [open, typingActive, selected]);
+
+  // When not typing, keep revealed synced so toggling modes never shows stale text.
+  useEffect(() => {
+    if (!open || typingActive) return;
+    setRevealed(fullValue);
+  }, [open, typingActive, fullValue]);
+
+  if (!open) return null;
+
+  const value = typingActive ? revealed : fullValue;
 
   const waitingBanner = (() => {
     if (!readOnly || !clock.active) return null;
     const phase = String(clock.phase || '');
     const waitingCoder = /waiting for (?:first tokens|App)|Loading coder|Coder is thinking|still waiting/i.test(phase);
     const appSelected = /App\.(tsx|jsx)$/i.test(selected || '');
-    const stubby = value.trim().length < 120
-      || /Todo List\s*\d*|export default function App\(\)\s*\{\s*return\s*\(\s*<div[^>]*>\s*<h1/i.test(value);
+    const stubby = fullValue.trim().length < 120
+      || /Todo List\s*\d*|export default function App\(\)\s*\{\s*return\s*\(\s*<div[^>]*>\s*<h1/i.test(fullValue);
     if (waitingCoder || (appSelected && stubby && clock.totalMs > 4_000)) {
       const target = clock.currentPath?.split('/').pop() || 'App';
       return waitingCoder
         ? `Coder is loading in the background — watching ${selected?.split('/').pop() || 'scaffold'} while ${target} prepares…`
-        : `Still building ${target} — cancel kicks in if no App code appears (~40s)…`;
+        : `Still building ${target} — local coder is writing; this can take a couple of minutes…`;
     }
     if (clock.stalled) {
       return `Working on ${clock.currentPath?.split('/').pop() || 'files'} — retry kicks in if this stays quiet…`;
@@ -520,6 +628,7 @@ export function ChatCodeOverlay({
                   path={selected}
                   value={value}
                   readOnly={readOnly}
+                  followTail={typingActive || readOnly}
                   onChange={(next) => {
                     if (readOnly) return;
                     onChangeFile(selected, next);

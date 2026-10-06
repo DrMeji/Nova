@@ -45,7 +45,13 @@ supabase/.temp/
 # Local agent / live-test junk
 .tmp*
 .tmp-*/
+tmp-*.png
+tmp-*.jpg
+tmp-*.jpeg
+tmp-*.webp
 tmp-media/
+scripts/_*.png
+scripts/_*.jpg
 scripts/live-cdp*
 scripts/tmp-*
 scripts/_tmp*

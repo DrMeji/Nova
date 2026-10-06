@@ -98,31 +98,39 @@ console.log('polishTimeoutMs', codingFileEditTimeoutMs(polishPrompt));
 const modelsBoth = [
   { id: 'qwen25-coder-14b', status: 'ready' },
   { id: 'qwen25-coder-7b', status: 'ready' },
-  { id: 'qwen25-coder-32b', status: 'ready' },
 ];
-// Mid PC (cap 7B): snappy 7B polish — not stuck forcing 32B.
+// Mid PC (cap 7B): snappy 7B polish — not stuck forcing 14B.
 const picked7 = pickReadyCreatePolishCoder(modelsBoth, { ramGb: 16, maxParamsB: 7 });
 if (picked7?.id !== 'qwen25-coder-7b') {
   console.error('FAIL: mid PC polish must pick 7B when capped at 7', picked7);
   process.exit(2);
 }
-// Strong PC (cap 32B): use largest ready coder for quality.
-const pickedStrong = pickReadyCreatePolishCoder(modelsBoth, { ramGb: 64, maxParamsB: 32 });
-if (pickedStrong?.id !== 'qwen25-coder-32b') {
-  console.error('FAIL: strong PC polish must pick 32B when allowed', pickedStrong);
+// Strong PC (create-safe cap 14B): use largest ready coder for quality.
+const pickedStrong = pickReadyCreatePolishCoder(modelsBoth, { ramGb: 64, maxParamsB: 14 });
+if (pickedStrong?.id !== 'qwen25-coder-14b') {
+  console.error('FAIL: strong PC polish must pick 14B when allowed', pickedStrong);
   process.exit(2);
 }
 const picked14 = pickReadyCreatePolishCoder(modelsBoth, {
   preferSelectedId: 'qwen25-coder-14b',
   ramGb: 32,
+  maxParamsB: 14,
+});
+// Pin honor: chat/ladder selected coder sticks — never silent upgrade.
+const modelsWith14 = [
+  ...modelsBoth,
+  { id: 'qwen25-coder-14b', status: 'ready', name: 'qwen25-coder-14b' },
+];
+const pinned14 = pickReadyCreatePolishCoder(modelsWith14, {
+  preferSelectedId: 'qwen25-coder-14b',
+  ramGb: 32,
   maxParamsB: 32,
 });
-// Create craft always upgrades to the strongest ready coder (32B here) — a weaker pin must not stick.
-if (picked14?.id !== 'qwen25-coder-32b') {
-  console.error('FAIL: create polish must upgrade weak pin to best ready coder', picked14);
+if (pinned14?.id !== 'qwen25-coder-14b') {
+  console.error('FAIL: create polish must honor ready pin (no silent upgrade to 32B)', pinned14);
   process.exit(2);
 }
-console.log('polishCoderAdaptive', { mid: picked7.id, strong: pickedStrong.id, upgraded: picked14.id });
+console.log('polishCoderAdaptive', { mid: picked7.id, strong: pickedStrong.id, pinHonored: pinned14.id, unpinnedFallback: picked14?.id });
 
 const css = stripModelProseFromSource(
   'src/App.css',

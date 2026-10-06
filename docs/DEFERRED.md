@@ -5,6 +5,27 @@ Master list of things not done yet, half-done, or parked.
 
 ---
 
+## Create spine puzzle (0.1.315–0.1.316)
+
+Tracked so agents stop patching side quests. See [`CREATE_PIPELINE.md`](./CREATE_PIPELINE.md).
+
+| # | Spine piece | Status |
+|---|-------------|--------|
+| 1 | One family owner (`inferCreateCompositionFamily`) | ✅ 0.1.315 |
+| 2 | Per-ask craft (brief-first — not tip/todo/notes recipe menus) | ✅ 0.1.317 |
+| 3 | Soft shape hints only (anti-sabotage; invent from ask) | ✅ 0.1.317 |
+| 4 | Truly empty Vite scaffold | ✅ 0.1.315 |
+| 5 | Stop floors owning App as quality success | ✅ 0.1.316 (`floorFallback` / `repairOwnedProduct`) |
+| 6 | Kill marketing default pressure (QUALITY_FLOOR, COVER) | ✅ 0.1.315 |
+| 7 | Hard anti-wrong-family Ready gate | ✅ 0.1.315–316 |
+| 8 | Honest Live (no forged utility mount) | ✅ 0.1.316 |
+| 9 | Repair must not become the product | ✅ 0.1.316 (`repairOwnedProduct`) |
+| 10 | Docs = code (this file + CREATE_PIPELINE) | ✅ 0.1.316 |
+
+**Still later (not spine blockers):** chat mid-ladder AIChat peel, Windows signing cert, email reset hosting, richer shop-without-cart genre, ensemble unpark when cloud-only.
+
+---
+
 ## Start here (recommended order)
 
 | # | Item | Why first |
@@ -18,6 +39,7 @@ Master list of things not done yet, half-done, or parked.
 | — | Image / Video / Call / Testers / Beta | ✅ Removed from product UI; Call source deleted |
 | — | Voice chat | Live (dev always on; retail via Settings → Voice); refuses builds/edits |
 | — | Profile photos / avatar cloud Storage | ✅ Cancelled — everyone uses the Nova logo |
+| — | Create spine puzzle (#1–#10) | ✅ 0.1.316 |
 
 ---
 

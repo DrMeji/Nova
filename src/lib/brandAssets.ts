@@ -217,10 +217,11 @@ export const UI_ICON_CATALOG: Array<{ id: string; label: string; iconify: string
   { id: 'user', label: 'profile', iconify: 'lucide:user', re: /\b(?:profile|user|account)\b/i },
   { id: 'settings', label: 'settings', iconify: 'lucide:settings', re: /\b(?:settings?|gear|cog)\b/i },
   { id: 'bell', label: 'bell', iconify: 'lucide:bell', re: /\b(?:bell|notif(?:ication)?s?)\b/i },
-  { id: 'heart', label: 'heart', iconify: 'lucide:heart', re: /\b(?:heart|favorite|like)\b/i },
+  // Avoid prose false hits: "like a …", bare "Edit the project", nav "Help" links.
+  { id: 'heart', label: 'heart', iconify: 'lucide:heart', re: /\b(?:heart|favorite|like\s+icon|likes?\s+button)\b/i },
   { id: 'cart', label: 'cart', iconify: 'lucide:shopping-cart', re: /\b(?:cart|shopping)\b/i },
   { id: 'bag', label: 'bag', iconify: 'lucide:shopping-bag', re: /\bbag\b/i },
-  { id: 'home', label: 'home', iconify: 'lucide:home', re: /\bhome\b/i },
+  { id: 'home', label: 'home', iconify: 'lucide:home', re: /\bhome\s+icon\b|\bicon[s]?\b[\s\S]{0,32}\bhome\b/i },
   { id: 'mail', label: 'mail', iconify: 'lucide:mail', re: /\b(?:mail|email|inbox)\b/i },
   { id: 'calendar', label: 'calendar', iconify: 'lucide:calendar', re: /\bcalendar\b/i },
   { id: 'camera', label: 'camera', iconify: 'lucide:camera', re: /\bcamera\b/i },
@@ -229,11 +230,11 @@ export const UI_ICON_CATALOG: Array<{ id: string; label: string; iconify: string
   { id: 'download', label: 'download', iconify: 'lucide:download', re: /\bdownload\b/i },
   { id: 'upload', label: 'upload', iconify: 'lucide:upload', re: /\bupload\b/i },
   { id: 'trash', label: 'trash', iconify: 'lucide:trash-2', re: /\b(?:trash|delete|bin)\b/i },
-  { id: 'edit', label: 'edit', iconify: 'lucide:pencil', re: /\b(?:edit|pencil)\b/i },
+  { id: 'edit', label: 'edit', iconify: 'lucide:pencil', re: /\b(?:edit\s+icon|pencil(?:\s+icon)?)\b/i },
   { id: 'lock', label: 'lock', iconify: 'lucide:lock', re: /\b(?:lock|secure|security)\b/i },
   { id: 'star', label: 'star', iconify: 'lucide:star', re: /\bstar\b/i },
   { id: 'bookmark', label: 'bookmark', iconify: 'lucide:bookmark', re: /\bbookmark\b/i },
-  { id: 'help', label: 'help', iconify: 'lucide:circle-help', re: /\b(?:help|faq)\b/i },
+  { id: 'help', label: 'help', iconify: 'lucide:circle-help', re: /\b(?:help\s+icon|faq\s+icon)\b/i },
   { id: 'info', label: 'info', iconify: 'lucide:info', re: /\binfo\b/i },
   { id: 'filter', label: 'filter', iconify: 'lucide:list-filter', re: /\bfilter\b/i },
   { id: 'grid', label: 'grid', iconify: 'lucide:layout-grid', re: /\b(?:grid|apps)\b/i },
@@ -263,7 +264,11 @@ export function parseNamedBrandLogos(brief: string): Array<{ id: string; label: 
 
 export function parseNamedUiIcons(brief: string): Array<{ id: string; label: string; iconify: string }> {
   const t = String(brief || '');
-  const iconCue = /\b(?:icons?|toolbar|nav\s*icons?|profile|settings?|premium|professional)\b/i.test(t);
+  // "premium / professional" alone must not mean icons — those words appear in design briefs.
+  const iconCue = /\bicons?\b/i.test(t)
+    || /\b(?:toolbar|nav\s*icons?)\b/i.test(t)
+    || /\b(?:premium|professional)\s+icons?\b/i.test(t)
+    || /\b(?:profile|settings?)\s+icon\b/i.test(t);
   if (!iconCue) return [];
   // Brand-logo asks should not also dump every UI icon whose word appears in brand names.
   if (/\b(?:logo|logos|wordmark)\b/i.test(t) && !/\bicons?\b/i.test(t)) return [];
@@ -506,25 +511,47 @@ async function resolveHeroSourceUrl(
   }
   const prompt = promptCore.join(', ').slice(0, 380);
 
+  const foodBrand = /\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|dates?\b|olive|chocolate|honey)\b/i.test(ctx);
+  const liquorBrand = /\b(?:liquor|spirits?|whiskey|whisky|bourbon|vodka|gin|tequila|rum|bottle\s+shop)\b/i.test(ctx);
+  const foodPrompt = foodBrand
+    ? [
+      enrichImagePrompt(query),
+      'real dried dates fruit food photography',
+      'medjool or deglet noor dates, warm natural light, ceramic plate or bowl',
+      'NOT electronics, NOT radio, NOT dial, NOT machine, NOT vacuum tube',
+      'no text overlay, no watermark, no collage, no logo brand mark',
+    ].join(', ').slice(0, 380)
+    : liquorBrand
+      ? [
+        enrichImagePrompt(query),
+        'premium whiskey or spirits bottle product photography',
+        'amber glass bottle, dark bar wood, warm editorial light',
+        'NOT electronics, NOT radio, NOT dial, NOT machine',
+        'no text overlay, no watermark, no collage, no logo brand mark',
+      ].join(', ').slice(0, 380)
+      : prompt;
+
   // 1) Hugging Face FLUX when keyed (premium path — never Pollinations).
   try {
     const { cloudGenerateImage } = await import('@/lib/cloudMedia');
-    const cloud = await cloudGenerateImage(prompt);
+    const cloud = await cloudGenerateImage(foodPrompt);
     if (cloud?.dataUrl) return cloud.dataUrl;
     if (cloud?.url && !/pollinations/i.test(cloud.url)) return cloud.url;
   } catch { /* fall through */ }
 
-  // 2) Local image weights when installed.
-  try {
-    const { listReadyLocalImageModels } = await import('@/lib/siteHeroImages');
-    const ready = await listReadyLocalImageModels();
-    if (ready[0]?.id) {
-      const gen = await window.novaDesktop?.engineGenerate?.(prompt, ready[0].id, 'image');
-      if (gen?.ok && gen.media?.dataUrl && !/pollinations/i.test(String(gen.source || gen.modelName || ''))) {
-        return gen.media.dataUrl;
+  // 2) Local image weights when installed — skip for food/liquor (small models invent radios/machines).
+  if (!foodBrand && !liquorBrand) {
+    try {
+      const { listReadyLocalImageModels } = await import('@/lib/siteHeroImages');
+      const ready = await listReadyLocalImageModels();
+      if (ready[0]?.id) {
+        const gen = await window.novaDesktop?.engineGenerate?.(prompt, ready[0].id, 'image');
+        if (gen?.ok && gen.media?.dataUrl && !/pollinations/i.test(String(gen.source || gen.modelName || ''))) {
+          return gen.media.dataUrl;
+        }
       }
-    }
-  } catch { /* fall through */ }
+    } catch { /* fall through */ }
+  }
 
   // 3) Hardware product sites: curated REAL PC-case photos only (verified subjects — never Pollinations).
   if (hardware) {
@@ -560,23 +587,46 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
   );
   const bakery = /\b(?:bakery|pastry|croissant|sourdough|bread|cake)\b/i.test(ctx);
   const florist = /\b(?:florist|bouquet|flower\s+shop|flowers?)\b/i.test(ctx);
-  // food/kitchen/flower are valid for bakery/florist — only ban them for hardware/generic.
-  const badTitle = bakery || florist
-    ? /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|logo|icon|infographic|x[- ]?ray|microscop|forensic|radio|electronics|transistor|cassette)\b/i
-    : /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|food|kitchen|tulip|flower|logo|icon|infographic|x[- ]?ray|microscop|forensic|archaeolog|insect|bird|dog|cat)\b/i;
+  // Dates / fruit / specialty food / liquor — ALLOW food titles; ban radio/electronics reuse.
+  const foodBrand = /\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|dates?\b|olive\s+oil|chocolate|honey)\b/i.test(ctx)
+    || (/\b(?:fruit|dates?)\b/i.test(ctx) && /\b(?:brand|shop|store|varieties|harvest)\b/i.test(ctx));
+  const liquorBrand = /\b(?:liquor|spirits?|whiskey|whisky|bourbon|vodka|gin|tequila|rum|bottle\s+shop|wine\s+shop)\b/i.test(ctx);
+  const edible = bakery || florist || foodBrand || liquorBrand;
+  // food/kitchen/flower are valid for bakery/florist/food — only ban them for hardware/generic.
+  const badTitle = edible
+    ? /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|logo|icon|infographic|x[- ]?ray|microscop|forensic|radio|electronics|transistor|cassette|vacuum\s*tube|dial|gauge|oscilloscope|circuit|motherboard)\b/i
+    : /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|food|kitchen|tulip|flower|logo|icon|infographic|x[- ]?ray|microscop|forensic|archaeolog|insect|bird|dog|cat|radio|electronics|cassette)\b/i;
   const hardware = /\b(?:pc\s*case|chassis|tower|gpu|keyboard|mouse|laptop|gaming)\b/i.test(ctx)
-    && !bakery && !florist;
+    && !edible;
   const curatedHardware = [
     'https://images.unsplash.com/photo-1593640408182-31c70c8268f5?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
     'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
   ];
+  const seed = Math.abs(_seed || 0);
   const tries = hardware
     ? [query, 'gaming pc mid tower case', 'tempered glass pc case studio', 'computer chassis product photo']
     : bakery
       ? [query, 'bakery interior croissant display', 'sourdough bread bakery counter', 'pastry shop warm daylight']
       : florist
         ? [query, 'florist flower shop bouquet', 'fresh roses peonies bouquet', 'flower market soft pastel']
-        : [query];
+        : foodBrand
+          ? [
+            query,
+            'medjool dates fruit bowl warm daylight food photography',
+            'dried dates palm fruit close up editorial',
+            'deglet noor dates on ceramic plate studio',
+            'desert date fruit harvest basket',
+          ]
+          : liquorBrand
+            ? [
+              query,
+              'whiskey bottle amber glass bar photography',
+              'bourbon bottle dark wood editorial',
+              'spirits bottle shop shelf warm light',
+              'gin bottle citrus garnish studio',
+            ]
+            : [query];
+  const seenUrls = new Set<string>();
   for (const q of tries.filter(Boolean)) {
     try {
       const found = await window.novaDesktop?.brandSearchImages?.({ query: q, pageSize: 12 });
@@ -584,10 +634,12 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
         .filter((r) => {
           if (!r.url || skipBanned(r.url)) return false;
           if (/pollinations/i.test(r.url)) return false;
+          if (seenUrls.has(r.url)) return false;
           const title = String((r as { title?: string }).title || '');
           if (title && badTitle.test(title)) return false;
           if (badTitle.test(r.url)) return false;
           if (hardware && /\b(?:cat|dog|kitten|puppy|pet|animal|bird|cage)\b/i.test(title)) return false;
+          if (foodBrand && /\b(?:radio|electronics|circuit|vacuum|cassette|dial)\b/i.test(title)) return false;
           if (!heroResultMatchesCategory(identity, `${title} ${r.url}`)) return false;
           const w = Number(r.width) || 0;
           if (w > 0 && w < 900) return false;
@@ -595,14 +647,18 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
             || /upload\.wikimedia|images\.unsplash|pexels|flickr/i.test(r.url);
         })
         .sort((a, b) => (Number(b.width) || 1400) - (Number(a.width) || 1400));
-      if (ranked[0]?.url) return ranked[0].url;
+      const pick = ranked[seed % Math.max(1, ranked.length)] || ranked[0];
+      if (pick?.url) {
+        seenUrls.add(pick.url);
+        return pick.url;
+      }
     } catch {
       /* try next */
     }
   }
   // No shared forest/ocean stock. Image gen already ran. A miss stays empty so the caller draws a product stage.
-  if (bakery || florist || !hardware) return '';
-  const idx = Math.abs(_seed || 0) % curatedHardware.length;
+  if (edible || !hardware) return '';
+  const idx = seed % curatedHardware.length;
   return curatedHardware[idx] || curatedHardware[0] || '';
 }
 
@@ -778,8 +834,13 @@ export function wireBrandAssetsIntoSource(source: string, plan: BrandAssetPlan, 
       wiredStages = true;
     }
     if (!wiredStages) {
-      if (/background-image:\s*url\(/i.test(s)) {
-        s = s.replace(/background-image:\s*url\([^)]+\)/i, `background-image: url('${heroes[0].href}')`);
+      // Only rewrite path/http backgrounds — never data-URI grain/noise (`)` inside
+      // `url(%23n)` used to truncate and leave `url('/heroes/…')'/%3E%3C/svg%3E")` junk).
+      if (/background-image:\s*url\(\s*(['"]?)(?:https?:|\/)[^)'"]+\1\s*\)/i.test(s)) {
+        s = s.replace(
+          /background-image:\s*url\(\s*(['"]?)(?:https?:|\/)[^)'"]+\1\s*\)/i,
+          `background-image: url('${heroes[0].href}')`,
+        );
       } else if (/\.hero\b/.test(s) && !heroes.some((h) => s.includes(h.href))) {
         s = s.replace(
           /(\.hero\s*\{[^}]*background-color:\s*#000;)/,
@@ -813,6 +874,7 @@ export async function materializeBrandAssets(opts: {
   projectName: string;
 }): Promise<{ files: Record<string, string>; saved: string[]; note: string }> {
   const saved: string[] = [];
+  const usedHeroUrls = new Set<string>();
   const files = { ...opts.files };
   const seed = heroSeedForProject(opts.projectName, 'brand');
   const lightCanvas = /background\s*:\s*(?:#fef3c7|#fff(?:fff)?|#f[5-9a-f]{5}|cream|white)/i.test(files['src/App.css'] || '')
@@ -849,22 +911,29 @@ export async function materializeBrandAssets(opts: {
     }
     if (!urls.length && slot.role === 'hero' && slot.query) {
       const identity = createIdentityFromBrief(opts.projectName, opts.brief);
-      const generated = await resolveHeroSourceUrl(
-        slot.query,
-        opts.brief,
-        opts.projectName,
-        seed + saved.length,
-      );
-      if (generated) urls.push(generated);
-      else urls.push(svgHeroDataUrl(identity, slot.id || slot.query || ''));
+      let attempts = 0;
+      while (attempts < 4) {
+        const generated = await resolveHeroSourceUrl(
+          slot.query,
+          opts.brief,
+          opts.projectName,
+          seed + saved.length + attempts * 17,
+        );
+        attempts += 1;
+        if (!generated || usedHeroUrls.has(generated)) continue;
+        urls.push(generated);
+        break;
+      }
+      if (!urls.length) urls.push(svgHeroDataUrl(identity, slot.id || slot.query || ''));
     } else if (!urls.length && slot.query) {
       const photo = await pickPhotoUrl(slot.query, `${opts.projectName} ${slot.query}`, seed + saved.length);
-      if (photo) urls.push(photo);
+      if (photo && !usedHeroUrls.has(photo)) urls.push(photo);
       else if (slot.role === 'hero') {
         urls.push(svgHeroDataUrl(createIdentityFromBrief(opts.projectName, opts.brief), slot.id || slot.query || ''));
       }
     }
     for (const url of urls) {
+      if (slot.role === 'hero' && usedHeroUrls.has(url) && !/^data:image\/svg\+xml/i.test(url)) continue;
       // SVG data-URL heroes → write .svg directly (saveUrl expects base64 images).
       if (/^data:image\/svg\+xml/i.test(url)) {
         const raw = decodeURIComponent(url.replace(/^data:image\/svg\+xml[^,]*,/i, ''));
@@ -894,6 +963,7 @@ export async function materializeBrandAssets(opts: {
       }
       const result = await saveUrl(opts.diskRoot, slot.rel, url);
       if (!result.ok) continue;
+      if (slot.role === 'hero') usedHeroUrls.add(url);
       saved.push(result.rel);
       // Register presence for wire/Ready WITHOUT content that can be written back over the binary.
       // A previous marker string was applied via @@@FILE and wiped real JPGs to ~50 bytes.
@@ -942,17 +1012,23 @@ export async function materializeBrandAssets(opts: {
     if (next !== files[key]) files[key] = next;
   }
 
+  const appSrc = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  const usesAbsoluteRail = /\b(?:icon|brand)-rail\b/i.test(appSrc);
   const extraCss = [
     '.logo img{display:block;width:36px;height:36px}',
     '.corner-logo img{display:block;width:40px;height:40px}',
     '.nav-tools{display:flex;align-items:center;gap:12px}',
     '.nav-icon{display:block;opacity:.92;width:20px;height:20px}',
-    '.brand-rail{position:absolute;top:1.35rem;left:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px)}',
-    '.brand-mark{display:block;width:28px;height:28px;opacity:.95}',
-    '.icon-rail{position:absolute;top:1.35rem;right:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;max-width:min(92vw,520px)}',
+    ...(usesAbsoluteRail
+      ? [
+          '.brand-rail{position:absolute;top:1.35rem;left:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px)}',
+          '.brand-mark{display:block;width:28px;height:28px;opacity:.95}',
+          '.icon-rail{position:absolute;top:1.35rem;right:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;max-width:min(92vw,520px)}',
+        ]
+      : []),
   ].join('');
   const hasChromeSlots = opts.plan.slots.some((s) => s.role === 'logo' || s.role === 'icon');
-  if (hasChromeSlots && files['src/App.css'] && !files['src/App.css'].includes('.brand-rail')) {
+  if (hasChromeSlots && files['src/App.css'] && usesAbsoluteRail && !files['src/App.css'].includes('.brand-rail')) {
     let css = files['src/App.css'].trimEnd();
     files['src/App.css'] = `${css}\n${extraCss}\n`;
   } else if (hasChromeSlots && files['src/App.css'] && !files['src/App.css'].includes('.nav-tools')) {
@@ -1046,9 +1122,12 @@ function patchFilesForHero(files: Record<string, string>, href: string, role: Br
     let body = css;
     if (role === 'hero') {
       if (/\.hero\b/.test(body)) {
-        if (/background-image:/i.test(body)) {
-          body = body.replace(/background-image:\s*url\([^)]+\)/i, `background-image: url('${href}')`);
-        } else {
+        if (/background-image:\s*url\(\s*(['"]?)(?:https?:|\/)[^)'"]+\1\s*\)/i.test(body)) {
+          body = body.replace(
+            /background-image:\s*url\(\s*(['"]?)(?:https?:|\/)[^)'"]+\1\s*\)/i,
+            `background-image: url('${href}')`,
+          );
+        } else if (!/background-image:/i.test(body)) {
           body = body.replace(/(\.hero\s*\{)/, `$1\n  background-image: url('${href}');`);
         }
       } else {

@@ -1,21 +1,23 @@
 /**
- * Plan-only turns — deep Plan card (same path as + → Plan).
- * Never the old “I’ve saved a plan” stub.
+ * Plan-only turns — synced Plan store + prose reply (Plan pill opens the map).
  */
 
 import {
   runPlanMode,
-  formatPlanReportMessage,
+  formatPlanChatReply,
   findLatestPlanReport,
   serializePlanReportForCreate,
   planReportToPlanLog,
 } from '@/lib/planReport';
+import { saveChatPlan, setChatPlanPill } from '@/lib/chatPlanStore';
+import { requestOpenChatPlan } from '@/lib/openChatPlan';
 
 export type PlanTurnHost = {
   userMessage: string;
   name?: string | null;
   summary?: string | null;
   preferredModelId?: string | null;
+  chatId?: string | null;
   messages?: Array<{ role?: string; content?: string } | null | undefined>;
   /** Always persist a buildable brief when provided. */
   savePlanBrief?: (brief: { name: string; summary: string; planLog?: string[] }) => void;
@@ -39,8 +41,15 @@ export function handlePlanTurnReply(opts: {
 
 export async function runPlanTurn(host: PlanTurnHost): Promise<void> {
   const ask = String(host.userMessage || host.summary || '').trim();
-  const prior = findLatestPlanReport(host.messages || []);
+  const chatId = String(host.chatId || '').trim();
+  const prior = findLatestPlanReport(host.messages || [], chatId || null);
   const projectName = String(host.name || prior?.title || 'your idea').trim() || 'your idea';
+  if (chatId) {
+    try {
+      setChatPlanPill(chatId, true);
+      requestOpenChatPlan({ chatId, openOverlay: true, live: true });
+    } catch { /* ignore */ }
+  }
   const report = await runPlanMode({
     userMessage: ask || `Plan ${projectName}`,
     projectName,
@@ -48,10 +57,24 @@ export async function runPlanTurn(host: PlanTurnHost): Promise<void> {
     priorPlan: prior,
     onProgress: host.onProgress,
   });
+  if (chatId) {
+    try {
+      saveChatPlan(chatId, report);
+      setChatPlanPill(chatId, true);
+      requestOpenChatPlan({ chatId, openOverlay: true, live: false });
+    } catch { /* ignore */ }
+  }
   host.savePlanBrief?.({
     name: report.title || projectName,
     summary: serializePlanReportForCreate(report),
     planLog: planReportToPlanLog(report),
   });
-  await host.finishPlainReply(formatPlanReportMessage(report), 'NOVA · Plan');
+  await host.finishPlainReply(
+    [
+      formatPlanChatReply(report, { refining: Boolean(prior?.steps?.length) }),
+      '',
+      'When you confirm build, Nova runs the Create Runtime Loop: craft → install → Live evidence (mount + console + smoke) → verified. Plan itself is never “done.”',
+    ].filter(Boolean).join('\n'),
+    'NOVA · Plan',
+  );
 }

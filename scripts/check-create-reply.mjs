@@ -41,10 +41,17 @@ function check(name, ok, detail = '') {
     bootstrap,
   );
   check('pending bootstrap not npm-failed', !/npm install failed/i.test(reply), reply.slice(0, 200));
-  check('pending bootstrap invites Live', /click \*\*Live\*\*/i.test(reply), reply.slice(0, 200));
   check(
-    'pending create is professional (no Ready stamp, no files dump)',
-    /I've created/i.test(reply) && !/\*\*Ready\*\*/i.test(reply) && !/\*\*Files written/i.test(reply),
+    'pending bootstrap mentions Live unlock',
+    /Live unlocks when Ready/i.test(reply) || /\*\*Live\*\*/i.test(reply),
+    reply.slice(0, 200),
+  );
+  check(
+    'pending create is professional (Created + finishing setup, no Ready stamp)',
+    /Created \*\*Nightglass\*\*/i.test(reply)
+      && /finishing setup/i.test(reply)
+      && !/\*\*Ready\*\*/i.test(reply)
+      && !/\*\*Files written/i.test(reply),
     reply.slice(0, 220),
   );
 }
@@ -68,8 +75,10 @@ function check(name, ok, detail = '') {
     richNote,
   );
   check(
-    'rich create invites changes, not soft-sell make it richer',
-    /I've created/i.test(richReply) && /Want anything changed/i.test(richReply) && !/make it richer/i.test(richReply),
+    'rich create pending copy is professional (no soft-sell make it richer)',
+    /Created \*\*Ember Roast\*\*/i.test(richReply)
+      && /finishing setup|Live unlocks/i.test(richReply)
+      && !/make it richer/i.test(richReply),
     richReply.slice(0, 240),
   );
 }

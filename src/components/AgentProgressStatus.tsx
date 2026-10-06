@@ -11,7 +11,8 @@ import {
 const NOISE = /thinking \(step|listed project files|^read src\/|verify passed|checking preview ready|preview ready fail|re-editing the ui|model timed out|step time reached|fix: thinking|build: thinking|almost done: finishing|final pass: checking|premium floor: another|keeping prior app/i;
 
 function looksLikeWebSearchStatus(label: string): boolean {
-  return /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references|your\s+message)\b|\blayout\s+references\b|\bfinding\s+relevant\s+sources\b|\bcomparing\s+sources\b|\bverifying\s+candidate\b|\blooking\s+for\s+images\b|\bplanning\s+searches\b|\bbuilding\s+answer\b/i.test(
+  // Globe only for real web / deep-search work — never for "Reading your message".
+  return /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references|sources?)\b|\blayout\s+references\b|\bfinding\s+relevant\s+sources\b|\bcomparing\s+sources\b|\bverifying\s+candidate\b|\blooking\s+for\s+images\b|\bplanning\s+searches\b|\bweb\s+lookup\b|\bdeep\s+research\b/i.test(
     String(label || ''),
   );
 }
@@ -167,11 +168,11 @@ export function AgentProgressStatus({
         }}
       >
         {finished ? null : webSearch ? (
-          <Globe className="w-3.5 h-3.5 shrink-0 text-sky-400 animate-pulse" aria-hidden />
+          <Globe className="w-3.5 h-3.5 shrink-0 text-content-tertiary" aria-hidden />
         ) : (
           <StatusDots />
         )}
-        <span className={`min-w-0 flex-1 text-[13px] font-medium tracking-wide break-words [overflow-wrap:anywhere] ${finished ? 'text-content-tertiary' : webSearch ? 'text-sky-300' : 'text-content-secondary'}`}>
+        <span className={`min-w-0 flex-1 text-sm font-medium tracking-wide break-words [overflow-wrap:anywhere] ${finished ? 'text-content-tertiary' : 'text-content-secondary'}`}>
           {shown}
         </span>
         {canExpand ? (

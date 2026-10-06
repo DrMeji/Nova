@@ -1,18 +1,27 @@
 /**
  * Chat turn — Q&A / inspect. Only place besides edit.ts that may call answerStudio.
- * Pure social asks (story, hello, jokes) skip studio packing entirely.
+ * Answer spine: resolveAnswerContract → gather → compose → verify (see docs/ANSWER-CONTRACT.md).
  */
 
 import { answerStudio } from '@/lib/studioAnswerEngine';
 import { arkRoute, routerProviderLabel } from '@/lib/novaRouter';
-import { buildRouterHistory, type RouterChatTurn } from '@/lib/chatHistory';
+import {
+  buildRouterHistory,
+  looksLikeExplicitTopicSwitch,
+  looksLikeThreadMemoryAsk,
+  looksLikeThreadMemoryPlant,
+  looksLikeTopicSwitchBleed,
+  type RouterChatTurn,
+} from '@/lib/chatHistory';
+import { extractVisionImages } from '@/lib/recentStore';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { chatSuccess, type ChatSuccess } from '@/lib/productContract';
-import { looksLikeBoundProjectAsk } from '@/lib/chatProjectDebug';
 import { hasRealStudioFiles } from '@/lib/plainChatAsk';
 import {
   looksLikePlainChatAsk,
   looksLikePureGreeting,
+  instantGreetingReply,
+  looksLikeSoftCheckInAsk,
   looksLikeCapabilityOverviewAsk,
   scrubFalseProjectChatPreamble,
   scrubTalkFirstCodeBleed,
@@ -23,7 +32,24 @@ import {
   looksLikeOrphanChatTail,
   orphanChatPlanFallback,
 } from '@/lib/plainChatAsk';
+import {
+  scrubPlanExitBleed,
+  scrubMarkdownHashHeadings,
+  looksLikeRunawayTokenGarbage,
+  cutBeforeTokenGarbage,
+  looksLikeShoppingOrPartsLinksAsk,
+  looksLikeHowToGuideAsk,
+  looksLikeThinHowToOutline,
+  shoppingLinksHonestGap,
+  howToGuideHonestGap,
+} from '@/lib/replySanity';
 import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import {
+  looksLikeSimpleBuildToyChatAsk,
+  looksLikeBrokenToyDemoReply,
+  simpleToyDemoHonestGap,
+  ensureToyDemoFenced,
+} from '@/lib/chatIntent';
 import { isCannedGreetingReply, usableAssistantText, scrubCannedGreetingFlash } from '@/lib/chatHistory';
 import {
   preferEnglishSafeReply,
@@ -42,7 +68,6 @@ import {
   looksLikeBookFindOrBuyAsk,
   honestLyricsUnavailableReply,
   sideQuestAnswerHint,
-  webSearchForChat,
   formatWebLookupForPrompt,
   webLookupUnavailableNote,
   fallbackAnswerFromLookup,
@@ -56,9 +81,11 @@ import {
   bookFindAnswerFromLookup,
   identifyResearchFailedReply,
 } from '@/lib/webSearch';
-import { runDeepResearch } from '@/lib/deepResearch';
 import { scrubDictationTranscript } from '@/lib/voiceSession';
 import { looksLikeColorCodeAsk, colorCodeReply } from '@/lib/colorCodeAsk';
+import { resolveAnswerContract } from '@/lib/answerContract';
+import { gatherForContract, companionStanceHint } from '@/lib/answerGather';
+import { verifyAnswerReply, scrubInventedLinkDump, honestGapForContract } from '@/lib/answerVerify';
 
 /** Soft style hints for the model — never a canned user-visible reply. */
 function answerShapeHintForAsk(message: string): string {
@@ -82,6 +109,34 @@ function answerShapeHintForAsk(message: string): string {
       'ANSWER SHAPE (find/buy): List the books briefly if asked, then give 3–5 markdown links with real https URLs from lookup Sources (Amazon, Barnes & Noble, Google Books, Open Library, Audible).',
       'Every store name MUST include a clickable URL. Never say “sure, here are links” without actual https links.',
       'Do not invent URLs. Prefer exact URLs from the lookup Sources list.',
+    ].join(' ');
+  }
+  if (looksLikeSimpleBuildToyChatAsk(t)) {
+    return [
+      'ANSWER SHAPE (simple demo in chat): The user wants a WORKING mini demo NOW — not a product plan.',
+      'Deliver ONE complete copy-paste HTML file (inline CSS + JS) inside a single markdown fenced code block tagged ```html.',
+      'Put a short 1–2 sentence intro BEFORE the fence. Put ALL code INSIDE the fence — never paste CSS/JS as a wall of unfenced text.',
+      'Use real newlines inside the fence (readable). Do NOT mash selectors and functions onto one line.',
+      'Do NOT write “Overall: keep the first version tiny”. Do NOT ask “who is the main user”.',
+      'Do NOT end with “Would you like to proceed with this plan?” — end with how to save and open the file in a browser.',
+      'Professional tone. No emojis. Keep it under ~80 lines of code when possible.',
+    ].join(' ');
+  }
+  // How-to / DIY / build guides + shopping follow-ups — depth like a real engineer brief (no emoji).
+  if (looksLikeHowToGuideAsk(t) || looksLikeShoppingOrPartsLinksAsk(t)) {
+    return [
+      'ANSWER SHAPE (how-to / build guide): Deliver a REAL guide — not a thin 1–2–3 tease.',
+      'Professional tone. No emojis. No markdown # / ## / #### hashtags — use **Bold titles** only.',
+      'Do NOT end with only “Would you like to start with hardware or software?”',
+      'Include all of the following when relevant:',
+      '(1) Two clear options — easier prototype vs advanced from-scratch — with tradeoffs.',
+      '(2) A recommended first prototype path with named parts (sensor/module families, boards, cables, enclosure) when known.',
+      '(3) Rough price bands when known; say when uncertain — never invent fake exact SKUs.',
+      '(4) Markdown https buy links: each link LABEL must match the URL. Prefer Amazon/Digi-Key search URLs that include the exact part name in the query. Never attach a random Adafruit/Amazon product page to a different part name.',
+      '(5) A simple text signal-flow / stack of the build (lens → sensor → bridge → USB → computer).',
+      '(6) What to buy first vs later, and a short versioned path (v1 → enclosure → custom PCB).',
+      'Aim for depth (~350–800 words). More concrete information is better than a short outline.',
+      'If the user also asked for buy links, every part row should include a real https link when possible.',
     ].join(' ');
   }
   // Factoid: net worth / price / how much — lead with the number, not a bio.
@@ -116,13 +171,18 @@ function answerShapeHintForAsk(message: string): string {
 }
 
 function plainChatHistorySeed(content: string): RouterChatTurn[] {
-  if (looksLikePureGreeting(content)) {
+  if (looksLikePureGreeting(content) || looksLikeSoftCheckInAsk(content)) {
     return [{
       role: 'user',
-      content: '[Reply style for this turn: one short natural greeting only. Do not list features or capabilities.]',
+      content: [
+        '[Reply style for this turn: warm, human, one or two short sentences.',
+        'Greet them like a real person — not a canned “Sure, what’s up?”.',
+        'Do not mention coding, programming, projects, apps, or features.',
+        'Do not ask what they want to build. Just be present and invite them to say what they need.]',
+      ].join(' '),
     }, {
       role: 'assistant',
-      content: 'Understood.',
+      content: 'Understood — warm human hello, no coding pitch, no canned “what’s up”.',
     }];
   }
   if (looksLikeCapabilityOverviewAsk(content)) {
@@ -135,6 +195,22 @@ function plainChatHistorySeed(content: string): RouterChatTurn[] {
     }];
   }
   if (looksLikeTalkBeforeCreateAsk(content) || looksLikeRequirementsAsk(content)) {
+    // Hardware / DIY how-to must NOT get the software product-plan seed.
+    if (looksLikeHowToGuideAsk(content)) {
+      return [{
+        role: 'user',
+        content: [
+          '[Reply style for this turn — CRITICAL:]',
+          'The user wants a concrete how-to / build guide for a real device or DIY project.',
+          'Give options, a first prototype path, named parts, rough prices, buy links when known, and a simple signal-flow.',
+          'Professional. No emojis. No Vite/React/scaffold. No “Overall: keep the first version tiny” product-app wrap-up.',
+          'Do not stop after three generic bullets — deliver the information they asked for.',
+        ].join(' '),
+      }, {
+        role: 'assistant',
+        content: 'Understood — deep how-to guide with options, parts, prices, and links. No software plan seed.',
+      }];
+    }
     const homepage = /\b(?:homepage|apple\.com|product\s+band|iphone|landing\s+page)\b/i.test(content);
     return [{
       role: 'user',
@@ -154,25 +230,15 @@ function plainChatHistorySeed(content: string): RouterChatTurn[] {
         ].join(' ')
         : [
         '[Reply style for this turn — CRITICAL:]',
-        'This is a normal conversation about a problem or product idea. Do NOT push to create files, pick a folder, or “set up Vite + React” unless the user clearly said build / create / go build / start building.',
-        'Write a thorough planning reply (about 180–320 words). Do NOT stop after three short bullets — cover the real shape of the idea.',
-        'Structure (use **Bold** titles on numbered lines; under each use - bullets):',
-        '1) Acknowledge the problem in plain language (they lose track of X — I can help).',
-        '2) Who it is for and the main job on a phone (one screen at a time).',
-        '3) What to track — concrete fields that fit THEIR domain (not a generic inventory lecture).',
-        '4) Day-of flows / main screens — registration, overview, updates (use - bullets under this step).',
-        '5) Must-have actions for a tiny v1 vs nice-to-haves later (at least 3 must-haves and 2 later ideas).',
-        '6) What “done” looks like for a first useful version.',
-        'Then an OVERALL exit paragraph (2–3 sentences): the simplest path forward for a tiny phone page, what to nail first, and how the pieces fit together. Do not stop right after the last numbered item.',
-        'Finally ask 1–2 concrete clarifying questions (who uses it, phone-only?, how many stalls).',
-        'LIST FORMAT: Main points are 1, 2, 3, 4, 5, 6 in order — never repeat 1. Under each point use - bullets only. Never use ★. Never leave empty numbered lines (no “4. User” with nothing under it).',
-        'VOICE: Open with “I can help…” / “I can tackle…”. Use “we” only for joint next steps (“we can go through this one by one”). Never “We can definitely help with that.”',
+        'This is a normal human conversation about a problem or product idea. Do NOT push to create files, pick a folder, or “set up Vite + React” unless they clearly said build / create / go build / start building.',
+        'Sound like a person chatting — warm, specific, contractions OK. Not a template, not “Great question!”, not a corporate brief.',
+        'Write about 100–220 words. Lead with prose that mirrors THEIR words. Use a short numbered list only if it helps; otherwise stay in paragraphs.',
+        'Cover naturally: the problem you heard, a simple v1 shape (fields / one screen), what can wait, and 1–2 plain questions.',
+        'VOICE: “Yeah — that makes sense…” / “I’d keep v1 tiny…” / “Here’s what I’d put on the first screen…”. Never “We can definitely help with that.”',
         'Stay accurate to what they said — farmers market stalls ≠ bookstore shelf. Mirror their words.',
-        'Do NOT add “implementation steps”, tech stack, HTML/CSS/JS, backend, localStorage, database, or “let’s start building”. Product plan only.',
+        'Do NOT dump tech stack, HTML/CSS/JS, backend, localStorage, or “let’s start building”. No @@@FILE, no code fences.',
         'Never end with “Would you like to proceed with creating this page?” or “What directory should we use?” or “Let’s start by setting up Vite”.',
         'Never pitch React Native, Flutter, Firebase, Express, MongoDB, AWS, or auth/payments unless they ask.',
-        'Talk as a collaborator (“we can…”, “here’s a simple approach”). Do not lecture (“you should implement…”).',
-        'If they only sketched an idea (stalls, shelf, borrow), mirror it and outline features in prose — no code dumps, no @@@FILE, no markdown fences.',
         'Never restart with “Hello! How can I assist you today?” — stay on this thread.',
         'Only when they explicitly ask to build/create should you discuss creating a project on disk.]',
       ].join(' '),
@@ -180,7 +246,7 @@ function plainChatHistorySeed(content: string): RouterChatTurn[] {
       role: 'assistant',
       content: homepage
         ? 'Understood — numbered homepage layout with bold labels and muted detail under each section. No Vite/build push.'
-        : 'Understood — numbered plan 1…n with bullets under each, then an overall wrap-up paragraph and clarifying questions. No Vite/build push.',
+        : 'Understood — talk like a human collaborator about their idea. Prose first, light structure, no Vite/build push.',
     }];
   }
   return [];
@@ -241,6 +307,23 @@ function threadHistoryForChat(host: ChatTurnHost): RouterChatTurn[] {
 /** Soft wall for abort only — never silence streaming chunks while the model is still writing. */
 const CHAT_STREAM_ABORT_MS = 300_000;
 
+function topicSwitchCleanReply(ask: string): string | null {
+  const a = String(ask || '');
+  if (/\bstretch|desk\b/i.test(a)) {
+    return [
+      'Try a seated chest opener: sit tall, clasp your hands behind your back (or hold the chair sides), and gently lift your chest while rolling the shoulders back.',
+      'Hold for 20–30 seconds, breathe slowly, then release. Do it once or twice when you notice yourself slumping.',
+    ].join(' ');
+  }
+  if (/\bbreath|wired at night|feeling wired\b/i.test(a)) {
+    return [
+      'Try a slow 4-7-8 breath: inhale through your nose for 4, hold for 7, then exhale through your mouth for 8.',
+      'Do three to four rounds in bed with lights low. If holding feels tense, shorten the hold and keep the exhale longer than the inhale.',
+    ].join(' ');
+  }
+  return null;
+}
+
 export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
   const started = Date.now();
   const abortMs = host.timeoutMs ?? (host.allowFileEdits ? 120_000 : CHAT_STREAM_ABORT_MS);
@@ -250,109 +333,146 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
   const statusPause = (ms: number) => new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
-  // Read → think first on every chat ask (then research only when needed).
+
+  // Answer Contract SSOT — gates web / disk / companion (no keyword race for ownership).
+  const contract = resolveAnswerContract({
+    message: host.content,
+    hasBoundFiles: hasRealStudioFiles(host.files),
+    priorHistory: host.priorHistory || [],
+  });
+  const slowStatusTurn = contract.allowWeb || contract.useStudioDisk || contract.job === 'research' || contract.job === 'diagnose';
+  // Read → think — short for simple chat; longer when web/disk research is coming.
   if (!host.shouldAbort()) {
     host.onStatus?.('Reading your message…');
-    await statusPause(450);
+    await statusPause(slowStatusTurn ? 450 : 100);
   }
   if (!host.shouldAbort()) {
     host.onStatus?.('Thinking…');
-    await statusPause(400);
+    await statusPause(slowStatusTurn ? 400 : 80);
   }
-
-  // Chat turns never pack project files into the bubble — arkRoute only.
-  // Exception: bound-project overview / diagnose asks must read the folder.
   const talkOrAdvice =
-    looksLikeTalkBeforeCreateAsk(host.content) || looksLikeRequirementsAsk(host.content);
-  const projectAwareAsk =
-    looksLikeBoundProjectAsk(host.content)
-    && hasRealStudioFiles(host.files);
+    (contract.job === 'plan_talk')
+    && !/\b(?:validate|validation|founder|week[- ]by[- ]week|30\s+days|customer\s+interview)\b/i.test(host.content);
+  const projectAwareAsk = contract.useStudioDisk && hasRealStudioFiles(host.files);
+
   if (!host.allowFileEdits && !projectAwareAsk) {
     const prefs = getLocalPrefs();
     let streamed = '';
     let lastGood = '';
-    const sideQuest = looksLikeSideQuestAsk(host.content);
-    const followUp = looksLikeThreadFollowUpAsk(host.content);
+    let garbageAbort = false;
+    const sideQuest = looksLikeSideQuestAsk(host.content) || contract.stance === 'companion';
+    const followUp = looksLikeThreadFollowUpAsk(host.content) || contract.topic === 'thread_entity';
+    const shoppingAsk = looksLikeShoppingOrPartsLinksAsk(host.content);
+    const simpleToyChat = looksLikeSimpleBuildToyChatAsk(host.content);
+    const scrubTalkCode = (s: string) => (simpleToyChat ? String(s || '') : scrubTalkFirstCodeBleed(s));
+    const topicSwitch = looksLikeExplicitTopicSwitch(host.content);
+    const memoryAsk = looksLikeThreadMemoryAsk(host.content);
+    const memoryPlant = looksLikeThreadMemoryPlant(host.content);
     // Follow-ups about “he / the game” must keep thread context (do not wipe Apex→Fortnite).
-    let history = buildRouterHistory(threadHistoryForChat(host), host.content, undefined, {
-      keepContinuity: !sideQuest || followUp,
+    // Explicit “switching topics” must wipe so the prior essay cannot continue mid-word.
+    // Pass real pixels so vision (or honest blindness) runs — never invent from the filename alt.
+    const visionPixels = extractVisionImages(host.content);
+    let history = buildRouterHistory(threadHistoryForChat(host), host.content, visionPixels, {
+      keepContinuity: memoryAsk || memoryPlant || (((!sideQuest || followUp || contract.stance === 'companion') && !topicSwitch)),
       kind: 'chat',
     });
-
-    // Live web for real-world asks (people, brands, products, sports, news).
-    let webHit: Awaited<ReturnType<typeof webSearchForChat>> | null = null;
-    if (looksLikeLyricsAsk(host.content)) {
-      const lyrics = honestLyricsUnavailableReply(host.content);
-      return {
-        status: 'handled',
-        text: lyrics,
-        intent: 'plain-chat',
-        contract: chatSuccess(lyrics),
-        provider: 'NOVA',
-      };
+    if (topicSwitch) {
+      // Hard wipe — never let prior assistant text leak into a fresh topic.
+      history = [{
+        role: 'user',
+        content: String(host.content || '').trim(),
+        images: visionPixels.length ? visionPixels : undefined,
+      }];
+      try { host.onDelta?.(''); } catch { /* ignore */ }
     }
-    // Color codes: short deterministic reply + clickable hex swatch (no HTML/CSS lecture).
-    if (looksLikeColorCodeAsk(host.content)) {
-      const color = colorCodeReply(host.content);
-      return {
-        status: 'handled',
-        text: color,
-        intent: 'plain-chat',
-        contract: chatSuccess(color),
-        provider: 'NOVA',
-      };
-    }
+    // Live web only when the contract allows it.
+    let webHit: Awaited<ReturnType<typeof gatherForContract>>['webHit'] = null;
 
-    const identifyAskEarly = looksLikeIdentifyMediaAsk(host.content)
-      || looksLikeExplicitResearchAsk(host.content)
-      || looksLikeRejectedPriorAnswerAsk(host.content);
-    const bookFindAskEarly = looksLikeBookFindOrBuyAsk(host.content);
-
-    // Book identify: deep multi-query research FIRST (real searches + images).
-    if (identifyAskEarly) {
-      try {
-        const deep = await runDeepResearch(host.content, {
-          shouldAbort: () => host.shouldAbort(),
-          timeoutMs: 75_000,
-          wantImages: true,
-          onProgress: (p) => {
-            const detail = p.detail ? ` — ${p.detail}` : '';
-            host.onStatus?.(`${p.label}${detail}`);
-          },
-        });
-        webHit = deep.searchPerformed
-          ? { ok: deep.ok, text: deep.text, sources: deep.sources }
-          : null;
-        if (host.shouldAbort()) {
-          return {
-            status: 'handled',
-            text: '',
-            intent: 'plain-chat',
-            contract: chatSuccess(''),
-            provider: 'NOVA',
-          };
-        }
-        if (deep.answer) {
-          return {
-            status: 'handled',
-            text: deep.answer,
-            intent: 'plain-chat',
-            contract: chatSuccess(deep.answer),
-            provider: 'NOVA',
-          };
-        }
-      } catch {
-        webHit = null;
-      }
-      if (host.shouldAbort()) {
+    if (contract.job === 'deterministic') {
+      if (looksLikePureGreeting(host.content)) {
+        const hi = instantGreetingReply();
         return {
           status: 'handled',
-          text: '',
+          text: hi,
           intent: 'plain-chat',
-          contract: chatSuccess(''),
+          contract: chatSuccess(hi),
+          provider: 'NOVA',
+          modelName: 'NOVA',
+        };
+      }
+      if (looksLikeLyricsAsk(host.content)) {
+        const lyrics = honestLyricsUnavailableReply(host.content);
+        return {
+          status: 'handled',
+          text: lyrics,
+          intent: 'plain-chat',
+          contract: chatSuccess(lyrics),
           provider: 'NOVA',
         };
       }
+      if (looksLikeColorCodeAsk(host.content)) {
+        const color = colorCodeReply(host.content);
+        return {
+          status: 'handled',
+          text: color,
+          intent: 'plain-chat',
+          contract: chatSuccess(color),
+          provider: 'NOVA',
+        };
+      }
+    }
+
+    const gathered = await gatherForContract({
+      message: host.content,
+      contract,
+      priorTurns: host.priorHistory || [],
+      shouldAbort: () => host.shouldAbort(),
+      onStatus: host.onStatus,
+      timeoutMs: contract.allowWeb ? 75_000 : 45_000,
+    });
+
+    if (host.shouldAbort()) {
+      return {
+        status: 'handled',
+        text: '',
+        intent: 'plain-chat',
+        contract: chatSuccess(''),
+        provider: 'NOVA',
+      };
+    }
+
+    if (gathered.kind === 'deterministic' && gathered.deterministicText) {
+      return {
+        status: 'handled',
+        text: gathered.deterministicText,
+        intent: 'plain-chat',
+        contract: chatSuccess(gathered.deterministicText),
+        provider: 'NOVA',
+      };
+    }
+
+    if (gathered.kind === 'deep' && gathered.deepAnswer) {
+      const v = verifyAnswerReply(contract, host.content, gathered.deepAnswer);
+      const deepText = v.ok ? gathered.deepAnswer : (v.honestGap || gathered.deepAnswer);
+      return {
+        status: 'handled',
+        text: deepText,
+        intent: 'plain-chat',
+        contract: chatSuccess(deepText),
+        provider: 'NOVA',
+      };
+    }
+
+    // Identify research failed with no usable deep answer.
+    if (
+      contract.allowWeb
+      && contract.reason === 'explicit-research'
+      && !gathered.deepAnswer
+      && !gathered.webHit?.ok
+      && (looksLikeIdentifyMediaAsk(host.content)
+        || looksLikeExplicitResearchAsk(host.content)
+        || looksLikeRejectedPriorAnswerAsk(host.content))
+    ) {
       const failed = identifyResearchFailedReply(host.content);
       return {
         status: 'handled',
@@ -363,48 +483,23 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
       };
     }
 
-    if (
-      !projectAwareAsk
-      && (
-        looksLikeWebGroundedAsk(host.content)
-        || bookFindAskEarly
-        || (followUp && /\b(?:more\s+(?:info|information|details?)|tell\s+me\s+more|net\s*worth|who\s+(?:is|are)|what\s+about|look\s+up|research|nope|wrong|not\s+the\s+name)\b/i.test(host.content)
-          && !/\b(?:this|the|my|our)\s+(?:project|folder|app)\b/i.test(host.content))
-      )
-    ) {
-      try {
-        host.onStatus?.('Researching…');
-        webHit = await webSearchForChat(host.content, {
-          priorTurns: host.priorHistory || [],
-          timeoutMs: 45_000,
-        });
-      } catch {
-        webHit = null;
-      }
-      if (host.shouldAbort()) {
-        return {
-          status: 'handled',
-          text: lastGood || '',
-          intent: 'plain-chat',
-          contract: chatSuccess(lastGood || ''),
-          provider: 'NOVA',
-        };
-      }
-      if (webHit?.ok) {
-        host.onStatus?.('Reviewing sources…');
-      } else {
-        host.onStatus?.('Thinking…');
-      }
+    webHit = gathered.webHit || null;
+    const bookFindAskEarly = looksLikeBookFindOrBuyAsk(host.content);
+
+    if (contract.allowWeb && contract.grounding === 'web') {
       const identifyAsk = false;
       const bookFindAsk = bookFindAskEarly;
-      const note = webHit?.ok
-        ? formatWebLookupForPrompt(webHit, {
-          comprehensive: looksLikeComprehensiveAsk(host.content)
-            || looksLikeExplicitResearchAsk(host.content)
-            || bookFindAsk,
-          identify: identifyAsk && !bookFindAsk,
-        })
-        : '';
+      const note = gathered.promptNote
+        || (webHit?.ok
+          ? formatWebLookupForPrompt(webHit, {
+            comprehensive: looksLikeComprehensiveAsk(host.content)
+              || looksLikeExplicitResearchAsk(host.content)
+              || looksLikeHowToGuideAsk(host.content)
+              || looksLikeShoppingOrPartsLinksAsk(host.content)
+              || bookFindAsk,
+            identify: identifyAsk && !bookFindAsk,
+          })
+          : '');
       if (sideQuest || followUp || webHit?.ok) {
         history = [
           {
@@ -450,10 +545,16 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           },
         ];
       }
+    } else if (contract.stance === 'companion' && gathered.promptNote) {
+      history = [
+        { role: 'user', content: gathered.promptNote || companionStanceHint(host.content) },
+        { role: 'assistant', content: 'Understood — stay on topic, no invented links or project dumps.' },
+        ...history,
+      ];
     }
 
-    // Even without web notes, push shape for factoid vs expand asks.
-    {
+    // Even without web notes, push shape for factoid vs expand asks (research stance only).
+    if (contract.allowWeb) {
       const shape = answerShapeHintForAsk(host.content);
       if (shape && !looksLikeWebGroundedAsk(host.content) && !followUp) {
         history = [
@@ -462,7 +563,6 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           ...history,
         ];
       } else if (shape && (looksLikeWebGroundedAsk(host.content) || followUp)) {
-        // Already attached with the lookup note above when present; if only follow-up path, ensure shape once.
         const already = history.some((h) => /ANSWER SHAPE/i.test(String(h.content || '')));
         if (!already) {
           history = [
@@ -510,7 +610,7 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
       },
       onChunk: prefs.streamResponses && host.onDelta
         ? (piece) => {
-          if (host.shouldAbort()) return;
+          if (host.shouldAbort() || garbageAbort) return;
           const delta = String(piece || '');
           if (!delta) return;
           // Full quiet-commit from the router (one-shot replace after a silent retry/hop).
@@ -531,8 +631,36 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           } else {
             streamed += delta;
           }
+          // Topic switch: abort mid-sentence prior-topic bleed early and paint a clean answer.
+          if (topicSwitch && looksLikeTopicSwitchBleed(streamed, host.content)) {
+            garbageAbort = true;
+            const clean = topicSwitchCleanReply(host.content);
+            if (clean) {
+              lastGood = clean;
+              streamed = clean;
+              host.onDelta?.(clean);
+            } else if (lastGood.length >= 2) {
+              host.onDelta?.(lastGood);
+            }
+            return;
+          }
+          // Abort runaway %2Cfff / hex dumps early — keep any leading prose.
+          if (looksLikeRunawayTokenGarbage(streamed)) {
+            garbageAbort = true;
+            const cut = cutBeforeTokenGarbage(streamed) || scrubPlanExitBleed(lastGood);
+            if (cut.length >= 24) {
+              lastGood = cut;
+              streamed = cut;
+              host.onDelta?.(cut);
+            } else if (lastGood.length >= 2) {
+              host.onDelta?.(lastGood);
+            }
+            return;
+          }
           let live = scrubFalseProjectChatPreamble(streamed);
-          live = scrubTalkFirstCodeBleed(live);
+          live = scrubTalkCode(live);
+          live = scrubPlanExitBleed(live);
+          live = scrubMarkdownHashHeadings(live);
           if (talkOrAdvice) {
             live = scrubBuildAggression(live);
             live = scrubHelpVoice(live);
@@ -551,7 +679,8 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           const usable = usableAssistantText(live, host.content, undefined, { stream: true });
           // Always prefer scrubbed English over a longer foreign-bleed draft.
           live = scrubUnexpectedForeignScript(usable || live, host.content) || usable || live;
-          if (isTalkFenceJunk(live)) {
+          live = scrubPlanExitBleed(live);
+          if (isTalkFenceJunk(live) || looksLikeRunawayTokenGarbage(live)) {
             if (lastGood.length >= 2 && !replyHasUnexpectedForeignBleed(lastGood, host.content)) {
               host.onDelta?.(lastGood);
             }
@@ -571,16 +700,30 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
             host.onDelta?.(lastGood);
             return;
           }
-          lastGood = preferEnglishSafeReply(live, lastGood, host.content);
-          host.onDelta?.(lastGood);
+          const candidate = preferEnglishSafeReply(live, lastGood, host.content);
+          const nextGood = scrubMarkdownHashHeadings(candidate);
+          // Stream paint only grows — never retract mid-turn unless garbage/foreign bleed.
+          if (
+            nextGood.length >= lastGood.length
+            || lastGood.length < 24
+            || (nextGood.length >= Math.floor(lastGood.length * 0.92) && nextGood.startsWith(lastGood.slice(0, Math.min(32, lastGood.length))))
+          ) {
+            lastGood = nextGood;
+            host.onDelta?.(lastGood);
+          } else if (lastGood.length >= 2) {
+            host.onDelta?.(lastGood);
+          }
         }
         : undefined,
     });
     // Prefer the longest solid live paint — never let a quieter scrub retract the bubble.
     // Exception: never restore a foreign-script bleed over scrubbed English.
+    // Exception: topic-switch mid-sentence bleed — keep the clean abort paint, not the long prior-topic dump.
     const routedText = String(routed.reply || '').trim();
     let raw = preferEnglishSafeReply(routedText, lastGood, host.content);
-    if (
+    if (topicSwitch && looksLikeTopicSwitchBleed(routedText, host.content) && lastGood.length >= 40) {
+      raw = lastGood;
+    } else if (
       lastGood.length >= 80
       && lastGood.length > routedText.length * 1.08
       && !replyHasUnexpectedForeignBleed(lastGood, host.content)
@@ -589,23 +732,39 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     } else if (!raw) {
       raw = lastGood || streamed || '';
     }
-    let text = scrubTalkFirstCodeBleed(scrubFalseProjectChatPreamble(raw));
+    let text = scrubTalkCode(scrubFalseProjectChatPreamble(raw));
     if (sideQuest) text = scrubSideQuestBleed(text, host.content) || text;
     text = scrubEmptyFactPlaceholders(text);
     text = scrubUnexpectedForeignScript(text, host.content) || text;
+    text = scrubPlanExitBleed(text);
+    text = scrubMarkdownHashHeadings(text);
+    if (looksLikeRunawayTokenGarbage(text)) {
+      text = cutBeforeTokenGarbage(text)
+        || (lastGood && !looksLikeRunawayTokenGarbage(lastGood) ? scrubPlanExitBleed(lastGood) : '');
+    }
     // If scrubbing shrinks a solid live answer, keep the live paint — unless live was bleed.
+    // Always re-scrub plan-exit bleed so “Overall: keep the first version tiny…” cannot return.
     if (
       lastGood.length >= 80
       && text.length < Math.floor(lastGood.length * 0.85)
       && !replyHasUnexpectedForeignBleed(lastGood, host.content)
+      && !looksLikeRunawayTokenGarbage(lastGood)
     ) {
-      text = scrubEmptyFactPlaceholders(lastGood) || lastGood;
+      const restored = scrubPlanExitBleed(scrubEmptyFactPlaceholders(lastGood) || lastGood);
+      if (restored.length >= 40) text = restored;
     }
     if (talkOrAdvice) {
       text = scrubBuildAggression(text);
       text = scrubHelpVoice(text);
-      text = ensurePlanningExit(text, host.content);
+      // Only append product-plan exits for real product talk — never OS how-tos.
+      if (
+        /\b(?:build|create|app|website|mvp|product|tracker|stall|shelf)\b/i.test(host.content)
+        && !/\b(?:windows|browser|taskbar|settings|stretch|habit|dinner)\b/i.test(host.content)
+      ) {
+        text = ensurePlanningExit(text, host.content);
+      }
     }
+    text = scrubPlanExitBleed(text);
     if (!text || isTalkFenceJunk(text)) {
       text = (lastGood && !isTalkFenceJunk(lastGood) && !replyHasUnexpectedForeignBleed(lastGood, host.content))
         ? lastGood
@@ -629,14 +788,76 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     };
     text = preferEnglishSafeReply(preferSolid(text, lastGood), text, host.content);
     text = scrubUnexpectedForeignScript(text, host.content) || text;
-    // Never leave product-planning “Overall: keep the first version tiny…” glued onto book answers.
+    text = scrubPlanExitBleed(text);
     text = text
       .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep the first version tiny[\s\S]*$/i, '')
       .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep v1 tiny[\s\S]*$/i, '')
       .replace(/\n+(?:\*\s*)?\*{0,2}\s*Overall:\s*keep every band[\s\S]*$/i, '')
+      .replace(/(?:^|\n)\s*Overall:\s*keep the first version tiny[\s\S]*$/i, '')
       .replace(/(?:^|\n)(?:\*\s*)?\*\*\s*$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+
+    // Always strip product-plan “Overall: keep the first version tiny…” glued onto any chat reply.
+    text = scrubPlanExitBleed(text)
+      .replace(/\s*Overall:\s*keep the first version tiny[\s\S]*$/i, '')
+      .replace(/\s*Overall:\s*keep v1 tiny[\s\S]*$/i, '')
+      .trim();
+
+    // Topic switch: if the model continued the previous essay mid-word / wrong subject, one clean retry.
+    if (topicSwitch && looksLikeTopicSwitchBleed(text, host.content) && !host.shouldAbort()) {
+      try { host.onStatus?.('Refocusing…'); } catch { /* ignore */ }
+      try { host.onDelta?.(''); } catch { /* ignore */ }
+      streamed = '';
+      lastGood = '';
+      const retryHistory: RouterChatTurn[] = [
+        {
+          role: 'user',
+          content: [
+            'SYSTEM: Brand-new topic. Do not continue any previous answer. Start with a capital letter.',
+            `User ask: ${String(host.content || '').trim()}`,
+          ].join('\n'),
+        },
+      ];
+      const retry = await arkRoute({
+        message: host.content,
+        kind: 'chat',
+        preferredModelId: host.preferredModelId || undefined,
+        preferredModelName: host.preferredModelName || undefined,
+        preferredSource: host.preferredSource as 'local' | 'cloud' | 'auto' | undefined,
+        stickyModelId: host.stickyModelId || undefined,
+        stickyModelName: host.stickyModelName || undefined,
+        stickyPinnedSource: host.stickyPinnedSource as 'local' | 'cloud' | undefined,
+        history: retryHistory,
+        onChunk: prefs.streamResponses && host.onDelta
+          ? (piece) => {
+            if (host.shouldAbort()) return;
+            streamed += String(piece || '');
+            const live = scrubPlanExitBleed(streamed);
+            if (live.length >= 2) {
+              lastGood = live;
+              host.onDelta?.(live);
+            }
+          }
+          : undefined,
+      });
+      const retryText = scrubPlanExitBleed(String(retry.reply || lastGood || '').trim());
+      if (retryText && !looksLikeTopicSwitchBleed(retryText, host.content)) {
+        text = retryText;
+      } else if (looksLikeTopicSwitchBleed(text, host.content)) {
+        const clean = topicSwitchCleanReply(host.content);
+        if (clean) {
+          text = clean;
+          try { host.onDelta?.(text); } catch { /* ignore */ }
+        }
+      }
+    } else if (topicSwitch && looksLikeTopicSwitchBleed(text, host.content)) {
+      const clean = topicSwitchCleanReply(host.content);
+      if (clean) {
+        text = clean;
+        try { host.onDelta?.(text); } catch { /* ignore */ }
+      }
+    }
 
     const identifyAsk = looksLikeIdentifyMediaAsk(host.content)
       || looksLikeExplicitResearchAsk(host.content)
@@ -668,33 +889,122 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
         text = fallbackAnswerFromLookup(host.content, webHit);
       }
     }
-    if (!text || isTalkFenceJunk(text) || looksLikeOrphanChatTail(text)) {
-      // Prefer a clear prose fallback over an empty CODE / "markdown ```" bubble.
-      // Never inject product-planning fallbacks into book identify / find asks.
-      if (identifyAsk || bookFindAsk) {
+    // Prefer a clear prose fallback over an empty CODE / "markdown ```" bubble.
+    // Never inject product-planning fallbacks into research / shopping / companion answers.
+    if (!text || isTalkFenceJunk(text) || looksLikeOrphanChatTail(text) || looksLikeRunawayTokenGarbage(text)) {
+      if (looksLikeRunawayTokenGarbage(text) && lastGood && !looksLikeRunawayTokenGarbage(lastGood)) {
+        text = scrubPlanExitBleed(lastGood);
+      } else if (identifyAsk || bookFindAsk) {
         text = webHit?.ok
           ? (identifyAsk
             ? identifyAnswerFromLookup(host.content, webHit)
             : bookFindAnswerFromLookup(host.content, webHit))
           : 'I could not finish that lookup cleanly — ask again and I will research it once more.';
-      } else {
+      } else if (shoppingAsk || looksLikeHowToGuideAsk(host.content)) {
+        text = webHit?.ok
+          ? fallbackAnswerFromLookup(host.content, webHit)
+          : (shoppingAsk ? shoppingLinksHonestGap(host.content) : howToGuideHonestGap(host.content));
+      } else if (contract.job === 'plan_talk') {
         text = orphanChatPlanFallback(host.content);
+      } else if (lastGood && !looksLikeRunawayTokenGarbage(lastGood) && !isTalkFenceJunk(lastGood)) {
+        text = scrubPlanExitBleed(lastGood);
+      } else {
+        text = honestGapForContract(contract, host.content);
       }
     }
     if (isCannedGreetingReply(text, host.content) && lastGood && !isCannedGreetingReply(lastGood, host.content)) {
       text = lastGood;
     }
     // Attach real hrefs for “live here” / empty markdown links from lookup sources.
+    // Shopping: keep Amazon/Digi-Key/etc. so streamed buy-links are not retracted on finalize.
+    const linkOpts = shoppingAsk || looksLikeHowToGuideAsk(host.content)
+      || (contract.allowWeb && contract.grounding === 'web' && /\b(?:buy|parts?|links?|amazon|build|how\s+to)\b/i.test(host.content))
+      ? { allowShopHosts: true, maxLinks: 8 }
+      : undefined;
+    const countMdLinks = (s: string) => (String(s || '').match(/\[[^\]]+\]\(https?:\/\/[^)]+\)/gi) || []).length;
     if (webHit?.ok && Array.isArray(webHit.sources) && webHit.sources.length) {
-      text = repairReplySourceLinks(text, webHit.sources);
+      text = repairReplySourceLinks(text, webHit.sources, linkOpts);
     } else {
-      text = repairReplySourceLinks(text);
+      text = repairReplySourceLinks(text, undefined, linkOpts);
+    }
+    // Prefer the live paint when finalize scrubbed away links the user already saw.
+    if (
+      shoppingAsk
+      && countMdLinks(lastGood) > countMdLinks(text)
+      && !looksLikeRunawayTokenGarbage(lastGood)
+      && lastGood.length >= 80
+    ) {
+      text = repairReplySourceLinks(scrubPlanExitBleed(lastGood), webHit?.sources, linkOpts);
     }
     // Strip leftover “use this in HTML/CSS…” lectures on color answers.
     text = text.replace(
       /\s*(?:You can use this code in HTML,?\s*CSS(?:,|\s+or)[^.!\n]*[.!]?\s*)+/gi,
       '',
     ).trim();
+
+    // Final plan-exit bleed scrub (after fallbacks / ensurePlanningExit / orphans).
+    text = scrubPlanExitBleed(text);
+    text = scrubMarkdownHashHeadings(text);
+
+    // Simple demos: reject plan outlines / broken fences — ask user to pick cloud or retry.
+    if (looksLikeBrokenToyDemoReply(text, host.content)) {
+      text = simpleToyDemoHonestGap(host.content);
+    } else {
+      text = ensureToyDemoFenced(text, host.content);
+    }
+
+    // Answer Contract verify — reject invented link dumps / clinic bleed; one soft scrub then honest gap.
+    {
+      let v = verifyAnswerReply(contract, host.content, text);
+      if (!v.ok && (v.reason === 'invented-link-dump' || v.reason === 'companion-link-dump')) {
+        const scrubbed = scrubInventedLinkDump(text);
+        if (scrubbed && scrubbed.length >= 40) {
+          v = verifyAnswerReply(contract, host.content, scrubbed);
+          if (v.ok) text = scrubbed;
+        }
+      }
+      if (!v.ok && v.reason === 'runaway-garbage' && lastGood && !looksLikeRunawayTokenGarbage(lastGood)) {
+        text = scrubPlanExitBleed(lastGood);
+        v = verifyAnswerReply(contract, host.content, text);
+      }
+      if (!v.ok && v.reason === 'plan-exit-bleed' && v.honestGap && v.honestGap.length >= 40
+        && !looksLikeRunawayTokenGarbage(v.honestGap)) {
+        text = v.honestGap;
+        v = verifyAnswerReply(contract, host.content, text);
+      }
+      if (!v.ok && v.reason === 'thin-howto-outline') {
+        if (lastGood && !looksLikeThinHowToOutline(lastGood, host.content) && !looksLikeRunawayTokenGarbage(lastGood)) {
+          text = repairReplySourceLinks(scrubPlanExitBleed(lastGood), webHit?.sources, linkOpts);
+          v = verifyAnswerReply(contract, host.content, text);
+        } else if (webHit?.ok) {
+          text = repairReplySourceLinks(fallbackAnswerFromLookup(host.content, webHit), webHit.sources, linkOpts);
+          v = verifyAnswerReply(contract, host.content, text);
+        }
+        if (!v.ok) {
+          text = howToGuideHonestGap(host.content);
+          v = { ok: true };
+        }
+      }
+      if (!v.ok) {
+        if (
+          shoppingAsk
+          && lastGood
+          && countMdLinks(lastGood) >= 1
+          && !looksLikeRunawayTokenGarbage(lastGood)
+        ) {
+          text = repairReplySourceLinks(scrubPlanExitBleed(lastGood), webHit?.sources, linkOpts);
+        } else if (shoppingAsk && (!text.trim() || looksLikeRunawayTokenGarbage(text))) {
+          text = shoppingLinksHonestGap(host.content);
+        } else {
+          text = v.honestGap || honestGapForContract(contract, host.content);
+        }
+      }
+    }
+
+    // Final display sanitize: coding pitches, topic-switch bleed, plan Overall, etc.
+    text = usableAssistantText(text, host.content) || text;
+    try { host.onDelta?.(text); } catch { /* ignore */ }
+
     return {
       status: 'handled',
       text,
@@ -733,11 +1043,17 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     if (talkOrAdvice || looksLikePlainChatAsk(host.content)) {
       text = scrubBuildAggression(text) || text;
       text = scrubHelpVoice(text) || text;
-      text = ensurePlanningExit(text, host.content) || text;
+      if (
+        /\b(?:build|create|app|website|mvp|product|tracker|stall|shelf)\b/i.test(host.content)
+        && !/\b(?:windows|browser|taskbar|settings|stretch|habit|dinner)\b/i.test(host.content)
+      ) {
+        text = ensurePlanningExit(text, host.content) || text;
+      }
+      text = scrubPlanExitBleed(text) || text;
     }
     // Always scrub talk replies — models still emit @@@FILE / CSS / fake CODE fences mid-plan.
     {
-      const scrubbed = scrubTalkFirstCodeBleed(text);
+      const scrubbed = looksLikeSimpleBuildToyChatAsk(host.content) ? text : scrubTalkFirstCodeBleed(text);
       if (scrubbed && !isTalkFenceJunk(scrubbed) && !looksLikeOrphanChatTail(scrubbed)) {
         text = scrubbed;
       } else if (
@@ -750,6 +1066,18 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
       ) {
         text = orphanChatPlanFallback(host.content)
           || 'Got it — happy to keep shaping that idea in plain language. Want a short feature outline next?';
+      }
+    }
+    // Disk / overview contract verify.
+    if (contract.useStudioDisk || contract.grounding === 'disk') {
+      let v = verifyAnswerReply(contract, host.content, text);
+      if (!v.ok && (v.reason === 'invented-link-dump' || v.reason === 'unrelated-books')) {
+        const scrubbed = scrubInventedLinkDump(text);
+        v = verifyAnswerReply(contract, host.content, scrubbed);
+        if (v.ok) text = scrubbed;
+      }
+      if (!v.ok) {
+        text = v.honestGap || honestGapForContract(contract, host.content);
       }
     }
   }

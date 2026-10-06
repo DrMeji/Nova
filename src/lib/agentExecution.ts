@@ -35,6 +35,14 @@ const ALLOWLIST_PATTERNS: RegExp[] = [
 /** Shared allowlist — renderer + Electron should import this. */
 export const EXEC_ALLOWLIST_PATTERNS = ALLOWLIST_PATTERNS;
 
+/** Verify / install commands that should not need an extra confirm when allowlisted. */
+export function isVerifyAgentCommand(command: string): boolean {
+  const cmd = String(command || '').trim();
+  return /^(npm|pnpm|yarn)(\.cmd)?\s+(test|ci|run\s+(test|build|lint|typecheck)|install)\b/i.test(cmd)
+    || /^npx(\.cmd)?\s+vite\b/i.test(cmd)
+    || /^git(\.exe)?\s+(status|diff|add|commit)\b/i.test(cmd);
+}
+
 const BLOCKED_PATTERNS: RegExp[] = [
   /\bformat\b/i,
   /\bdel\s+\/[sf]/i,
@@ -74,13 +82,17 @@ export function isAllowlistedAgentCommand(command: string): boolean {
 export function agentCommandNeedsConfirm(command: string): boolean {
   const mode = getAgentExecutionMode();
   if (isBlockedAgentCommand(command)) return true;
+  // OpenHands-style: verify cmds are low-risk when allowlisted.
+  if (isVerifyAgentCommand(command) && isAllowlistedAgentCommand(command)) return false;
   const powerful = /^(node|python(?:\d+(?:\.\d+)?)?|py|npx)(\.exe|\.cmd)?(\s|$)/i.test(command.trim())
     || /\bnode(?:\.exe)?\s+(-e|--eval)\b/i.test(command)
     || /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i.test(command)
     || /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i.test(command);
-  if (powerful) return true;
+  if (powerful && !isVerifyAgentCommand(command)) return true;
   if (mode === 'run_all') return !isAllowlistedAgentCommand(command);
   if (mode === 'auto_review') return !isAllowlistedAgentCommand(command);
+  // allowlist mode: verify auto; everything else still confirms
+  if (isAllowlistedAgentCommand(command) && isVerifyAgentCommand(command)) return false;
   return true;
 }
 

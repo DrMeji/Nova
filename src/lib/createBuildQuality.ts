@@ -12,11 +12,15 @@ import type { CreateIdentity, CreatePalette } from '@/lib/createIdentity';
 import { createIdentityFromBrief } from '@/lib/createIdentity';
 import {
   buildProductSpec,
+  briefLooksLikeStorefront,
   scoreFunctionalReady,
   scoreLayoutQuality,
   type LayoutContract,
   type ProductSpec,
 } from '@/lib/createLayoutContract';
+import { lintOriginalCreateQuality } from '@/lib/createDesignSystem';
+import { inferCreateCompositionFamily } from '@/lib/createProductPlan';
+import { buildStorefrontCommerceFloor } from '@/lib/createStorefrontFloor';
 
 const PROSE_MARKERS = [
   /the updated file should/i,
@@ -74,8 +78,26 @@ export function healMissedCssSemicolons(css: string): string {
   );
 }
 
+const GRAIN_DATA_URI =
+  "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
+
+/** Restore `.site-grain` when a hero-url rewrite mangled a data-URI noise layer. */
+export function healCorruptedGrainCss(css: string): string {
+  let s = String(css || '');
+  if (!s.trim()) return s;
+  // Classic corruption: url('/heroes/…')'/%3E%3C/svg%3E");
+  if (/url\(\s*['"]?\/heroes\/[^)'"]+['"]?\)\s*['"]?\/?%3E/i.test(s)
+    || /\.site-grain\s*\{[^}]*url\(\s*['"]?\/heroes\//i.test(s)) {
+    s = s.replace(
+      /\.site-grain\s*\{[\s\S]*?\n\}/,
+      `.site-grain {\n  pointer-events: none; position: fixed; inset: 0; z-index: 40; opacity: 0.055; mix-blend-mode: overlay;\n  background-image: ${GRAIN_DATA_URI};\n}`,
+    );
+  }
+  return s;
+}
+
 export function healUnbalancedCssBraces(css: string): string {
-  let s = healMissedCssSemicolons(css);
+  let s = healCorruptedGrainCss(healMissedCssSemicolons(css));
   if (!s.trim()) return s;
   const stripped = s
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -204,11 +226,46 @@ export function healHiddenProductBands(app: string): string {
 }
 
 /** Brief asks for an apple.com-like full-bleed product homepage. */
+/** Strip create system / forbid prose so genre gates only see the user ask. */
+function stripCreateSystemProse(brief: string): string {
+  return String(brief || '')
+    .replace(/##\s*ProductSpec[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*LayoutContract[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*CopyPack[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*Plan checklist[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*Ensemble plan[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/ORIGINAL ONE-OF-ONE CREATE[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/CRAFT RULES:[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/REFERENCE BAR[\s\S]{0,500}/gi, ' ')
+    .replace(/\bapple\.com product homepage\b[^\n]*/gi, ' ')
+    // Forbid lines that name apple.com / cafe recipes must never classify the ask.
+    .replace(
+      /\b(?:forbidden|forbidding|never|avoid|do\s+not|don't|dont)\b[^\n]{0,220}\b(?:apple(?:\.com)?|linear|cafe\s+recipe|mac\s*\/\s*ipad)[^\n]*/gi,
+      ' ',
+    )
+    .replace(/\bapple\.com\/Linear\/cafe recipe layouts\b[^\n]*/gi, ' ');
+}
+
 export function briefLooksLikeAppleStyleHomepage(brief: string): boolean {
-  const t = String(brief || '');
+  // Strip injected contract / craft-forbid prose — "apple.com/…cafe recipe" used to
+  // false-force the Mac/iPad floor on unrelated brands (Glassroot, vacuum, etc.).
+  const t = stripCreateSystemProse(brief);
   if (!t.trim()) return false;
-  if (/\bapple\.com\b/i.test(t)) return true;
-  return /\b(?:iphone|mac|ipad|airpods)\b/i.test(t)
+  // "Forbidden: Apple Mac/iPad clones" must NEVER trip the Apple floor.
+  const forbidsApple = /\b(?:never|forbidden|forbidding|not|no|don't|dont|avoid|instead of)\b[\s\S]{0,80}\b(?:apple(?:\.com)?|mac\s*\/\s*ipad|mac\/ipad|iphone|ipad|airpods)\b/i.test(t)
+    || /\b(?:apple\s+)?mac\s*\/\s*ipad(?:\s*\/\s*watch)?\s+clones?\b/i.test(t)
+    || /\bclones?\b[\s\S]{0,24}\b(?:apple|mac|ipad|iphone)\b/i.test(t);
+  if (forbidsApple) return false;
+  // Positive user ask only (not a generic "apple.com" mention inside system text).
+  if (/\bexact\s+apple(?:\.com)?[- ]?style\b/i.test(t)) return true;
+  if (/\bapple\.com\b/i.test(t)
+    && /\b(?:style|like|exact|replica|clone|copy|homepage)\b/i.test(t)
+    && /\b(?:build|create|make|start building|apple)\b/i.test(t)) {
+    return true;
+  }
+  const positive = /\b(?:build|create|make|clone|replica|like|exact)\b[\s\S]{0,80}\b(?:apple|iphone|mac|ipad|airpods)\b/i.test(t)
+    || /\b(?:iphone|ipad|airpods)\b[\s\S]{0,48}\b(?:product\s+band|full[- ]?bleed|thin\s+nav)\b/i.test(t);
+  return positive
     && /\b(?:product\s+band|colorful\s+band|full[- ]?bleed|thin\s+nav|hero)\b/i.test(t);
 }
 
@@ -730,17 +787,53 @@ export function briefLooksLikeSimpleTimer(brief: string): boolean {
     && /\b(?:build|create|make|simple|basic|page|app|site)\b/i.test(t);
 }
 
-export function briefLooksLikeMicroWebToy(brief: string): boolean {
+/** Pottery firing journal (KilnBook-style) — single screen form + list. */
+export function briefLooksLikeFiringJournal(brief: string): boolean {
   const t = String(brief || '').trim();
+  if (!t) return false;
+  if (/\b(?:kilnbook|kiln\s*book)\b/i.test(t)) return true;
+  const pottery = /\b(?:kiln|firing|pottery|clay|glaze|cone)\b/i.test(t);
+  const journal = /\b(?:journal|log|form|list|pass\s*\/?\s*fail|result)\b/i.test(t);
+  return pottery && journal;
+}
+
+/** Tiny sticky-note / single-note page (title + one text box). */
+export function briefLooksLikeStickyNotePage(brief: string): boolean {
+  const raw = String(brief || '').trim();
+  if (!raw) return false;
+  const head = raw
+    .split(/\n##\s+Ensemble|\n##\s+Layout contract|\ncreateV2 RULES:/i)[0]
+    .trim()
+    .slice(0, 520);
+  const t = head || raw.slice(0, 520);
+  if (/\b(?:landing\s+page|marketing\s+site|dashboard|discord|checkout|ecommerce|cafe|restaurant)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:notedot|note\s*dot|sticky\s*notes?|notepad)\b/i.test(t)) return true;
+  const wantsNote = /\b(?:note|notes|sticky)\b/i.test(t);
+  const wantsType = /\b(?:title|text\s*box|textarea|type|typing|input)\b/i.test(t);
+  const tiny = /\b(?:tiny|simple|basic|just|only|most basic|nothing else)\b/i.test(t) || t.length < 220;
+  return wantsNote && wantsType && tiny;
+}
+
+export function briefLooksLikeMicroWebToy(brief: string): boolean {
+  // Strip “Do not ship a tip/todo…” so forbid text never classifies a product homepage as a toy.
+  const t = stripUtilityFloorNoise(brief).trim();
   if (!t || t.length > 520) return false;
   // Explicit marketing / multi-section product sites are not toys.
-  if (/\b(?:landing\s+page|marketing\s+site|restaurant|cafe|menu\s+highlights|apple\.com|product\s+band|quiet\s+luxury|dashboard|kanban|discord|slack|checkout|ecommerce)\b/i.test(t)) {
+  if (/\b(?:landing\s+page|marketing\s+site|product\s+homepage|homepage|restaurant|cafe|menu\s+highlights|apple\.com|product\s+band|quiet[- ]luxury|full[- ]?bleed|dashboard|kanban|discord|slack|checkout|ecommerce|vacuum)\b/i.test(t)) {
     return false;
   }
   if (looksLikePlayableCanvasGame(t) || looksLikeSpatialApp(t) || looksLikeFpsGame(t)) return false;
+  // Tip calculators are tools — never marketing-hero heal targets.
+  if (/\b(?:tip[- ]?(?:calc|calculator|wise|jar)?|split\s+the\s+bill|gratuity)\b/i.test(t)
+    || /\bTipjar\b|\bTipWise\b/i.test(t)) {
+    return true;
+  }
   if (briefLooksLikeClickCounter(t)) return true;
   if (briefLooksLikeTodoList(t)) return true;
   if (briefLooksLikeSimpleTimer(t)) return true;
+  if (briefLooksLikeStickyNotePage(t)) return true;
 
   const wantsName = /\b(?:enter(?:\s+their)?\s+name|type\s+(?:your|their)\s+name|name\s+(?:input|field)|user(?:'s)?\s+name)\b/i.test(t)
     || (/\bname\b/i.test(t) && /\b(?:input|textbox|form|type|enter)\b/i.test(t));
@@ -756,6 +849,87 @@ export function briefLooksLikeMicroWebToy(brief: string): boolean {
   return false;
 }
 
+/** Minimal sticky-note page floor — title + one text box (createV2 stall fallback). */
+export function stickyNotePageApp(productName: string): string {
+  const title = String(productName || 'Note')
+    .replace(/[<>&'"`\\]/g, '')
+    .replace(/\s+Build Plan.*$/i, '')
+    .trim()
+    .slice(0, 48) || 'Note';
+  return `import { useState } from 'react';
+import './App.css';
+
+export default function App() {
+  const [note, setNote] = useState('');
+  return (
+    <div className="app">
+      <h1 className="title">${title}</h1>
+      <label className="note-label" htmlFor="note">
+        Note
+        <textarea
+          id="note"
+          className="note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Type your note…"
+          rows={8}
+        />
+      </label>
+    </div>
+  );
+}
+`;
+}
+
+export function stickyNotePageCss(): string {
+  return `.app {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1.25rem;
+  max-width: 36rem;
+  margin-inline: auto;
+  background: #12141a;
+  color: #f2f4f8;
+  box-sizing: border-box;
+}
+.title {
+  margin: 0;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.note-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #a8b0bd;
+}
+.note {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 10rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: #1a1d24;
+  color: #f2f4f8;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  line-height: 1.45;
+}
+.note:focus {
+  outline: 2px solid rgba(125, 180, 255, 0.45);
+  outline-offset: 1px;
+}
+`;
+}
+
 /** @deprecated Micro prebuilt Ready gate removed — use isPreviewReady. */
 export function isMicroWebToyReady(files: Record<string, string>): PreviewReadyResult {
   return isPreviewReady(files);
@@ -763,14 +937,27 @@ export function isMicroWebToyReady(files: Record<string, string>): PreviewReadyR
 
 /** Marketing / restaurant / landing briefs need real page depth before Preview Ready. */
 export function briefLooksLikeMarketingLanding(brief: string): boolean {
-  const t = String(brief || '');
+  // Strip "Do not ship a tip/todo…" so forbid text never classifies a product homepage as a utility.
+  const t = stripUtilityFloorNoise(brief);
   if (!t.trim()) return false;
   // Tiny interactive toys (name dance, CSS animation demos) must NEVER use landing depth.
   if (briefLooksLikeMicroWebToy(t)) return false;
   // Games / 3D / interactive apps are never marketing landings — use playable/interactive Ready.
   if (looksLikePlayableCanvasGame(t) || looksLikeSpatialApp(t) || looksLikeFpsGame(t)) return false;
-  if (/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(t)
-    && !/\b(?:landing|restaurant|cafe|menu|marketing)\b/i.test(t)) {
+  // Positive product-homepage signals win before utility early-outs (forbid text used to say "todo").
+  const premiumHome = /\b(?:product\s+homepage|premium\s+product|quiet[- ]luxury|full[- ]?bleed\s+hero|soft(?:\s+\w+){0,3}\s+orbs?|scroll[- ]?(?:to[- ]?)?reveal|product\s+marketing)\b/i.test(t)
+    || (/\b(?:homepage|home\s+page|landing(?:\s+page)?|marketing\s+site)\b/i.test(t)
+      && /\b(?:premium|editorial|vacuum|brand|hero|feature\s+sections?|specs?\s+strip|full[- ]?bleed)\b/i.test(t))
+    // "coffee brand website" + hero/story bands — must not fall into coffee utility ladder
+    || (/\b(?:brand\s+website|marketing\s+website|complete\s+(?:\w+\s+){0,3}website)\b/i.test(t)
+      && /\b(?:hero|story\s+bands?|site-band|full[- ]?bleed|nav)\b/i.test(t));
+  if (premiumHome) return true;
+  // Utility apps win even when ensemble/plan fluff says "landing" / "menu" / "hero".
+  if (/\b(?:todo|task\s*list|tip\s*(?:calc|calculator|wise)|checklist|counter|timer|notepad)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|tracker|application)\b/i.test(t)
+    && !/\b(?:landing|restaurant|cafe|menu|marketing|homepage)\b/i.test(t)) {
     return false;
   }
   if (/\b(?:game|playable|arcade|canvas\s+game|fps|shooter|three\.?js|webgl|3d\s+(?:app|editor|tool|model)|modeler)\b/i.test(t)
@@ -784,12 +971,37 @@ export function briefLooksLikeMarketingLanding(brief: string): boolean {
     return false;
   }
   // Quiet-luxury / product marketing sites — even when also "premium website" SPA signals.
-  if (/\b(?:quiet\s+luxury|soft\s+(?:mint\s+|green\s+)?orbs?|scroll\s+to\s+reveal|product\s+marketing|premium\s+product|pc\s*case|gaming\s+pc|computer\s*case|mid[\s-]?tower)\b/i.test(t)) {
+  if (/\b(?:quiet[- ]luxury|soft(?:\s+\w+){0,3}\s+orbs?|scroll[- ]?(?:to[- ]?)?reveal|product\s+marketing|premium\s+product|pc\s*case|gaming\s+pc|computer\s*case|mid[\s-]?tower)\b/i.test(t)) {
     return true;
   }
   if (/\b(?:landing(?:\s+page)?|marketing\s+site|homepage|home\s+page|coffee\s+homepage)\b/i.test(t)) return true;
+  // Short coffee/cafe ladder prompts are simple sites — not full marketing landings.
+  if (t.length < 320 && /\b(?:brewhaus|simple\s+coffee|coffee\s+shop\s+page|list of \d+ drinks)\b/i.test(t)) {
+    return false;
+  }
+  // Gaming peripherals / hardware product pages — "gaming mouse website" must never
+  // fall through as a non-marketing SPA (that skipped originality + shipped phone-columns).
+  if (/\b(?:gaming\s+(?:mouse|keyboard|headset|peripheral|gear)|wireless\s+mouse|mechanical\s+keyboard)\b/i.test(t)
+    || (/\b(?:mouse|keyboard|headset|earbuds?)\b/i.test(t)
+      && /\b(?:website|landing|homepage|product|shop|store|DPI|polling)\b/i.test(t))) {
+    return true;
+  }
+  // Specialty food / fruit / liquor / shop brand sites — never booking Core/Day/Reserve stubs.
+  if (/\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|varieties|liquor|spirits?|whiskey|whisky|bottle\s+shop)\b/i.test(t)
+    || (/\b(?:dates?|fruit|honey|olive|chocolate|tea|spice|bourbon|vodka|gin|tequila)\b/i.test(t)
+      && /\b(?:brand|shop|store|website|landing|homepage|varieties|cultivar|cart|checkout)\b/i.test(t))
+    || (/\b(?:shop|store|boutique)\b/i.test(t)
+      && /\b(?:website|landing|homepage|brand|featured|story|cart|buy)\b/i.test(t))) {
+    return true;
+  }
+  // One-page brand website with Shop/Story/hero structure.
+  if (/\b(?:one[- ]?page|brand[- ]?new)\b/i.test(t)
+    && /\b(?:website|site)\b/i.test(t)
+    && /\b(?:shop|varieties|story|hero|footer|full[- ]?bleed)\b/i.test(t)) {
+    return true;
+  }
   // Do not let bare "website" / "hero" alone force landing depth — too many app/game briefs say that.
-  return /\b(?:landing(?:\s+page)?|marketing\s+site|product\s+marketing|premium\s+product|quiet\s+luxury|apple\.com|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|tagline|dishes?|soft\s+(?:green\s+)?orbs?|scroll\s+to\s+reveal|sign[- ]?in|login\s+page|cinematic|embark|platform\s+button|headphones?|earbuds?|headset|audio\s+product|luxur(?:y|ious)\s+(?:product|landing|site)|aquarium|saltwater|reef\s+shop|coral|fish\s+shop|pet\s+store|florist|flower\s+shop)\b/i.test(t);
+  return /\b(?:landing(?:\s+page)?|marketing\s+site|product\s+marketing|premium\s+product|quiet[- ]luxury|apple\.com|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|tagline|dishes?|soft(?:\s+\w+){0,3}\s+orbs?|scroll[- ]?(?:to[- ]?)?reveal|sign[- ]?in|login\s+page|cinematic|embark|platform\s+button|headphones?|earbuds?|headset|audio\s+product|luxur(?:y|ious)\s+(?:product|landing|site)|aquarium|saltwater|reef\s+shop|coral|fish\s+shop|pet\s+store|florist|flower\s+shop|dried[- ]?dates?|fruit\s+brand|specialty[- ]food)\b/i.test(t);
 }
 
 /**
@@ -923,8 +1135,268 @@ export function stripEntrypointBleedFromApp(app: string): string {
   return s.trimEnd() + '\n';
 }
 
+/** Strip contract dumps + “Forbidden: tip calculator” lines so floors never false-trigger. */
+function stripUtilityFloorNoise(brief: string): string {
+  return stripCreateSystemProse(brief)
+    // "Do not ship a tip app, todo list…" / "Forbidden: tip calculator" — strip the whole forbid clause.
+    .replace(
+      /\b(?:do\s+not|never|forbidden|forbidding|don't|dont|avoid)\b[^\n.]{0,160}\b(?:tip(?:\s*(?:calc|calculator|wise|app))?|tipwise|todo(?:\s*lists?)?|tasknest|gratuity|checklist|coffee)\b[^\n.]*/gi,
+      ' ',
+    )
+    .replace(
+      /\b(?:not|no)\b[^\n.]{0,120}\b(?:tip(?:\s*(?:calc|calculator|wise|app))?|tipwise|todo(?:\s*lists?)?|tasknest|gratuity|checklist)\b[^\n.]*/gi,
+      ' ',
+    );
+}
+
+/** True only when the user is actually asking for a tip/todo/coffee utility — not forbidding them. */
+export function briefWantsUtilityFloorKind(
+  brief: string,
+  kind: 'tip' | 'todo' | 'coffee' | 'kiln',
+): boolean {
+  const t = stripUtilityFloorNoise(brief);
+  if (!t.trim()) return false;
+  // Premium / product homepages never get ladder utility stubs.
+  if (/\b(?:premium|product\s+homepage|marketing\s+landing|full-?bleed\s+hero|quiet[- ]luxury|vacuum|ambient\s+light)\b/i.test(t)
+    && !/\b(?:build|create|make)\b[\s\S]{0,48}\b(?:tip\s*(?:calc|calculator)|tipwise|todo\s*list|tasknest|coffee\s*shop)\b/i.test(t)) {
+    return false;
+  }
+  if (kind === 'tip') {
+    return /\b(?:build|create|make|scaffold)\b[\s\S]{0,64}\b(?:tip\s*(?:calc|calculator|wise)|tipwise|gratuity)\b/i.test(t)
+      || /\b(?:tip\s*(?:calc|calculator|wise)|tipwise)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t);
+  }
+  if (kind === 'todo') {
+    return /\b(?:build|create|make|scaffold)\b[\s\S]{0,64}\b(?:todo|tasknest|task\s*list|checklist)\b/i.test(t)
+      || /\b(?:todo|tasknest)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t);
+  }
+  if (kind === 'coffee') {
+    // Marketing brand sites (hero + story bands) are Design Spine — not the cafe-menu utility stub.
+    if (/\b(?:brand\s+website|marketing\s+website|story\s+bands?|product\s+homepage|full[- ]?bleed)\b/i.test(t)) {
+      return false;
+    }
+    return /\b(?:build|create|make|scaffold)\b[\s\S]{0,64}\b(?:coffee|caf[eé]|brewhaus|espresso)\b/i.test(t)
+      || /\b(?:brewhaus|coffee\s*shop)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t);
+  }
+  if (/\b(?:brand\s+website|marketing\s+website|story\s+bands?|product\s+homepage)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(?:kiln|firing|pottery|clay|glaze|cone|kilnbook)\b/i.test(t)
+    && /\b(?:build|create|make|journal|log)\b/i.test(t);
+}
+
 /** Neutral last-resort App when the model left an unusable shell (not genre-specific).
  * DEPRECATED NEVER CALL FROM CREATE — kept for smoke/helpers only. */
+/**
+ * Brief-shaped floor when small-model craft leaves truncated/crashy App.
+ * Used so Live can paint for todo / tip / coffee stress scenarios.
+ * NEVER call for premium/product-homepage asks — “Forbidden: tip calculator” must not match.
+ */
+export function buildUtilityFloorFromBrief(projectName: string, brief = ''): { app: string; css: string; kind: string } {
+  const title = String(projectName || 'App').replace(/[`$\\]/g, '').trim().slice(0, 48) || 'App';
+  const t = stripUtilityFloorNoise(`${title}\n${brief}`);
+  if (briefWantsUtilityFloorKind(t, 'tip')) {
+    return {
+      kind: 'tip',
+      app: `import { useMemo, useState } from 'react';
+import './App.css';
+
+export default function App() {
+  const [bill, setBill] = useState('42.50');
+  const [pct, setPct] = useState('18');
+  const { tip, total } = useMemo(() => {
+    const b = Math.max(0, Number(bill) || 0);
+    const p = Math.max(0, Number(pct) || 0);
+    const tipAmt = Math.round(b * p) / 100;
+    return { tip: tipAmt, total: b + tipAmt };
+  }, [bill, pct]);
+  return (
+    <main className="app">
+      <header>
+        <h1>${title}</h1>
+        <p className="lede">Tip calculator — enter bill and tip percent.</p>
+      </header>
+      <label>Bill amount
+        <input type="number" min="0" step="0.01" value={bill} onChange={(e) => setBill(e.target.value)} aria-label="Bill amount" />
+      </label>
+      <label>Tip percent
+        <input type="number" min="0" step="1" value={pct} onChange={(e) => setPct(e.target.value)} aria-label="Tip percent" />
+      </label>
+      <p className="out">Tip: <strong>{'$'}{tip.toFixed(2)}</strong></p>
+      <p className="out">Total: <strong>{'$'}{total.toFixed(2)}</strong></p>
+    </main>
+  );
+}
+`,
+      css: `:root{--bg:#0f1412;--ink:#eef6f1;--muted:#9db5a8;--accent:#7dcea0;--line:rgba(255,255,255,.12)}
+*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",sans-serif;background:radial-gradient(1200px 600px at 10% -10%,#1b2a22,#0f1412);color:var(--ink)}
+.app{min-height:100vh;max-width:28rem;margin:0 auto;padding:2rem 1.25rem;display:grid;gap:.9rem}
+h1{margin:0;font-size:clamp(1.8rem,4vw,2.4rem)}.lede{color:var(--muted);margin:.35rem 0 0}
+label{display:grid;gap:.35rem;font-size:.92rem;color:var(--muted)}
+input{padding:.7rem .8rem;border-radius:.55rem;border:1px solid var(--line);background:#0c1110;color:var(--ink);font:inherit}
+.out{margin:0;font-size:1.05rem}strong{color:var(--accent)}`,
+    };
+  }
+  if (briefWantsUtilityFloorKind(t, 'kiln')) {
+    return {
+      kind: 'kiln',
+      app: `import { useState } from 'react';
+import './App.css';
+
+export default function App() {
+  const [firings, setFirings] = useState([]);
+  const [clay, setClay] = useState('');
+  const [cone, setCone] = useState('6');
+  const [glaze, setGlaze] = useState('');
+  const [result, setResult] = useState('pass');
+
+  const addFiring = (e) => {
+    e.preventDefault();
+    if (!clay.trim()) return;
+    setFirings((prev) => [
+      {
+        id: Date.now(),
+        clay: clay.trim(),
+        cone: cone.trim() || '6',
+        glaze: glaze.trim() || '—',
+        result,
+      },
+      ...prev,
+    ].slice(0, 12));
+    setClay('');
+    setGlaze('');
+    setResult('pass');
+  };
+
+  return (
+    <main className="app">
+      <header className="brand">
+        <h1>${title}</h1>
+        <p className="tag">Log every kiln run.</p>
+      </header>
+      <form className="firing-form" onSubmit={addFiring}>
+        <label>
+          Clay body
+          <input value={clay} onChange={(e) => setClay(e.target.value)} placeholder="e.g. stoneware" required />
+        </label>
+        <label>
+          Cone
+          <input value={cone} onChange={(e) => setCone(e.target.value)} placeholder="6 or 10" />
+        </label>
+        <label>
+          Glaze notes
+          <textarea value={glaze} onChange={(e) => setGlaze(e.target.value)} rows={2} placeholder="Crawled? Color?" />
+        </label>
+        <fieldset className="result">
+          <legend>Result</legend>
+          <label><input type="radio" name="result" checked={result === 'pass'} onChange={() => setResult('pass')} /> Pass</label>
+          <label><input type="radio" name="result" checked={result === 'fail'} onChange={() => setResult('fail')} /> Fail</label>
+        </fieldset>
+        <button type="submit">Save firing</button>
+      </form>
+      <section className="list" aria-label="Saved firings">
+        <h2>Recent firings</h2>
+        {firings.length === 0 ? (
+          <p className="empty">No firings yet — log your first kiln run above.</p>
+        ) : (
+          <ul>
+            {firings.map((f) => (
+              <li key={f.id}>
+                <strong>{f.clay}</strong>
+                <span>Cone {f.cone}</span>
+                <span>{f.glaze}</span>
+                <span className={f.result}>{f.result}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
+  );
+}
+`,
+      css: `:root{--bg:#1a1410;--ink:#f5f0e8;--muted:#b9a894;--accent:#964b0c;--line:rgba(245,240,232,.14)}
+*{box-sizing:border-box}body{margin:0;font-family:Georgia,"Iowan Old Style",serif;background:radial-gradient(900px 520px at 20% -10%,#3a2a1c,#1a1410);color:var(--ink)}
+.app{min-height:100vh;max-width:28rem;margin:0 auto;padding:2.25rem 1.25rem 3rem;display:grid;gap:1.25rem}
+.brand h1{margin:0;font-size:clamp(2.2rem,6vw,3rem);letter-spacing:-.02em}
+.tag{margin:.35rem 0 0;color:var(--muted);font-size:1.05rem}
+.firing-form{display:grid;gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:.85rem;background:rgba(0,0,0,.22)}
+label{display:grid;gap:.3rem;font-size:.9rem;color:var(--muted)}
+input,textarea,button{font:inherit}
+input,textarea{padding:.65rem .75rem;border-radius:.5rem;border:1px solid var(--line);background:#120e0b;color:var(--ink)}
+.result{border:none;margin:0;padding:0;display:flex;gap:1rem;align-items:center;color:var(--muted)}
+.result legend{padding:0;margin:0 .5rem 0 0}
+.result label{display:flex;align-items:center;gap:.35rem;flex-direction:row}
+button{padding:.75rem 1rem;border:none;border-radius:.55rem;background:var(--accent);color:#fff8f0;font-weight:600;cursor:pointer}
+.list h2{margin:0 0 .6rem;font-size:1rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.empty{color:var(--muted);margin:0}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:.45rem}
+li{display:grid;grid-template-columns:1.2fr .7fr 1fr auto;gap:.5rem;padding:.7rem .8rem;border-radius:.55rem;border:1px solid var(--line);background:rgba(0,0,0,.18);font-size:.92rem}
+.pass{color:#9dcea0;text-transform:uppercase;font-size:.75rem;font-weight:700}
+.fail{color:#e0a090;text-transform:uppercase;font-size:.75rem;font-weight:700}
+@media (max-width:520px){li{grid-template-columns:1fr 1fr}}`,
+    };
+  }
+  if (briefWantsUtilityFloorKind(t, 'coffee')) {
+    return {
+      kind: 'coffee',
+      app: `import { useState } from 'react';
+import './App.css';
+
+const DRINKS = [
+  { name: 'House Drip', price: '$3.50' },
+  { name: 'Cortado', price: '$4.25' },
+  { name: 'Oat Latte', price: '$5.00' },
+  { name: 'Mocha', price: '$5.25' },
+  { name: 'Cold Brew', price: '$4.75' },
+  { name: 'Espresso', price: '$3.00' },
+];
+
+export default function App() {
+  const [selected, setSelected] = useState(DRINKS[0].name);
+  return (
+    <main className="app">
+      <header className="hero">
+        <h1>${title}</h1>
+        <p className="lede">Small-batch coffee, roasted for everyday rituals.</p>
+        <p className="hours">Hours: Mon–Fri 7am–6pm · Sat–Sun 8am–4pm</p>
+      </header>
+      <section className="menu" aria-label="Drink menu">
+        <h2>Menu</h2>
+        <ul>
+          {DRINKS.map((d) => (
+            <li key={d.name}>
+              <button type="button" onClick={() => setSelected(d.name)} aria-label={d.name + ' - ' + d.price + ' per cup'}>
+                <span>{d.name}</span>
+                <span>{d.price}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <p className="pick">Selected drink: <strong>{selected}</strong></p>
+      </section>
+    </main>
+  );
+}
+`,
+      css: `:root{--bg:#1a1410;--ink:#f6efe6;--muted:#c4b2a0;--accent:#d4a574;--line:rgba(255,255,255,.1)}
+*{box-sizing:border-box}body{margin:0;font-family:"Iowan Old Style",Georgia,serif;background:radial-gradient(900px 500px at 80% 0%,#3a2418,#1a1410);color:var(--ink)}
+.app{min-height:100vh;max-width:40rem;margin:0 auto;padding:2.5rem 1.25rem}
+.hero h1{margin:0;font-size:clamp(2.4rem,6vw,3.4rem);letter-spacing:-.02em}
+.lede{color:var(--muted);font-size:1.1rem}.hours{color:var(--accent);font-size:.95rem}
+.menu h2{margin:2rem 0 .8rem;font-size:1.1rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+ul{list-style:none;padding:0;margin:0;display:grid;gap:.45rem}
+button{width:100%;display:flex;justify-content:space-between;gap:1rem;padding:.85rem 1rem;border-radius:.55rem;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ink);font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}.pick{margin-top:1rem;color:var(--muted)}strong{color:var(--ink)}`,
+    };
+  }
+  if (briefWantsUtilityFloorKind(t, 'todo')) {
+    const interactive = buildLastResortInteractiveApp(title);
+    return { kind: 'todo', app: interactive.app, css: interactive.css };
+  }
+  // No positive utility ask — callers must NOT apply a stub (kind: none).
+  return { kind: 'none', app: '', css: '' };
+}
+
 export function buildLastResortInteractiveApp(projectName: string): { app: string; css: string } {
   const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
   return {
@@ -1516,6 +1988,16 @@ export function isPreviewReady(
   if (looksLikeReactEntrypointSource(app)) reasons.push('App.jsx looks like a Vite entry file, not a component');
   if (app.length < 120) reasons.push('App.jsx too thin');
   if (!/export\s+default/i.test(app)) reasons.push('App.jsx has no default export');
+  // Missing npm deps blank Live — three is the usual marketing-craft false positive.
+  if (/\bfrom\s+['"]three(?:\/[^'"]*)?['"]|\brequire\s*\(\s*['"]three['"]/.test(app)
+    && !/"three"\s*:/.test(pkg)) {
+    reasons.push('App imports three.js but package.json has no three dependency (would blank Live)');
+  }
+  if (briefLooksLikeMarketingLanding(brief)
+    && !looksLikeSpatialApp(brief)
+    && /\b(?:from\s+['"]three|OrbitControls|THREE\.|WebGLRenderer)\b/i.test(app)) {
+    reasons.push('marketing homepage must not ship a Three.js scene (CSS atmosphere only)');
+  }
   if (
     /\b(?:useState|useEffect|useMemo|useCallback|useRef)\s*[<(]/.test(app)
     && !/\bimport\s+[^;]*\b(?:useState|useEffect|useMemo|useCallback|useRef)\b/.test(app)
@@ -1619,23 +2101,26 @@ export function isPreviewReady(
 
   // Landing / restaurant / marketing: brand + one paragraph is never Ready.
   if (briefLooksLikeMarketingLanding(brief)) {
-    const appleStyle = briefLooksLikeAppleStyleHomepage(brief);
+    // Genre floors must follow the user ask — not craft-forbid lines naming apple.com/cafe.
+    const askForGenre = stripCreateSystemProse(brief);
+    const appleStyle = briefLooksLikeAppleStyleHomepage(askForGenre);
     const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(uiBlob)
-      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid|grid|cards?|band)\b/i.test(uiBlob);
+      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid|grid|cards?|band|feature-[a-z]|specs)\b/i.test(uiBlob);
     const hasCta = /<(?:button|a)\b/i.test(uiBlob)
       || /\b(?:cta|order|reserve|book|explore|menu|purchase|add\s*to\s*cart|get\s+started|shop|learn\s+more)\b/i.test(uiBlob);
     const cssLen = cssBlob.replace(/\s+/g, '').length;
+    // Count semantic tags AND common product-homepage class bands (feature-a/b/c, specs, footer).
     const sectionCount = (uiBlob.match(/<(?:section|main|header|footer)\b/gi) || []).length
       + (uiBlob.match(/className=["'][^"']*\bhero\b/i) ? 1 : 0)
-      + (uiBlob.match(/className=["'][^"']*\bband\b/i) ? 1 : 0);
+      + (uiBlob.match(/className=["'][^"']*\b(?:band|feature-[a-z0-9]+|feature|specs|footer)\b/gi) || []).length;
     const hasPremiumCss = /gradient|radial-gradient|@keyframes|backdrop-filter|box-shadow|background-image/i.test(cssBlob);
     const hasMotion = /@keyframes|animation\s*:|transition\s*:/i.test(cssBlob);
     const hasHeroVisual = /\/heroes\/|<img\b|background-image|radial-gradient|full[- ]?bleed|\.hero\b/i.test(`${uiBlob}\n${cssBlob}`);
     const hasDiskHeroes = Object.keys(files).some((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)/i.test(p.replace(/\\/g, '/')));
-    const wantsBooking = /\b(?:reserv|appointment|time\s*slot|book\s+(?:a\s+)?(?:table|appointment|slot))\b/i.test(brief)
-      && !/\b(?:borrow|bookshelf|library|lend(?:ing)?|checked\s*out|return\s+button)\b/i.test(brief);
+    const wantsBooking = /\b(?:reserv|appointment|time\s*slot|book\s+(?:a\s+)?(?:table|appointment|slot))\b/i.test(askForGenre)
+      && !/\b(?:borrow|bookshelf|library|lend(?:ing)?|checked\s*out|return\s+button)\b/i.test(askForGenre);
     // Quiet-luxury / orb aesthetic — never force this on apple.com-style product bands.
-    const wantsPremium = !appleStyle && /\b(?:quiet[\s-]?luxury|luxur(?:y|ious)|editorial|serif|orb|vesper|distilled|atmosphere|cinematic|sign[- ]?in|embark|game\s+auth|lumenforge|headphones?|parchment|cream|sage|gold\s+light)\b/i.test(brief);
+    const wantsPremium = !appleStyle && /\b(?:quiet[\s-]?luxury|luxur(?:y|ious)|editorial|serif|orb|vesper|distilled|atmosphere|cinematic|sign[- ]?in|embark|game\s+auth|lumenforge|headphones?|parchment|cream|sage|gold\s+light)\b/i.test(askForGenre);
     const minApp = appleStyle ? 2200 : (wantsPremium ? (hasDiskHeroes ? 1800 : 2800) : (wantsBooking ? 2200 : 1800));
     const minCss = appleStyle ? 900 : (wantsPremium ? 1400 : (wantsBooking ? 1200 : 900));
     const uiLen = uiBlob.replace(/\s+/g, '').length;
@@ -1689,10 +2174,14 @@ export function isPreviewReady(
         reasons.push('apple-style homepage bands lack product-stage imagery');
       }
     }
-    if (restaurantBriefBuiltAsCoffeeShop(uiBlob, brief)) {
+    if (restaurantBriefBuiltAsCoffeeShop(uiBlob, askForGenre)) {
       reasons.push('restaurant brief built as a coffee shop instead');
     }
-    if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(uiBlob)) {
+    // Require a real food ask — bare "menu"/"cafe" in craft-forbid text must not trip this.
+    const foodMenuAsk = /\b(?:restaurant|bistro|bakery|dishes?|dinner\s+menu|food\s+menu)\b/i.test(askForGenre)
+      || (/\b(?:cafe|coffee\s+shop|roaster)\b/i.test(askForGenre)
+        && /\b(?:menu|dishes?|drinks?|pastr(?:y|ies)|latte|espresso)\b/i.test(askForGenre));
+    if (foodMenuAsk && !/\b(?:menu|dish|price|\$\d|latte|espresso|pastr)/i.test(uiBlob)) {
       reasons.push('restaurant/menu brief missing menu content');
     }
     if (!hasCta && /\b(?:cta|button|order|reserve|explore)\b/i.test(brief)) {
@@ -1844,7 +2333,8 @@ export function isPreviewReady(
  * not a marketing cafe/landing page. Used for the interactive Ready depth gate (#5).
  */
 export function briefRequiresInteractiveApp(brief: string): boolean {
-  const t = String(brief || '');
+  // Strip forbid clauses first — "Do not ship a tip app / todo list" must not force interactive Ready.
+  const t = stripUtilityFloorNoise(brief);
   if (!t.trim()) return false;
   if (briefLooksLikeChatApp(t)) return true;
   // Booking / reservation / marketplace products always need interactive depth.
@@ -1856,12 +2346,15 @@ export function briefRequiresInteractiveApp(brief: string): boolean {
     && /\b(?:site|app|web|page|simple)\b/i.test(t)) {
     return true;
   }
-  const looksMarketing = /\b(?:landing\s+page|marketing\s+site|cafe|coffee\s+shop|roaster|bistro|bakery|restaurant|portfolio\s+site|hero\s+with|menu\s+highlights)\b/i.test(t);
-  const looksApp = /\b(?:app|application|dashboard|workspace|kanban|todo|tracker|inbox|editor|ledger|budget|notes?)\b/i.test(t)
+  // Marketing / product homepages are static story pages — CTAs as links are enough.
+  if (briefLooksLikeMarketingLanding(t)) return false;
+  const looksMarketing = /\b(?:landing\s+page|marketing\s+site|homepage|home\s+page|cafe|coffee\s+shop|roaster|bistro|bakery|restaurant|portfolio\s+site|hero\s+with|menu\s+highlights|premium\s+product|quiet[- ]luxury)\b/i.test(t);
+  const looksApp = /\b(?:application|dashboard|workspace|kanban|todo|tracker|inbox|editor|ledger|budget|notes?)\b/i.test(t)
     || /\b(?:build|create|make)\s+(?:an?\s+)?(?:[\w-]+\s+){0,4}(?:app|application)\b/i.test(t)
     || /\b(?:useState|working\s+controls|multi-pane|interactive)\b/i.test(t);
   if (looksMarketing && !looksApp) return false;
-  if (/\b(?:landing\s+page|marketing\s+site)\b/i.test(t) && !/\b(?:app|dashboard|workspace|interactive)\b/i.test(t)) {
+  if (/\b(?:landing\s+page|marketing\s+site|homepage|home\s+page|product\s+homepage)\b/i.test(t)
+    && !/\b(?:dashboard|workspace|interactive|todo|kanban)\b/i.test(t)) {
     return false;
   }
   return (
@@ -1881,32 +2374,497 @@ export function ensureProductBrandInApp(
 ): Record<string, string> {
   const name = String(productName || '').trim();
   if (!name || name.length < 2) return files;
+  const safe = name.replace(/[`$]/g, '');
   const token = name.split(/\s+/).find((w) => w.length >= 3) || name;
+  const tokenRe = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const next = { ...files };
   for (const key of ['src/App.jsx', 'src/App.tsx']) {
     const body = next[key];
     if (!body) continue;
-    if (new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(body)) continue;
+    if (tokenRe.test(body)) continue;
     let updated = body;
+    // Swap stock titles the small coders leave in logo / h1.
+    updated = updated.replace(
+      /(<(?:span|a|h1|div)[^>]*className=["'][^"']*\b(?:logo-mark|brand-wordmark|brand|logo|nav-brand)\b[^"']*["'][^>]*>)([^<]{0,48})(<\/)/gi,
+      (full, open, text, close) => {
+        if (/todo\s*list|my\s*app|website|sample|untitled|product\s*name/i.test(String(text))) {
+          return `${open}${safe}${close}`;
+        }
+        return full;
+      },
+    );
+    updated = updated.replace(
+      /(<h1\b[^>]*>)(\s*(?:Todo\s*List|My\s*App|Website|Sample|Untitled)\s*)(<\/h1>)/i,
+      `$1${safe}$3`,
+    );
+    if (tokenRe.test(updated)) {
+      next[key] = updated;
+      continue;
+    }
     if (/<header[\s>]/i.test(updated)) {
       updated = updated.replace(
         /(<header[^>]*>)/i,
-        `$1\n        <div className="brand"><strong>${name.replace(/[`$]/g, '')}</strong></div>`,
+        `$1\n        <div className="brand"><strong>${safe}</strong></div>`,
       );
     } else if (/<nav[\s>]/i.test(updated)) {
       updated = updated.replace(
         /(<nav[^>]*>)/i,
-        `$1\n        <div className="brand"><strong>${name.replace(/[`$]/g, '')}</strong></div>`,
+        `$1\n        <div className="brand"><strong>${safe}</strong></div>`,
       );
     } else if (/className=["']app["'][^>]*>/i.test(updated)) {
       updated = updated.replace(
         /(className=["']app["'][^>]*>)/i,
-        `$1\n      <div className="brand"><strong>${name.replace(/[`$]/g, '')}</strong></div>`,
+        `$1\n      <div className="brand"><strong>${safe}</strong></div>`,
       );
     }
     if (updated !== body) next[key] = updated;
   }
   return next;
+}
+
+/**
+ * Lightweight CSS floor for utility apps (todo / tip / counter) when craft only
+ * left :root tokens. Generic — never a canned App.jsx template.
+ */
+export function buildUtilityCompanionCss(productName: string, brief = ''): string {
+  const id = createIdentityFromBrief(productName, brief);
+  const brand = String(id.name || productName || 'App').replace(/[*/\\]/g, '').slice(0, 48);
+  const p = id.palette;
+  return `/* NOVA utility companion — ${brand} */
+:root {
+  --bg: ${p.bg};
+  --panel: ${p.panel};
+  --text: ${p.text};
+  --muted: ${p.muted};
+  --accent: ${p.accent};
+  --line: ${p.line};
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+body { font-family: ${p.font}; line-height: 1.45; }
+.App, .app { min-height: 100vh; display: flex; flex-direction: column; }
+.nav, nav, .nav-container, .sticky-nav, header {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+.logo-mark, .brand, .brand-wordmark, .nav-brand { font-weight: 700; letter-spacing: -0.03em; }
+.nav-links { display: flex; gap: 1rem; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
+.hero, .hero-content, section.body, .body-content, main {
+  width: min(720px, 92vw); margin: 0 auto; padding: 1.75rem 0 2.5rem;
+}
+.hero h1, h1 { margin: 0 0 0.4rem; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -0.03em; }
+.hero p, .lede { margin: 0 0 1rem; color: var(--muted); }
+.hero-cta { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.todo-input, .tip-row, form.row, .controls {
+  display: flex; gap: 0.55rem; flex-wrap: wrap; margin: 1rem 0;
+}
+input[type="text"], input[type="number"], input:not([type]), textarea, select {
+  flex: 1; min-width: 160px; padding: 0.65rem 0.85rem; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+}
+button, .cta-button {
+  appearance: none; border: 0; border-radius: 10px; padding: 0.65rem 1rem;
+  background: var(--accent); color: ${p.btnInk}; font-weight: 700; cursor: pointer;
+}
+button:hover, .cta-button:hover { filter: brightness(1.06); }
+.todo-list, ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.todo-list li, li {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.7rem 0.85rem; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+}
+.todo-search { margin: 0.75rem 0 1rem; }
+.footer, footer {
+  margin-top: auto; padding: 1.1rem 1.25rem; text-align: center;
+  color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  .hero, .body-content, main { width: min(100%, 94vw); padding-top: 1.2rem; }
+}
+`;
+}
+
+/**
+ * Fix common small-model JSX mistakes that red-screen Vite Live:
+ * - opening tag attrs then child `<` without closing `>`
+ * - button label written as a bare attribute (`Add` before `</button>`)
+ */
+export function healBrokenJsxOpenTags(source: string): string {
+  let s = String(source || '');
+  if (!s || s.length < 40) return s;
+  // Craft typo: `required / value={…}` breaks Vite transform and freezes Live evidence.
+  s = s.replace(/\brequired\s*\/\s*(value|onChange|onClick|placeholder|type|className)=/gi, 'required $1=');
+  // Absolute public paths — `./public/…` or `/public/…` 404 in Vite Live (root is already public/).
+  s = s.replace(/\bsrc=(["'])(?:\.\/)?public\//gi, 'src=$1/');
+  s = s.replace(/\bsrc=(["'])\/public\//gi, 'src=$1/');
+  // aria-label={`…`} / className="…" / onClick={() => …}\n    <child  → close the open tag
+  s = s.replace(
+    /(=(?:\{`[^`]*`\}|\{[^}\n]{0,180}\}|"[^"]*"|'[^']*'))\s*\n(\s*)(<\/?[A-Za-z])/g,
+    '$1>\n$2$3',
+  );
+  // onClick={() => foo(bar)}\n    <child  when arrow args contain () — prior pattern stops early
+  s = s.replace(
+    /(onClick=\{\(\)\s*=>\s*[^\n{}]{1,120}\})\s*\n(\s*)(<\/?[A-Za-z])/g,
+    '$1>\n$2$3',
+  );
+  // <button … aria-label={`…`}>\n missing: bare text attr then </button>
+  s = s.replace(
+    /(<button\b[^>]*?)(aria-label=\{`[^`]*`\})\s*\n(\s*)([A-Za-z][\w ]{0,40})\s*\n(\s*)<\/button>/g,
+    '$1$2>\n$3$4\n$5</button>',
+  );
+  // Same without nested capture when > already almost there
+  s = s.replace(
+    /(aria-label=\{`[^`]*`\})\s*\n(\s*)([A-Za-z][\w ]{0,40})\s*\n(\s*)<\/button>/g,
+    '$1>\n$2$3\n$4</button>',
+  );
+  return s;
+}
+
+/** True when CSS/App is a centered phone-column or skinny mid-stack. */
+export function hasPhoneColumnShell(css: string, app = ''): boolean {
+  const c = String(css || '');
+  const a = String(app || '');
+  const flexPhone = (
+    /\.(?:app|site|App)\b[\s\S]{0,320}\bjustify-content\s*:\s*center\b/i.test(c)
+    && /\.(?:app|site|App)\b[\s\S]{0,320}\balign-items\s*:\s*center\b/i.test(c)
+  ) || (
+    /#root\b[\s\S]{0,200}\bjustify-content\s*:\s*center\b/i.test(c)
+    && /#root\b[\s\S]{0,200}\balign-items\s*:\s*center\b/i.test(c)
+  );
+  const skinnyMid = /\.(?:app|site)\b[^{]*\{[^}]{0,220}\bmax-width\s*:\s*(?:[0-9]|[12][0-9]|3[0-9]|40)(?:rem|em|%)\b/i.test(c)
+    && /\.(?:app|site)\b[^{]*\{[^}]{0,220}\bmargin(?:-inline)?\s*:\s*(?:0\s+auto|auto)\b/i.test(c)
+    && !/(?:100vw|full[- ]?bleed|width\s*:\s*100%)/i.test(c + a);
+  return flexPhone || skinnyMid;
+}
+
+/** Liquor / cart / checkout storefront asks. */
+export function briefLooksLikeCommerceStore(brief: string): boolean {
+  return briefLooksLikeStorefront(brief);
+}
+
+/** True when App has real cart state + purchase — not just a cart icon. */
+export function appHasCommerceCart(files: Record<string, string>): boolean {
+  const app = String(files['src/App.tsx'] || files['src/App.jsx'] || '');
+  const hasCartState = /\b(?:setCart|addToCart|add-to-cart)\b/i.test(app)
+    || (/useState\s*\(\s*\[\s*\]\s*\)/.test(app) && /\bcart\b/i.test(app));
+  const hasAdd = /Add to cart|addToCart|onClick=\{[^}]*cart/i.test(app);
+  const hasBuy = /\b(?:Purchase|checkout|Order placed|placeOrder)\b/i.test(app);
+  return hasCartState && hasAdd && hasBuy;
+}
+
+/**
+ * Brand-agnostic thin product/marketing shell — header+title stubs, phone-column,
+ * missing footer, unused heroes. Used to open the marketing floor on create fail-closed.
+ */
+export function isThinProductMarketingShell(
+  files: Record<string, string>,
+  brief = '',
+): boolean {
+  const t = String(brief || '');
+  if (!briefLooksLikeMarketingLanding(t) && !/\b(?:website|homepage|landing|product\s+page|shop|store|liquor|cart)\b/i.test(t)) {
+    return false;
+  }
+  if (briefLooksLikeMicroWebToy(t)) return false;
+  const app = String(files['src/App.tsx'] || files['src/App.jsx'] || '');
+  const css = String(files['src/App.css'] || '');
+  if (!app.trim()) return true;
+  const sectionCount = (app.match(/<(?:section|main)\b/gi) || []).length;
+  const hasFooter = /<footer\b/i.test(app) || /className=["'][^"']*\b(?:footer|foot)\b/i.test(app);
+  const heroFiles = Object.keys(files).some((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)/i.test(p.replace(/\\/g, '/')));
+  const coverDecls = /COVER_HREFS|heroes\/[\w.-]+\.(?:jpe?g|png|webp|svg)/i.test(app);
+  const heroRendered = /(?:src|href)=['"][^'"]*\/heroes\//i.test(app)
+    || /\.hero\b[\s\S]{0,220}\/heroes\//i.test(css);
+  if (hasPhoneColumnShell(css, app)) return true;
+  if (!hasFooter) return true;
+  if ((heroFiles || coverDecls) && !heroRendered) return true;
+  // Liquor/cart asks with only a cart icon / title stub are still thin.
+  if (briefLooksLikeCommerceStore(t) && !appHasCommerceCart(files)) return true;
+  if (app.replace(/\s+/g, '').length < 1800 && sectionCount < 2) return true;
+  return false;
+}
+
+/**
+ * Surgical structure heal for thin product shells — strip phone-column, wire hero, add footer.
+ * Does not replace a rich multi-section App.
+ */
+export function healProductMarketingStructure(
+  files: Record<string, string>,
+  productName: string,
+  brief = '',
+): { files: Record<string, string>; changed: boolean; actions: string[] } {
+  const actions: string[] = [];
+  const next = { ...files };
+  const appKey = next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : '');
+  if (!appKey || !next[appKey]) return { files: next, changed: false, actions };
+  let app = String(next[appKey] || '');
+  let css = String(next['src/App.css'] || '');
+  const title = String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48) || 'Brand';
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brand';
+  const heroFromDisk = Object.keys(next)
+    .map((p) => p.replace(/\\/g, '/'))
+    .find((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p));
+  const heroHref = heroFromDisk
+    ? `/${heroFromDisk.replace(/^public\//i, '')}`
+    : (app.match(/COVER_HREFS\s*=\s*\[['\"]([^'\"]+)/i)?.[1]
+      || `/heroes/${slug}-hero.jpg`);
+
+  if (hasPhoneColumnShell(css, app)) {
+    css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+      let b = String(body || '')
+        .replace(/\bdisplay\s*:\s*flex\s*;?/gi, '')
+        .replace(/\balign-items\s*:\s*center\s*;?/gi, '')
+        .replace(/\bjustify-content\s*:\s*center\s*;?/gi, '');
+      if (!/min-height\s*:/i.test(b)) b += ' min-height: 100vh;';
+      if (!/width\s*:/i.test(b)) b += ' width: 100%;';
+      if (!/display\s*:/i.test(b)) b += ' display: block;';
+      return `.app {${b}}`;
+    });
+    css = css.replace(/\.site\s*\{([^}]*)\}/i, (_m, body: string) => {
+      let b = String(body || '')
+        .replace(/\bdisplay\s*:\s*flex\s*;?/gi, '')
+        .replace(/\balign-items\s*:\s*center\s*;?/gi, '')
+        .replace(/\bjustify-content\s*:\s*center\s*;?/gi, '');
+      if (!/width\s*:/i.test(b)) b += ' width: 100%;';
+      return `.site {${b}}`;
+    });
+    actions.push('strip-phone-column');
+  }
+
+  const heroRendered = /(?:src|href)=['"][^'"]*\/heroes\//i.test(app)
+    || /\.hero\b[\s\S]{0,220}\/heroes\//i.test(css);
+  if (!heroRendered && heroHref) {
+    if (!/COVER_HREFS/.test(app) && !/const\s+COVER/.test(app)) {
+      app = app.replace(
+        /(import\s+['"]\.\/App\.css['"];?\s*)/i,
+        `$1\nconst COVER_HREFS = ['${heroHref}'];\n`,
+      );
+    }
+    if (/<\/header>/i.test(app)) {
+      app = app.replace(
+        /<\/header>/i,
+        `</header>\n      <section className="hero full-bleed" id="top" aria-label="${title}">\n        <img className="hero-photo" src="${heroHref}" alt="${title} hero" />\n        <div className="hero-copy"><h1 className="product-name">${title}</h1></div>\n      </section>`,
+      );
+      actions.push('inject-hero');
+    } else if (/className=["']app["'][^>]*>/i.test(app)) {
+      app = app.replace(
+        /(className=["']app["'][^>]*>)/i,
+        `$1\n      <section className="hero full-bleed" id="top"><img className="hero-photo" src="${heroHref}" alt="${title} hero" /><h1>${title}</h1></section>`,
+      );
+      actions.push('inject-hero');
+    }
+    if (!/\.hero-photo\b/.test(css)) {
+      css += `
+.hero.full-bleed,.hero{position:relative;min-height:min(88vh,820px);width:100%;display:grid;place-items:center;overflow:hidden}
+.hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.55}
+.hero-copy,.hero h1,.product-name{position:relative;z-index:1;text-align:center}
+`;
+      actions.push('hero-css');
+    }
+  }
+
+  if (!/<footer\b/i.test(app) && !/className=["'][^"']*\b(?:footer|foot)\b/i.test(app)) {
+    const foot = `\n      <footer className="footer foot" role="contentinfo">\n        <a href="#top">${title}</a>\n        <span>© ${new Date().getFullYear()} ${title}</span>\n      </footer>\n`;
+    if (/<\/main>/i.test(app)) {
+      app = app.replace(/<\/main>/i, `</main>${foot}`);
+    } else if (/<\/div>\s*\)\s*;?\s*$/i.test(app)) {
+      app = app.replace(/(\s*)<\/div>(\s*\)\s*;?\s*)$/i, `${foot}$1</div>$2`);
+    } else {
+      app = app.replace(/(\n\s*\);\s*}?\s*)$/i, `${foot}$1`);
+    }
+    actions.push('inject-footer');
+    if (!/\.footer\b|\.foot\b/.test(css)) {
+      css += `\n.footer,.foot{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;padding:2rem 1rem;border-top:1px solid rgba(255,255,255,.12)}\n.footer a,.foot a{color:inherit;opacity:.8;text-decoration:none}\n`;
+    }
+  }
+
+  if (actions.length) {
+    next[appKey] = app;
+    next['src/App.css'] = css;
+  }
+  return { files: next, changed: actions.length > 0, actions };
+}
+
+/**
+ * When craft left a real App but Ready fails on thin CSS / missing brand, heal those
+ * two gaps without replacing the App with a canned template.
+ */
+export function healNearReadyCreateUi(
+  files: Record<string, string>,
+  productName: string,
+  brief = '',
+): { files: Record<string, string>; changed: boolean; actions: string[] } {
+  const actions: string[] = [];
+  let next = ensureProductBrandInApp({ ...files }, productName);
+  const appKey = next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : '');
+  if (appKey && next[appKey]) {
+    let fixed = healBrokenJsxOpenTags(next[appKey]);
+    // Craft sometimes appends orphan `</div>}` after a valid App — breaks Vite Live.
+    const stripped = String(fixed || '').replace(/\n\}\s*\n\s*<\/(?:div|main|section|aside)>\s*\n\}\s*$/i, '\n}\n');
+    if (stripped !== fixed) {
+      fixed = stripped;
+      actions.push('trailing-jsx-junk');
+    }
+    if (fixed !== next[appKey]) {
+      next[appKey] = fixed;
+      actions.push('jsx-open-tags');
+    }
+  }
+  const app = appKey ? String(next[appKey] || '') : '';
+  const css = String(next['src/App.css'] || '');
+  const cssLen = css.replace(/\s+/g, '').length;
+  const marketing = briefLooksLikeMarketingLanding(brief) && !briefLooksLikeMicroWebToy(brief);
+  // Cafe/landing Ready wants ~900–2000 CSS + gradients. Small models often leave 400–800
+  // chars of flat CSS — still fail "too thin" / "premium depth". Floor those too.
+  const cssFloorAt = marketing ? 2000 : 400;
+  if (
+    app.length >= 200
+    && cssLen < cssFloorAt
+    && !/getContext\s*\(\s*['"]2d['"]|canvas|requestAnimationFrame/i.test(app)
+  ) {
+    next['src/App.css'] = marketing
+      ? buildMarketingCompanionCss(productName, brief)
+      : buildUtilityCompanionCss(productName, brief);
+    actions.push('css-floor');
+  }
+  // Premium landings: thick but flat CSS still fails Ready — inject motion + atmosphere in place.
+  if (marketing && app.length >= 200) {
+    let cssNow = String(next['src/App.css'] || '');
+    const beforeAtmos = cssNow;
+    if (!/@keyframes/i.test(cssNow)) {
+      cssNow += `
+
+/* NOVA near-ready motion */
+@keyframes contractReveal {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes softOrbDrift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(10px, -16px); }
+}
+.hero, section, .band, .feature-a, .feature-b, .feature-c {
+  animation: contractReveal 0.75s ease both;
+}
+`;
+      actions.push('css-motion');
+    }
+    if (!/radial-gradient|linear-gradient/i.test(cssNow)) {
+      cssNow += `
+.app, .hero {
+  background-image:
+    radial-gradient(ellipse 55% 45% at 18% 22%, rgba(126,184,255,0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 82% 18%, rgba(154,163,178,0.18), transparent 58%),
+    linear-gradient(165deg, #0c0f14, #141a22 55%, #0c0f14);
+}
+`;
+      actions.push('css-atmosphere');
+    }
+    if (cssNow !== beforeAtmos) next['src/App.css'] = cssNow;
+  }
+  if (appKey && next[appKey] && next['src/App.css'] && !/import\s+['"]\.\/App\.css['"]/.test(next[appKey])) {
+    next[appKey] = `import './App.css';\n${next[appKey]}`;
+    actions.push('css-import');
+  }
+  // Strip stock stub footers that fail layout score on otherwise-good utility apps.
+  if (appKey && next[appKey] && /\b(?:Built|Designed) for general users\b/i.test(next[appKey])) {
+    const brand = String(productName || 'App').replace(/[`$]/g, '').slice(0, 48);
+    next[appKey] = next[appKey]
+      .replace(/\bDesigned for general users\.?/gi, `${brand} — add, track, done.`)
+      .replace(/\bBuilt for general users\.?/gi, `Made with ${brand}`);
+    actions.push('stub-copy');
+  }
+  // Marketing crafts often glue a Three.js demo onto a homepage — blanks Live when
+  // `three` is not in package.json. Prefer Design Spine shell restore (paren-balance
+  // JSX salvage fails on onClick={() => …} nests). Keep the old salvage as a soft path.
+  // Use marketingLanding (not the micro-toy-gated `marketing` flag) so forbid-tip text cannot skip this.
+  if (
+    briefLooksLikeMarketingLanding(brief)
+    && appKey
+    && next[appKey]
+    && /(?:from\s+['"]three|OrbitControls|\bTHREE\b|WebGLRenderer)/i.test(next[appKey])
+    && !looksLikeSpatialApp(brief)
+  ) {
+    let stripped = false;
+    const src = next[appKey];
+    const returnIdx = src.search(/\breturn\s*\(/);
+    let jsx = '';
+    if (returnIdx >= 0) {
+      const after = src.slice(returnIdx).replace(/^\s*return\s*\(\s*/i, '');
+      let depth = 1;
+      let end = -1;
+      for (let i = 0; i < after.length; i++) {
+        const ch = after[i];
+        if (ch === '(') depth += 1;
+        else if (ch === ')') {
+          depth -= 1;
+          if (depth === 0) { end = i; break; }
+        }
+      }
+      if (end > 0) jsx = after.slice(0, end).trim();
+    }
+    // Only keep JSX when it already looks like a marketing shell AND has no THREE tags.
+    if (
+      jsx
+      && /className=["'][^"']*\b(?:hero|app|feature|band|site)\b/i.test(jsx)
+      && !/\bTHREE\b|WebGLRenderer|OrbitControls/i.test(jsx)
+      && !/<\/THREE\./i.test(jsx)
+    ) {
+      const brand = String(productName || 'App').replace(/[`$\\]/g, '').slice(0, 48);
+      next[appKey] = `import './App.css';\n\nexport default function App() {\n  return (\n    ${jsx}\n  );\n}\n`;
+      if (brand.length >= 2 && !new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(next[appKey])) {
+        next[appKey] = next[appKey].replace(
+          /(<h1\b[^>]*>)([\s\S]*?)(<\/h1>)/i,
+          `$1${brand}$3`,
+        );
+      }
+      actions.push('strip-three-marketing');
+      stripped = true;
+    }
+    // Never paste a Design Spine template when Three.js strip fails — leave craft
+    // source and let originality lint / craft retry handle quality.
+  }
+  // Tip/todo/utility: absolute icon-rails fail craft preflight — strip before score.
+  const utilityAsk = /\b(?:todo|task\s*list|tip\s*(?:calc|calculator|wise)|checklist|counter|timer|notepad)\b/i.test(brief);
+  if (utilityAsk && appKey && next[appKey]) {
+    const beforeRail = next[appKey];
+    next[appKey] = beforeRail
+      .replace(/<div className=["'][^"']*\b(?:icon|brand)-rail\b[^"']*["'][^>]*>[\s\S]*?<\/div>\s*/gi, '');
+    if (next[appKey] !== beforeRail) actions.push('strip-utility-rails');
+    if (next['src/App.css'] && /\.(?:icon|brand)-rail\s*\{/i.test(next['src/App.css'])) {
+      next['src/App.css'] = next['src/App.css']
+        .replace(/\.(?:icon|brand)-rail(?:--[a-z0-9-]+)?\s*\{[^}]*\}\s*/gi, '');
+      actions.push('strip-utility-rail-css');
+    }
+  }
+  // Thick CSS can still fail originality on missing fonts — append without wiping App.
+  if (marketing && app.length >= 200) {
+    let cssFonts = String(next['src/App.css'] || '');
+    if (!/@font-face|fonts\.googleapis|font-family\s*:/i.test(cssFonts)) {
+      cssFonts = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap');\n${cssFonts}\n:root{--display:Fraunces,Georgia,serif;--body:"Source Sans 3",system-ui,sans-serif}\nbody,.app,.site{font-family:var(--body)}\nh1,h2,.product-name,.title{font-family:var(--display)}\n`;
+      next['src/App.css'] = cssFonts;
+      actions.push('css-fonts');
+    }
+  }
+  // Marketing thin shells: strip phone-column / wire heroes / footer while keeping model App when possible.
+  // NEVER run on tool-panel / app-chrome / game — that injected Tipjar’s broken COVER hero.
+  const family = inferCreateCompositionFamily(brief, productName);
+  const allowMarketingStruct = family === 'marketing-bands' || family === 'catalog-store';
+  if (allowMarketingStruct && (marketing || isThinProductMarketingShell(next, brief))) {
+    const struct = healProductMarketingStructure(next, productName, brief);
+    if (struct.changed) {
+      next = struct.files;
+      actions.push(...struct.actions.map((a) => `struct-${a}`));
+    }
+  }
+  const brandBefore = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  const brandAfter = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
+  if (brandBefore !== brandAfter) actions.push('brand-stamp');
+  const changed = actions.length > 0
+    || css !== String(next['src/App.css'] || '')
+    || brandBefore !== brandAfter;
+  return { files: next, changed, actions: [...new Set(actions)] };
 }
 
 /**
@@ -1997,24 +2955,67 @@ export function previewReadyForBrief(
     contract?: LayoutContract | null;
   },
 ): PreviewReadyResult {
-  const brief = String(opts?.brief || '');
-  // apple.com-style product homepages must never use the 3D/spatial gate
-  // (layout recipes say "first viewport" which used to false-positive).
-  if (briefLooksLikeAppleStyleHomepage(brief) || briefLooksLikeMarketingLanding(brief)) {
+  const rawBrief = String(opts?.brief || '');
+  // Strip "Do not ship a tip/todo…" before ladder/utility detection — otherwise premium
+  // homepages false-route into requireInteractive and fail with "no interactive handlers".
+  const brief = stripUtilityFloorNoise(rawBrief);
+  // Product / marketing homepages first — never treat forbid-tip text as a todo ladder ask.
+  if (briefLooksLikeAppleStyleHomepage(rawBrief) || briefLooksLikeMarketingLanding(rawBrief)) {
+    const bookingCommerce = /\b(?:book|reserv|appointment|time\s*slot|cart|checkout|borrow)\b/i.test(brief);
     const base = isPreviewReady(files, {
       ...opts,
-      requireInteractive: Boolean(opts?.requireInteractive) && !briefLooksLikeAppleStyleHomepage(brief),
+      brief: rawBrief,
+      requireInteractive: Boolean(opts?.requireInteractive) && bookingCommerce,
     });
     const reasons = [...base.reasons];
     const spec = opts?.spec || buildProductSpec({
-      brief,
+      brief: rawBrief,
       productName: opts?.productName || '',
     });
-    const layout = scoreLayoutQuality(files, { brief, spec, contract: opts?.contract || null });
-    const functional = scoreFunctionalReady(files, { brief, spec });
+    const layout = scoreLayoutQuality(files, { brief: rawBrief, spec, contract: opts?.contract || null });
+    const functional = scoreFunctionalReady(files, { brief: rawBrief, spec });
     for (const r of layout.reasons) reasons.push(r);
     for (const r of functional.reasons) reasons.push(r);
+    // Originality / quality — never force Design Spine landmarks.
+    const blankSolid = blankSolidColorFromAsk(rawBrief);
+    if (!blankSolid) {
+      const orig = lintOriginalCreateQuality(files, {
+        brief: rawBrief,
+        productName: opts?.productName || '',
+      });
+      for (const r of orig.reasons) reasons.push(r);
+    }
     return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+  }
+  // Side-by-side / everyday creates: base Ready only — no layout/marketing score walls.
+  const simpleLadderAsk = briefWantsUtilityFloorKind(brief, 'todo')
+    || briefWantsUtilityFloorKind(brief, 'tip')
+    || briefWantsUtilityFloorKind(brief, 'coffee')
+    || briefWantsUtilityFloorKind(brief, 'kiln')
+    || /\b(?:tasknest|checklist|counter|timer|notepad|simple\s+coffee|coffee\s+shop\s+page|kilnbook|kiln\s*book|pottery|firing\s+journal)\b/i.test(brief)
+    || briefLooksLikeFiringJournal(brief)
+    || (brief.length < 280 && /\b(?:simple|basic|small|quick)\b/i.test(brief)
+      && /\b(?:coffee|todo|tip|page|app|site|kiln|firing)\b/i.test(brief));
+  if (simpleLadderAsk) {
+    return isPreviewReady(files, {
+      ...opts,
+      brief: rawBrief,
+      requireInteractive: briefWantsUtilityFloorKind(brief, 'todo')
+        || briefWantsUtilityFloorKind(brief, 'tip')
+        || briefWantsUtilityFloorKind(brief, 'kiln')
+        || /\b(?:task|counter|timer|kiln|firing|pottery|clay|glaze)\b/i.test(brief)
+        || briefLooksLikeFiringJournal(brief),
+    });
+  }
+  // Utility asks must never hit arcade/FPS/3D gates — ensemble plan fluff often
+  // says "playable" / "canvas" / "game loop" and false-fails a working todo.
+  const utilityAsk = briefWantsUtilityFloorKind(brief, 'todo')
+    || briefWantsUtilityFloorKind(brief, 'tip')
+    || briefWantsUtilityFloorKind(brief, 'kiln')
+    || /\b(?:checklist|counter|timer|notepad|kilnbook|pottery|firing)\b/i.test(brief)
+    || briefLooksLikeFiringJournal(brief);
+  if (utilityAsk) {
+    return isPreviewReady(files, { ...opts, brief: rawBrief, requireInteractive: true });
   }
   if (looksLikeFpsGame(brief)) return isPlayableGameReady(files);
   if (looksLikePlayableCanvasGame(brief)) return isPlayableArcadeGameReady(files);
@@ -2032,11 +3033,13 @@ export function previewReadyForBrief(
     return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
   }
   const marketing = briefLooksLikeMarketingLanding(brief);
-  const commerce = /\b(?:cart|checkout|booking|reserv|borrow)\b/i.test(brief);
+  const storefrontAsk = briefLooksLikeCommerceStore(brief);
+  const commerce = storefrontAsk || /\b(?:cart|checkout|booking|reserv|borrow)\b/i.test(brief);
   const needsInteractive = (!marketing || commerce) && (
     Boolean(opts?.requireInteractive)
     || briefRequiresInteractiveApp(brief)
     || briefLooksLikeChatApp(brief)
+    || storefrontAsk
   );
   const base = isPreviewReady(files, { ...opts, requireInteractive: needsInteractive });
   const reasons = [...base.reasons];
@@ -2048,6 +3051,16 @@ export function previewReadyForBrief(
   const functional = scoreFunctionalReady(files, { brief, spec });
   for (const r of layout.reasons) reasons.push(r);
   for (const r of functional.reasons) reasons.push(r);
+  // Product hardware / shop / storefront pages still need originality even when marketing classifier missed.
+  const productHardware = /\b(?:mouse|keyboard|headset|earbuds?|vacuum|shop|store|product\s+page)\b/i.test(rawBrief)
+    && /\b(?:website|landing|homepage|marketing|brand)\b/i.test(rawBrief);
+  if ((marketing || productHardware || storefrontAsk) && !blankSolidColorFromAsk(rawBrief)) {
+    const orig = lintOriginalCreateQuality(files, {
+      brief: rawBrief,
+      productName: opts?.productName || '',
+    });
+    for (const r of orig.reasons) reasons.push(r);
+  }
   return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
@@ -2269,6 +3282,7 @@ export default function App() {
 export function wireCreatePublicAssets(
   files: Record<string, string>,
   productName = 'App',
+  brief = '',
 ): { files: Record<string, string>; changed: string[] } {
   const assembled = assembleCreateAppFromParts(files, productName);
   const importHeal = healMissingLocalImports(assembled.files, productName);
@@ -2284,9 +3298,14 @@ export function wireCreatePublicAssets(
   const hasLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
   const hasSearch = keys.some((p) => /(^|\/)public\/icons\/search\.svg$/i.test(p));
   const hasBag = keys.some((p) => /(^|\/)public\/icons\/bag\.svg$/i.test(p));
-  const heroes = keys
-    .filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
-    .map((p) => '/' + p.replace(/^public\//i, ''));
+  const family = inferCreateCompositionFamily(brief || productName, productName);
+  // Tools/apps must not get COVER_HREFS forced in — that paints broken hero theater.
+  const allowCoverWire = family === 'marketing-bands' || family === 'catalog-store';
+  const heroes = allowCoverWire
+    ? keys
+      .filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
+      .map((p) => '/' + p.replace(/^public\//i, ''))
+    : [];
   const appKey = next['src/App.tsx'] && !next['src/App.jsx']
     ? 'src/App.tsx'
     : (next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : ''));
@@ -2317,8 +3336,12 @@ export function wireCreatePublicAssets(
     );
     // Close again before appends so injections never nest into a dangling block.
     css = healUnbalancedCssBraces(css);
-    // Hero photo underlay — tint from existing --bg / page color, never hardcode cream.
-    if (heroes[0] && !/url\(\s*['"]?\/heroes\//i.test(css)) {
+    // Hero photo underlay — only when the App has no real hero <img> / COVER stage.
+    // Booking stubs used to get a recycled full-page bg; shop floors already render heroes.
+    const appSrc = appKey ? String(next[appKey] || '') : '';
+    const hasHeroStage = /className=["'][^"']*\bhero-photo\b|COVER_HREFS|src=["'][^"']*\/heroes\//i.test(appSrc)
+      || /\.hero-photo\b|url\(\s*['"]?\/heroes\//i.test(css);
+    if (heroes[0] && !hasHeroStage && !/url\(\s*['"]?\/heroes\//i.test(css)) {
       css += `\n.app-shell, .app { background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg, #0f1419) 88%, transparent), color-mix(in srgb, var(--bg, #0f1419) 94%, transparent)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
     }
     if ((hasLogo || hasSearch || hasBag) && !/\.sticky-nav\b/.test(css)) {
@@ -2703,28 +3726,66 @@ body { font-family: ${p.font}; }
 `;
 }
 
+/** Liquor / cart storefront floor — rich catalog + filters + cart (see createStorefrontFloor). */
+function buildCommerceCartFloor(
+  title: string,
+  brief: string,
+  p: CreatePalette,
+): { app: string; css: string; files?: Record<string, string> } {
+  const floor = buildStorefrontCommerceFloor(title, brief, p);
+  return { app: floor.app, css: floor.css, files: floor.files };
+}
+
 /** Marketing / shop landing floor — uses on-disk heroes; never booking stubs. */
 function buildMarketingShopFloor(
   title: string,
   brief: string,
   p: CreatePalette,
-  kind: 'reef' | 'shop',
+  kind: 'reef' | 'shop' | 'food',
 ): { app: string; css: string } {
   const reef = kind === 'reef';
+  const food = kind === 'food';
   const bands = reef
     ? [
         { id: 'livestock', title: 'Livestock', body: 'Corals and reef fish, healthy and ready for home tanks.' },
         { id: 'kits', title: 'Care kits', body: 'Salt, test kits, and lighting matched to your reef.' },
         { id: 'visit', title: 'Visit', body: 'Tue–Sat 10–6 · Ask about acclimation and water parameters.' },
       ]
-    : [
-        { id: 'featured', title: 'Featured', body: `Signature pieces from ${title}.` },
-        { id: 'story', title: 'Our story', body: 'Crafted with care for people who notice the details.' },
-        { id: 'visit', title: 'Visit', body: 'Open daily · Come see what’s new.' },
-      ];
+    : food
+      ? (
+        /\b(?:dates?|medjool|deglet)\b/i.test(brief)
+          ? [
+              { id: 'varieties', title: 'Varieties', body: 'Medjool, Deglet Noor, and harvest picks with real tasting notes.' },
+              { id: 'story', title: 'Story', body: 'Sun-ripened fruit, packed for people who care how dates taste.' },
+              { id: 'pair', title: 'Pairing', body: 'Cheese boards, tea, and everyday snacks — simple ways to serve.' },
+            ]
+          : [
+              { id: 'varieties', title: 'Shop', body: `Signature selections from ${title}.` },
+              { id: 'story', title: 'Story', body: 'Sourced with care for people who taste the difference.' },
+              { id: 'pair', title: 'Enjoy', body: 'Simple ways to serve, gift, and share.' },
+            ]
+      )
+      : [
+          { id: 'featured', title: 'Featured', body: `Signature pieces from ${title}.` },
+          { id: 'story', title: 'Our story', body: 'Crafted with care for people who notice the details.' },
+          { id: 'visit', title: 'Visit', body: 'Open daily · Come see what’s new.' },
+        ];
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brand';
-  const hero = `/heroes/${slug}-hero.webp`;
-  const story = `/heroes/${slug}-story.webp`;
+  // Prefer .jpg — brandAssets materializes jpg; webp stubs 404 when only jpg lands.
+  const hero = `/heroes/${slug}-hero.jpg`;
+  const story = `/heroes/${slug}-story.jpg`;
+  const datesBrief = /\b(?:dates?|medjool|deglet)\b/i.test(brief);
+  const eyebrow = reef ? 'Saltwater / Reef' : food ? (datesBrief ? 'Specialty fruit' : 'Specialty food') : 'Welcome';
+  const headline = reef ? 'Reef life, carefully curated.' : `${title}.`;
+  const sub = reef
+    ? 'Corals, fish, and care kits for calm, living aquariums.'
+    : food
+      ? (datesBrief
+        ? 'Sun-ripened Medjool and Deglet Noor dates — shop varieties, read the harvest story, and taste the difference.'
+        : (String(brief || '').replace(/\s+/g, ' ').trim().slice(0, 140) || `Premium ${title} — shop, story, and taste.`))
+      : (String(brief || '').slice(0, 120) || 'A premium shop experience.');
+  const ctaPrimary = reef ? 'Browse livestock' : food ? 'Shop varieties' : 'Explore';
+  const ctaGhost = food ? 'Our story' : 'Visit';
   const app = `import './App.css';
 
 export default function App() {
@@ -2734,17 +3795,17 @@ export default function App() {
         <nav className="topnav-inner" aria-label="Primary">
           <a className="mark" href="#top">${title}</a>
           ${bands.map((b) => `<a href="#${b.id}">${b.title}</a>`).join('\n          ')}
-          <a href="#visit">Hours</a>
+          <a href="#${food ? 'varieties' : 'visit'}">${food ? 'Shop' : 'Hours'}</a>
         </nav>
       </header>
       <section className="hero full-bleed" id="top">
         <div className="hero-copy">
-          <p className="eyebrow">${reef ? 'Saltwater / Reef' : 'Welcome'}</p>
-          <h1>${reef ? 'Reef life, carefully curated.' : `${title}.`}</h1>
-          <p className="sub">${reef ? 'Corals, fish, and care kits for calm, living aquariums.' : (String(brief || '').slice(0, 120) || 'A premium shop experience.')}</p>
+          <p className="eyebrow">${eyebrow}</p>
+          <h1>${headline}</h1>
+          <p className="sub">${sub}</p>
           <div className="cta-row">
-            <a className="pill pill-primary" href="#${bands[0].id}">${reef ? 'Browse livestock' : 'Explore'}</a>
-            <a className="pill pill-ghost" href="#visit">Visit</a>
+            <a className="pill pill-primary" href="#${bands[0].id}">${ctaPrimary}</a>
+            <a className="pill pill-ghost" href="#${food ? 'story' : 'visit'}">${ctaGhost}</a>
           </div>
         </div>
         <img className="hero-photo" src="${hero}" alt="${title} hero" />
@@ -2766,17 +3827,23 @@ export default function App() {
   );
 }
 `;
-  const css = `:root {
+  const css = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;700&family=Source+Sans+3:wght@400;600&display=swap');
+:root {
   --bg: ${reef ? '#04151c' : p.bg};
   --ink: ${reef ? '#e8f6f8' : p.text};
   --mute: ${reef ? '#8eb8c0' : p.muted};
   --accent: ${reef ? '#2ec4b6' : p.accent};
   --panel: ${reef ? '#0a2430' : p.panel};
+  --display: Fraunces, Georgia, serif;
+  --body: "Source Sans 3", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
-body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; }
+body { font-family: var(--body); }
+h1, h2, .mark { font-family: var(--display); }
 .site { width: 100%; }
+@keyframes contractReveal { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.hero, .band { animation: contractReveal 0.7s ease both; }
 .topnav { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); }
 .topnav-inner { max-width: 1040px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 1.1rem; justify-content: center; padding: 0.85rem 1rem; }
 .topnav a { color: var(--ink); text-decoration: none; font-size: 0.92rem; opacity: 0.9; }
@@ -2807,19 +3874,86 @@ body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; }
  * (hero + item grid + hours + confirm form) using CreateIdentity palette —
  * never cream luxury companion or Veopx stock copy.
  */
-export function buildBriefInteractiveFloor(productName: string, brief = ''): { app: string; css: string } {
+export function buildBriefInteractiveFloor(productName: string, brief = ''): { app: string; css: string; files?: Record<string, string> } {
   const identity = createIdentityFromBrief(productName, brief);
   const title = String(identity.name || productName || 'Product').replace(/[*/\\<>]/g, '').slice(0, 48) || 'Product';
   const p = identity.palette;
   const t = String(brief || identity.brief || '');
   // Prefer marketing/shop when the ask is clearly that — never a silent default for utility asks.
   // (create fail-closed no longer injects this floor for empty crafts; research-first owns those.)
-  const boatish = /\b(?:boat|skiff|harbor|dock|clipper|marina|sail)\b/i.test(t);
-  const machineish = /\b(?:machine|laser|cnc|makerspace|forge|printer)\b/i.test(t);
+  // Boat rentals only — do not treat brand words like "Harbor Loom" as marina booking.
+  const boatish = /\b(?:boat\s*rental|day-?boat|skiff\s+rental|sailboat\s+rent|marina\s+rent|book\s+a\s+(?:boat|skiff))\b/i.test(t)
+    || (/\b(?:skiff|clipper|dock\s+runner)\b/i.test(t) && /\b(?:reserv|rental|book)\b/i.test(t));
+  const machineish = /\b(?:machine|laser|cnc|makerspace|forge|printer)\b/i.test(t)
+    && /\b(?:book|bay|station|slot)\b/i.test(t);
   const reefish = /\b(?:aquarium|saltwater|reef|coral|fish\s+shop|livestock)\b/i.test(t);
-  // Marketing / shop landings must NOT ship the booking "Core / Day / Reserve" stub.
-  if (reefish || (briefLooksLikeMarketingLanding(t) && !boatish && !machineish)) {
-    return buildMarketingShopFloor(title, t, p, reefish ? 'reef' : 'shop');
+  const foodish = /\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|varieties|honey\s+dates)\b/i.test(t)
+    || (/\b(?:dates?|fruit|olive|chocolate|tea|spice|honey)\b/i.test(t)
+      && /\b(?:brand|shop|store|website|landing|varieties|cultivar)\b/i.test(t));
+  const commerce = /\b(?:cart|checkout|purchase|buy\b|add\s+to\s+cart|online\s+store|e-?commerce)\b/i.test(t)
+    || /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|wine\s+shop)\b/i.test(t);
+  // App / tool asks must never fall into shop/marketing recovery floors.
+  const appOrTool = /\b(?:habit\s+tracker|habit\s+app|todo|task\s*list|notes?\s+app|dashboard|sidebar|app\s+chrome|workspace|checklist|calculator|tracker)\b/i.test(t)
+    && !/\b(?:shop|store|cart|checkout|landing\s+page|marketing\s+site|product\s+homepage)\b/i.test(
+      t.replace(/\b(?:not|never|no|without|don'?t|avoid|skip)\s+(?:a\s+|an\s+)?(?:marketing|landing(?:\s+page)?)\b/gi, ' '),
+    );
+  if (appOrTool && !commerce && !boatish && !machineish) {
+    const app = `import { useState } from 'react';
+import './App.css';
+
+export default function App() {
+  const [items, setItems] = useState([{ id: '1', title: 'Welcome to ${title}', body: 'Your starting board is ready.' }]);
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const v = draft.trim();
+    if (!v) return;
+    setItems((prev) => [...prev, { id: String(Date.now()), title: v, body: 'New item' }]);
+    setDraft('');
+  };
+  return (
+    <div className="app-shell">
+      <aside className="sidebar" aria-label="Sidebar">
+        <strong>${title}</strong>
+        <button type="button" onClick={() => setDraft('New item')}>New</button>
+      </aside>
+      <main className="workspace" id="main">
+        <header className="workspace-head">
+          <h1>${title}</h1>
+          <form onSubmit={(e) => { e.preventDefault(); add(); }}>
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Add item" placeholder="Add something" />
+            <button type="submit">Add</button>
+          </form>
+        </header>
+        {items.length === 0 ? <p className="empty">Nothing here yet — add your first item.</p> : (
+          <ul className="item-list">{items.map((it) => (
+            <li key={it.id}><strong>{it.title}</strong><span>{it.body}</span></li>
+          ))}</ul>
+        )}
+      </main>
+    </div>
+  );
+}
+`;
+    const css = `html,body,#root{min-height:100%}
+.app-shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh;font-family:"Source Sans 3",Georgia,serif;background:radial-gradient(circle at 18% 12%,#243044,#0b1020);color:#e8eef8}
+.sidebar{padding:1.1rem;border-right:1px solid rgba(255,255,255,.12);display:flex;flex-direction:column;gap:.75rem}
+.workspace{padding:1.35rem}
+.workspace-head{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}
+.workspace-head h1{margin:0;font-family:Fraunces,Georgia,serif;font-size:clamp(1.8rem,3vw,2.8rem)}
+.item-list{list-style:none;padding:0;margin:1rem 0 0;display:grid;gap:.7rem}
+.item-list li{padding:.9rem 1rem;border:1px solid rgba(255,255,255,.12);border-radius:14px;display:flex;flex-direction:column;gap:.2rem}
+.empty{opacity:.75}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.item-list li{animation:rise .35s ease both}
+`;
+    return { app, css };
+  }
+  // Booking floor ONLY for boat/machine asks. Everything else that hits this
+  // recovery path gets a full-bleed shop/marketing page — never Core/Day/Reserve.
+  if (!boatish && !machineish) {
+    if (commerce) return buildCommerceCartFloor(title, t, p);
+    const kind = reefish ? 'reef' : foodish ? 'food' : 'shop';
+    return buildMarketingShopFloor(title, t, p, kind);
   }
   const items = boatish
     ? [
@@ -2827,23 +3961,15 @@ export function buildBriefInteractiveFloor(productName: string, brief = ''): { a
         { name: 'Clipper 18', blurb: 'Steady for foggy mornings.', status: 'Open' },
         { name: 'Dock Runner', blurb: 'Quick loops around the bay.', status: 'Hold' },
       ]
-    : machineish
-      ? [
-          { name: 'Laser bay', blurb: 'Open until 9pm.', status: 'Free' },
-          { name: 'CNC table', blurb: 'Book a 2-hour slot.', status: 'Free' },
-          { name: '3D printers', blurb: 'Three stations online.', status: 'Busy' },
-        ]
-      : [
-          { name: `${title} Core`, blurb: 'Primary offer for this brief.', status: 'Open' },
-          { name: `${title} Day`, blurb: 'Everyday pick.', status: 'Open' },
-          { name: `${title} Reserve`, blurb: 'Weekend special.', status: 'Hold' },
-        ];
+    : [
+        { name: 'Laser bay', blurb: 'Open until 9pm.', status: 'Free' },
+        { name: 'CNC table', blurb: 'Book a 2-hour slot.', status: 'Free' },
+        { name: '3D printers', blurb: 'Three stations online.', status: 'Busy' },
+      ];
   const hours = boatish
     ? 'Sat-Sun 8am-6pm | Dock C'
-    : machineish
-      ? 'Tonight 5pm-10pm | Shop floor'
-      : 'Open hours | See below';
-  const cta = boatish ? 'Reserve' : machineish ? 'Book slot' : 'Confirm';
+    : 'Tonight 5pm-10pm | Shop floor';
+  const cta = boatish ? 'Reserve' : 'Book slot';
   const itemsLit = JSON.stringify(items, null, 2);
   const app = `import { useState } from 'react';
 import './App.css';

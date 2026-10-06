@@ -178,10 +178,17 @@
   }
 
   .nova-nav-item {
-    @apply flex items-center gap-2 py-2 rounded-none text-sm font-medium transition-colors duration-150 cursor-pointer min-w-0 pl-0 pr-2;
+    @apply flex items-center gap-2 rounded-none font-medium transition-colors duration-150 cursor-pointer min-w-0 pl-0 pr-2;
     color: rgb(var(--color-content-secondary));
+    font-size: 0.875rem; /* 14px — tighter labels on the slim rail */
+    line-height: 1.25;
     /* Lock row height so hover/active paint never reflows icons */
-    min-height: 2.25rem;
+    min-height: 2.2rem;
+    height: 2.2rem;
+    max-height: 2.2rem;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
     position: relative;
     z-index: 0;
     background-color: transparent;
@@ -195,12 +202,12 @@
     content: '';
     position: absolute;
     z-index: -1;
-    left: 0.55rem;
-    right: 0.55rem;
-    top: 0.28rem;
-    bottom: 0.28rem;
+    left: 0.35rem;
+    right: 0.35rem;
+    top: 0.2rem;
+    bottom: 0.2rem;
     background-color: rgb(var(--color-surface-active));
-    border-radius: 0.55rem;
+    border-radius: 0.45rem;
   }
   .nova-nav-item.active {
     /* Inset active fill — soft rounded corners (no hard chamfer slash). */
@@ -213,12 +220,12 @@
     content: '';
     position: absolute;
     z-index: -1;
-    left: 0.55rem;
-    right: 0.55rem;
-    top: 0.28rem;
-    bottom: 0.28rem;
+    left: 0.35rem;
+    right: 0.35rem;
+    top: 0.2rem;
+    bottom: 0.2rem;
     background-color: rgb(var(--color-surface-active));
-    border-radius: 0.55rem;
+    border-radius: 0.45rem;
   }
   .nova-nav-item.active:hover::before {
     background-color: rgb(var(--color-surface-active));
@@ -234,12 +241,12 @@
     content: '';
     pointer-events: none;
     position: absolute;
-    left: 0.55rem;
-    right: 0.55rem;
-    top: 0.28rem;
-    bottom: 0.28rem;
+    left: 0.35rem;
+    right: 0.35rem;
+    top: 0.2rem;
+    bottom: 0.2rem;
     box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.55);
-    border-radius: 0.55rem;
+    border-radius: 0.45rem;
     animation: nova-nav-working-heartbeat 1.45s ease-in-out infinite;
   }
   .nova-nav-item.nova-nav-working-away .nova-nav-icon,
@@ -263,20 +270,30 @@
     color: rgb(56 189 248);
   }
   /*
-   * Icon plate matches collapsed rail width (4rem). Glyph is centered in that plate
-   * open or closed, so icons never shift when the sidebar stretches.
+   * Icon plate matches collapsed rail width (3.5rem). Glyph is centered in that plate
+   * open or closed, so icons never shift horizontally when the sidebar stretches.
+   * Row height is locked above so hover expand/collapse does not move icons up/down.
    */
   .nova-nav-icon {
-    @apply w-16 h-8 flex items-center justify-center shrink-0;
+    @apply w-14 flex items-center justify-center shrink-0;
+    height: 2.2rem;
   }
   .nova-nav-icon svg {
-    @apply w-4 h-4 shrink-0;
+    width: 1.05rem;
+    height: 1.05rem;
+    @apply shrink-0;
   }
   .nova-nav-item-rail {
-    @apply !justify-start !px-0 !py-2 !min-h-[2.25rem] !gap-0 !pr-0;
+    /* Same height as .nova-nav-item — only alignment changes */
+    @apply !justify-start !px-0 !py-0 !gap-0 !pr-0;
+    min-height: 2.2rem !important;
+    height: 2.2rem !important;
+    max-height: 2.2rem !important;
   }
   .nova-nav-label {
     @apply truncate transition-opacity duration-200 ease-out min-w-0;
+    font-size: 0.875rem;
+    letter-spacing: -0.01em;
   }
   /* Keep label out of flex sizing when collapsed — opacity alone still reserved width/height */
   .nova-nav-label-hide {
@@ -294,24 +311,96 @@
   }
   /* Section titles keep a fixed slot so expand/collapse does not shove icons */
   .nova-nav-section-label {
-    height: 1.25rem;
-    line-height: 1.25rem;
+    height: 1.45rem;
+    line-height: 1.45rem;
     margin: 0;
     overflow: hidden;
+    font-size: 0.6875rem; /* 11px */
+    letter-spacing: 0.06em;
+  }
+  /* Comfortable vertical rhythm in the expanded rail */
+  .nova-sidebar-panel nav {
+    gap: 0.2rem;
+    padding-top: 0.55rem;
+  }
+  .nova-sidebar-panel .nova-nav-group {
+    margin-top: 0.55rem;
+  }
+  .nova-sidebar-panel .nova-nav-group:first-child {
+    margin-top: 0;
+  }
+  .nova-sidebar-panel .nova-nav-stack {
+    gap: 0.1rem;
   }
   .nova-sidebar-panel {
-    width: 16rem;
-    min-width: 16rem;
-    max-width: 16rem;
+    width: 15rem;
+    min-width: 15rem;
+    max-width: 15rem;
     transition:
       width 280ms cubic-bezier(0.22, 1, 0.36, 1),
       min-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
       max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .nova-sidebar-panel.is-collapsed {
-    width: 4rem;
-    min-width: 4rem;
-    max-width: 4rem;
+    /* Slim locked rail — icon plate is w-14 (3.5rem); leave a hair of chrome padding. */
+    width: 3.5rem;
+    min-width: 3.5rem;
+    max-width: 3.5rem;
+  }
+
+  /*
+   * Composer width: keep Stop / mic / model fully visible when Verifying + Code chips appear.
+   * Message stream width is the dial for left/right separation.
+   */
+  .nova-composer-column {
+    width: 100%;
+    max-width: 44rem;
+    min-width: min(100%, 18rem);
+  }
+  html[data-density='compact'] .nova-composer-column,
+  html[data-density='comfortable'] .nova-composer-column {
+    max-width: 44rem;
+  }
+  .nova-chat-stream {
+    --nova-chat-spread: 75; /* rem — locked; higher = more left/right separation */
+    width: 100%;
+    max-width: min(calc(var(--nova-chat-spread) * 1rem), 100%);
+    margin-inline: auto;
+  }
+  .nova-msg-row {
+    display: flex;
+    width: 100%;
+    gap: 0.75rem;
+  }
+  .nova-msg-row--user {
+    justify-content: flex-end;
+  }
+  .nova-msg-row--assistant {
+    justify-content: flex-start;
+  }
+  /* Wider bubbles = more words per line, less vertical scroll (longer, not taller). */
+  .nova-msg-row--user > .nova-chat-bubble {
+    max-width: min(48rem, 86%);
+    margin-inline-start: auto;
+  }
+  .nova-msg-row--assistant > .nova-chat-bubble {
+    max-width: min(52rem, 88%);
+    margin-inline-end: auto;
+  }
+  /* Type scale for chat only (rail labels stay ~0.875rem). */
+  .nova-chat-surface {
+    --nova-chat-size: 0.9375rem; /* 15px */
+    --nova-chat-leading: 1.55;
+    font-size: var(--nova-chat-size);
+    line-height: var(--nova-chat-leading);
+  }
+  .nova-chat-surface .nova-chat-bubble {
+    font-size: var(--nova-chat-size);
+    line-height: var(--nova-chat-leading);
+  }
+  .nova-chat-surface .nova-chat-hero {
+    font-size: clamp(1.25rem, 2.2vw, 1.5rem);
+    line-height: 1.25;
   }
 
   /* Liquid-glass trial — frosted panels so ambient orbs show through */
@@ -374,6 +463,13 @@
     animation: nova-mark-think 1.35s ease-in-out infinite;
     transform-origin: center center;
   }
+  @keyframes nova-dl-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); }
+    50% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+  }
+  .nova-dl-pulse {
+    animation: nova-dl-pulse 1.6s ease-out infinite;
+  }
   .nova-nav-activity {
     color: rgb(110 231 183);
   }
@@ -382,7 +478,7 @@
   }
   /* Settings modal rail — independent from main sidebar icon-plate layout */
   .settings-nav-item {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-150 cursor-pointer min-w-0;
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer min-w-0;
     color: rgb(var(--color-content-secondary));
   }
   .settings-nav-item:hover {
@@ -471,6 +567,18 @@
   .auth-orb-tone-i {
     background-color: rgb(163 230 53 / 0.78);
     animation: authOrbPulseI 8.8s ease-in-out infinite;
+  }
+  .auth-orb-tone-j {
+    background-color: rgb(248 113 113 / 0.78);
+    animation: authOrbPulseJ 10.2s ease-in-out infinite;
+  }
+  .auth-orb-tone-k {
+    background-color: rgb(129 140 248 / 0.78);
+    animation: authOrbPulseK 9.2s ease-in-out infinite;
+  }
+  .auth-orb-tone-l {
+    background-color: rgb(45 212 191 / 0.78);
+    animation: authOrbPulseL 8.4s ease-in-out infinite;
   }
   .auth-type-rainbow {
     background-image: linear-gradient(
@@ -674,6 +782,18 @@
   @keyframes authOrbPulseI {
     0%, 100% { background-color: rgb(163 230 53 / 0.72); }
     50% { background-color: rgb(190 242 100 / 0.92); }
+  }
+  @keyframes authOrbPulseJ {
+    0%, 100% { background-color: rgb(248 113 113 / 0.72); }
+    50% { background-color: rgb(252 165 165 / 0.92); }
+  }
+  @keyframes authOrbPulseK {
+    0%, 100% { background-color: rgb(129 140 248 / 0.72); }
+    50% { background-color: rgb(165 180 252 / 0.92); }
+  }
+  @keyframes authOrbPulseL {
+    0%, 100% { background-color: rgb(45 212 191 / 0.72); }
+    50% { background-color: rgb(94 234 212 / 0.92); }
   }
 
   .text-balance {

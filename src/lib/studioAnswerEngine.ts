@@ -89,7 +89,7 @@ export type StudioAnswerResult = {
 };
 
 const SMALLTALK_RE =
-  /^(hi|hello|hey|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
+  /^(hi|hello|heelo|helo|ehello|hell+o|hey|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
 
 const STUDIO_RECOMMEND_RE =
   /\b(i want (some |a )?recommendations?|recommendations?\b|what (do you |would you )?recommend|where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|recommend(ed)? (next|first)|priorit(y|ize)|next step)\b/i;
@@ -151,6 +151,11 @@ export function codingFileEditTimeoutMs(userMessage: string): number {
   }
   // Tool-loop steps must stay snappy — hanging on "Thinking (step N/24)" for 8 minutes each froze creates.
   if (looksLikeAgentToolLoopPrompt(userMessage)) return MODEL_TIMEOUT_CODE_MS;
+  // Short "rebuild the UI" nudges used to inherit the 12‑minute build budget and look frozen.
+  if (/\brebuild\s+(?:the\s+)?ui\b/i.test(String(userMessage || ''))
+    && String(userMessage || '').length < 280) {
+    return 240_000;
+  }
   if (looksLikeFullUiBuildCodingAsk(userMessage)) return MODEL_TIMEOUT_BUILD_MS;
   if (looksLikeMicroCodingAsk(userMessage)) return MODEL_TIMEOUT_MICRO_MS;
   return MODEL_TIMEOUT_CODE_MS;
@@ -325,6 +330,23 @@ export function packStudioContext(input: StudioAnswerInput): {
     ? input.lastFindings
     : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all', ask);
 
+  // Create/craft whole-file writes: never pack the long “you can see the files” system —
+  // local GGUFs echo those lines into App.jsx and Preview Ready fails.
+  const craftFileWrite = Boolean(input.allowFileEdits)
+    && (
+      /\b@@@FILE\b/i.test(ask)
+      || /\bcreateV2 RULES\b/i.test(ask)
+      || /\bWrite ONLY @@@FILE\b/i.test(ask)
+      || /\bOutput ONLY (?:one )?file block/i.test(ask)
+      || /\bFRESH BUILD RULES\b/i.test(ask)
+    );
+  if (craftFileWrite) {
+    const system = 'Output @@@FILE code only. Complete file bodies. Do not echo instructions.';
+    const user = ask;
+    const prompt = `${system}\n\n${user}`;
+    return { system, user, findings, prompt, packedTokens: estimateTokens(prompt) };
+  }
+
   const handsFreeDebug = looksLikeProjectDebugAsk(input.userMessage);
   const applyNow = handsFreeDebug && (wantsApplyFix(input.userMessage) || looksLikeFeatureMutateAsk(input.userMessage) || input.allowFileEdits);
   const turnSize = handsFreeDebug ? 'full' : classifyCodeTurnSize(ask, input.files);
@@ -373,11 +395,15 @@ export function packStudioContext(input: StudioAnswerInput): {
             'Every @@@FILE line must include a path (@@@FILE src/App.jsx). Never emit a bare @@@FILE.',
             'Prefer a single App.jsx with all sections inline. Do not import missing ./components/* files.',
             'App.jsx must be a real interactive UI matching the brief — never an empty <div className="app" />, never a single search box, never placeholder "Ask NOVA" copy.',
+            'Build what the user asked for from the brief — invent the UI. Do not force tip/todo/notes/marketing/shop presets. No COVER_HREFS / storefront products.ts unless the brief needs them.',
             'Take the time needed: aim for a substantial App (roughly 150+ lines / 2500+ characters of real JSX) with multiple sections, real controls, and polished CSS (hundreds of lines of CSS when the brief is a rich site).',
             'Do not stop early with a minimal form+list stub when the brief asks for a full product or marketing-quality site.',
             'After the files, add ONE short plain-English sentence only (no code fences).',
           ].join(' ')
-          : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
+          : [
+            'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change.',
+            'Do not invent COVER_HREFS, marketing heroes, or src/data/products.ts unless the ask needs them. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."',
+          ].join(' ')
       : handsFreeDebug
         ? 'Diagnose only. Reply in this exact shape: (1) "Okay — I see the problem you’re describing." (2) **What’s going wrong:** restate their symptom in one line. (3) **Cause:** `path` — why it breaks. (4) **How to fix it:** one concrete step. (5) Offer to apply with "Say fix it when you’re ready." Do NOT write @@@FILE blocks. Do not dump whole files.'
         : 'Do NOT write @@@FILE blocks. Do not dump whole files.';

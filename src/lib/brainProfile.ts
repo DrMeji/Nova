@@ -6,7 +6,7 @@
  */
 
 import { getAccurateHardware, parseRamGb, type HardwareInfo } from '@/lib/api';
-import { isCoderEngineId } from '@/lib/enginePick';
+import { isCoderEngineId, isUiDesignEngineId } from '@/lib/enginePick';
 import {
   allowTwoLocalModels,
   assertVramFits,
@@ -60,10 +60,11 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
   const gpuUsable = (vramGB || 0) >= 4
     && (hw.acceleration === 'CUDA' || hw.acceleration === 'Vulkan' || hw.acceleration === 'Metal');
   // VRAM band for full-GPU load; high RAM still allows larger Q4 coders via CPU/partial offload.
-  // 16GB+ RAM can run 7B Q4; 20GB+ → try 14B offload; 24GB → solid 14B; 48GB+ → 32B.
-  const ramCoderCap = ramGB >= 64 ? 32 : ramGB >= 48 ? 32 : ramGB >= 24 ? 14 : ramGB >= 20 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0;
+  // Create-safe ceiling is 14B — 32B stalls craft/polish on consumer PCs even with lots of RAM.
+  // 16GB+ RAM → 7B; 20GB+/24GB → 14B.
+  const ramCoderCap = ramGB >= 24 ? 14 : ramGB >= 20 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0;
   const gpuCoderCap = gpuUsable ? maxCoderParamsBForVram(vramGB) : 0;
-  const maxCoderParamsB = Math.max(ramCoderCap, gpuCoderCap);
+  const maxCoderParamsB = Math.min(14, Math.max(ramCoderCap, gpuCoderCap));
   const maxChatParamsB = ramGB >= 16 ? 7 : ramGB >= 8 ? 3 : 1.5;
   const allowMultiModel = allowTwoLocalModels(ramGB, vramGB) && maxCoderParamsB >= 7;
   const preferredQuant = preferredCoderQuant(vramGB);
@@ -73,11 +74,9 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
   else if (maxChatParamsB >= 3) chat = { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', role: 'chat' };
   else chat = { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', role: 'chat' };
 
-  // Recommend the strongest real coder this PC can run — never Instruct as a fake coder.
+  // Recommend the strongest create-safe coder this PC can run — never Instruct as a fake coder.
   let coder: ModelRef | null = null;
-  if (maxCoderParamsB >= 32) {
-    coder = { id: 'qwen25-coder-32b', name: 'Qwen2.5-Coder 32B', role: 'coder' };
-  } else if (maxCoderParamsB >= 14) {
+  if (maxCoderParamsB >= 14) {
     coder = { id: 'qwen25-coder-14b', name: 'Qwen2.5-Coder 14B', role: 'coder' };
   } else if (maxCoderParamsB >= 7) {
     coder = { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', role: 'coder' };
@@ -152,9 +151,17 @@ export function assertCoderAllowed(
   if (isWeakCoderId(label)) {
     return { ok: false, reason: '1.5B / tiny models cannot be the coder. Pin a larger coder or use surgical/scaffold only.' };
   }
-  // Chat Instruct / multimodal brains are not create polish brains.
+  // Chat Instruct / multimodal brains are not sticky coder pins.
+  // UI-design specialist GGUFs (UIGEN etc.) may craft via Design Spine.
   const id = String(modelId || '').trim();
-  if (id && id !== 'NOVA-auto' && !isCoderEngineId(id) && !isCoderEngineId(modelName)) {
+  if (
+    id
+    && id !== 'NOVA-auto'
+    && !isCoderEngineId(id)
+    && !isCoderEngineId(modelName)
+    && !isUiDesignEngineId(id)
+    && !isUiDesignEngineId(modelName)
+  ) {
     return {
       ok: false,
       reason: 'Create/build needs a coder GGUF (for example Qwen Coder 7B/14B). Chat Instruct cannot polish UI.',

@@ -1,5 +1,3 @@
-import { detectLayoutReference } from '@/lib/layoutReference';
-
 /**
  * ProductSpec + LayoutContract + CopyPack + genre floors + quality scores.
  * Free models fill slots; Nova owns composition taste and Ready gates.
@@ -7,6 +5,7 @@ import { detectLayoutReference } from '@/lib/layoutReference';
 
 export type BuildGenre =
   | 'product-homepage'
+  | 'storefront'
   | 'cafe-local'
   | 'saas-landing'
   | 'arcade-game'
@@ -15,6 +14,19 @@ export type BuildGenre =
   | 'cli-tool'
   | 'python-app'
   | 'generic-web';
+
+/** Catalog product schema craft/floors must fill for storefront genre. */
+export type StorefrontProduct = {
+  id: string;
+  name: string;
+  type: string;
+  origin?: string;
+  age?: string;
+  abv?: string;
+  notes: string;
+  price: number;
+  image?: string;
+};
 
 export type ProductSpec = {
   productName: string;
@@ -29,13 +41,13 @@ export type ProductSpec = {
 
 export type LayoutSection = {
   id: string;
-  role: 'nav' | 'hero' | 'band' | 'grid' | 'footer' | 'canvas' | 'sidebar' | 'main';
+  role: 'nav' | 'hero' | 'band' | 'grid' | 'footer' | 'canvas' | 'sidebar' | 'main' | 'filters' | 'cart' | 'checkout';
   fullBleed?: boolean;
   headlineKey?: string;
 };
 
 export type LayoutContract = {
-  composition: 'full-bleed-bands' | 'split-hero' | 'single-canvas' | 'app-chrome' | 'cli-chrome' | 'tool-panel';
+  composition: 'full-bleed-bands' | 'catalog-storefront' | 'split-hero' | 'single-canvas' | 'app-chrome' | 'cli-chrome' | 'tool-panel';
   hero: {
     fullBleed: boolean;
     media: 'product-stage' | 'photo' | 'gradient' | 'canvas' | 'none';
@@ -45,7 +57,7 @@ export type LayoutContract = {
   typography: {
     display: string;
     body: string;
-    scale: 'editorial' | 'product' | 'utility';
+    scale: 'editorial' | 'product' | 'utility' | 'retail';
   };
   palette: {
     bg: string;
@@ -84,6 +96,19 @@ const FORBID_COMMON = [
   'unsplash-cinema-forest-ocean',
 ];
 
+/** True when the brief wants a real shop / cart / catalog — not a marketing one-pager. */
+export function briefLooksLikeStorefront(brief: string, productName = ''): boolean {
+  const t = `${brief}\n${productName}`;
+  if (/\b(?:cart|checkout|purchase|add\s+to\s+cart|online\s+store|e-?commerce|product\s+catalog)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|wine\s+shop)\b/i.test(t)) {
+    return true;
+  }
+  return /\b(?:shop|store|boutique)\b/i.test(t)
+    && /\b(?:buy|browse|products?|catalog|filter|quantity|checkout)\b/i.test(t);
+}
+
 /** Infer genre + kind from brief (deterministic; LLM may refine). */
 export function inferBuildGenre(brief: string, productName = ''): { genre: BuildGenre; kind: ProductSpec['kind'] } {
   const t = `${brief}\n${productName}`;
@@ -99,56 +124,139 @@ export function inferBuildGenre(brief: string, productName = ''): { genre: Build
   if (/\b(?:electron|desktop\s+app|native\s+window)\b/i.test(t) && !/\b(?:website|landing)\b/i.test(t)) {
     return { genre: 'desktop-app', kind: 'desktop' };
   }
-  if (
-    /\bapple\.com\b/i.test(t)
-    || (/\b(?:iphone|macbook|ipad|airpods|apple\s+watch|product\s+band|full[- ]?bleed)\b/i.test(t)
-      && /\b(?:homepage|landing|store|product)\b/i.test(t))
-  ) {
-    return { genre: 'product-homepage', kind: 'web' };
+  // Storefront / commerce before marketing homepage — shops are not one-pager landings.
+  if (briefLooksLikeStorefront(brief, productName)) {
+    return { genre: 'storefront', kind: 'web' };
   }
-  if (/\b(?:cafe|coffee|bakery|bistro|restaurant|roaster)\b/i.test(t)) {
-    return { genre: 'cafe-local', kind: 'web' };
-  }
-  if (/\b(?:saas|dashboard\s+landing|pricing\s+page|sign[- ]?up|waitlist)\b/i.test(t)) {
-    return { genre: 'saas-landing', kind: 'web' };
-  }
-  if (/\b(?:calculator|tracker|utility|tool\s+ui|converter)\b/i.test(t)) {
+  // Job shape first — site names (apple.com) are NOT what unlocks product-homepage quality.
+  // Explicit Apple brand replica still uses product-homepage via briefWantsAppleProductBands elsewhere.
+  if (/\b(?:calculator|tracker|utility|tool\s+ui|converter|tip\s*(?:calc|calculator|wise)|todo|task\s*list)\b/i.test(t)
+    && !/\b(?:landing|marketing|homepage|website|product\s+site)\b/i.test(t)) {
     return { genre: 'utility-tool', kind: 'web' };
   }
-  if (/\b(?:landing|marketing|homepage|website|product\s+site)\b/i.test(t)) {
+  if (/\b(?:dashboard|sidebar|admin\s+panel)\b/i.test(t)
+    && !/\b(?:landing|marketing|homepage)\b/i.test(t)) {
+    return { genre: 'desktop-app', kind: 'web' };
+  }
+  if (/\b(?:saas|pricing\s+page|sign[- ]?up|waitlist)\b/i.test(t)
+    && !/\b(?:homepage|product\s+site|full[- ]?bleed)\b/i.test(t)) {
     return { genre: 'saas-landing', kind: 'web' };
   }
+  // Local businesses share marketing composition; warm tokens come from Design Spine, not a cafe-only gate.
+  if (/\b(?:cafe|coffee|bakery|bistro|restaurant|roaster)\b/i.test(t)
+    && /\b(?:website|site|landing|homepage|page)\b/i.test(t)
+    && !/\b(?:cart|checkout|online\s+store)\b/i.test(t)) {
+    return { genre: 'cafe-local', kind: 'web' };
+  }
+  if (/\b(?:landing|marketing|homepage|website|product\s+site|product\s+band|full[- ]?bleed)\b/i.test(t)
+    || /\b(?:skincare|brand|studio)\b/i.test(t)) {
+    return { genre: 'product-homepage', kind: 'web' };
+  }
+  // Default web asks → generic-web; ProductPlan picks the composition family (not silent marketing).
   return { genre: 'generic-web', kind: 'web' };
 }
 
 /** True when absolute icon/brand rails would destroy the layout. */
 export function briefForbidsAbsoluteRails(brief: string): boolean {
   const { genre } = inferBuildGenre(brief);
-  if (genre === 'product-homepage' || genre === 'cafe-local' || genre === 'saas-landing') return true;
+  if (genre === 'product-homepage' || genre === 'storefront' || genre === 'cafe-local' || genre === 'saas-landing') {
+    return true;
+  }
   const t = String(brief || '');
-  return /\b(?:full[- ]?bleed|apple\.com|product\s+band|marketing|landing|hero)\b/i.test(t)
+  return /\b(?:full[- ]?bleed|apple\.com|product\s+band|marketing|landing|hero|shop|store)\b/i.test(t)
     && !/\b(?:icon[- ]?rail|toolbar\s+icons?\s+top[- ]?left)\b/i.test(t);
 }
 
-export function genreFloor(genre: BuildGenre): LayoutContract {
+/** True only for intentional Apple.com replica asks — not “Forbidden: Mac/iPad clones”. */
+function briefWantsAppleProductBands(brief: string): boolean {
+  const t = String(brief || '')
+    .replace(/##\s*ProductSpec[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*LayoutContract[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/##\s*CopyPack[\s\S]*?(?=##\s|\s*$)/gi, ' ')
+    .replace(/\bapple\.com product homepage\b[^\n]*/gi, ' ');
+  if (!t.trim()) return false;
+  if (/\b(?:never|forbidden|forbidding|not|no|don't|dont|avoid)\b[\s\S]{0,80}\b(?:apple(?:\.com)?|mac\s*\/\s*ipad|mac\/ipad|iphone|ipad|airpods)\b/i.test(t)
+    || /\b(?:apple\s+)?mac\s*\/\s*ipad(?:\s*\/\s*watch)?\s+clones?\b/i.test(t)
+    || /\bclones?\b[\s\S]{0,24}\b(?:apple|mac|ipad|iphone)\b/i.test(t)) {
+    return false;
+  }
+  return /\bexact\s+apple(?:\.com)?[- ]?style\b/i.test(t)
+    || (/\bapple\.com\b/i.test(t) && /\b(?:style|like|exact|replica|clone|homepage)\b/i.test(t) && /\b(?:build|create|make|apple)\b/i.test(t))
+    || (/\b(?:build|create|make|clone|replica)\b[\s\S]{0,80}\b(?:apple|iphone)\b/i.test(t)
+      && /\b(?:mac|ipad|airpods|product\s+band)\b/i.test(t));
+}
+
+export function genreFloor(genre: BuildGenre, brief?: string): LayoutContract {
   const baseForbid = [...FORBID_COMMON];
   switch (genre) {
-    case 'product-homepage':
+    case 'storefront': {
+      const liquor = /\b(?:liquor|spirits?|whiskey|whisky|bourbon|vodka|gin|tequila|rum|bottle)\b/i.test(String(brief || ''));
       return {
-        composition: 'full-bleed-bands',
-        hero: { fullBleed: true, media: 'product-stage', overlaysForbidden: true },
+        composition: 'catalog-storefront',
+        hero: { fullBleed: true, media: liquor ? 'photo' : 'product-stage', overlaysForbidden: true },
         sections: [
           { id: 'nav', role: 'nav' },
           { id: 'hero', role: 'hero', fullBleed: true, headlineKey: 'hero' },
-          { id: 'mac', role: 'band', fullBleed: true },
-          { id: 'ipad', role: 'band', fullBleed: true },
-          { id: 'watch', role: 'band', fullBleed: true },
-          { id: 'airpods', role: 'band', fullBleed: true },
+          { id: 'filters', role: 'filters' },
+          { id: 'catalog', role: 'grid' },
+          { id: 'story', role: 'band' },
+          { id: 'cart', role: 'cart' },
+          { id: 'checkout', role: 'checkout' },
           { id: 'footer', role: 'footer' },
         ],
-        typography: { display: 'SF Pro Display, Helvetica Neue, system-ui', body: 'SF Pro Text, system-ui, sans-serif', scale: 'product' },
-        palette: { bg: '#000000', ink: '#f5f5f7', accent: '#2997ff', muted: '#a1a1a6' },
-        motion: ['subtle-fade-in', 'band-reveal'],
+        typography: {
+          display: liquor ? 'Fraunces, Georgia, serif' : 'Instrument Serif, Georgia, serif',
+          body: 'Source Sans 3, system-ui, sans-serif',
+          scale: 'retail',
+        },
+        palette: liquor
+          ? { bg: '#120c0a', ink: '#f4ebe2', accent: '#c9853a', muted: '#b7a597' }
+          : { bg: '#0f1419', ink: '#eef2f6', accent: '#d4a574', muted: '#9aa3b2' },
+        motion: ['card-rise', 'drawer-slide', 'soft-fade-in'],
+        forbid: [
+          ...baseForbid,
+          'phone-column-shell',
+          'booking-core-day-reserve-stub',
+          'icon-only-cart',
+          'thin-3-sku-catalog',
+          'missing-product-metadata',
+          'missing-qty-controls',
+          'missing-filter-bar',
+        ],
+        genre,
+      };
+    }
+    case 'product-homepage': {
+      const appleBands = briefWantsAppleProductBands(String(brief || ''));
+      return {
+        composition: 'full-bleed-bands',
+        hero: { fullBleed: true, media: 'product-stage', overlaysForbidden: true },
+        sections: appleBands
+          ? [
+            { id: 'nav', role: 'nav' },
+            { id: 'hero', role: 'hero', fullBleed: true, headlineKey: 'hero' },
+            { id: 'mac', role: 'band', fullBleed: true },
+            { id: 'ipad', role: 'band', fullBleed: true },
+            { id: 'watch', role: 'band', fullBleed: true },
+            { id: 'airpods', role: 'band', fullBleed: true },
+            { id: 'footer', role: 'footer' },
+          ]
+          : [
+            { id: 'nav', role: 'nav' },
+            { id: 'hero', role: 'hero', fullBleed: true, headlineKey: 'hero' },
+            { id: 'feature-a', role: 'band', fullBleed: true },
+            { id: 'feature-b', role: 'band', fullBleed: true },
+            { id: 'feature-c', role: 'band', fullBleed: true },
+            { id: 'specs', role: 'band' },
+            { id: 'footer', role: 'footer' },
+          ],
+        typography: appleBands
+          ? { display: 'SF Pro Display, Helvetica Neue, system-ui', body: 'SF Pro Text, system-ui, sans-serif', scale: 'product' }
+          : { display: 'Georgia, Times New Roman, serif', body: 'system-ui, sans-serif', scale: 'editorial' },
+        palette: appleBands
+          ? { bg: '#000000', ink: '#f5f5f7', accent: '#2997ff', muted: '#a1a1a6' }
+          : { bg: '#0c0f14', ink: '#f4f1ea', accent: '#7eb8ff', muted: '#9aa3b2' },
+        motion: ['subtle-fade-in', 'band-reveal', 'soft-orb-drift'],
         forbid: [
           ...baseForbid,
           'card-grid-as-first-viewport',
@@ -158,9 +266,11 @@ export function genreFloor(genre: BuildGenre): LayoutContract {
           'band-n-placeholder-titles',
           'toy-tablet-hero-bezel',
           'built-for-general-users-copy',
+          ...(appleBands ? [] : ['apple-mac-ipad-watch-clone-bands', 'iphone-hero-for-non-apple-brand']),
         ],
         genre,
       };
+    }
     case 'cafe-local':
       return {
         composition: 'split-hero',
@@ -287,17 +397,18 @@ export function buildProductSpec(opts: {
   const inferred = inferBuildGenre(opts.brief, opts.productName);
   const p = opts.partial || {};
   const genre = (p.genre && isGenre(p.genre) ? p.genre : inferred.genre) as BuildGenre;
-  const floor = genreFloor(genre);
-  const appleish = /\bapple\.com\b|\biphone\b|\bairpods\b/i.test(`${opts.brief}\n${opts.productName}`)
-    && /\b(?:product\s+band|full[- ]?bleed|thin\s+nav|homepage)\b/i.test(opts.brief);
+  const floor = genreFloor(genre, opts.brief);
+  const appleish = briefWantsAppleProductBands(opts.brief);
   return {
     productName: String(p.productName || opts.productName || 'Product').trim() || 'Product',
     genre,
     audience: String(
       p.audience
-      || (appleish || genre === 'product-homepage'
+      || (appleish
         ? 'people who want beautiful products'
-        : 'general users'),
+        : (genre === 'storefront'
+          ? `people shopping ${opts.productName}`
+          : (genre === 'product-homepage' ? `people shopping for ${opts.productName}` : 'general users'))),
     ).trim(),
     pageMap: Array.isArray(p.pageMap) && p.pageMap.length
       ? p.pageMap.map(String).slice(0, 8)
@@ -314,12 +425,22 @@ export function buildProductSpec(opts: {
 }
 
 function isGenre(v: string): v is BuildGenre {
-  return /^(?:product-homepage|cafe-local|saas-landing|arcade-game|utility-tool|desktop-app|cli-tool|python-app|generic-web)$/.test(v);
+  return /^(?:product-homepage|storefront|cafe-local|saas-landing|arcade-game|utility-tool|desktop-app|cli-tool|python-app|generic-web)$/.test(v);
 }
 
 function defaultMustHave(genre: BuildGenre, name: string): string[] {
   const n = name || 'brand';
   switch (genre) {
+    case 'storefront':
+      return [
+        `${n} sticky nav with cart badge`,
+        'full-bleed brand hero',
+        'filter/category bar',
+        '8–12 product cards with type/origin/notes/price',
+        'working qty ± cart + line items + totals',
+        'demo checkout / purchase confirm',
+        'footer',
+      ];
     case 'product-homepage':
       return [`${n} wordmark in thin nav`, 'full-bleed product hero', '3+ product bands', 'high-contrast CTAs', 'footer links'];
     case 'cafe-local':
@@ -335,7 +456,9 @@ function defaultMustHave(genre: BuildGenre, name: string): string[] {
 
 function defaultReferenceBar(genre: BuildGenre): string {
   switch (genre) {
-    case 'product-homepage': return 'apple.com product homepage — full-bleed bands, brand-first';
+    case 'storefront':
+      return 'specialty retail storefront — catalog grid, filters, rich product metadata, cart with qty, demo checkout (not a marketing one-pager)';
+    case 'product-homepage': return 'premium product homepage — full-bleed bands, brand-first (not an Apple replica unless asked)';
     case 'cafe-local': return 'neighborhood cafe marketing site — warm, photographic';
     case 'saas-landing': return 'modern SaaS landing — split hero, feature grid';
     case 'arcade-game': return 'classic playable browser arcade';
@@ -390,25 +513,9 @@ export function mergeLayoutContract(
  * another product (coffee shop, etc.), promote composition to the reference recipe
  * without changing the product genre / must-haves.
  */
-export function applyLayoutReference(brief: string, contract: LayoutContract): LayoutContract {
-  const recipe = detectLayoutReference(brief).recipe;
-  if (!recipe) return contract;
-  return {
-    ...contract,
-    composition: recipe.composition,
-    hero: {
-      ...contract.hero,
-      fullBleed: recipe.heroFullBleed,
-      overlaysForbidden: recipe.overlaysForbidden,
-    },
-    typography: {
-      display: recipe.typography.display,
-      body: recipe.typography.body,
-      scale: recipe.typography.scale,
-    },
-    motion: [...new Set([...recipe.motion, ...contract.motion])],
-    forbid: [...new Set([...contract.forbid, ...recipe.forbidExtra])],
-  };
+/** Retired — layoutReference recipes must not reshape contracts on create. */
+export function applyLayoutReference(_brief: string, contract: LayoutContract): LayoutContract {
+  return contract;
 }
 
 export function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -430,14 +537,24 @@ export function parseJsonObject(raw: string): Record<string, unknown> | null {
 export function defaultCopyPack(spec: ProductSpec, contract: LayoutContract): CopyPack {
   const brand = spec.productName;
   const productHomepage = contract.genre === 'product-homepage' || spec.genre === 'product-homepage';
-  const bandCopy: Record<string, { title: string; body: string }> = {
-    mac: { title: 'Mac', body: 'Mind-blowing. Head-turning.' },
-    ipad: { title: 'iPad', body: 'Lovable. Drawable. Magical.' },
-    watch: { title: 'Watch', body: 'Smarter. Brighter. Mightier.' },
-    airpods: { title: 'AirPods', body: 'Sound that surrounds you.' },
-    iphone: { title: 'iPhone', body: 'Built for what matters most.' },
-    hero: { title: brand, body: 'The best products. Full-bleed. Brand first.' },
-  };
+  const appleBands = contract.sections.some((s) => /^(?:mac|ipad|watch|airpods|iphone)$/i.test(s.id));
+  const bandCopy: Record<string, { title: string; body: string }> = appleBands
+    ? {
+      mac: { title: 'Mac', body: 'Mind-blowing. Head-turning.' },
+      ipad: { title: 'iPad', body: 'Lovable. Drawable. Magical.' },
+      watch: { title: 'Watch', body: 'Smarter. Brighter. Mightier.' },
+      airpods: { title: 'AirPods', body: 'Sound that surrounds you.' },
+      iphone: { title: 'iPhone', body: 'Built for what matters most.' },
+      hero: { title: brand, body: 'The best products. Full-bleed. Brand first.' },
+    }
+    : {
+      hero: { title: brand, body: `${brand} — designed for how you actually live.` },
+      'feature-a': { title: 'Built for the job', body: 'Real performance, not brochure fluff.' },
+      'feature-b': { title: 'Quiet confidence', body: 'Refined in every detail you touch.' },
+      'feature-c': { title: 'Form that lasts', body: 'Materials and lines you notice every day.' },
+      specs: { title: 'Specs that matter', body: 'Clear numbers. No filler rows.' },
+    };
+  const genericBandTitles = ['Signature strength', 'Everyday ease', 'Designed detail', 'Why it wins'];
   const sections: CopyPack['sections'] = {};
   for (const s of contract.sections) {
     if (s.role === 'nav' || s.role === 'footer') continue;
@@ -446,15 +563,20 @@ export function defaultCopyPack(spec: ProductSpec, contract: LayoutContract): Co
       sections[s.id] = preset;
       continue;
     }
-    // Never ship "Band 1" as a customer-facing title.
+    // Never ship "Band 1" as a customer-facing title — and never invent Mac/iPad for non-Apple brands.
     const rawTitle = s.id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const bandIdx = Object.keys(sections).length;
     const title = /^Band\s*\d+$/i.test(rawTitle) && productHomepage
-      ? (['Mac', 'iPad', 'Watch', 'AirPods'][Object.keys(sections).length] || brand)
+      ? (appleBands
+        ? (['Mac', 'iPad', 'Watch', 'AirPods'][bandIdx] || brand)
+        : (genericBandTitles[bandIdx] || `${brand} ${bandIdx + 1}`))
       : (s.role === 'hero' ? brand : rawTitle);
     sections[s.id] = {
       title,
       body: s.role === 'hero'
-        ? (productHomepage ? 'The best products. Full-bleed stages. Huge type.' : `Designed for ${spec.audience}.`)
+        ? (productHomepage
+          ? (appleBands ? `The latest from ${brand} — made for everyday.` : `${brand} — a clearer product story.`)
+          : `Designed for ${spec.audience}.`)
         : (productHomepage ? `Explore ${title}.` : `Explore ${brand} — ${s.id}.`),
     };
   }
@@ -462,7 +584,9 @@ export function defaultCopyPack(spec: ProductSpec, contract: LayoutContract): Co
     brand,
     headline: brand,
     support: productHomepage
-      ? 'Thin nav. Full-bleed product bands. Huge type. Lots of whitespace.'
+      ? (appleBands
+        ? `${brand} products, staged simply — space to breathe.`
+        : `A singular ritual for how you actually live — made by ${brand}.`)
       : `Built for ${spec.audience}.`,
     ctas: contract.genre === 'arcade-game' ? ['Play', 'Restart'] : ['Learn more', 'Buy'],
     sections,
@@ -500,10 +624,66 @@ export function formatEnsembleBriefBlock(
     `- Composition: ${contract.composition}`,
     `- Hero fullBleed=${contract.hero.fullBleed}; media=${contract.hero.media}; overlaysForbidden=${contract.hero.overlaysForbidden}`,
     `- FORBIDDEN: ${contract.forbid.join(', ')}`,
-    '- Put UI in src/App.jsx + src/App.css (or kind-appropriate entry). No absolute icon-rail / brand-rail overlays.',
-    '- Use CopyPack headlines/CTAs verbatim where possible.',
+    contract.genre === 'storefront'
+      ? '- STOREFRONT: emit src/App.tsx + src/App.css AND optional src/data/products.ts + src/components/*.tsx (ProductCard, CartDrawer, FilterBar).'
+      : '- Put UI in src/App.jsx + src/App.css (or kind-appropriate entry). No absolute icon-rail / brand-rail overlays.',
+    contract.genre === 'storefront'
+      ? '- Catalog: ≥8 products with {id,name,type,origin?,age?,abv?,notes,price}. Filters by type. Qty ± cart + checkout demo. Optional detail view.'
+      : '- Use CopyPack headlines/CTAs verbatim where possible.',
     `- Palette CSS variables: --bg ${contract.palette.bg}; --ink ${contract.palette.ink}; --accent ${contract.palette.accent}; --muted ${contract.palette.muted}`,
   ].join('\n');
+}
+
+/** Score a craft against the storefront contract (catalog depth + cart + filters). */
+export function scoreStorefrontContract(
+  files: Record<string, string>,
+  opts?: { brief?: string },
+): QualityScore {
+  const reasons: string[] = [];
+  let score = 100;
+  const app = `${files['src/App.tsx'] || files['src/App.jsx'] || ''}\n${files['src/data/products.ts'] || ''}\n${
+    Object.entries(files)
+      .filter(([k]) => /src\/components\//i.test(k))
+      .map(([, v]) => v)
+      .join('\n')
+  }`;
+  const css = files['src/App.css'] || '';
+  const brief = String(opts?.brief || '');
+  // Accept TS object literals and JSON-style keys from src/data/products.ts.
+  const productBlocks = (app.match(/["']?(?:id|name)["']?\s*:\s*['"`][^'"`]+['"`]/g) || []).length;
+  const priceHits = (app.match(/["']?price["']?\s*:\s*\d+/g) || []).length;
+  const hasCart = /\b(?:setCart|addToCart|add-to-cart)\b/i.test(app) && /Add to cart/i.test(app);
+  const hasQty = /\bqty\b|quantity|setQty|qty\s*[±+\-]/i.test(app);
+  const hasCheckout = /\b(?:Purchase|checkout|Order placed|placeOrder)\b/i.test(app);
+  const hasFilters = /\b(?:filter|category|type)\b/i.test(app)
+    && (/\bsetFilter\b|\bactiveType\b|\bAll\b/.test(app) || /role=["'](?:tablist|toolbar)/i.test(app));
+  const hasMeta = /\b(?:origin|age|abv|notes|tasting)\b/i.test(app);
+  const hasGrid = /product-grid|product-card|catalog/i.test(`${app}\n${css}`);
+  const hasNavCart = /Cart\s*\(|cart-btn|cart badge/i.test(app);
+  const thinSku = priceHits > 0 && priceHits < 6;
+
+  if (!hasNavCart) { reasons.push('storefront missing sticky nav cart badge'); score -= 15; }
+  if (!hasGrid) { reasons.push('storefront missing product grid/cards'); score -= 20; }
+  if (priceHits < 6) { reasons.push('storefront needs ≥6 priced products'); score -= 25; }
+  if (thinSku) { reasons.push('catalog too thin for specialty retail'); score -= 10; }
+  if (!hasMeta && /\b(?:liquor|spirit|whiskey|origin|age|notes)\b/i.test(brief)) {
+    reasons.push('liquor/shop brief missing origin/age/notes metadata');
+    score -= 15;
+  }
+  if (!hasFilters) { reasons.push('storefront missing filter/category controls'); score -= 12; }
+  if (!hasCart) { reasons.push('storefront missing working add-to-cart state'); score -= 25; }
+  if (!hasQty) { reasons.push('storefront missing quantity controls'); score -= 15; }
+  if (!hasCheckout) { reasons.push('storefront missing purchase/checkout path'); score -= 15; }
+  if (productBlocks < 8 && priceHits < 8) {
+    reasons.push('prefer 8+ catalog entries with real attributes');
+    score -= 8;
+  }
+  if (/ready when you are|Browse what is open|Core["'].*Day["']/i.test(app)) {
+    reasons.push('booking Core/Day/Reserve stub forbidden on storefront');
+    score -= 40;
+  }
+  score = Math.max(0, score);
+  return { ok: reasons.length === 0 && score >= 70, score, reasons };
 }
 
 function hexLuminance(hex: string): number | null {
@@ -529,31 +709,64 @@ export function scoreLayoutQuality(
   const blob = `${app}\n${css}`;
   const brief = String(opts.brief || '');
   const spec = opts.spec || buildProductSpec({ brief, productName: '' });
-  const contract = opts.contract || genreFloor(spec.genre);
+  const contract = opts.contract || genreFloor(spec.genre, opts.brief);
   const marketing = /product-homepage|cafe-local|saas-landing|generic-web/.test(spec.genre);
+  const storefront = spec.genre === 'storefront' || contract.genre === 'storefront';
+  const utilityBrief = /\b(?:todo|task\s*list|tip\s*(?:calc|calculator|wise)|checklist|counter|timer|notepad)\b/i.test(brief);
 
-  if (marketing || briefForbidsAbsoluteRails(brief)) {
-    if (/className=["'][^"']*\bicon-rail\b/i.test(app) || /\.icon-rail\s*\{[^}]*position\s*:\s*absolute/i.test(css)) {
+  if (storefront) {
+    const shop = scoreStorefrontContract(files, { brief });
+    for (const r of shop.reasons) reasons.push(r);
+    score = Math.min(score, shop.score);
+    // Design bar is soft here — hard design score lives in lintOriginalCreateQuality / repair.
+    if (!files['src/data/products.ts'] && shop.score < 90) {
+      reasons.push('storefront missing src/data/products.ts catalog module');
+      score -= 10;
+    }
+  }
+
+  if ((marketing || briefForbidsAbsoluteRails(brief)) && !utilityBrief) {
+    // Penalize only when the App actually mounts a rail — dead CSS from brand wiring is noise.
+    if (/className=["'][^"']*\bicon-rail\b/i.test(app)) {
       reasons.push('absolute icon-rail overlays product UI');
       score -= 35;
     }
-    if (/className=["'][^"']*\bbrand-rail\b/i.test(app) || /\.brand-rail\s*\{[^}]*position\s*:\s*absolute/i.test(css)) {
+    if (/className=["'][^"']*\bbrand-rail\b/i.test(app)) {
       reasons.push('absolute brand-rail overlays product UI');
       score -= 30;
     }
   }
 
   if (contract.hero.fullBleed || contract.composition === 'full-bleed-bands') {
-    const hasFullBleed = /100vw|100vh|min-height:\s*100vh|full[- ]?bleed|product-band|className=["'][^"']*\b(?:hero|band|stage)\b/i.test(blob)
-      || /width:\s*100%[^;]*;\s*min-height:\s*(?:80|90|100)vh/i.test(css);
+    const phoneColumn = (
+      /\.(?:app|site)\b[\s\S]{0,320}\bjustify-content\s*:\s*center\b/i.test(css)
+      && /\.(?:app|site)\b[\s\S]{0,320}\balign-items\s*:\s*center\b/i.test(css)
+    );
+    // Bare min-height:100vh on a centered .app is NOT full-bleed.
+    const hasFullBleed = !phoneColumn && (
+      /100vw|full[- ]?bleed|product-band|className=["'][^"']*\b(?:hero|band|stage)\b/i.test(blob)
+      || /width:\s*100%[^;]*;\s*min-height:\s*(?:80|90|100)vh/i.test(css)
+      || (/min-height:\s*100vh/i.test(css)
+        && /className=["'][^"']*\b(?:hero|band|site)\b/i.test(app)
+        && !phoneColumn)
+    );
     const cardGridHero = /className=["'][^"']*\b(?:product-card|cards?|grid)\b/i.test(app)
       && !/className=["'][^"']*\b(?:hero|product-band|full-bleed)\b/i.test(app)
       && app.length < 4500;
-    if (!hasFullBleed && spec.genre === 'product-homepage') {
-      reasons.push('product homepage missing full-bleed hero / bands');
+    if (!hasFullBleed && (spec.genre === 'product-homepage' || storefront)) {
+      reasons.push(storefront
+        ? 'storefront missing full-bleed brand hero above the catalog'
+        : 'product homepage missing full-bleed hero / bands');
       score -= 25;
     }
-    if (cardGridHero && spec.genre === 'product-homepage') {
+    if (phoneColumn && (spec.genre === 'product-homepage' || storefront)) {
+      reasons.push(storefront
+        ? 'storefront is a centered phone-column — not a retail layout'
+        : 'product homepage is a centered phone-column — not full-bleed');
+      score -= 30;
+    }
+    // Card grid as first viewport is wrong for marketing homepages — OK for storefronts after hero.
+    if (cardGridHero && spec.genre === 'product-homepage' && !storefront) {
       reasons.push('card grid used as first viewport instead of full-bleed bands');
       score -= 30;
     }
@@ -585,7 +798,11 @@ export function scoreLayoutQuality(
     score -= 20;
   }
 
-  if (/\b(?:lorem ipsum|Sample text|placeholder copy|TODO copy|Built for general users|Band\s*[1-4])\b/i.test(app)) {
+  // Stub-copy gate is for marketing / product-homepage craft. Utility apps (todo, tip,
+  // calculator) often leave "Built for general users" in the footer — heal, don't fail-closed.
+  const utilityApp = /\b(?:todo|task\s*list|tip\s*calc|calculator|counter|timer|notepad|checklist)\b/i.test(`${brief}\n${spec.genre || ''}`)
+    || /(?:todo|tip|utility|tool|checklist)/i.test(String(spec.genre || ''));
+  if (!utilityApp && /\b(?:lorem ipsum|Sample text|placeholder copy|TODO copy|Built for general users|Band\s*[1-4])\b/i.test(app)) {
     reasons.push('placeholder / stub copy in App (Band N or general users)');
     score -= 25;
   }
@@ -604,7 +821,14 @@ export function scoreLayoutQuality(
   }
 
   if (contract.forbid.includes('cream-terracotta-serif-cluster')) {
-    if (/#f4f1ea|#e07a5f|terracotta/i.test(css) && /Georgia|Playfair|serif/i.test(css) && spec.genre === 'product-homepage') {
+    // True cluster = cream page background + terracotta accent + serif display.
+    // Do NOT trip on --ink: #f4f1ea (warm light text on a dark product homepage).
+    const creamBg = /(?:--bg|background(?:-color)?)\s*:\s*#(?:f4f1ea|faf7f2|f5f0e8)\b/i.test(css)
+      || /background(?:-color)?\s*:\s*(?:cream|off-white)\b/i.test(css);
+    const terracotta = /(?:--accent|color|background(?:-color)?)\s*:\s*#e07a5f\b/i.test(css)
+      || /\bterracotta\b/i.test(css);
+    const serifDisplay = /(?:--display|font-family)\s*:[^;]*(?:Georgia|Playfair|Cormorant|Fraunces)/i.test(css);
+    if (creamBg && terracotta && serifDisplay && spec.genre === 'product-homepage') {
       reasons.push('AI cream + terracotta + serif cluster on product homepage');
       score -= 15;
     }
@@ -669,10 +893,18 @@ export function scoreFunctionalReady(
     }
   }
 
-  if (spec.mustHave.some((m) => /product\s+stage|product\s+band/i.test(m))
-    && !/product-band|product-stage|\/heroes\/|svg/i.test(app + (files['src/App.css'] || ''))) {
-    reasons.push('Spec requires product stages/bands but none found');
-    score -= 20;
+  // "3+ product bands" in default mustHave means feature sections — not only Apple class names.
+  if (spec.mustHave.some((m) => /product\s+stage|product\s+band/i.test(m))) {
+    const css = files['src/App.css'] || '';
+    const blob = `${app}\n${css}`;
+    const hasNamedBands = /product-band|product-stage|feature-band|\/heroes\//i.test(blob);
+    const sectionCount = (app.match(/<(?:section|article)\b/gi) || []).length
+      + (app.match(/className=["'][^"']*\b(?:band|stage|feature)\b/gi) || []).length;
+    const hasSvgOrImg = /<(?:svg|img)\b/i.test(app) || /background-image\s*:/i.test(css);
+    if (!hasNamedBands && sectionCount < 2 && !hasSvgOrImg) {
+      reasons.push('Spec requires product stages/bands but none found');
+      score -= 20;
+    }
   }
 
   // Wrong-product shell: canned booking cards when the ask was not a booking/reserve product.

@@ -194,6 +194,17 @@ export function markBuildDiagnosticsEnded(): void {
   persist();
 }
 
+/** Leave craft file follow when npm/Live starts — stops Code showing App.jsx idle for minutes. */
+export function clearBuildWritingPath(detail?: string): void {
+  closeCurrentPathTiming();
+  snap.writingPath = null;
+  snap.currentPathStartedAt = null;
+  if (detail) snap.lastStatus = String(detail).slice(0, 220);
+  snap.updatedAt = new Date().toISOString();
+  snap.lastActivityAt = Date.now();
+  persist();
+}
+
 export function pushBuildDiag(ev: Omit<BuildDiagEvent, 'at'> & { at?: string }): void {
   const now = Date.now();
   const nextPath = ev.path ? String(ev.path).replace(/\\/g, '/') : null;

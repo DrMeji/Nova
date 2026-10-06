@@ -19,10 +19,14 @@ import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 import { projectUsesNpm } from '@/lib/projectScaffolds';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { pendingCreateBootstrap } from './createBootstrap';
+import { formatCreateProjectMap } from '@/lib/createEvidence';
+import { snapshotCreateCheckpoint } from '@/lib/createCheckpoint';
+import { buildRankedProjectMap } from '@/lib/createProjectMap';
 import {
   markCreateJobFailed,
   markCreateJobNpm,
   markCreateJobReady,
+  markCreateJobVerifying,
   startCreateJob,
   updateCreateJob,
 } from '@/lib/createJobStore';
@@ -40,8 +44,12 @@ import {
   createV2PathWallMs,
   createV2IdleStallMs,
   createV2StallRetryPath,
+  CREATE_V2_APP_FAMILY_WALL_MS,
   isCreateV2ScaffoldPath,
+  isCreateV2AppPath,
   createV2StatusCraft,
+  createV2StatusRepair,
+  createV2StagedWriteInstructions,
 } from '@/lib/createV2';
 import {
   resetBuildDiagnostics,
@@ -51,6 +59,7 @@ import {
   noteBuildFail,
   getBuildDiagnostics,
   markBuildDiagnosticsEnded,
+  clearBuildWritingPath,
   tickBuildHeartbeat,
 } from '@/lib/buildDiagnostics';
 
@@ -98,7 +107,8 @@ function softBindCreateStudio(
   const secondGap = v2 ? CREATE_V2_SOFT_BIND_MS : 1600;
   if (!opts.force && now - last < minGap) return;
   if (!opts.force && count >= 1 && now - last < secondGap) return;
-  if (!opts.force && count > (v2 ? 8 : 24)) return;
+  // createV2: allow many paints so Code grows line-by-line (old cap of 8 froze mid-craft).
+  if (!opts.force && count > (v2 ? 400 : 24)) return;
   softBindLastAt.set(key, now);
   softBindCount.set(key, count + 1);
   try {
@@ -142,7 +152,7 @@ export type { CreateSuccess };
 
 /**
  * Create always allowed when a coder is ready (no dual-VRAM gate).
- * Multi-hop ensemble is opt-in via `multiModelCreate` — default is single-coder.
+ * Single Brain Create — Multimodal relay removed.
  */
 export async function assertCreateMultiModelOk(): Promise<{ ok: boolean; reason?: string }> {
   return { ok: true };
@@ -292,6 +302,50 @@ export async function resolveCreateUiPolishCoder(host: {
   // Never use chat sticky "Instruct" as the display name for a coder id.
   const nameHint = undefined;
 
+  // Chat picker / ladder pin wins — Instruct 7B, UIGEN, VL, or coder.
+  // Never silently upgrade to a bigger coder behind the UI label (that caused
+  // 7B prove-outs to jump to coder-32B mid-build).
+  const { isUiDesignEngineId } = await import('@/lib/enginePick');
+  const pinCandidates = [
+    host.stickyModelId,
+    host.preferredModelId,
+    host.modelId,
+    prefs.lastChatModelId,
+    prefs.activeChatId,
+    prefs.defaultModelId,
+    prefs.activeCoderId,
+    prefs.defaultCodeModelId,
+  ]
+    .map((s) => String(s || '').trim())
+    .filter((id) => id && id !== 'NOVA-auto' && !isWeakCoderId(id));
+  for (const turnPin of pinCandidates) {
+    try {
+      const status = await getEngineStatus();
+      const hit = (status.models || []).find((m) => m.id === turnPin && m.status === 'ready');
+      if (!hit) continue;
+      // Skip vision/image packs unless the user explicitly pinned that id.
+      if (
+        isVisionEngineId(turnPin)
+        && turnPin !== host.stickyModelId
+        && turnPin !== host.preferredModelId
+        && turnPin !== host.modelId
+      ) {
+        continue;
+      }
+      if (/\b(?:image|video|sd|flux)\b/i.test(turnPin)) continue;
+      const pinName = String(
+        host.stickyModelName
+        || host.preferredModelName
+        || host.modelName
+        || hit.name
+        || turnPin,
+      );
+      return { id: turnPin, name: pinName, source: 'local', ok: true };
+    } catch {
+      /* try next pin */
+    }
+  }
+
   const explicitIds = [
     host.stickyModelId,
     host.preferredModelId,
@@ -305,7 +359,7 @@ export async function resolveCreateUiPolishCoder(host: {
       && id !== 'NOVA-auto'
       && !isWeakCoderId(id)
       && !isVisionEngineId(id)
-      && isCoderEngineId(id));
+      && (isCoderEngineId(id) || isUiDesignEngineId(id)));
 
   const alreadySelectedCoder = explicitIds[0] || null;
 
@@ -325,7 +379,14 @@ export async function resolveCreateUiPolishCoder(host: {
   const seen = new Set<string>();
   const push = (id: string | null | undefined, name?: string | null, source: 'local' | 'auto' = 'local') => {
     const clean = String(id || '').trim();
-    if (!clean || clean === 'NOVA-auto' || isWeakCoderId(clean) || isVisionEngineId(clean) || !isCoderEngineId(clean) || seen.has(clean)) return;
+    if (
+      !clean
+      || clean === 'NOVA-auto'
+      || isWeakCoderId(clean)
+      || isVisionEngineId(clean)
+      || !(isCoderEngineId(clean) || isUiDesignEngineId(clean))
+      || seen.has(clean)
+    ) return;
     seen.add(clean);
     candidates.push({ id: clean, name: String(name || clean), source });
   };
@@ -351,6 +412,34 @@ export async function resolveCreateUiPolishCoder(host: {
     };
   }
 
+  // Craft fallback — when no coder GGUF is ready, still build with
+  // UIGEN / Instruct (shell + hard lint own layout quality). Prove-out path.
+  try {
+    const { rankedReadyDesignIds } = await import('@/lib/enginePick');
+    const status = await getEngineStatus();
+    const designIds = rankedReadyDesignIds(status.models, profile.ramGB, profile.maxCoderParamsB);
+    const nameOf = (id: string) =>
+      String((status.models || []).find((m) => m.id === id)?.name || id);
+    for (const id of designIds) {
+      if (!id || isWeakCoderId(id) || isVisionEngineId(id)) continue;
+      const hit = (status.models || []).find((m) => m.id === id && m.status === 'ready');
+      if (!hit) continue;
+      // Prefer UIGEN / design packs first (rankedReadyDesignIds already orders that way).
+      if (isUiDesignEngineId(id)) {
+        return { id, name: nameOf(id), source: 'local', ok: true };
+      }
+    }
+    for (const id of designIds) {
+      if (!id || isWeakCoderId(id) || isVisionEngineId(id) || isUiDesignEngineId(id)) continue;
+      const hit = (status.models || []).find((m) => m.id === id && m.status === 'ready');
+      if (!hit) continue;
+      // Instruct / chat — Single Brain invents the UI from the brief.
+      return { id, name: nameOf(id), source: 'local', ok: true };
+    }
+  } catch {
+    /* fall through to hard fail */
+  }
+
   return {
     id: 'NOVA-auto',
     name: 'NOVA Auto',
@@ -358,7 +447,7 @@ export async function resolveCreateUiPolishCoder(host: {
     ok: false,
     reason: profile.maxCoderParamsB <= 0
       ? (profile.reason || 'No suitable coder for UI polish')
-      : 'No local coder GGUF ready — install any coder that fits this PC (7B / 14B / 32B) from Models',
+      : 'No local model ready for create — install a coder, UIGEN, or Instruct GGUF from Models',
   };
 }
 
@@ -413,8 +502,23 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     || richestBrief.match(/\bproduct\s+([A-Z][A-Za-z0-9][A-Za-z0-9-]{1,40})\s+One\b/)?.[1]
     || null
   );
+  // “Let’s build this” after Plan — recover the product name from the synced Plan title.
+  let nameFromPlan: string | null = null;
+  try {
+    const { loadChatPlan } = await import('@/lib/chatPlanStore');
+    const plan = loadChatPlan(host.chatId);
+    const rawTitle = String(plan?.title || '').trim();
+    const cleaned = rawTitle
+      .replace(/\s*[—\-–|:]\s*.*$/, '')
+      .replace(/\s+Build Plan.*$/i, '')
+      .replace(/\s+Plan$/i, '')
+      .trim();
+    if (cleaned.length >= 2 && cleaned.length <= 48 && !/^(?:build|plan|app|site|new app)$/i.test(cleaned)) {
+      nameFromPlan = cleaned;
+    }
+  } catch { /* optional */ }
   const lockedProductName = cleanProductTitle(
-    brandFromBrief || lockedFromAsk || intent.name || pending?.name || intent.name || 'New App',
+    brandFromBrief || lockedFromAsk || nameFromPlan || intent.name || pending?.name || intent.name || 'New App',
   );
   // Folder/slug stays on the explicit "called …" name when present.
   const safeName = cleanProductTitle(
@@ -510,6 +614,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   // Optional Plan → approve gate (Settings). Never use the old stub checklist
   // (“Plan — X” + echo brief + “Nova is free”). Soft explores already route to chat;
   // if a create still lands here without an approve phrase, hand them a real Plan card.
+  // Hard go (“on disk now”, “skip plan”, “build it”) always scaffolds — never stall on Plan.
   {
     const prefs = getLocalPrefs();
     if (prefs.planApproveGate) {
@@ -521,18 +626,26 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         buildPlanFromBrief,
         modeStatusLabel,
       } = await import('@/lib/novaStudioModes');
-      const approving = isBuildApprovePhrase(host.content);
+      const { looksLikeImplementGo } = await import('@/lib/chatPlanMode');
+      const ask = String(host.content || '');
+      const hardGoNow = looksLikeImplementGo(ask)
+        || /\bskip\s+plan\b/i.test(ask)
+        || /\bon\s+disk\s+now\b/i.test(ask)
+        || /\b(?:create|build|scaffold)\b[\s\S]{0,80}\bon\s+disk\b/i.test(ask);
+      const approving = isBuildApprovePhrase(host.content) || hardGoNow;
       const pendingPlan = loadPendingBuildPlan(host.chatId);
       if (!approving) {
         host.pushStatus(modeStatusLabel('plan', lockedProductName));
         const { createBriefSpecFromAsk } = await import('@/lib/createIdentity');
         const {
           runPlanMode,
-          formatPlanReportMessage,
+          formatPlanChatReply,
           findLatestPlanReport,
           serializePlanReportForCreate,
           planReportToPlanLog,
         } = await import('@/lib/planReport');
+        const { saveChatPlan, setChatPlanPill } = await import('@/lib/chatPlanStore');
+        const { requestOpenChatPlan } = await import('@/lib/openChatPlan');
         const spec = createBriefSpecFromAsk(lockedProductName, String(buildIntent.summary || host.content));
         const plan = buildPlanFromBrief({
           chatId: host.chatId,
@@ -542,7 +655,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         });
         savePendingBuildPlan(plan);
         try {
-          const priorPlan = findLatestPlanReport(host.messages || []);
+          const priorPlan = findLatestPlanReport(host.messages || [], host.chatId);
+          try {
+            setChatPlanPill(host.chatId, true);
+            requestOpenChatPlan({ chatId: host.chatId, openOverlay: true, live: true });
+          } catch { /* ignore */ }
           const report = await runPlanMode({
             userMessage: String(buildIntent.summary || host.content),
             projectName: priorPlan?.title || lockedProductName,
@@ -550,6 +667,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             priorPlan,
             onProgress: (msg) => host.pushStatus(msg),
           });
+          try {
+            saveChatPlan(host.chatId, report);
+            setChatPlanPill(host.chatId, true);
+            requestOpenChatPlan({ chatId: host.chatId, openOverlay: true, live: false });
+          } catch { /* ignore */ }
           try {
             setLastPendingGreenfield(host.chatId, {
               name: report.title || lockedProductName,
@@ -560,7 +682,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               problemLine: `Build ${report.title || lockedProductName} from your plan.`,
             });
           } catch { /* ignore persist */ }
-          await host.finishPlainReply(formatPlanReportMessage(report), 'NOVA · Plan');
+          await host.finishPlainReply(
+            formatPlanChatReply(report, { refining: Boolean(priorPlan?.steps?.length) }),
+            'NOVA · Plan',
+          );
         } catch {
           // Fallback: short talk + invite Plan mode — never the old echo checklist.
           await host.finishPlainReply(
@@ -585,19 +710,19 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
   }
 
-  // Gate BEFORE scaffolding: switch to a ready coder (or stop with a clear next step).
-  // No prebuilt / micro shortcuts — every create goes through a real coder.
+  // Gate BEFORE scaffolding: ready coder, else UIGEN / Instruct.
+  // No Cursor / prebuilt shortcuts — every create goes through a local GGUF.
   type CoderGate = Awaited<ReturnType<typeof resolveCreateUiPolishCoder>>;
   let coderGate: CoderGate;
   coderGate = await resolveCreateUiPolishCoder(host);
   if (!coderGate.ok) {
     await host.finishPlainReply(
       [
-        `**Cannot start building yet** — no local **coder** model is ready for this create.`,
+        `**Cannot start building yet** — no local model is ready for this create.`,
         '',
-        coderGate.reason || 'Install a coder GGUF that fits this PC under **Models**, then say **ok start building** again.',
+        coderGate.reason || 'Install a coder, UIGEN, or Instruct GGUF that fits this PC under **Models**, then say **ok start building** again.',
         '',
-        'Nova is free — no paywall. Chat models can plan with you. Building the UI needs a coder (for example a 7B+ coder GGUF on this PC, or a cloud key you already own).',
+        'Nova is free — no paywall. Prefer a coder GGUF when you can; UIGEN or Instruct can still craft from your brief.',
       ].join('\n'),
       'NOVA · create',
     );
@@ -606,12 +731,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   try {
     host.onCoderPinned?.({ id: coderGate.id, name: coderGate.name });
   } catch { /* ignore */ }
-  try {
-    const { announceCreatePhase } = await import('@/lib/createStatus');
-    await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
-  } catch {
-    host.pushStatus(`Craft · **${coderGate.name}**…`);
-  }
+  // Do not pin the composer chip to Craft yet — relay Plan/Design/Copy must show first.
+  host.pushStatus(`Relay ready · craft reserved **${coderGate.name}**…`);
 
   const { createWallBudgetMs, createPolishAttemptBudgetMs, createBudgetProfile, createBudgetExceededReply, yieldToUi, isVisionEngineId } = await import('@/lib/createRuntime');
   const createBriefForBudget = String(host.content || intent?.summary || '');
@@ -620,64 +741,28 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   const createStartedAt = Date.now();
   const createTimedOut = () => Date.now() - createStartedAt > createWallMs;
   if (isVisionEngineId(coderGate.id)) {
-    await host.finishPlainReply(
-      [
-        '**Cannot craft with a vision model.**',
-        '',
-        'Create needs a **coder** GGUF (not Qwen2-VL / vision). Install a coder under **Models**, then say **ok start building** again.',
-      ].join('\n'),
-      'NOVA · create',
-    );
-    return { status: 'handled' };
+    // Explicit chat pin / ladder may stress-test VL on create. Auto never picks VL for craft.
+    host.pushStatus(`Craft on pinned vision model **${coderGate.name}**…`);
   }
   host.pushStatus(`Build uses **${coderGate.name}** · ${budgetProfile} budget…`);
   await yieldToUi(0);
-  // Default coder-only create: never block on missing Design/Copy brains.
-  const allowEnsembleHops = Boolean(getLocalPrefs().multiModelCreate);
-  if (allowEnsembleHops) try {
-    const { getEngineStatus } = await import('@/lib/novaEngine');
-    const { getBrainProfile } = await import('@/lib/brainProfile');
-    const {
-      assessEnsembleReadiness,
-      formatTeamReadinessMarkdown,
-      userAcceptedCoderOnlyCreate,
-      setUserAcceptedCoderOnlyCreate,
-      looksLikeBuildAnywayAsk,
-    } = await import('@/lib/ensembleReadiness');
-    const profile = await getBrainProfile();
-    const status = await getEngineStatus();
-    const teamReady = assessEnsembleReadiness(status.models, {
-      ramGb: profile.ramGB,
-      maxCoderParamsB: profile.maxCoderParamsB,
-    });
-    if (looksLikeBuildAnywayAsk(host.content)) {
-      setUserAcceptedCoderOnlyCreate(true);
+  // Single Brain Create craft = createV2 staged write (avoids tool-loop thrash).
+  // Post-craft gather→act→verify lives in createRuntimeLoop + createPassSpine — not prefs.agentLoopOnCreate.
+  try {
+    const prefs = getLocalPrefs();
+    if (prefs.multiModelCreate !== false) {
+      const { setLocalPrefs } = await import('@/lib/localPrefs');
+      setLocalPrefs({ multiModelCreate: false });
     }
-    if (teamReady.warnBeforeCreate && !userAcceptedCoderOnlyCreate()) {
-      await host.finishPlainReply(
-        [
-          formatTeamReadinessMarkdown(teamReady),
-          '',
-          `When ready, say **build anyway** to create **${lockedProductName}** with the coder only, or install the missing brains and say **ok start building** again.`,
-        ].join('\n'),
-        'NOVA · team',
-      );
-      return { status: 'handled' };
-    }
-    if (teamReady.teamScore === 'craft-only') {
-      host.pushStatus('Coder-only team — Layout Contract uses genre defaults…');
-    } else {
-      host.pushStatus(`Build team: ${teamReady.teamScore}…`);
-    }
-  } catch { /* readiness best-effort */ }
+  } catch { /* prefs best-effort */ }
 
-  host.pushStatus(
-    allowEnsembleHops
-      ? `Craft · **${coderGate.name}** (plan/copy may use Instruct)…`
-      : `Craft · **${coderGate.name}** (single coder)…`,
-  );
-  await yieldToUi(0);
-  // Sequential ensemble: floors first, LLM refine only when distinct brains exist.
+  // Blank / solid-color page from the USER ask only — never from ensemble fluff.
+  const { blankSolidColorFromAsk, viteSolidShellEdits } = await import('@/lib/webProjectCanon');
+  const blankSolidFromUser = blankSolidColorFromAsk(String(host.content || ''));
+  if (blankSolidFromUser) {
+    host.pushStatus(`Blank page · solid ${blankSolidFromUser} (skip marketing hops)…`);
+  }
+
   let ensemblePlanText = '';
   let ensembleAttribution = coderGate.name;
   let ensembleSpec: import('@/lib/createLayoutContract').ProductSpec | null = null;
@@ -686,182 +771,44 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   let ensembleContractBlock = '';
   /** Web research notes for craft — hoisted so polish prompts can see them after the ensemble try. */
   let createResearchNotes = '';
+  /** One salt per create job — rebuilds must invent a new look. */
+  const { newDesignFreshnessKey, formatOriginalCraftRules } = await import('@/lib/createDesignSystem');
+  const designFreshnessKey = newDesignFreshnessKey();
   try {
-    const { getEngineStatus, setEngineModel } = await import('@/lib/novaEngine');
-    const { getBrainProfile } = await import('@/lib/brainProfile');
-    const {
-      resolveCreateEnsembleTeam,
-      ensembleMember,
-      runCreateDesignHop,
-      runCreateCopyHop,
-      assertSequentialEnsembleOk,
-    } = await import('@/lib/createEnsemble');
-    const {
-      formatEnsembleBriefBlock,
-      buildProductSpec,
-      genreFloor,
-      defaultCopyPack,
-    } = await import('@/lib/createLayoutContract');
-    const { saveChatBuildMemory } = await import('@/lib/chatBuildMemory');
-    const profile = await getBrainProfile();
-    const status = await getEngineStatus();
-    const briefSeed = buildIntent.summary || host.content;
-    // Always research before craft — brief-literal web notes, not a canned product catalog.
-    // Keep this short so research cannot add minutes before coding starts.
-    try {
-      const { looksLikeNeedsCreateResearch, researchCreateReferences } = await import('@/lib/createResearchBrief');
-      const researchBrief = [buildIntent.summary, host.content].filter(Boolean).join('\n');
-      if (looksLikeNeedsCreateResearch(researchBrief)) {
-        host.pushStatus('Researching what you asked for…');
-        const researchBudgetMs = budgetProfile === 'simple' ? 14_000 : 28_000;
-        const researched = await Promise.race([
-          researchCreateReferences({
-            brief: researchBrief,
-            projectName: lockedProductName,
-          }),
-          new Promise<{ ok: false; notes: string; sources: [] }>((resolve) => {
-            window.setTimeout(() => {
-              resolve({
-                ok: false,
-                notes: 'Research timed out — build strictly from the user ask. Do not invent a booking/marketing shell.',
-                sources: [],
-              });
-            }, researchBudgetMs);
-          }),
-        ]);
-        createResearchNotes = researched.notes || '';
-        host.pushStatus(researched.ok
-          ? 'Research ready — building from those notes…'
-          : 'Research thin — building from your ask…');
-      }
-    } catch { /* offline / blocked — craft from brief alone */ }
-    // Deterministic floors immediately — never wait on LLM for Spec/Contract.
-    ensembleSpec = buildProductSpec({ brief: briefSeed, productName: lockedProductName });
-    ensembleContract = genreFloor(ensembleSpec.genre);
-    try {
-      const { applyLayoutReference } = await import('@/lib/createLayoutContract');
-      ensembleContract = applyLayoutReference(
-        `${buildIntent.summary || ''}\n${host.content || ''}`,
-        ensembleContract,
-      );
-    } catch { /* keep floor */ }
-    ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
-    ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
-    if (createResearchNotes) {
-      ensembleContractBlock = [
-        ensembleContractBlock,
-        '',
-        createResearchNotes.slice(0, 3500),
-      ].filter(Boolean).join('\n');
-    }
-    host.pushStatus(`Contract floor · ${ensembleSpec.genre}…`);
-
-    const team = resolveCreateEnsembleTeam(status.models, {
-      ramGb: profile.ramGB,
-      maxCoderParamsB: profile.maxCoderParamsB,
-      craftId: coderGate.id,
-      allowMultiHop: allowEnsembleHops,
-    });
-    const ensGate = assertSequentialEnsembleOk(team);
-    if (ensGate.ok && team.multiHop) {
-      ensembleAttribution = team.attribution;
-      const designer = ensembleMember(team, 'design');
-      const copyBrain = ensembleMember(team, 'copy') || ensembleMember(team, 'plan');
-      // LLM refine only when Design is a distinct brain (not the coder).
-      if (designer && designer.id !== coderGate.id && ensembleSpec) {
-        try {
-          const { announceCreatePhase } = await import('@/lib/createStatus');
-          await announceCreatePhase(host, 'design', { id: designer.id, name: designer.name });
-        } catch {
-          host.pushStatus(`Design · **${designer.name}**…`);
+    if (blankSolidFromUser) {
+      /* blank pages are a solid shell, not a product story */
+    } else {
+      const briefSeed = [buildIntent.summary, host.content].filter(Boolean).join('\n');
+      createResearchNotes = '';
+      // Brief-only craft law — no Design Spine shell, CopyPack, or layoutReference recipes.
+      ensembleContractBlock = formatOriginalCraftRules({
+        brief: briefSeed,
+        productName: lockedProductName,
+        freshnessKey: designFreshnessKey,
+      }).join('\n');
+      const { announceCreatePhase } = await import('@/lib/createStatus');
+      const { setEngineModel } = await import('@/lib/novaEngine');
+      // Bind sticky craft model once (no Plan/Design/Copy seat swaps).
+      try {
+        if (coderGate.id && coderGate.id !== 'NOVA-auto') {
+          host.pushStatus(`Loading model · **${coderGate.name}** (one brain for this build)…`);
+          await setEngineModel?.(coderGate.id);
         }
-        const designed = await runCreateDesignHop({
-          brief: briefSeed,
-          productName: lockedProductName,
-          spec: ensembleSpec,
-          modelId: designer.id,
-          modelName: designer.name,
-          shouldAbort: () => Boolean(host.shouldAbort?.()),
-        });
-        ensembleContract = designed.contract;
-        // Warm craft GGUF while we still hold design results.
-        try {
-          const { announceCreatePhase } = await import('@/lib/createStatus');
-          await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
-        } catch {
-          void setEngineModel?.(coderGate.id);
-        }
-      }
-      if (
-        copyBrain
-        && copyBrain.id !== coderGate.id
-        && ensembleSpec
-        && ensembleContract
-        && copyBrain.id !== designer?.id
-      ) {
-        try {
-          const { announceCreatePhase } = await import('@/lib/createStatus');
-          await announceCreatePhase(host, 'copy', { id: copyBrain.id, name: copyBrain.name });
-        } catch {
-          host.pushStatus(`Copy · **${copyBrain.name}** (words, not code)…`);
-        }
-        const copied = await runCreateCopyHop({
-          brief: briefSeed,
-          productName: lockedProductName,
-          spec: ensembleSpec,
-          contract: ensembleContract,
-          modelId: copyBrain.id,
-          modelName: copyBrain.name,
-          shouldAbort: () => Boolean(host.shouldAbort?.()),
-        });
-        ensembleCopy = copied.copy;
-        try {
-          const { announceCreatePhase } = await import('@/lib/createStatus');
-          await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
-        } catch {
-          void setEngineModel?.(coderGate.id);
-        }
-      } else if (ensembleSpec && ensembleContract) {
-        ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
-      }
-      if (ensembleSpec && ensembleContract && ensembleCopy) {
-        ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
-        host.pushStatus(`Contract locked · ${ensembleSpec.genre}…`);
-      }
-    }
-    if (ensembleSpec && ensembleContract && ensembleCopy) {
-      saveChatBuildMemory({
-        chatId: host.chatId,
-        spec: ensembleSpec,
-        contract: ensembleContract,
-        copy: ensembleCopy,
-        lastPhase: 'contract',
-        projectId: null,
-        updatedAt: Date.now(),
-      });
+      } catch { /* ignore */ }
+      await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name }, { setEngine: false });
+      host.pushStatus(`Single Brain · **${coderGate.name}** (original craft from brief)…`);
     }
   } catch {
-    /* ensemble is best-effort — never block create */
-  }
-  // Layout-contract floor when ensemble hops did not produce a spec.
-  if (!ensembleSpec) {
-    try {
-      const { buildProductSpec, genreFloor, defaultCopyPack, formatEnsembleBriefBlock } = await import('@/lib/createLayoutContract');
-      ensembleSpec = buildProductSpec({
-        brief: buildIntent.summary || host.content,
-        productName: lockedProductName,
-      });
-      ensembleContract = genreFloor(ensembleSpec.genre);
+    /* originality brief is best-effort — never block create */
+    if (!ensembleContractBlock && !blankSolidFromUser) {
       try {
-        const { applyLayoutReference } = await import('@/lib/createLayoutContract');
-        ensembleContract = applyLayoutReference(
-          `${buildIntent.summary || ''}\n${host.content || ''}`,
-          ensembleContract,
-        );
-      } catch { /* keep floor */ }
-      ensembleCopy = defaultCopyPack(ensembleSpec, ensembleContract);
-      ensembleContractBlock = formatEnsembleBriefBlock(ensembleSpec, ensembleContract, ensembleCopy);
-    } catch { /* ignore */ }
+        ensembleContractBlock = formatOriginalCraftRules({
+          brief: buildIntent.summary || host.content,
+          productName: lockedProductName,
+          freshnessKey: designFreshnessKey,
+        }).join('\n');
+      } catch { /* ignore */ }
+    }
   }
   // createV2: do not auto-open Code mid-craft (tree+editor freezes the shell).
   if (CREATE_V2_AUTO_OPEN_CODE || !isCreateV2Active()) {
@@ -930,6 +877,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const originDiskRoot = created.projectPath || null;
     const originProjectId = created.projectId || newProjectId;
     let createFilesAcc: Record<string, string> = { ...created.files };
+    let craftCheckpoint = snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
+      label: 'scaffold',
+      diskRoot: originDiskRoot,
+    });
     try {
       const { mergeBriefNpmDependencies } = await import('@/lib/projectScaffolds');
       createFilesAcc = mergeBriefNpmDependencies(
@@ -937,18 +888,28 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
       );
     } catch { /* optional */ }
-    // createV2 D: scaffold must always include a complete Vite package.json before craft.
+    // createV2 D: scaffold must always include a complete Vite shell before craft.
+    // Flush ALL repaired entry files (index.html/#root, main, vite.config) — package.json alone
+    // left static index.html on disk and blanked Live.
     try {
       const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
       const repaired = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
       createFilesAcc = repaired.files;
       if (repaired.repaired.length) {
-        host.pushStatus('Scaffold · Vite package.json verified…');
+        host.pushStatus('Scaffold · Vite entry files verified…');
         if (originDiskRoot) {
-          const pkg = createFilesAcc['package.json'];
-          if (pkg) {
+          const flushKeys = [
+            'package.json',
+            'index.html',
+            'vite.config.js',
+            'vite.config.ts',
+            'src/main.jsx',
+            'src/main.tsx',
+            'src/index.css',
+          ].filter((k) => createFilesAcc[k]);
+          if (flushKeys.length) {
             await applyChatReplyEdits({
-              reply: `@@@FILE package.json\n${pkg}`,
+              reply: flushKeys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
               projectId: originProjectId,
               projectName: lockedProductName,
               files: createFilesAcc,
@@ -966,39 +927,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       diskRoot: originDiskRoot,
       force: true,
     });
-    // createV2: no prebuilt App seeds (apple/arcade floors). Coder writes App from the brief.
-    if (!isCreateV2Active()) {
-    try {
-      const { briefLooksLikeAppleStyleHomepage } = await import('@/lib/createBuildQuality');
-      const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
-      const briefForSeed = [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n');
-      const seedArcade = looksLikePlayableCanvasGame(briefForSeed) || looksLikeFpsGame(briefForSeed);
-      if (briefLooksLikeAppleStyleHomepage(briefForSeed) || seedArcade) {
-        const { realizeBriefUi } = await import('@/lib/createRealize');
-        const seeded = realizeBriefUi(createFilesAcc, lockedProductName, briefForSeed);
-        if (seeded.changed) {
-          createFilesAcc = seeded.files;
-          host.pushStatus(seedArcade
-            ? 'Seeded playable canvas game loop…'
-            : 'Seeded apple.com-style product bands…');
-          if (originDiskRoot) {
-            const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
-            await applyChatReplyEdits({
-              reply: [
-                createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
-                createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
-              ].filter(Boolean).join('\n'),
-              projectId: originProjectId,
-              projectName: lockedProductName,
-              files: createFilesAcc,
-              userMessage: briefForSeed,
-              diskRoot: originDiskRoot,
-            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
-          }
-        }
-      }
-    } catch { /* seed best-effort */ }
-    }
+    // Bare Vite wiring only — never pre-write a Design Spine / CopyPack product template.
     updateCreateJob(jobId, {
       path: originDiskRoot || '',
       projectId: originProjectId,
@@ -1044,13 +973,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       looksLikeFillerStubAppSource,
       isEmptyOrStubAppSource,
     } = await import('@/lib/createBuildQuality');
-    let blankSolidColor: string | null = null;
+    // Prefer the raw user ask — ensemble fluff in briefForUi used to kill blank-solid detection.
+    let blankSolidColor: string | null = blankSolidFromUser || blankSolidColorFromAsk(String(host.content || ''));
     try {
-      const { blankSolidColorFromAsk, reactSurgicalMicroAskEdits } = await import('@/lib/webProjectCanon');
-      blankSolidColor = blankSolidColorFromAsk(briefForUi);
+      const { reactSurgicalMicroAskEdits } = await import('@/lib/webProjectCanon');
       // Never run micro surgical (center-word / cream rails) on rich marketing / chat creates —
       // that path mangles long product briefs into a one-line stub.
-      const skipSurgical = briefNeedsCreateUiPolish(briefForUi)
+      const skipSurgical = Boolean(blankSolidColor)
+        || briefNeedsCreateUiPolish(briefForUi)
         || briefLooksLikeMarketingLanding(briefForUi)
         || briefLooksLikeChatApp(briefForUi);
       const surgicalCreate = skipSurgical ? [] : reactSurgicalMicroAskEdits(createFilesAcc, briefForUi);
@@ -1068,18 +998,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         if (surgicalApplied.ok && surgicalApplied.updated.length) {
           createFilesAcc = surgicalApplied.files;
         }
-      } else if (blankSolidColor && !briefNeedsCreateUiPolish(briefForUi) && !briefLooksLikeMarketingLanding(briefForUi)) {
+      } else if (blankSolidColor) {
         host.pushStatus(`Painting solid ${blankSolidColor} shell…`);
+        const shellFiles = viteSolidShellEdits(blankSolidColor);
         const blankApplied = await applyChatReplyEdits({
-          reply: '',
+          reply: shellFiles.map((e) => `@@@FILE ${e.path}\n${e.content}`).join('\n'),
           projectId: originProjectId,
           projectName: buildIntent.name,
           files: createFilesAcc,
-          userMessage: briefForUi,
+          userMessage: String(host.content || ''),
           diskRoot: originDiskRoot,
         });
-        if (blankApplied.ok && blankApplied.updated.length) {
-          createFilesAcc = blankApplied.files;
+        if (blankApplied.ok) {
+          createFilesAcc = { ...blankApplied.files };
+          delete createFilesAcc['src/App.tsx'];
         }
       }
     } catch { /* best-effort */ }
@@ -1087,13 +1019,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     /** null = skipped (scaffold-only OK); true = Preview-ready UI applied; false = fail-closed */
     let uiPolishOk: boolean | null = null;
     let uiPolishReasons: string[] = [];
-    // Every real create must leave a working UI — never claim success on the Vite title splash.
-    // Marketing / quiet-luxury briefs always polish even if blank-solid heuristics misfire.
-    // No prebuilt micro shortcuts — coder (tool loop / polish) owns App.jsx for every create.
-    const needsUiPolish = (
-      !blankSolidColor || briefNeedsCreateUiPolish(briefForUi)
-      || briefLooksLikeMarketingLanding(briefForUi)
-    );
+    /** Recovery floor used — Live may unlock; quality Ready must still fail (pass spine). */
+    let createFloorFallback = false;
+    // Blank solid pages are DONE after the shell paint — never force marketing polish.
+    const needsUiPolish = !blankSolidColor;
+    if (blankSolidColor) {
+      uiPolishOk = true;
+      uiPolishReasons = [];
+      host.pushStatus('Blank shell ready — skipping craft / Style hops…');
+    }
     const {
       createBriefSpecFromAsk,
       polishPromptLinesFromBrief,
@@ -1210,8 +1144,25 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         } catch { /* ignore */ }
       }
       try {
-        const { setEngineModel } = await import('@/lib/novaEngine');
-        if (coderGate.ok) void setEngineModel?.(coderGate.id);
+        // Item 5: hard-pin craft model — await bind so Auto/rotation cannot steal mid-write.
+        try {
+          const { setEngineModel } = await import('@/lib/novaEngine');
+          if (coderGate.ok) {
+            await setEngineModel?.(coderGate.id);
+            try {
+              const { setLocalPrefs } = await import('@/lib/localPrefs');
+              const { isCoderEngineId } = await import('@/lib/enginePick');
+              // Pin coder role only — never overwrite chat Multimodal prefs (new chats
+              // were getting stuck on the craft GGUF after create).
+              setLocalPrefs({
+                aiMode: 'local_only',
+                ...(isCoderEngineId(coderGate.id)
+                  ? { activeCoderId: coderGate.id, defaultCodeModelId: coderGate.id }
+                  : {}),
+              });
+            } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
       } catch { /* ignore */ }
       try {
         const coder = coderGate.ok
@@ -1232,15 +1183,36 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           );
           const appPath = preferTs ? 'src/App.tsx' : 'src/App.jsx';
           createFollowLock = appPath;
+          craftCheckpoint = snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
+            label: 'pre-craft',
+            diskRoot: originDiskRoot,
+          });
           const basePromptLines = [
             ...polishPromptLinesFromBrief(briefSpec, appPath, briefForUi),
+            formatCreateProjectMap(createFilesAcc),
+            buildRankedProjectMap(createFilesAcc, briefForUi, { limit: 16 }),
             ...(isCreateV2Active()
-              ? [
-                  'createV2 RULES:',
-                  `- Write ONLY @@@FILE ${appPath} and @@@FILE src/App.css.`,
-                  '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
-                  '- Put the full working product UI in App — not a title stub.',
-                ]
+              ? (() => {
+                const shopAsk = /\b(?:cart|checkout|purchase|add\s+to\s+cart|online\s+store|e-?commerce)\b/i.test(briefForUi)
+                  || /\b(?:liquor|spirits?|whiskey|whisky|bourbon|vodka|gin|tequila|bottle\s+shop)\b/i.test(briefForUi)
+                  || (/\b(?:shop|store|boutique)\b/i.test(briefForUi) && /\b(?:buy|browse|products?|filter|quantity)\b/i.test(briefForUi));
+                return shopAsk
+                  ? [
+                      'createV2 STOREFRONT RULES:',
+                      `- REQUIRED @@@FILE: ${appPath}, src/App.css, and src/data/products.ts (≥8 products).`,
+                      '- Also allowed: src/components/*.tsx (ProductCard, CartDrawer, FilterBar).',
+                      '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
+                      '- Complete filters + qty cart + purchase before finishing — not a title stub.',
+                      createV2StagedWriteInstructions(preferTs),
+                    ]
+                  : [
+                      'createV2 RULES:',
+                      `- Write ONLY @@@FILE ${appPath} and @@@FILE src/App.css.`,
+                      '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
+                      '- Put the full working product UI in App — not a title stub.',
+                      createV2StagedWriteInstructions(preferTs),
+                    ];
+              })()
               : []),
             'FRESH BUILD RULES:',
             '- Build exactly the product in the USER ASK + research notes above.',
@@ -1248,6 +1220,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             '- Interactive controls must match the ask (real useState flows) — not a decorative shell.',
             ...(createResearchNotes
               ? ['- Prefer the PRODUCT RESEARCH / IMPLEMENTATION NOTES over inventing a layout.']
+              : []),
+            ...(createFilesAcc['NOVA.md'] || createFilesAcc['AGENTS.md']
+              ? [
+                  '## Project rules (NOVA.md / AGENTS.md)',
+                  String(createFilesAcc['NOVA.md'] || createFilesAcc['AGENTS.md'] || '').slice(0, 1500),
+                ]
               : []),
           ];
           const polishStarted = Date.now();
@@ -1262,10 +1240,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               createWallBudgetMs(briefForUi),
             );
           if (polishTotalBudgetMs < 20_000 || createTimedOut()) {
-            // Walls are uncapped (Infinity). This branch only fires if remaining budget
-            // was already consumed by a prior hard limit — keep as safety stop.
+            // Soft wall already spent — stop before another craft attempt.
             uiPolishOk = false;
             uiPolishReasons = ['Create interrupted before UI polish'];
+            markCreateJobFailed(jobId, 'Create soft wall reached before UI craft finished');
             markBuildDiagnosticsEnded();
             await host.finishPlainReply(
               createBudgetExceededReply(budgetProfile, lockedProductName),
@@ -1276,12 +1254,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           /** No byte growth for this long → cancel GGUF and retry that file. */
           const POLISH_STALL_ABORT_MS = budgetProfile === 'simple' ? 10_000 : 14_000;
           const { POLISH_ALMOST_DONE_LABEL, POLISH_FINAL_PASS_LABEL } = await import('@/lib/createProgressCopy');
-          /** Tiny scaffold files finish fast then sit in stream focus — don't hard-abort on them (legacy only). */
-          const isScaffoldStallExempt = (p: string) => (
-            !isCreateV2Active()
-            && /(?:^|\/)(?:package\.json|package-lock\.json|tsconfig.*\.json|vite\.config\.\w+|index\.html|main\.[jt]sx?|README\.md|\.gitignore)$/i
-              .test(String(p || '').replace(/\\/g, '/'))
-          );
+          /** Never exempt index.css / package.json from stall — that caused 19m Code hangs. */
+          const isScaffoldStallExempt = (_p: string) => false;
           let modelReply = '';
           let lastError = '';
           let streamBuf = '';
@@ -1335,7 +1309,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   ...basePromptLines.slice(1),
                 ].join('\n');
             if (stallRetry) {
-              host.pushStatus(`Retrying stalled write: ${stallRetryPath}…`, stallRetryPath);
+              host.pushStatus(
+                isCreateV2Active()
+                  ? createV2StatusRepair(stallRetryPath)
+                  : `Retrying stalled write: ${stallRetryPath}…`,
+                stallRetryPath,
+              );
               stalledPathHint = '';
             } else if (enrichPass) {
               host.pushStatus('Deepening the product UI: flows, confirmation, and premium layout…', null);
@@ -1348,6 +1327,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             let lastFocusLen = 0;
             let lastGrowthAt = Date.now();
             let pathFocusedAt = Date.now();
+            let appFamilyStartedAt = 0;
             let lastStreamAt = Date.now();
             let sawStreamToken = false;
             let stallAbort = false;
@@ -1365,13 +1345,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   // Status only — do NOT rotate Code files every few seconds (that freezes the shell).
                   if (now - lastWaitStatusAt >= 8_000) {
                     lastWaitStatusAt = now;
+                    // Do NOT heartbeat here — that fakes "coding ·" while the model is still loading.
                     host.pushStatus(
                       waited < 20_000
-                        ? `Loading coder · waiting for first App tokens… (${Math.round(waited / 1000)}s)`
-                        : `Coder still loading · will cancel if quiet past ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s… (${Math.round(waited / 1000)}s)`,
-                      appPath,
+                        ? `Loading model · waiting for first tokens… (${Math.round(waited / 1000)}s)`
+                        : `Still loading · will cancel if quiet past ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s… (${Math.round(waited / 1000)}s)`,
+                      null,
                     );
-                    tickBuildHeartbeat(`waiting · ${appPath}`);
                   }
                 }
                 if (!sawStreamToken && now - attemptStarted > CREATE_V2_FIRST_TOKEN_MS) {
@@ -1389,13 +1369,34 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   }
                   return;
                 }
-                if (sawStreamToken && now - lastStreamAt > createV2IdleStallMs(lastFocusPath || appPath)) {
+                // Idle = no App byte growth (token trickles must not refresh forever).
+                if (sawStreamToken && now - lastGrowthAt > createV2IdleStallMs(lastFocusPath || appPath)) {
                   stallAbort = true;
                   stallAbortPath = createV2StallRetryPath(lastFocusPath || appPath, preferTs);
                   if (!stallCancelFired) {
                     stallCancelFired = true;
                     host.pushStatus(
                       `Stream idle — cancelling to retry App…`,
+                      stallAbortPath,
+                    );
+                    void import('@/lib/novaEngine')
+                      .then(({ engineGenerateCancel }) => engineGenerateCancel())
+                      .catch(() => {});
+                  }
+                  return;
+                }
+                // App.jsx ↔ App.css thrash used to reset per-path walls forever.
+                if (
+                  sawStreamToken
+                  && appFamilyStartedAt > 0
+                  && now - appFamilyStartedAt > CREATE_V2_APP_FAMILY_WALL_MS
+                ) {
+                  stallAbort = true;
+                  stallAbortPath = createV2StallRetryPath(lastFocusPath || appPath, preferTs);
+                  if (!stallCancelFired) {
+                    stallCancelFired = true;
+                    host.pushStatus(
+                      `App craft wall (${Math.round(CREATE_V2_APP_FAMILY_WALL_MS / 60_000)}m) — cancelling…`,
                       stallAbortPath,
                     );
                     void import('@/lib/novaEngine')
@@ -1417,9 +1418,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 preferredModelId: coder.id,
                 preferredModelName: coder.name,
                 preferredSource: coder.source,
-                stickyModelId: host.stickyModelId || undefined,
-                stickyModelName: host.stickyModelName || undefined,
-                stickyPinnedSource: host.stickyModelId ? 'local' : undefined,
+                // Hard pin: craft always uses the selected coder, not Multimodal/Auto.
+                stickyModelId: coder.id,
+                stickyModelName: coder.name,
+                stickyPinnedSource: 'local',
                 allowFileEdits: true,
                 // Hard wall — never inherit the legacy 12-minute build timeout.
                 timeoutMs: Math.min(polishBudgetMs, isCreateV2Active() ? createV2AttemptWallMs(budgetProfile) : polishBudgetMs),
@@ -1431,21 +1433,32 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               },
               (delta) => {
                 streamBuf = String(delta || '');
-                // Only real @@@FILE craft counts as "alive" — thinking/trickle text must not
-                // defeat the first-token cancel (that caused 7+ minute App stub stalls).
-                if (/@@@FILE\b/i.test(streamBuf)) {
+                // Only App / App.css @@@FILE counts as craft heartbeat.
+                // Scaffold trickles (index.css) used to refresh lastStreamAt forever → 19m stalls.
+                const activeHdr = (() => {
+                  const active = streamBuf.lastIndexOf('@@@FILE');
+                  if (active < 0) return '';
+                  const hdr = streamBuf.slice(active).match(/^@@@FILE\s+([^\n\r]+)/);
+                  return String(hdr?.[1] || '').replace(/\\/g, '/').replace(/^\.\//, '').trim();
+                })();
+                const activeIsApp = Boolean(activeHdr) && isCreateV2AppPath(activeHdr);
+                const activeIsScaffold = Boolean(activeHdr) && isCreateV2ScaffoldPath(activeHdr);
+                if (activeIsApp) {
+                  sawStreamToken = true;
+                  lastStreamAt = Date.now();
+                } else if (/@@@FILE\b/i.test(streamBuf) && !activeIsScaffold && !isCreateV2Active()) {
+                  // Legacy: any non-scaffold file header counts.
                   sawStreamToken = true;
                   lastStreamAt = Date.now();
                 }
                 let focusPath = '';
                 try {
                   // Prefer the in-progress @@@FILE (last header), not the last completed extract.
-                  const active = streamBuf.lastIndexOf('@@@FILE');
-                  if (active >= 0) {
-                    const hdr = streamBuf.slice(active).match(/^@@@FILE\s+([^\n\r]+)/);
-                    if (hdr?.[1]) {
-                      focusPath = String(hdr[1]).replace(/\\/g, '/').replace(/^\.\//, '').trim();
-                    }
+                  // createV2: never park Code focus on scaffold chrome — jump to App.
+                  if (activeHdr) {
+                    focusPath = (isCreateV2Active() && isCreateV2ScaffoldPath(activeHdr))
+                      ? appPath
+                      : activeHdr;
                   }
                   const streamed = extractStreamingFileEdits(streamBuf);
                   if (streamed.length) {
@@ -1456,7 +1469,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                       // createV2: ignore mid-stream writes to scaffold chrome (index.css etc).
                       if (isCreateV2Active() && isCreateV2ScaffoldPath(rel)) continue;
                       merged[rel] = e.content;
-                      if (!focusPath) focusPath = rel;
+                      if (!focusPath || (isCreateV2Active() && isCreateV2ScaffoldPath(focusPath))) {
+                        focusPath = rel;
+                      }
                     }
                     createFilesAcc = merged;
                     const now = Date.now();
@@ -1468,16 +1483,26 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     const contentGrew = Boolean(focusPath)
                       && focusPath === lastFocusPath
                       && !isCreateV2ScaffoldPath(focusPath)
-                      && focusLen > lastFocusLen + 24; // ignore tiny trickle bumps
+                      && focusLen > lastFocusLen + 2; // paint often — Code typewriter smooths the rest
                     if (pathChanged) {
+                      const appFamilyHop = isCreateV2Active()
+                        && isCreateV2AppPath(focusPath)
+                        && (!lastFocusPath || isCreateV2AppPath(lastFocusPath));
                       lastFocusPath = focusPath;
                       lastFocusLen = focusLen;
                       lastGrowthAt = now;
-                      pathFocusedAt = now;
+                      // Stay on one App-family clock when hopping App.jsx ↔ App.css.
+                      if (!appFamilyHop) pathFocusedAt = now;
+                      if (isCreateV2AppPath(focusPath) && !appFamilyStartedAt) {
+                        appFamilyStartedAt = now;
+                      }
                       seenCodingPaths.add(focusPath);
                     } else if (contentGrew) {
                       lastFocusLen = focusLen;
                       lastGrowthAt = now;
+                      if (isCreateV2AppPath(focusPath) && !appFamilyStartedAt) {
+                        appFamilyStartedAt = now;
+                      }
                       // Activity pulse — Code UI must not show "stall" while App is still growing.
                       tickBuildHeartbeat(createFileBuildLabel(focusPath, 'Coding'));
                     } else if (
@@ -1529,7 +1554,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                       }
                     }
                     // createV2: status + heartbeat only mid-stream — never soft-bind full files map.
-                    if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 220) {
+                    if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 32) {
                       lastStudioPaint = now;
                       const base = focusPath.split('/').pop() || focusPath;
                       host.pushStatus(
@@ -1561,21 +1586,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     }
                   } else if (isCreateV2Active() && focusPath) {
                     // @@@FILE header only (incomplete body) — still enforce path wall.
+                    // Never linger on scaffold chrome in Code — remap focus to App.
                     const now = Date.now();
-                    if (focusPath !== lastFocusPath) {
-                      lastFocusPath = focusPath;
+                    const displayFocus = isCreateV2ScaffoldPath(focusPath) ? appPath : focusPath;
+                    if (displayFocus !== lastFocusPath) {
+                      lastFocusPath = displayFocus;
                       pathFocusedAt = now;
                       lastGrowthAt = now;
-                      host.pushStatus(createFileBuildLabel(focusPath, 'Coding'), focusPath);
+                      host.pushStatus(createFileBuildLabel(displayFocus, 'Coding'), displayFocus);
                     }
-                    if (now - pathFocusedAt > createV2PathWallMs(focusPath) && !stallAbort) {
+                    const wallPath = isCreateV2ScaffoldPath(focusPath) ? focusPath : displayFocus;
+                    if (now - pathFocusedAt > createV2PathWallMs(wallPath) && !stallAbort) {
                       stallAbort = true;
                       stallAbortPath = createV2StallRetryPath(focusPath, preferTs);
                       if (!stallCancelFired) {
                         stallCancelFired = true;
                         host.pushStatus(
                           `Path wall on ${focusPath.split('/').pop()} — cancelling…`,
-                          focusPath,
+                          displayFocus,
                         );
                         void import('@/lib/novaEngine')
                           .then(({ engineGenerateCancel }) => engineGenerateCancel())
@@ -1590,13 +1618,196 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               if (craftWatchId != null) window.clearInterval(craftWatchId);
             }
             if (stallAbort && stallAbortPath) {
-              stalledPathHint = stallAbortPath;
+              // Tiny sticky-note asks: don't burn minutes retrying a quiet coder — ship the floor now.
+              try {
+                const {
+                  briefLooksLikeStickyNotePage,
+                  briefLooksLikeFiringJournal,
+                  stickyNotePageApp,
+                  stickyNotePageCss,
+                  buildUtilityFloorFromBrief,
+                  healNearReadyCreateUi,
+                  previewReadyForBrief,
+                } = await import('@/lib/createBuildQuality');
+                const kilnBrief = briefLooksLikeFiringJournal(briefForUi)
+                  || briefLooksLikeFiringJournal(host.content)
+                  || /\b(?:kilnbook|pottery|firing\s+journal)\b/i.test(`${briefForUi}\n${lockedProductName}`);
+                // Tip / todo / coffee ONLY when the ask is positively that product —
+                // “Forbidden: tip calculator, todo” must never trip a tip stub.
+                const { briefWantsUtilityFloorKind } = await import('@/lib/createBuildQuality');
+                const utilityBlob = `${briefForUi}\n${lockedProductName}\n${host.content}`;
+                const utilityStallBrief = briefWantsUtilityFloorKind(utilityBlob, 'tip')
+                  || briefWantsUtilityFloorKind(utilityBlob, 'todo')
+                  || briefWantsUtilityFloorKind(utilityBlob, 'coffee');
+                if (kilnBrief || utilityStallBrief) {
+                  const floor = buildUtilityFloorFromBrief(lockedProductName, briefForUi);
+                  if (!floor.app || floor.kind === 'none') {
+                    /* no utility stub for this brief — keep craft output */
+                  } else {
+                  host.pushStatus(
+                    kilnBrief
+                      ? 'Coder quiet — shipping KilnBook firing-journal floor…'
+                      : `Coder quiet — shipping ${floor.kind} utility floor…`,
+                  );
+                  const appKey = createFilesAcc['src/App.jsx'] && !createFilesAcc['src/App.tsx']
+                    ? 'src/App.jsx'
+                    : 'src/App.tsx';
+                  // Keep a near-complete model App when it already looks like the ask.
+                  const priorApp = String(createFilesAcc[appKey] || '');
+                  const tipReady = /\bbillAmount\b|\btipPercent\b|\btip\s*percent\b/i.test(priorApp)
+                    && /<(?:input|button)\b/i.test(priorApp)
+                    && priorApp.length >= 400;
+                  const todoReady = /\b(?:todos?|setTodos|addTodo)\b/i.test(priorApp)
+                    && /<(?:input|button)\b/i.test(priorApp)
+                    && priorApp.length >= 400;
+                  const keepPrior = (floor.kind === 'tip' && tipReady)
+                    || (floor.kind === 'todo' && todoReady)
+                    || (priorApp.length >= 900 && /export\s+default\s+function\s+App/i.test(priorApp));
+                  createFilesAcc = {
+                    ...createFilesAcc,
+                    [appKey]: keepPrior ? priorApp : floor.app,
+                    'src/App.css': keepPrior && createFilesAcc['src/App.css']
+                      ? createFilesAcc['src/App.css']
+                      : floor.css,
+                  };
+                  softBindCreateStudio(host, {
+                    files: createFilesAcc,
+                    projectId: originProjectId,
+                    name: lockedProductName,
+                    diskRoot: originDiskRoot,
+                    force: true,
+                  });
+                  if (originDiskRoot) {
+                    await applyChatReplyEdits({
+                      reply: [
+                        `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                        `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+                      ].join('\n'),
+                      projectId: originProjectId,
+                      projectName: lockedProductName,
+                      files: createFilesAcc,
+                      userMessage: briefForUi,
+                      diskRoot: originDiskRoot,
+                    }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+                  }
+                  if (!keepPrior) createFloorFallback = true;
+                  uiPolishOk = true;
+                  uiPolishReasons = keepPrior ? [] : [`${floor.kind} utility floor — not original craft`];
+                  lastError = '';
+                  host.pushStatus(
+                    keepPrior
+                      ? `Keeping crafted ${floor.kind} App after stall — continuing to Live…`
+                      : `${floor.kind} floor ready — Live unlock only (quality gated)…`,
+                  );
+                  break;
+                  } // else: floor.app present
+                }
+                if (briefLooksLikeStickyNotePage(briefForUi) || briefLooksLikeStickyNotePage(host.content)) {
+                  host.pushStatus('Coder quiet — shipping basic sticky-note page…');
+                  const appKey = createFilesAcc['src/App.jsx'] && !createFilesAcc['src/App.tsx']
+                    ? 'src/App.jsx'
+                    : 'src/App.tsx';
+                  createFilesAcc = {
+                    ...createFilesAcc,
+                    [appKey]: stickyNotePageApp(lockedProductName),
+                    'src/App.css': stickyNotePageCss(),
+                  };
+                  softBindCreateStudio(host, {
+                    files: createFilesAcc,
+                    projectId: originProjectId,
+                    name: lockedProductName,
+                    diskRoot: originDiskRoot,
+                    force: true,
+                  });
+                  if (originDiskRoot) {
+                    await applyChatReplyEdits({
+                      reply: [
+                        `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                        `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+                      ].join('\n'),
+                      projectId: originProjectId,
+                      projectName: lockedProductName,
+                      files: createFilesAcc,
+                      userMessage: briefForUi,
+                      diskRoot: originDiskRoot,
+                    }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+                  }
+                  uiPolishOk = true;
+                  uiPolishReasons = [];
+                  lastError = '';
+                  host.pushStatus('Sticky-note page ready (title + note box)…');
+                  break;
+                }
+                // User Stop must win over stall-heal / Style hops — otherwise UI says
+                // "(stopped)" while create keeps coding in the background.
+                if (host.shouldAbort?.()) {
+                  markCreateJobFailed(jobId, 'Stopped');
+                  unbindCreateChat(host, host.chatId);
+                  return { status: 'handled' };
+                }
+                // Near-complete App after stall/wall: close truncation + CSS/brand heal, then Ready.
+                const appKeyStall = createFilesAcc['src/App.jsx']
+                  ? 'src/App.jsx'
+                  : (createFilesAcc['src/App.tsx'] ? 'src/App.tsx' : '');
+                const appStallBody = appKeyStall ? String(createFilesAcc[appKeyStall] || '') : '';
+                if (appKeyStall && appStallBody.length >= 800) {
+                  host.pushStatus('Stall with partial App — healing for Preview Ready…');
+                  const { healNearCompleteTruncatedSource } = await import('@/lib/freshSpaFromBrief');
+                  const closed = healNearCompleteTruncatedSource(appKeyStall, appStallBody);
+                  createFilesAcc = { ...createFilesAcc, [appKeyStall]: closed || appStallBody };
+                  const near = healNearReadyCreateUi(createFilesAcc, lockedProductName, briefForUi);
+                  if (near.changed) createFilesAcc = near.files;
+                  softBindCreateStudio(host, {
+                    files: createFilesAcc,
+                    projectId: originProjectId,
+                    name: lockedProductName,
+                    diskRoot: originDiskRoot,
+                    force: true,
+                  });
+                  if (originDiskRoot) {
+                    await applyChatReplyEdits({
+                      reply: [
+                        `@@@FILE ${appKeyStall}\n${createFilesAcc[appKeyStall]}`,
+                        createFilesAcc['src/App.css']
+                          ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`
+                          : '',
+                      ].filter(Boolean).join('\n'),
+                      projectId: originProjectId,
+                      projectName: lockedProductName,
+                      files: createFilesAcc,
+                      userMessage: briefForUi,
+                      diskRoot: originDiskRoot,
+                    }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+                  }
+                  const gate = previewReadyForBrief(createFilesAcc, {
+                    productName: lockedProductName,
+                    brief: briefForUi,
+                    spec: ensembleSpec,
+                    contract: ensembleContract,
+                  });
+                  if (gate.ok) {
+                    uiPolishOk = true;
+                    uiPolishReasons = [];
+                    lastError = '';
+                    host.pushStatus('Partial App healed — Preview Ready…');
+                    break;
+                  }
+                  uiPolishReasons = gate.reasons?.slice(0, 6) || [];
+                  host.pushStatus('Partial heal incomplete — one repair pass…');
+                }
+              } catch { /* keep partial */ }
+              // Item 1: one short repair pass when attempts remain.
               lastError = `Coder stalled on ${stallAbortPath}`;
-              host.pushStatus(`Retrying ${stallAbortPath} after stall…`, stallAbortPath);
-              // Keep partial bytes; next pass rewrites just this path.
-              continue;
+              if (attempt < maxPolishAttempts - 1) {
+                stalledPathHint = stallAbortPath;
+                host.pushStatus(`Craft wall on ${stallAbortPath.split('/').pop()} — repair pass…`, stallAbortPath);
+                continue;
+              }
+              stalledPathHint = '';
+              host.pushStatus(`Craft wall hit on ${stallAbortPath} — continuing with partial App…`, stallAbortPath);
+              break;
             }
-            if (await host.stopIfSuperseded()) {
+            if (host.shouldAbort?.() || await host.stopIfSuperseded()) {
               markCreateJobFailed(jobId, 'Stopped');
               unbindCreateChat(host, host.chatId);
               return { status: 'handled' };
@@ -1670,7 +1881,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               healMissingIconPackImports,
               stripModelProseFromSource,
             } = await import('@/lib/createBuildQuality');
-            const { looksLikeTruncatedUiSource } = await import('@/lib/freshSpaFromBrief');
+            const { looksLikeTruncatedUiSource, healNearCompleteTruncatedSource } = await import('@/lib/freshSpaFromBrief');
             const { createFileReEditLabel } = await import('@/lib/createProgressCopy');
             // Heal missing ./productData-style imports instead of fail-looping forever.
             {
@@ -1701,11 +1912,40 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
             }
             const missing = createPolishMissingLocalImports(createFilesAcc);
-            const appProbe = createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '';
-            const cssProbe = createFilesAcc['src/App.css'] || '';
+            let appProbe = createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '';
+            let cssProbe = createFilesAcc['src/App.css'] || '';
             const appKeyProbe = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
               ? 'src/App.tsx'
               : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
+            // Near-complete local GGUF cuts (`<footer className="foo`) — heal before fail/retry.
+            {
+              const healedApp = healNearCompleteTruncatedSource(appKeyProbe, appProbe);
+              const healedCss = healNearCompleteTruncatedSource('src/App.css', cssProbe);
+              const healBlocks: string[] = [];
+              if (healedApp !== appProbe) {
+                createFilesAcc = { ...createFilesAcc, [appKeyProbe]: healedApp };
+                appProbe = healedApp;
+                healBlocks.push(`@@@FILE ${appKeyProbe}\n${healedApp}`);
+              }
+              if (healedCss !== cssProbe) {
+                createFilesAcc = { ...createFilesAcc, 'src/App.css': healedCss };
+                cssProbe = healedCss;
+                healBlocks.push(`@@@FILE src/App.css\n${healedCss}`);
+              }
+              if (healBlocks.length) {
+                host.pushStatus('Healing truncated App/CSS close…', appKeyProbe);
+                try {
+                  await applyChatReplyEdits({
+                    reply: healBlocks.join('\n'),
+                    projectId: originProjectId,
+                    projectName: buildIntent.name,
+                    files: createFilesAcc,
+                    userMessage: briefForUi,
+                    diskRoot: originDiskRoot,
+                  });
+                } catch { /* best-effort */ }
+              }
+            }
             const truncatedApp = looksLikeTruncatedUiSource(appProbe);
             const truncatedCss = looksLikeTruncatedUiSource(cssProbe);
             const truncated = truncatedApp || truncatedCss;
@@ -1714,24 +1954,38 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 ? 'src/App.css'
                 : appKeyProbe;
               host.pushStatus(createFileReEditLabel(badPath), badPath);
-              // Restore disk from last good snapshot — not memory-only.
-              createFilesAcc = { ...polishSnapshot };
-              try {
-                const restoreBlocks = Object.entries(polishSnapshot)
-                  .filter(([p]) => /App\.(tsx|jsx|css)$/i.test(p))
-                  .map(([p, body]) => `@@@FILE ${p}\n${body}`)
-                  .join('\n');
-                if (restoreBlocks) {
-                  await applyChatReplyEdits({
-                    reply: restoreBlocks,
-                    projectId: originProjectId,
-                    projectName: buildIntent.name,
-                    files: createFilesAcc,
-                    userMessage: briefForUi,
-                    diskRoot: originDiskRoot,
-                  });
-                }
-              } catch { /* best-effort restore */ }
+              // Never wipe a longer partial App back to the scaffold stub.
+              // Only restore snapshot when it was a previously verified (non-stub) UI.
+              const snapApp = String(polishSnapshot[appKeyProbe] || polishSnapshot['src/App.jsx'] || polishSnapshot['src/App.tsx'] || '');
+              const snapCss = String(polishSnapshot['src/App.css'] || '');
+              const snapIsStub = snapApp.length < 220
+                || /<h1[^>]*>\s*Todo List\s*<\/h1>\s*<\/div>\s*\)\s*;?\s*\}\s*$/i.test(snapApp)
+                || (/export default function App\(\)\s*\{\s*return\s*\(\s*<div[^>]*>\s*<h1/i.test(snapApp) && snapApp.length < 400);
+              const partialBetter = (truncatedApp && appProbe.length > snapApp.length + 80)
+                || (truncatedCss && cssProbe.length > snapCss.length + 40);
+              if (snapIsStub && partialBetter) {
+                // Keep the longer partial for the next rewrite attempt — do not restore stub.
+                host.pushStatus('Keeping partial App write — rewriting truncated section…', badPath);
+              } else {
+                // Restore disk from last good snapshot — not memory-only.
+                createFilesAcc = { ...polishSnapshot };
+                try {
+                  const restoreBlocks = Object.entries(polishSnapshot)
+                    .filter(([p]) => /App\.(tsx|jsx|css)$/i.test(p))
+                    .map(([p, body]) => `@@@FILE ${p}\n${body}`)
+                    .join('\n');
+                  if (restoreBlocks) {
+                    await applyChatReplyEdits({
+                      reply: restoreBlocks,
+                      projectId: originProjectId,
+                      projectName: buildIntent.name,
+                      files: createFilesAcc,
+                      userMessage: briefForUi,
+                      diskRoot: originDiskRoot,
+                    });
+                  }
+                } catch { /* best-effort restore */ }
+              }
               lastError = missing.length
                 ? `App imports missing modules: ${missing.slice(0, 6).join(', ')}`
                 : 'App/CSS source looks truncated mid-write';
@@ -1833,7 +2087,35 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             host.pushStatus(POLISH_ALMOST_DONE_LABEL);
             await new Promise((r) => setTimeout(r, 120));
             host.pushStatus(POLISH_FINAL_PASS_LABEL);
-            const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
+            const { previewReadyForBrief, healNearReadyCreateUi } = await import('@/lib/createBuildQuality');
+            // Near-ready heal: brand stamp + CSS floor when craft left a real App
+            // but tokens-only App.css / missing product name would fail Ready.
+            try {
+              const nearHeal = healNearReadyCreateUi(createFilesAcc, lockedProductName, briefForUi);
+              if (nearHeal.changed) {
+                createFilesAcc = nearHeal.files;
+                appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+                host.pushStatus(
+                  nearHeal.actions.includes('css-floor')
+                    ? 'Filling thin App.css so Preview can open…'
+                    : 'Stamping product name into the UI…',
+                );
+                if (originDiskRoot) {
+                  const appKeyHeal = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+                  await applyChatReplyEdits({
+                    reply: [
+                      createFilesAcc[appKeyHeal] ? `@@@FILE ${appKeyHeal}\n${createFilesAcc[appKeyHeal]}` : '',
+                      createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+                    ].filter(Boolean).join('\n'),
+                    projectId: originProjectId,
+                    projectName: lockedProductName,
+                    files: createFilesAcc,
+                    userMessage: briefForUi,
+                    diskRoot: originDiskRoot,
+                  }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+                }
+              }
+            } catch { /* best-effort */ }
             const ready = previewReadyForBrief(createFilesAcc, {
               productName: lockedProductName,
               brief: briefForUi,
@@ -1844,7 +2126,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             const briefMisses = briefCreateMisses(briefSpec, createFilesAcc);
             const filler = looksLikeFillerStubAppSource(appBody);
             if (!ready.ok || filler || briefMisses.length) {
-              // Fail-closed for this attempt — one enrich retry max, then stop.
+              // Fail-closed for this attempt — one repair/enrich retry max, then stop.
               uiPolishOk = false;
               uiPolishReasons = [
                 ...(ready.reasons || []),
@@ -1853,6 +2135,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 ...(lastError ? [lastError] : []),
               ];
               if (attempt < maxPolishAttempts - 1) {
+                const reasonBlob = uiPolishReasons.join(' ');
+                const needsRepair = isCreateV2Active()
+                  && /truncat|broken|incomplete|stalled|filler|TypeScript syntax/i.test(reasonBlob);
+                if (needsRepair) {
+                  stalledPathHint = appPath;
+                  host.pushStatus(createV2StatusRepair(appPath), appPath);
+                  continue;
+                }
                 const missHint = (briefMisses[0] || ready.reasons?.[0] || 'UI depth')
                   .replace(/^missing\s+/i, '');
                 host.pushStatus(
@@ -1939,7 +2229,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         }
         const linkedAfterHero = ensureStylesLinked(createFilesAcc);
         createFilesAcc = linkedAfterHero.files;
-        const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName);
+        const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, briefForUi);
         createFilesAcc = wired.files;
         if (wired.changed.length || linkedAfterHero.changed.length) {
           host.pushStatus(wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…');
@@ -1974,15 +2264,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           }).catch(() => {});
         }
         if (uiPolishOk === true) {
-          const recheck = isPreviewReady(createFilesAcc, {
+          // Same brief gate as craft — never demote a marketing homepage via raw requireInteractive.
+          const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
+          const recheck = previewReadyForBrief(createFilesAcc, {
             productName: lockedProductName,
             brief: briefForUi,
-            requireInteractive: chatAppBrief
-              || briefRequiresInteractiveApp(briefForUi)
-              || (
-                !briefLooksLikeMarketingLanding(briefForUi)
-                && briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|messag|borrow/i.test(m))
-              ),
+            spec: ensembleSpec,
+            contract: ensembleContract,
+            requireInteractive: chatAppBrief || briefRequiresInteractiveApp(briefForUi),
           });
           if (!recheck.ok) {
             uiPolishOk = false;
@@ -1994,207 +2283,135 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       }
     }
 
-    // Style hop — contract tokens + constrained CSS (no cream-bias dump).
-    if (needsUiPolish) {
+    // Style polish on the SAME sticky craft model (never swap GGUFs).
+    if (host.shouldAbort?.()) {
+      markCreateJobFailed(jobId, 'Stopped');
+      unbindCreateChat(host, host.chatId);
+      return { status: 'handled' };
+    }
+    if (needsUiPolish && coderGate.ok) {
       try {
         const cssNow = createFilesAcc['src/App.css'] || '';
         const cssThin = cssNow.replace(/\s+/g, '').length < 900
-          || (/#0f1419/.test(cssNow) && cssNow.length < 1200)
-          || !/NOVA layout contract tokens/.test(cssNow);
-        if (cssThin) {
-          const { getEngineStatus } = await import('@/lib/novaEngine');
-          const { getBrainProfile } = await import('@/lib/brainProfile');
-          const {
-            resolveCreateEnsembleTeam,
-            ensembleMember,
-            runCreateStyleHop,
-          } = await import('@/lib/createEnsemble');
-          const profile = await getBrainProfile();
-          const status = await getEngineStatus();
-          const team = resolveCreateEnsembleTeam(status.models, {
-            ramGb: profile.ramGB,
-            maxCoderParamsB: profile.maxCoderParamsB,
-            craftId: coderGate.id,
-            allowMultiHop: false,
-          });
-          const styler = ensembleMember(team, 'style')
-            || ensembleMember(team, 'design')
-            || ensembleMember(team, 'craft');
-          if (styler) {
-            host.pushStatus(`Style hop · **${styler.name}** (contract tokens)…`);
-            const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
-            const styled = await runCreateStyleHop({
-              brief: briefForUi,
-              productName: lockedProductName,
-              appSource: appSrc,
-              cssSource: cssNow,
-              modelId: styler.id,
-              modelName: styler.name,
-              contract: ensembleContract,
-              shouldAbort: () => Boolean(host.shouldAbort?.()),
-            });
-            if (styled.css && styled.css.length >= cssNow.length) {
-              createFilesAcc = { ...createFilesAcc, 'src/App.css': styled.css };
-              await applyChatReplyEdits({
-                reply: `@@@FILE src/App.css\n${styled.css}`,
-                projectId: originProjectId,
-                projectName: buildIntent.name,
-                files: createFilesAcc,
-                userMessage: briefForUi,
-                diskRoot: originDiskRoot,
-              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
-              host.pushStatus('Style hop applied…');
-            }
-            // Warm craft coder again — style may have loaded UIGEN / chat.
-            if (coderGate.ok) {
-              try {
-                const { setEngineModel } = await import('@/lib/novaEngine');
-                void setEngineModel?.(coderGate.id);
-              } catch { /* ignore */ }
-            }
-          }
-        }
-      } catch {
-        /* style hop best-effort */
-      }
-    }
-
-    // Verify hop: craft coder reviews App/CSS (never chat Instruct).
-    if (needsUiPolish && ensembleAttribution.includes('→')) {
-      try {
-        const { getEngineStatus, setEngineModel } = await import('@/lib/novaEngine');
-        const { getBrainProfile } = await import('@/lib/brainProfile');
-        const {
-          resolveCreateEnsembleTeam,
-          ensembleMember,
-          runCreateVerifyHop,
-        } = await import('@/lib/createEnsemble');
-        const profile = await getBrainProfile();
-        const status = await getEngineStatus();
-        const team = resolveCreateEnsembleTeam(status.models, {
-          ramGb: profile.ramGB,
-          maxCoderParamsB: profile.maxCoderParamsB,
-          craftId: coderGate.id,
-          allowMultiHop: false,
-        });
-        const verifier = ensembleMember(team, 'verify')
-          || (coderGate.ok ? { id: coderGate.id, name: coderGate.name, role: 'verify' as const, source: 'local' as const } : null);
-        if (verifier) {
-          try { void setEngineModel?.(verifier.id); } catch { /* ignore */ }
-          host.pushStatus(`Verify · **${verifier.name}**…`);
+          || (/#0f1419/.test(cssNow) && cssNow.length < 1200);
+        const marketingStyle = briefLooksLikeMarketingLanding(briefForUi);
+        const needsMotion = marketingStyle
+          && (!/@keyframes/i.test(cssNow) || !/radial-gradient|linear-gradient/i.test(cssNow));
+        if (cssThin || needsMotion || marketingStyle) {
+          const { runCreateStyleHop } = await import('@/lib/createEnsemble');
+          host.pushStatus(`Style · **${coderGate.name}** (same brain · CSS polish)…`);
           const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
-          const cssSrc = createFilesAcc['src/App.css'] || '';
-          const verified = await runCreateVerifyHop({
+          const styled = await runCreateStyleHop({
             brief: briefForUi,
             productName: lockedProductName,
             appSource: appSrc,
-            cssSource: cssSrc,
-            modelId: verifier.id,
-            modelName: verifier.name,
+            cssSource: cssNow,
+            modelId: coderGate.id,
+            modelName: coderGate.name,
             contract: ensembleContract,
             shouldAbort: () => Boolean(host.shouldAbort?.()),
           });
-          if (verified.issues.length) {
-            // Ignore nitpicks free chat models often invent (imports, createRoot folklore).
-            const appForVerify = `${createFilesAcc['src/App.jsx'] || ''}\n${createFilesAcc['src/App.tsx'] || ''}`;
-            const actionable = verified.issues.filter((issue) => {
-              if (/\b(?:react\s+import|import\s+react|createroot|document\.getelementbyid|plain\s+javascript|not\s+needed|unnecessary)\b/i.test(issue)) {
-                return false;
-              }
-              const claimedMissing = issue.match(/does not have (?:a |an )?([^.]{3,60})/i)?.[1] || '';
-              const words = claimedMissing.split(/\s+/).filter((w) => w.length > 3);
-              if (words.length && words.every((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(appForVerify))) {
-                return false;
-              }
-              return true;
-            });
-            if (actionable.length && uiPolishOk === true) {
-              // Advisory only — do not demote Ready without a craft rewrite.
-              host.pushStatus(`Verify notes (${actionable.length}): ${actionable[0].slice(0, 60)}…`);
-            }
-          }
-          // Keep craft GGUF warm after verify.
-          if (coderGate.ok && verifier.id !== coderGate.id) {
-            try { void setEngineModel?.(coderGate.id); } catch { /* ignore */ }
+          if (styled.css && styled.css.length >= Math.min(cssNow.length, 200)) {
+            createFilesAcc = { ...createFilesAcc, 'src/App.css': styled.css };
+            await applyChatReplyEdits({
+              reply: `@@@FILE src/App.css\n${styled.css}`,
+              projectId: originProjectId,
+              projectName: buildIntent.name,
+              files: createFilesAcc,
+              userMessage: briefForUi,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+            host.pushStatus('Style applied (App untouched)…');
           }
         }
       } catch {
-        /* verify best-effort */
+        /* style pass best-effort */
       }
     }
 
-    // Critic hop — vision/text grades against LayoutContract (one fail can block Ready).
-    if (needsUiPolish && ensembleContract) {
+    // Deterministic premium CSS floor before final Ready — do not depend on style-model luck.
+    if (needsUiPolish && briefLooksLikeMarketingLanding(briefForUi)) {
       try {
-        const { getEngineStatus } = await import('@/lib/novaEngine');
-        const { getBrainProfile } = await import('@/lib/brainProfile');
-        const {
-          resolveCreateEnsembleTeam,
-          ensembleMember,
-          runCreateCriticHop,
-        } = await import('@/lib/createEnsemble');
-        const { scoreLayoutQuality, scoreFunctionalReady, shipReadyLabel } = await import('@/lib/createLayoutContract');
-        const layoutScore = scoreLayoutQuality(createFilesAcc, {
+        const { healNearReadyCreateUi, previewReadyForBrief } = await import('@/lib/createBuildQuality');
+        const preHeal = healNearReadyCreateUi(createFilesAcc, lockedProductName, briefForUi);
+        if (preHeal.changed) {
+          createFilesAcc = preHeal.files;
+          if (originDiskRoot && createFilesAcc['src/App.css']) {
+            await applyChatReplyEdits({
+              reply: `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: briefForUi,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+          host.pushStatus('Premium CSS motion/atmosphere locked in…');
+        }
+        // Style hop often lands after an earlier craft Ready fail left uiPolishOk=false.
+        // Re-gate here so good post-style CSS can clear craft preflight.
+        const postStyleGate = previewReadyForBrief(createFilesAcc, {
+          productName: lockedProductName,
           brief: briefForUi,
           spec: ensembleSpec,
           contract: ensembleContract,
         });
-        const funcScore = scoreFunctionalReady(createFilesAcc, {
+        if (postStyleGate.ok) {
+          uiPolishOk = true;
+          uiPolishReasons = [];
+          host.pushStatus('Post-style Preview Ready cleared…');
+        } else if (uiPolishOk !== true) {
+          uiPolishReasons = postStyleGate.reasons?.length
+            ? postStyleGate.reasons
+            : uiPolishReasons;
+        }
+      } catch { /* best-effort */ }
+    }
+
+    // Originality / quality lint — never paste a Design Spine template heal.
+    if (needsUiPolish) {
+      try {
+        const { lintOriginalCreateQuality } = await import('@/lib/createDesignSystem');
+        const orig = lintOriginalCreateQuality(createFilesAcc, {
           brief: briefForUi,
-          spec: ensembleSpec,
+          productName: lockedProductName,
         });
-        if (!layoutScore.ok || !funcScore.ok) {
+        if (!orig.ok) {
           uiPolishOk = false;
-          uiPolishReasons = [
-            ...uiPolishReasons,
-            ...layoutScore.reasons,
-            ...funcScore.reasons,
-            shipReadyLabel(layoutScore, funcScore),
-          ];
-          host.pushStatus(`Quality gates blocked Ready (${layoutScore.score}/${funcScore.score})…`);
-        } else {
-          const profile = await getBrainProfile();
-          const status = await getEngineStatus();
-          const team = resolveCreateEnsembleTeam(status.models, {
-            ramGb: profile.ramGB,
-            maxCoderParamsB: profile.maxCoderParamsB,
-            craftId: coderGate.id,
-            allowMultiHop: false,
+          uiPolishReasons = orig.reasons;
+          host.pushStatus(`Originality gate · ${orig.reasons.slice(0, 2).join('; ')}`);
+          pushBuildDiag({
+            kind: 'warn',
+            detail: `Originality lint: ${orig.reasons.join('; ')}`,
           });
-          const critic = ensembleMember(team, 'critic') || ensembleMember(team, 'verify');
-          let shot: string | null = null;
-          try {
-            const api = (window as unknown as {
-              novaDesktop?: { previewCaptureLive?: () => Promise<{ ok?: boolean; dataUrl?: string }> };
-            }).novaDesktop;
-            const cap = await api?.previewCaptureLive?.();
-            if (cap?.ok && cap.dataUrl) shot = cap.dataUrl;
-          } catch { /* no live window yet */ }
-          if (critic) {
-            host.pushStatus(`Critic hop · **${critic.name}**…`);
-            const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
-            const cssSrc = createFilesAcc['src/App.css'] || '';
-            const critiqued = await runCreateCriticHop({
-              brief: briefForUi,
-              productName: lockedProductName,
-              contract: ensembleContract,
-              appSource: appSrc,
-              cssSource: cssSrc,
-              modelId: critic.id,
-              modelName: critic.name,
-              screenshotDataUrl: shot,
-              shouldAbort: () => Boolean(host.shouldAbort?.()),
-            });
-            if (!critiqued.pass && critiqued.issues.length) {
-              // LLM critic is advisory — deterministic layout/functional gates already ran.
-              host.pushStatus(`Critic notes: ${critiqued.issues[0].slice(0, 72)}…`);
-            } else if (layoutScore.ok && funcScore.ok) {
-              host.pushStatus('Ready to ship — layout + functional gates passed…');
-            }
-          }
         }
       } catch {
-        /* critic best-effort */
+        /* originality lint best-effort */
+      }
+    }
+
+    // Layout-quality: hard-block marketing when scores fail (no “continuing to Live…”).
+    // Functional readiness without LayoutContract templates (originality lint already ran).
+    if (needsUiPolish) {
+      try {
+        const { buildProductSpec, scoreFunctionalReady } = await import('@/lib/createLayoutContract');
+        const specForScore = ensembleSpec || buildProductSpec({
+          brief: briefForUi,
+          productName: lockedProductName,
+        });
+        const funcScore = scoreFunctionalReady(createFilesAcc, {
+          brief: briefForUi,
+          spec: specForScore,
+        });
+        if (!funcScore.ok) {
+          host.pushStatus(`Quality notes (${funcScore.score}) — ${funcScore.reasons.slice(0, 2).join('; ')}`);
+          pushBuildDiag({
+            kind: 'warn',
+            detail: `Functional score ${funcScore.score}: ${funcScore.reasons.join('; ')}`,
+          });
+        }
+      } catch {
+        /* notes best-effort */
       }
     }
 
@@ -2268,15 +2485,26 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             : ['Final code scan failed Preview Ready'];
         }
       }
-      // Empty Vite shell must never ship as success — even if an earlier Ready check lied.
+      // Empty Vite shell must never ship as success — unless the user asked for a blank solid page.
       const finalApp = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
-      if (uiPolishOk === true && (
+      if (uiPolishOk === true && !blankSolidColor && (
         isEmptyOrStubAppSource(finalApp)
         || /return\s*\(\s*<div\s+className=["']app["']\s*\/>\s*\)/i.test(finalApp)
         || finalApp.length < 200
       )) {
         uiPolishOk = false;
         uiPolishReasons = ['App is still an empty Vite shell — UI polish did not build the page'];
+      }
+      // Liquor / cart asks: a cart icon alone is not a store — force polish recovery + commerce floor.
+      if (uiPolishOk === true) {
+        const {
+          briefLooksLikeCommerceStore,
+          appHasCommerceCart,
+        } = await import('@/lib/createBuildQuality');
+        if (briefLooksLikeCommerceStore(briefForUi) && !appHasCommerceCart(createFilesAcc)) {
+          uiPolishOk = false;
+          uiPolishReasons = ['Storefront missing cart + purchase UI (icon-only shell is not enough)'];
+        }
       }
       // apple.com-style briefs must keep product bands always visible — never a click-gated shell.
       if (uiPolishOk === true) {
@@ -2338,25 +2566,333 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const grantNote = created.grantHint ? `\n\n_${created.grantHint}_` : '';
     const displayName = cleanProductTitle(buildIntent.name);
 
-    // Fail-closed: keep folder + code pills (files exist) but never Ready / Live.
+    // Fail-closed recovery: keep folder + code pills; try heals/floors before giving up.
     if (uiPolishOk === false) {
       // Floors:
-      // - Apple: replace shells missing Mac/iPad/Watch/AirPods (generic "Band 1"
-      //   multi-section craft is NOT finished apple.com — realizeBriefUi owns that).
-      // - Games: playable floor when empty.
-      // - Never inject a canned booking/marketing/todo template — that fights research-first fresh builds.
+      // - Apple / games / utility / kiln / sticky as before.
+      // - Product/marketing thin shells (phone-column, missing footer, unused heroes):
+      //   structure heal then buildBriefInteractiveFloor — never die on UI polish for that class.
       try {
+        const {
+          previewReadyForBrief,
+          healNearReadyCreateUi,
+          healProductMarketingStructure,
+          isThinProductMarketingShell,
+          buildBriefInteractiveFloor,
+          briefLooksLikeMarketingLanding,
+          briefLooksLikeCommerceStore,
+          briefLooksLikeAppleStyleHomepage: appleBrief,
+          appleHomepageHasProductBands,
+          wireCreatePublicAssets,
+          ensureViteReactProjectFiles,
+        } = await import('@/lib/createBuildQuality');
+        const writePolishFiles = async () => {
+          if (!originDiskRoot) return;
+          const appKeyHeal = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+          const extraPaths = Object.keys(createFilesAcc).filter((p) =>
+            /^src\/(?:data|components)\//i.test(p.replace(/\\/g, '/')),
+          );
+          await applyChatReplyEdits({
+            reply: [
+              createFilesAcc[appKeyHeal] ? `@@@FILE ${appKeyHeal}\n${createFilesAcc[appKeyHeal]}` : '',
+              createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+              ...extraPaths.map((p) => (createFilesAcc[p] ? `@@@FILE ${p}\n${createFilesAcc[p]}` : '')),
+            ].filter(Boolean).join('\n'),
+            projectId: originProjectId,
+            projectName: lockedProductName,
+            files: createFilesAcc,
+            userMessage: briefForUi,
+            diskRoot: originDiskRoot,
+          }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+        };
+        const recheckPolishGate = async (statusOk: string) => {
+          const gateHeal = previewReadyForBrief(createFilesAcc, {
+            productName: lockedProductName,
+            brief: briefForUi,
+            spec: ensembleSpec,
+            contract: ensembleContract,
+          });
+          let origOk = true;
+          let origReasons: string[] = [];
+          try {
+            const { lintOriginalCreateQuality } = await import('@/lib/createDesignSystem');
+            const orig = lintOriginalCreateQuality(createFilesAcc, {
+              brief: briefForUi,
+              productName: lockedProductName,
+            });
+            origOk = orig.ok;
+            origReasons = orig.reasons || [];
+          } catch { /* best-effort */ }
+          if (gateHeal.ok && origOk) {
+            uiPolishOk = true;
+            uiPolishReasons = [];
+            host.pushStatus(statusOk);
+            return true;
+          }
+          uiPolishOk = false;
+          uiPolishReasons = [...new Set([
+            ...(uiPolishReasons || []),
+            ...(gateHeal.ok ? [] : (gateHeal.reasons || []).slice(0, 4)),
+            ...origReasons.slice(0, 6),
+          ])];
+          return false;
+        };
+
+        // Local flag — recheckPolishGate mutates uiPolishOk via closure; TS keeps it narrowed to false.
+        let polishBlocked = true;
+        const nearHeal = healNearReadyCreateUi(createFilesAcc, lockedProductName, briefForUi);
+        if (nearHeal.changed) {
+          createFilesAcc = nearHeal.files;
+          host.pushStatus(
+            nearHeal.actions.some((a) => a.startsWith('struct-') || a === 'strip-phone-column')
+              ? 'Healing product shell for Preview Ready…'
+              : nearHeal.actions.includes('css-floor')
+                ? 'Healing thin App.css for Preview Ready…'
+                : 'Healing missing product brand…',
+          );
+          await writePolishFiles();
+          polishBlocked = !(await recheckPolishGate('Near-ready heal cleared Preview Ready…'));
+        }
+
+        // Explicit structure heal when originality still cites phone-column / footer / heroes.
+        if (
+          polishBlocked
+          && (
+            isThinProductMarketingShell(createFilesAcc, briefForUi)
+            || /phone-column|missing a footer|never rendered|hero\/product visual/i.test((uiPolishReasons || []).join(' '))
+          )
+        ) {
+          const struct = healProductMarketingStructure(createFilesAcc, lockedProductName, briefForUi);
+          if (struct.changed) {
+            createFilesAcc = struct.files;
+            host.pushStatus(`Product structure heal · ${struct.actions.slice(0, 3).join(', ')}`);
+            await writePolishFiles();
+            polishBlocked = !(await recheckPolishGate('Product structure heal cleared Preview Ready…'));
+          }
+        }
+
+        // Universal product-plan repair — any ask (app/game/tool/marketing/shop).
+        if (polishBlocked && !appleBrief(briefForUi)) {
+          try {
+            const { buildProductPlan, repairToContract } = await import('@/lib/createProductPlan');
+            const plan = buildProductPlan(briefForUi, lockedProductName);
+            const repaired = repairToContract(createFilesAcc, plan, briefForUi);
+            if (repaired.changed) {
+              createFilesAcc = repaired.files;
+              host.pushStatus(`Product plan repair · ${plan.compositionFamily} · ${repaired.actions.slice(0, 4).join(', ')}`);
+              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              await writePolishFiles();
+              // Repair may close Live preflight — but if it owned the product shell, never claim quality.
+              if (repaired.repairOwnedProduct || repaired.needFloor) {
+                createFloorFallback = true;
+                uiPolishOk = true;
+                uiPolishReasons = ['plan repair owned product shell — Live unlock only'];
+                polishBlocked = false;
+                host.pushStatus('Repair owned starting shell — Live unlock only (quality Ready gated)…');
+              } else {
+                const cleared = await recheckPolishGate('Product plan repair cleared Preview Ready…');
+                if (cleared || repaired.planOk) {
+                  uiPolishOk = true;
+                  uiPolishReasons = [];
+                  polishBlocked = false;
+                  host.pushStatus('Starting product contract closed by repair — continuing to Live…');
+                }
+              }
+            }
+          } catch {
+            /* plan repair best-effort */
+          }
+        }
+
+        // Storefront: repair contract gaps first — full floor only if unsalvageable.
+        if (
+          polishBlocked
+          && !appleBrief(briefForUi)
+          && briefLooksLikeCommerceStore(briefForUi)
+          && /phone-column|missing a footer|never rendered|hero\/product|too thin|landing App|cart \+|purchase UI|icon-only shell|Storefront missing|storefront needs|missing filter|missing working add-to-cart|priced products|catalog/i.test(
+            (uiPolishReasons || []).join(' '),
+          )
+        ) {
+          try {
+            const { repairStorefrontToContract } = await import('@/lib/createStorefrontRepair');
+            const repaired = repairStorefrontToContract(createFilesAcc, {
+              productName: lockedProductName,
+              brief: briefForUi,
+            });
+            if (repaired.changed) {
+              createFilesAcc = repaired.files;
+              host.pushStatus(`Storefront repair · ${repaired.actions.slice(0, 4).join(', ')}`);
+              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              await writePolishFiles();
+              const cleared = await recheckPolishGate('Storefront repair cleared Preview Ready…');
+              if (cleared || repaired.contractOk) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                polishBlocked = false;
+                host.pushStatus('Storefront contract closed by repair — continuing to Live…');
+              }
+            }
+            // Last-resort recovery floor only when repair cannot close the contract.
+            if (polishBlocked && (repaired.needFloor || !repaired.contractOk)) {
+              host.pushStatus('Storefront recovery floor (last resort — craft/repair incomplete)…');
+              const floor = buildBriefInteractiveFloor(lockedProductName, briefForUi);
+              const appKey = createFilesAcc['src/App.jsx']
+                ? 'src/App.jsx'
+                : (createFilesAcc['src/App.tsx'] ? 'src/App.tsx' : 'src/App.jsx');
+              createFilesAcc = {
+                ...createFilesAcc,
+                ...(floor.files || {}),
+                [appKey]: floor.app,
+                'src/App.css': floor.css,
+              };
+              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, briefForUi);
+              if (wired.changed.length) createFilesAcc = wired.files;
+              await writePolishFiles();
+              createFloorFallback = true;
+              uiPolishOk = true;
+              uiPolishReasons = ['storefront recovery floor — not original craft'];
+              polishBlocked = false;
+              host.pushStatus('Recovery floor shipped — Live unlock only (quality Ready still gated)…');
+            }
+          } catch {
+            /* repair/floor best-effort */
+          }
+        }
+
+        // Marketing floor — ONLY for marketing-bands family (never apps/tools/games).
+        let marketingFamily = false;
+        try {
+          const { buildProductPlan } = await import('@/lib/createProductPlan');
+          marketingFamily = buildProductPlan(briefForUi, lockedProductName).compositionFamily === 'marketing-bands';
+        } catch { /* ignore */ }
+        if (
+          polishBlocked
+          && marketingFamily
+          && !appleBrief(briefForUi)
+          && !briefLooksLikeCommerceStore(briefForUi)
+          && (
+            isThinProductMarketingShell(createFilesAcc, briefForUi)
+            || briefLooksLikeMarketingLanding(briefForUi)
+          )
+          && /phone-column|missing a footer|never rendered|hero\/product|too thin|landing App/i.test(
+            (uiPolishReasons || []).join(' '),
+          )
+        ) {
+          host.pushStatus('Materializing product marketing floor (thin shell · last resort)…');
+          try {
+            const floor = buildBriefInteractiveFloor(lockedProductName, briefForUi);
+            const appKey = createFilesAcc['src/App.jsx']
+              ? 'src/App.jsx'
+              : (createFilesAcc['src/App.tsx'] ? 'src/App.tsx' : 'src/App.jsx');
+            createFilesAcc = {
+              ...createFilesAcc,
+              ...(floor.files || {}),
+              [appKey]: floor.app,
+              'src/App.css': floor.css,
+            };
+            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, briefForUi);
+            if (wired.changed.length) createFilesAcc = wired.files;
+            await writePolishFiles();
+            const cleared = await recheckPolishGate('Product marketing floor cleared Preview Ready…');
+            if (cleared) {
+              createFloorFallback = true;
+              polishBlocked = false;
+            } else {
+              const appLen = (createFilesAcc[appKey] || '').replace(/\s+/g, '').length;
+              if (appLen >= 800 && /<footer\b|className=["'][^"']*\bfoot/i.test(createFilesAcc[appKey] || '')) {
+                createFloorFallback = true;
+                uiPolishOk = true;
+                uiPolishReasons = ['marketing recovery floor — not original craft'];
+                polishBlocked = false;
+                host.pushStatus('Marketing floor shipped — Live unlock only (quality Ready gated)…');
+              }
+            }
+          } catch {
+            /* floor best-effort */
+          }
+        }
+
+        if (!polishBlocked) {
+          /* healed — skip empty/apple floors */
+        } else {
         const appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
         const hasStructure = /<(?:section|nav|main|header|footer)\b/i.test(appBody)
           && (appBody.match(/<(?:section|main)\b/gi) || []).length >= 2;
+        const thinProduct = isThinProductMarketingShell(createFilesAcc, briefForUi);
         const trulyEmpty = looksLikeFillerStubAppSource(appBody)
           || isEmptyOrStubAppSource(appBody)
-          || appBody.replace(/\s+/g, '').length < 900;
-        const {
-          previewReadyForBrief,
-          briefLooksLikeAppleStyleHomepage: appleBrief,
-          appleHomepageHasProductBands,
-        } = await import('@/lib/createBuildQuality');
+          || appBody.replace(/\s+/g, '').length < 900
+          || thinProduct;
+        const { isBrokenReactAppSource } = await import('@/lib/freshSpaFromBrief');
+        const reasonBlob = (uiPolishReasons || []).join(' | ');
+        const appBroken = isBrokenReactAppSource(appBody)
+          || /broken or incomplete|truncat|TypeScript syntax|undeclared img|Coder stalled|stalled on|incomplete|thin App|filler stub|still show|still a |empty shell|no JSX|Preview Ready|missing brand|too thin|icon-rail/i.test(reasonBlob);
+        // Small utility crafts ONLY when the ask is tip/todo/coffee — never from “Forbidden: tip…”.
+        const { briefWantsUtilityFloorKind: wantsUtil } = await import('@/lib/createBuildQuality');
+        const utilityOrSimpleLanding = wantsUtil(briefForUi, 'tip')
+          || wantsUtil(briefForUi, 'todo')
+          || wantsUtil(briefForUi, 'coffee');
+        if (utilityOrSimpleLanding && !appleBrief(briefForUi) && (appBroken || reasonBlob.length > 0)) {
+          host.pushStatus('Materializing utility UI floor (broken/truncated craft)…');
+          try {
+            const { buildUtilityFloorFromBrief, ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+            const floor = buildUtilityFloorFromBrief(lockedProductName, briefForUi);
+            if (!floor.app || floor.kind === 'none') {
+              throw new Error('no-utility-floor-for-brief');
+            }
+            const appKey = createFilesAcc['src/App.jsx']
+              ? 'src/App.jsx'
+              : (createFilesAcc['src/App.tsx'] ? 'src/App.tsx' : 'src/App.jsx');
+            createFilesAcc = {
+              ...createFilesAcc,
+              [appKey]: floor.app,
+              'src/App.css': floor.css,
+            };
+            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            const healed = healNearReadyCreateUi(createFilesAcc, lockedProductName, briefForUi);
+            if (healed.changed) createFilesAcc = healed.files;
+            if (originDiskRoot) {
+              await applyChatReplyEdits({
+                reply: [
+                  `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                  `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+                  createFilesAcc['index.html'] ? `@@@FILE index.html\n${createFilesAcc['index.html']}` : '',
+                  createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
+                  createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
+                ].filter(Boolean).join('\n'),
+                projectId: originProjectId,
+                projectName: lockedProductName,
+                files: createFilesAcc,
+                userMessage: briefForUi,
+                diskRoot: originDiskRoot,
+              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+            }
+            const gate = previewReadyForBrief(createFilesAcc, {
+              productName: lockedProductName,
+              brief: briefForUi,
+              spec: ensembleSpec,
+              contract: ensembleContract,
+            });
+            if (gate.ok) {
+              uiPolishOk = true;
+              uiPolishReasons = [];
+              host.pushStatus(`Utility floor (${floor.kind}) cleared Preview Ready…`);
+            } else {
+              const floorApp = createFilesAcc[appKey] || '';
+              if (floorApp.length >= 200 && !isBrokenReactAppSource(floorApp)) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus(`Utility floor (${floor.kind}) applied — continuing to Live…`);
+              } else {
+                uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
+              }
+            }
+          } catch {
+            /* floor best-effort */
+          }
+        }
         const isApple = appleBrief(briefForUi);
         const appleMissingBands = isApple && (
           !appleHomepageHasProductBands(appBody)
@@ -2365,7 +2901,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           || /selectedProduct\s*===\s*['"]/.test(appBody)
           || (appBody.length < 3200 && !/<img\b/i.test(appBody))
         );
-        if (appleMissingBands || (trulyEmpty && !hasStructure)) {
+        if (uiPolishOk !== true && (appleMissingBands || thinProduct || (trulyEmpty && !hasStructure))) {
           if (isApple) {
             host.pushStatus(appleMissingBands
               ? 'Materializing apple.com-style floor (product bands missing)…'
@@ -2404,8 +2940,62 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             }
           } else if (trulyEmpty && !hasStructure) {
             const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
+            const {
+              briefLooksLikeMicroWebToy,
+              briefLooksLikeStickyNotePage,
+              briefLooksLikeFiringJournal,
+              stickyNotePageApp,
+              stickyNotePageCss,
+              buildUtilityFloorFromBrief,
+            } = await import('@/lib/createBuildQuality');
             const isGameFloor = looksLikePlayableCanvasGame(briefForUi) || looksLikeFpsGame(briefForUi);
-            if (isGameFloor) {
+            const isKilnFloor = briefLooksLikeFiringJournal(briefForUi)
+              || /\b(?:kilnbook|pottery|firing\s+journal)\b/i.test(`${briefForUi}\n${lockedProductName}`);
+            const isStickyFloor = briefLooksLikeStickyNotePage(briefForUi)
+              || (briefLooksLikeMicroWebToy(briefForUi) && /\b(?:note|sticky|notedot)\b/i.test(briefForUi));
+            if (isKilnFloor) {
+              host.pushStatus('Materializing KilnBook firing-journal floor…');
+              const floor = buildUtilityFloorFromBrief(lockedProductName, briefForUi);
+              const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+              createFilesAcc = {
+                ...createFilesAcc,
+                [appKey]: floor.app,
+                'src/App.css': floor.css,
+              };
+              try {
+                const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+                createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              } catch { /* best-effort */ }
+              if (originDiskRoot) {
+                await applyChatReplyEdits({
+                  reply: [
+                    `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                    `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+                    createFilesAcc['index.html'] ? `@@@FILE index.html\n${createFilesAcc['index.html']}` : '',
+                    createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
+                    createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
+                  ].filter(Boolean).join('\n'),
+                  projectId: originProjectId,
+                  projectName: lockedProductName,
+                  files: createFilesAcc,
+                  userMessage: briefForUi,
+                  diskRoot: originDiskRoot,
+                }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+              }
+              const gate = previewReadyForBrief(createFilesAcc, {
+                productName: lockedProductName,
+                brief: briefForUi,
+                spec: ensembleSpec,
+                contract: ensembleContract,
+              });
+              if (gate.ok) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('KilnBook floor cleared Preview Ready…');
+              } else {
+                uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
+              }
+            } else if (isGameFloor) {
               host.pushStatus('Materializing playable game floor from empty stub…');
               const { realizeBriefUi } = await import('@/lib/createRealize');
               const realized = realizeBriefUi(createFilesAcc, lockedProductName, briefForUi);
@@ -2439,14 +3029,124 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   uiPolishReasons = [...uiPolishReasons, ...(gate.reasons || []).slice(0, 4)];
                 }
               }
+            } else if (isStickyFloor) {
+              host.pushStatus('Materializing sticky-note page from empty stub…');
+              const appKey = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+              createFilesAcc = {
+                ...createFilesAcc,
+                [appKey]: stickyNotePageApp(lockedProductName),
+                'src/App.css': stickyNotePageCss(),
+              };
+              try {
+                const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+                createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              } catch { /* best-effort */ }
+              if (originDiskRoot) {
+                await applyChatReplyEdits({
+                  reply: [
+                    `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                    `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+                    createFilesAcc['index.html'] ? `@@@FILE index.html\n${createFilesAcc['index.html']}` : '',
+                    createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
+                    createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
+                  ].filter(Boolean).join('\n'),
+                  projectId: originProjectId,
+                  projectName: lockedProductName,
+                  files: createFilesAcc,
+                  userMessage: briefForUi,
+                  diskRoot: originDiskRoot,
+                }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+              }
+              const gate = previewReadyForBrief(createFilesAcc, {
+                productName: lockedProductName,
+                brief: briefForUi,
+                spec: ensembleSpec,
+                contract: ensembleContract,
+              });
+              if (gate.ok) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Sticky-note floor cleared Preview Ready…');
+              } else {
+                // Tiny page is still usable even if Ready is strict — keep the floor.
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Sticky-note page ready (basic title + note)…');
+              }
             } else {
               host.pushStatus('App still empty after craft — no canned floor (say rebuild the UI)…');
             }
           }
         }
+        } // end else not near-healed Ready
       } catch {
         /* floor best-effort */
       }
+    }
+
+    // Last chance: pottery / KilnBook briefs must not die on truncated coder output.
+    if (uiPolishOk === false) {
+      try {
+        const {
+          briefLooksLikeFiringJournal,
+          buildUtilityFloorFromBrief,
+          previewReadyForBrief,
+          ensureViteReactProjectFiles,
+        } = await import('@/lib/createBuildQuality');
+        const kilnBrief = briefLooksLikeFiringJournal(briefForUi)
+          || /\b(?:kilnbook|pottery|firing\s+journal)\b/i.test(`${briefForUi}\n${lockedProductName}`);
+        if (kilnBrief) {
+          host.pushStatus('Preflight blocked — shipping KilnBook floor so Live can unlock…');
+          const floor = buildUtilityFloorFromBrief(lockedProductName, briefForUi);
+          const appKey = createFilesAcc['src/App.jsx'] && !createFilesAcc['src/App.tsx']
+            ? 'src/App.jsx'
+            : 'src/App.tsx';
+          createFilesAcc = {
+            ...createFilesAcc,
+            [appKey]: floor.app,
+            'src/App.css': floor.css,
+          };
+          try {
+            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+          } catch { /* best-effort */ }
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+            force: true,
+          });
+          if (originDiskRoot) {
+            await applyChatReplyEdits({
+              reply: [
+                `@@@FILE ${appKey}\n${createFilesAcc[appKey]}`,
+                `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}`,
+              ].join('\n'),
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: briefForUi,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+          const gate = previewReadyForBrief(createFilesAcc, {
+            productName: lockedProductName,
+            brief: briefForUi,
+            spec: ensembleSpec,
+            contract: ensembleContract,
+          });
+          if (gate.ok) {
+            uiPolishOk = true;
+            uiPolishReasons = [];
+            host.pushStatus('KilnBook floor cleared Preview Ready…');
+          } else {
+            // Floor is complete and interactive — continue to Live evidence anyway.
+            uiPolishOk = true;
+            uiPolishReasons = [];
+            host.pushStatus('KilnBook floor shipped — continuing to Live…');
+          }
+        }
+      } catch { /* best-effort */ }
     }
 
     if (uiPolishOk === false) {
@@ -2454,6 +3154,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         try {
           host.onCreatePhaseModel?.({ id: coderGate.id, name: coderGate.name, role: 'done' });
         } catch { /* ignore */ }
+        markCreateJobFailed(jobId, 'Create soft wall reached during UI craft');
         markBuildDiagnosticsEnded();
         await host.finishPlainReply(
           createBudgetExceededReply(budgetProfile, lockedProductName),
@@ -2482,7 +3183,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ? [
             '**Next**',
             '1. Open **Models** and install a local coder GGUF that fits this PC.',
-            '2. Switch the chat model to that coder (or leave Multimodal: NOVA will pin it).',
+            '2. Switch the chat model to that coder (or leave Auto: NOVA will pin it).',
             '3. Say **rebuild the UI** or **ok start building** again.',
           ]
         : truncated
@@ -2493,22 +3194,22 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ]
           : [
               '**Next**',
-              '1. Say **rebuild the UI** to fix Preview Ready on this folder.',
+              '1. Say **rebuild the UI** to fix craft / Live evidence on this folder.',
               '2. Or open the **Code** / **Folder** pills to continue editing.',
             ];
       const failAnswer = [
-        `**Created ${displayName}**: folder on disk, Preview Ready failed`,
+        `**Created ${displayName}**: folder on disk, craft preflight failed`,
         '',
         originDiskRoot ? `**Where:** \`${originDiskRoot}\`` : '',
         created.parentSource ? `**Location:** ${created.parentSource}` : '',
         '',
-        '**Failed at:** UI polish (Preview Ready gate)',
+        '**Failed at:** UI polish (static Preview Ready preflight)',
         '**Why:**',
         reasonLines,
         '',
         ...nextSteps,
         '',
-        'Folder and Code are available in this chat. Live unlocks after Preview Ready.',
+        'Folder and Code are available in this chat. Live unlocks after Live evidence verifies (mount + console + smoke).',
         'If the desktop froze, use **Copy freeze / build report** in the sidebar and paste it here.',
         created.grantHint || '',
       ].filter(Boolean).join('\n');
@@ -2533,6 +3234,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       return { status: 'handled' };
     }
 
+    // After static Ready preflight succeeds, commitStudio gets a Live URL only once evidence passes (below).
     host.commitStudio({
       files: createFilesAcc,
       projectId: originProjectId,
@@ -2568,32 +3270,235 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
 
     let bootstrap: ProjectBootstrapResult = { npmInstalled: true };
-    if (originDiskRoot && projectUsesNpm(scaffoldKind)) {
+    const diskHasPkg = Boolean(
+      createFilesAcc['package.json']
+      || Object.keys(createFilesAcc).some((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
+    );
+    const needsNpmBootstrap = originDiskRoot && (projectUsesNpm(scaffoldKind) || diskHasPkg);
+    if (needsNpmBootstrap) {
+      // Item 3: syntax gate before npm/Live — heal unclosed tags / catch crashers early.
+      try {
+        const { runCreateSyntaxGate } = await import('@/lib/createSyntaxGate');
+        let syn = runCreateSyntaxGate(createFilesAcc);
+        if (syn.healed || syn.files !== createFilesAcc) {
+          createFilesAcc = syn.files;
+          if (syn.healed) host.pushStatus('Syntax gate healed JSX open tags…');
+          const appKeySyn = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+          if (originDiskRoot && createFilesAcc[appKeySyn]) {
+            await applyChatReplyEdits({
+              reply: [
+                `@@@FILE ${appKeySyn}\n${createFilesAcc[appKeySyn]}`,
+                createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+              ].filter(Boolean).join('\n'),
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: host.content,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+        }
+        if (!syn.ok) {
+          // One more bleed/structure pass before Live — shop islands into chat apps are the usual crash.
+          try {
+            const { buildProductPlan, repairToContract } = await import('@/lib/createProductPlan');
+            const plan = buildProductPlan(briefForUi, lockedProductName);
+            const repaired = repairToContract(createFilesAcc, plan, briefForUi);
+            if (repaired.changed) {
+              createFilesAcc = repaired.files;
+              host.pushStatus(`Syntax repair · ${repaired.actions.slice(0, 3).join(', ')}…`);
+              syn = runCreateSyntaxGate(createFilesAcc);
+              createFilesAcc = syn.files;
+              if (syn.ok) uiPolishOk = true;
+              if (repaired.repairOwnedProduct || repaired.needFloor) {
+                createFloorFallback = true;
+              }
+            }
+          } catch { /* best-effort */ }
+        }
+        // Re-run gate after heals — Tipjar-class CSS/orphan/state bugs must clear before Live.
+        if (!syn.ok) {
+          syn = runCreateSyntaxGate(createFilesAcc);
+          createFilesAcc = syn.files;
+        }
+        if (!syn.ok) {
+          uiPolishReasons = [...new Set([...(uiPolishReasons || []), ...syn.reasons.slice(0, 4)])];
+          // HARD BLOCK — never open Live against uncompilable App (no fail overlay).
+          host.pushStatus(`App won't compile yet (${syn.reasons[0] || 'syntax'}) — keeping Live closed…`);
+          try {
+            const appKeySyn = createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+            if (originDiskRoot && createFilesAcc[appKeySyn]) {
+              await applyChatReplyEdits({
+                reply: [
+                  `@@@FILE ${appKeySyn}\n${createFilesAcc[appKeySyn]}`,
+                  createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+                ].filter(Boolean).join('\n'),
+                projectId: originProjectId,
+                projectName: lockedProductName,
+                files: createFilesAcc,
+                userMessage: host.content,
+                diskRoot: originDiskRoot,
+              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+            }
+          } catch { /* ignore */ }
+          markCreateJobFailed(
+            jobId,
+            `App.jsx still won't compile (${syn.reasons.slice(0, 2).join('; ')}). Live stayed closed.`,
+          );
+          await host.finishPlainReply(
+            [
+              `**${lockedProductName}** is on disk, but Live stayed closed — App.jsx still won't compile.`,
+              '',
+              syn.reasons.slice(0, 4).map((r) => `- ${r}`).join('\n'),
+              '',
+              `Folder: \`${originDiskRoot}\``,
+              '',
+              'Tell me to **fix the App** and I will heal it, then open Live only when it compiles.',
+            ].join('\n'),
+            `${ensembleAttribution || 'NOVA'} · syntax gate`,
+          );
+          return { status: 'handled' };
+        }
+      } catch { /* best-effort */ }
+      // Last chance: never start Vite against a static #app index leftover.
+      try {
+        const { ensureViteReactProjectFiles, isValidViteIndexHtml } = await import('@/lib/createBuildQuality');
+        if (!isValidViteIndexHtml(createFilesAcc['index.html'] || '')) {
+          host.pushStatus('Healing index.html for Vite Live…');
+          const healed = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
+          createFilesAcc = healed.files;
+          const keys = ['index.html', 'src/main.jsx', 'src/main.tsx', 'vite.config.js', 'vite.config.ts', 'package.json']
+            .filter((k) => createFilesAcc[k]);
+          if (keys.length) {
+            await applyChatReplyEdits({
+              reply: keys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
+              projectId: originProjectId,
+              projectName: lockedProductName,
+              files: createFilesAcc,
+              userMessage: host.content,
+              diskRoot: originDiskRoot,
+            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+          }
+        }
+      } catch { /* best-effort */ }
       host.pushStatus('Installing project dependencies (npm) — downloading packages…');
+      clearBuildWritingPath('Installing npm…');
       markCreateJobNpm(jobId);
       try {
         bootstrap = await bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
           files: createFilesAcc,
           preferPreviewUrl: null,
-          npmTimeoutMs: 180_000,
+          npmTimeoutMs: 420_000,
           onStatus: (label) => {
             host.pushStatus(label);
             tickBuildHeartbeat(label);
           },
         });
-        if (bootstrap.npmInstalled && uiPolishOk === true) {
-          bootstrap = { ...bootstrap, codeVerified: true };
-          host.pushStatus(
-            bootstrap.previewLive
-              ? 'Dependencies installed — code scan passed, Live verified…'
-              : 'Dependencies installed — verifying Live…',
-          );
-          markCreateJobReady(jobId, bootstrap.devServerUrl || null);
-        } else if (!bootstrap.npmInstalled) {
+        if (bootstrap.npmInstalled) {
+          let codeVerified = false;
+          const liveUrl = String(bootstrap.devServerUrl || '').trim();
+          if (liveUrl && bootstrap.previewLive) {
+            try {
+              // Create Runtime Loop: Live + console + smoke + host judge; capped auto-fix.
+              const { runCreateVerifyAndFix } = await import('@/lib/createRuntimeLoop');
+              const { createRuntimeStageLabel } = await import('@/lib/createEvidence');
+              markCreateJobVerifying(jobId, 'live', 'Collecting Live evidence…');
+              host.pushStatus(createRuntimeStageLabel('live'));
+              const runtime = await runCreateVerifyAndFix({
+                files: createFilesAcc,
+                productName: lockedProductName,
+                brief: briefForUi,
+                projectId: originProjectId,
+                diskRoot: originDiskRoot,
+                liveUrl,
+                npmInstalled: true,
+                staticReady: true,
+                staticReasons: uiPolishReasons,
+                floorFallback: createFloorFallback,
+                maxFixRounds: createFloorFallback ? 1 : 3,
+                host: {
+                  pushStatus: (label) => host.pushStatus(label),
+                  shouldAbort: () => Boolean(host.shouldAbort?.()),
+                  onStage: (stage, detail) => {
+                    markCreateJobVerifying(jobId, stage, detail);
+                  },
+                },
+              });
+              createFilesAcc = runtime.files;
+              const painted = Boolean(runtime.liveUnlock || (runtime.evidence.httpOk && runtime.evidence.mounted));
+              // Live unlock ≠ quality Ready. Quality requires pass spine (plan + design + judge).
+              codeVerified = Boolean(runtime.qualityReady);
+              if (host.shouldAbort?.() || runtime.judgeReasons?.includes('aborted')) {
+                codeVerified = false;
+                markCreateJobFailed(jobId, 'Create stopped during Live verify');
+              } else {
+                try {
+                  pushBuildDiag({
+                    kind: codeVerified ? 'ready' : (painted ? 'status' : 'status'),
+                    detail: codeVerified
+                      ? `Quality Ready (${runtime.fixRounds} fix rounds)`
+                      : painted
+                        ? `Live unlocked — quality open: ${(runtime.judgeReasons || []).slice(0, 2).join('; ') || 'plan/design'}`
+                        : `Live server up (${runtime.fixRounds} fix rounds)`,
+                  });
+                } catch { /* ignore */ }
+                if (painted && !codeVerified) {
+                  host.pushStatus('Live unlocked — quality Ready still open (plan/design/judge)…');
+                }
+              }
+              // Allow Live button when painted even if quality not Ready.
+              if (painted && !host.shouldAbort?.()) {
+                bootstrap = { ...bootstrap, codeVerified, previewLive: true };
+              }
+            } catch {
+              // Still unlock if Vite answered — don't hide Live behind a probe crash.
+              codeVerified = false;
+            }
+          }
+          bootstrap = { ...bootstrap, codeVerified };
+          if (liveUrl && bootstrap.previewLive && !host.shouldAbort?.()) {
+            const qualityOk = Boolean(codeVerified);
+            const readyNote = qualityOk
+              ? 'Live ready · quality verified'
+              : (createFloorFallback
+                ? 'Live unlocked · recovery floor (quality open)'
+                : 'Live unlocked · quality still open');
+            host.pushStatus(qualityOk
+              ? 'Live ready — open Live under the chat…'
+              : 'Live unlocked — open Live (quality gate still open)…');
+            markCreateJobReady(jobId, liveUrl, readyNote);
+            try {
+              host.commitStudio({
+                files: createFilesAcc,
+                projectId: originProjectId,
+                name: lockedProductName,
+                diskRoot: originDiskRoot,
+                previewUrl: liveUrl,
+              });
+            } catch { /* ignore */ }
+            try {
+              const prefs = getLocalPrefs();
+              if (qualityOk && prefs.agentLoopCommitOnSuccess === true && originDiskRoot && window.novaDesktop?.agentRun) {
+                const msg = `NOVA: created ${lockedProductName}`.replace(/"/g, '\\"');
+                await window.novaDesktop.agentRun({
+                  command: `git add -A && git commit -m "${msg}"`,
+                  cwd: originDiskRoot,
+                }).catch(() => {});
+              }
+            } catch { /* optional */ }
+            // Live available to user; codeVerified tracks quality Ready only.
+            bootstrap = { ...bootstrap, codeVerified: qualityOk, previewLive: true };
+          } else if (!bootstrap.previewLive) {
+            host.pushStatus('Dependencies installed — Live not ready yet…');
+            markCreateJobFailed(
+              jobId,
+              bootstrap.bootstrapNote
+                || 'Dependencies installed, but Live did not start. Say **run Preview** or **install npm dependencies**.',
+            );
+          }
+        } else {
           host.pushStatus('Dependency install did not finish…');
           markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'npm install failed');
-        } else {
-          markCreateJobFailed(jobId, 'UI not Preview-ready');
         }
       } catch (err) {
         bootstrap = {
@@ -2602,8 +3507,94 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         };
         markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'npm failed');
       }
+    } else if (uiPolishOk === true && originDiskRoot) {
+      // Static HTML / non-npm: Live + Create Runtime evidence (same gate as Vite).
+      host.pushStatus('Starting Live preview…');
+      try {
+        const live = await Promise.race([
+          window.novaDesktop?.getOrAttachPreview?.(originDiskRoot) ?? Promise.resolve(null),
+          new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 55_000); }),
+        ]);
+        if (live?.ok && live.url) {
+          let codeVerified = false;
+          try {
+            const { runCreateVerifyAndFix } = await import('@/lib/createRuntimeLoop');
+            markCreateJobVerifying(jobId, 'live', 'Collecting Live evidence…');
+            const runtime = await runCreateVerifyAndFix({
+              files: createFilesAcc,
+              productName: lockedProductName,
+              brief: briefForUi,
+              projectId: originProjectId,
+              diskRoot: originDiskRoot,
+              liveUrl: live.url,
+              npmInstalled: true,
+              staticReady: true,
+              staticReasons: uiPolishReasons,
+              floorFallback: createFloorFallback,
+              host: {
+                pushStatus: (label) => host.pushStatus(label),
+                shouldAbort: () => Boolean(host.shouldAbort?.()),
+                onStage: (stage, detail) => markCreateJobVerifying(jobId, stage, detail),
+              },
+              maxFixRounds: createFloorFallback ? 1 : 3,
+            });
+            createFilesAcc = runtime.files;
+            codeVerified = Boolean(runtime.qualityReady);
+            bootstrap = {
+              npmInstalled: true,
+              previewLive: Boolean(runtime.liveUnlock || runtime.evidence.httpOk),
+              devServerUrl: live.url,
+              codeVerified,
+            };
+          } catch {
+            codeVerified = false;
+            bootstrap = {
+              npmInstalled: true,
+              previewLive: true,
+              devServerUrl: live.url,
+              codeVerified: false,
+            };
+          }
+          host.pushStatus(codeVerified
+            ? 'Live ready — open Live under the chat…'
+            : 'Live unlocked — quality gate still open…');
+          markCreateJobReady(
+            jobId,
+            live.url,
+            codeVerified ? 'Live ready · quality verified' : 'Live unlocked · quality still open',
+          );
+          try {
+            host.commitStudio({
+              files: createFilesAcc,
+              projectId: originProjectId,
+              name: lockedProductName,
+              diskRoot: originDiskRoot,
+              previewUrl: live.url,
+            });
+          } catch { /* ignore */ }
+        } else {
+          bootstrap = {
+            npmInstalled: true,
+            previewLive: false,
+            bootstrapNote: live?.error
+              || 'Live preview server did not start. Say **run Preview** to retry.',
+          };
+          markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'Live did not start');
+        }
+      } catch (err) {
+        bootstrap = {
+          npmInstalled: true,
+          previewLive: false,
+          bootstrapNote: err instanceof Error ? err.message : 'Live preview failed',
+        };
+        markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'Live preview failed');
+      }
     } else if (uiPolishOk === true) {
-      markCreateJobReady(jobId, null);
+      // CONFLICT REMOVED: never mark Ready without disk Live evidence.
+      markCreateJobFailed(
+        jobId,
+        'UI preflight passed but no project folder / Live target — cannot verify.',
+      );
     } else {
       markCreateJobFailed(jobId, 'UI not Preview-ready');
     }
@@ -2642,9 +3633,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         'Wrote scaffold files',
         'Coder built the product UI',
         bootstrap.previewLive && bootstrap.codeVerified
-          ? 'Code scan passed — Live verified'
+          ? 'Live verified (mount + evidence)'
           : bootstrap.previewLive
-            ? 'Live server started'
+            ? 'Live evidence incomplete — not verified'
             : (bootstrap.npmInstalled
               ? 'Installed project dependencies'
               : (bootstrap.npmPending ? 'Installing project dependencies' : 'Setup incomplete')),
@@ -2654,7 +3645,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ? `NOVA · ensemble · ${ensembleAttribution}`
         : (coderGate.ok && coderGate.name
           ? (isCreateV2Active()
-            ? `NOVA · createV2 · ${coderGate.name}`
+            ? `NOVA · create · ${coderGate.name}`
             : `NOVA · create · ${coderGate.name}`)
           : 'NOVA · create'));
     try {

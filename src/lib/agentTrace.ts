@@ -98,7 +98,12 @@ export function traceThoughtFromAsk(userMessage: string): string {
   if (/\bwhat(?:'s| is)\s+(?:in|inside)\b/i.test(t)) {
     return 'Listing folder contents and summarizing without dumping every file into chat.';
   }
-  if (/\b(delete|remove|trash)\b/i.test(t)) {
+  // Create / build before delete — "Delete on each row" in a todo brief must not look like trash.
+  if (/\b(?:build|create|scaffold|start building)\b/i.test(t)
+    && /\b(?:app|project|todo|landing|site|page|vite|react)\b/i.test(t)) {
+    return 'Creating the project folder, writing scaffold files, and verifying they exist on disk.';
+  }
+  if (/\b(delete|remove|trash)\b/i.test(t) && !/\b(?:todo|task|row|list|item)\b/i.test(t)) {
     return 'Locating the path, confirming scope, then deleting only what was asked.';
   }
   if (/\b(clone|pull|github|push)\b/i.test(t)) {
@@ -125,7 +130,12 @@ export function traceThoughtFromAsk(userMessage: string): string {
   if (/\b(?:add|put|place|insert)\b/i.test(t)) {
     return 'Adding the requested UI to the project files, then verifying the change.';
   }
-  if (/\b(?:remove|delete|drop)\b/i.test(t)) {
+  // "drop a heading / title / card" means place — not delete.
+  if (/\bdrop\b[\s\S]{0,64}\b(?:heading|headline|h1|title|card|button|word|text)\b/i.test(t)) {
+    return 'Adding the requested UI to the project files, then verifying the change.';
+  }
+  if (/\b(?:remove|delete)\b/i.test(t)
+    || (/\bdrop\b/i.test(t) && /\b(?:about|footer|clutter|panel|sidebar|hud|section)\b/i.test(t))) {
     return 'Removing the requested piece from the project files.';
   }
   if (/\b(comment|edit|change|fix|update)\b/i.test(t)) {

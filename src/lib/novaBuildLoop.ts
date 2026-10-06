@@ -382,15 +382,67 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
     );
     reasons = check.reasons;
     if (check.ok) {
-      opts.host.pushStatus(modeStatusLabel('build', 'Preview Ready'));
-      return {
-        ok: true,
-        files,
-        reasons: [],
-        steps: allSteps,
-        usedAgentLoop: true,
-        replySummary: lastLoop.reply || `Built **${opts.productName}**. Open Live when ready.`,
-      };
+      // Static Ready is preflight. When disk exists, require Live evidence before ok.
+      if (opts.diskRoot) {
+        try {
+          const attach = await window.novaDesktop?.getOrAttachPreview?.(opts.diskRoot);
+          const liveUrl = String(attach?.url || '').trim();
+          if (attach?.ok && liveUrl) {
+            const {
+              collectLiveEvidence,
+              emptyCreateEvidence,
+              finalizeCreateEvidence,
+            } = await import('@/lib/createEvidence');
+            opts.host.pushStatus(modeStatusLabel('build', 'Live evidence'));
+            const live = await collectLiveEvidence({
+              liveUrl,
+              productName: opts.productName,
+              files,
+              brief: opts.brief,
+              requireSmoke: true,
+            });
+            const ev = finalizeCreateEvidence(emptyCreateEvidence({
+              staticReady: true,
+              npmInstalled: true,
+              ...live,
+            }));
+            if (!ev.pass) {
+              reasons = [
+                ...reasons,
+                !ev.mounted ? 'Live UI did not mount' : '',
+                !ev.consoleClean ? 'Live console errors' : '',
+                ev.smokeOk === false ? ev.smokeDetail : '',
+              ].filter(Boolean);
+              // Fall through — do not return ok on static Ready alone.
+            } else {
+              opts.host.pushStatus(modeStatusLabel('build', 'Live verified'));
+              return {
+                ok: true,
+                files,
+                reasons: [],
+                steps: allSteps,
+                usedAgentLoop: true,
+                replySummary: lastLoop.reply || `Built **${opts.productName}**. Live verified.`,
+              };
+            }
+          } else {
+            reasons = [...reasons, attach?.error || 'Live did not start'];
+          }
+        } catch (err) {
+          reasons = [...reasons, err instanceof Error ? err.message : 'Live evidence failed'];
+        }
+        // Static Ready alone is not success when diskRoot is set.
+      } else {
+        opts.host.pushStatus(modeStatusLabel('build', 'Preview Ready'));
+        return {
+          ok: true,
+          files,
+          reasons: [],
+          steps: allSteps,
+          usedAgentLoop: true,
+          replySummary: lastLoop.reply || `Built **${opts.productName}**. Open Live when ready.`,
+        };
+      }
     }
   }
 
@@ -413,5 +465,5 @@ export function shouldUseNovaCreateBuildLoop(): boolean {
 
 export function shouldUseNovaEditBuildLoop(): boolean {
   const prefs = getLocalPrefs();
-  return prefs.agentLoopOnEdit !== false && prefs.agentLoopEnabled !== false;
+  return prefs.agentLoopOnEdit === true && prefs.agentLoopEnabled !== false;
 }

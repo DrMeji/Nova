@@ -16,15 +16,19 @@ export const AI_MODES = [
   { value: 'local_fallback', label: 'Cloud Create', hint: 'Prefer cloud for builds, local backup' },
 ];
 
+/** Quick picks for Settings → Models (order is re-sorted live: installed first). */
 export const DEFAULT_MODELS = [
-  { id: 'NOVA-auto', label: 'Nova Multimodal', detail: '', source: 'auto' },
-  { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: '', source: 'local' },
-  { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: '', source: 'local' },
-  { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: '', source: 'local' },
-  { id: 'gpt-4o', label: 'GPT-4o', detail: '', source: 'cloud' },
-  { id: 'claude-sonnet', label: 'Claude Sonnet', detail: '', source: 'cloud' },
-  { id: 'deepseek-chat', label: 'DeepSeek Chat', detail: '', source: 'cloud' },
-  { id: 'gemini-flash', label: 'Gemini 2.0 Flash', detail: '', source: 'cloud' },
+  { id: 'NOVA-auto', label: 'Nova Auto', detail: '', source: 'auto' as const },
+  { id: 'qwen25-7b', label: 'Qwen2.5 7B', detail: '', source: 'local' as const },
+  { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: '', source: 'local' as const },
+  { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: '', source: 'local' as const },
+  { id: 'qwen2-vl-7b', label: 'Qwen2-VL 7B', detail: '', source: 'local' as const },
+  { id: 'uigen-fx-4b', label: 'UIGEN-FX 4B', detail: '', source: 'local' as const },
+  { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: '', source: 'local' as const },
+  { id: 'gpt-4o', label: 'GPT-4o', detail: '', source: 'cloud' as const },
+  { id: 'claude-sonnet', label: 'Claude Sonnet', detail: '', source: 'cloud' as const },
+  { id: 'deepseek-chat', label: 'DeepSeek Chat', detail: '', source: 'cloud' as const },
+  { id: 'gemini-flash', label: 'Gemini 2.0 Flash', detail: '', source: 'cloud' as const },
 ];
 
 export const PROVIDER_ROWS = [

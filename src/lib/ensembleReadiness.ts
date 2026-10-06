@@ -217,16 +217,16 @@ export function assessEnsembleReadiness(
 /** Markdown block for create gate / chat reply. */
 export function formatTeamReadinessMarkdown(ready: EnsembleReadiness): string {
   const lines = [
-    '**Build team for this PC**',
+    '**Brains on this PC**',
     '',
     ...ready.summaryLines.map((l) => `- ${l}`),
   ];
   if (ready.warnBeforeCreate && ready.canCreate) {
     lines.push(
       '',
-      'Premium builds work best with **Chat + Design + Coder**. You can build with Coder only (lower quality), or install the missing brains under **Models → Design**.',
+      'Nova uses **one locked brain** per chat (ensemble Auto is parked). Install a solid Instruct or coder GGUF under **Models** — backups are for context handoff, not mid-build seat swaps.',
       '',
-      'Say **build anyway** to continue, or open **Models** and install **UIGEN-FX 4B** (Design) plus an Instruct chat model.',
+      'Say **build anyway** to continue with what’s ready, or open **Models** to install another brain.',
     );
   }
   if (!ready.canCreate) {

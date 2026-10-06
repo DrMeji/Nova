@@ -108,6 +108,6 @@ export function honestNoLiveChatReply(): string {
     '1. Open Models / Local AI and install a chat brain that fits this PC (prefer 3B+). Tiny 1.5B is chat-only — never the coder.',
     '2. Or connect free capacity. Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
     '',
-    'Once something is connected, leave the picker on Nova Multimodal. it will fail over for you and keep this thread’s context.',
+    'Once something is connected, leave the picker on Nova Auto. it will pick one Ready brain for you and keep this thread’s context.',
   ].join('\n');
 }

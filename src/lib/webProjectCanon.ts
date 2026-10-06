@@ -776,11 +776,40 @@ document.getElementById('waitlist-form')?.addEventListener('submit', (e) => {
   return out;
 }
 
+/**
+ * Shop / catalog feature asks need a real model App rewrite — never surgical half-patches
+ * (local patch left unbound cart state and blank Live on the Garden ladder).
+ */
+export function isShopFeatureStructureAsk(message: string): boolean {
+  const t = normalizeMessyUiEditAsk(String(message || ''));
+  if (!t.trim()) return false;
+  if (/\badd\s+to\s+cart\b/i.test(t)) return true;
+  if (/\b(?:place\s+order|checkout)\b/i.test(t)) return true;
+  if (/\bcart\b/i.test(t) && /\b(?:drawer|checkout|place\s+order|badge|bump|quantit|open\s+the\s+cart)\b/i.test(t)) return true;
+  if (/\b(?:quantity|stepper|qty)\b/i.test(t) && /\b(?:card|plant|cart|minus|plus|default)\b/i.test(t)) return true;
+  if (/\bfilter\b/i.test(t) && /\b(?:All|Vegetables|Herbs|Leafy|plant)\b/i.test(t)) return true;
+  if (/\b(?:plant|product)\s+cards?\b/i.test(t) && /\b(?:price|Add to cart|row of|eight items)\b/i.test(t)) return true;
+  if (/\b(?:tomatoes?|peppers?|herbs|leafy\s+greens|basil|kale|zucchini)\b/i.test(t)
+    && /\b(?:card|price|cart|Add to cart)\b/i.test(t)) {
+    return true;
+  }
+  // First-create hard-go — must scaffold via create/model, not cream-only micro.
+  if (/\bskip\s+the\s+plan\b/i.test(t) && /\b(?:on\s+disk|Live)\b/i.test(t)) return true;
+  if (/\bput\s+it\s+on\s+disk\b/i.test(t) && /\bLive\b/i.test(t)) return true;
+  if (/\b(?:filters?|qty\s+steppers?|cart\s+drawer)\b/i.test(t)
+    && /\b(?:Live|checkout|cream|sticky)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 export function isWebMicroAsk(message: string): boolean {
   const t = normalizeMessyUiEditAsk(String(message || ''));
   if (!t.trim()) return false;
   // Structural Discord/chat piece asks must go through real App.jsx generation — never HTML micro.
   if (isStructuralUiPieceAsk(t)) return false;
+  // Shop feature packs → model/create path only.
+  if (isShopFeatureStructureAsk(t)) return false;
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
     // brand-new big builds are not micro. except hello world follow-ups with change verbs
   }
@@ -811,7 +840,17 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\bpizza\b/i.test(t) && /\b(change|saying|say|text|title|hello)\b/i.test(t)) return true;
   if (/\b(text|hello\s*world)\b.{0,40}\b(white|black|color)\b/i.test(t)) return true;
   if (/\b(logo|icon)\b/i.test(t) && /\b(add|put|place|center|middle|screen|top[\s-]?left)\b/i.test(t)) return true;
-  if (/\b(?:bag|cart)\b/i.test(t) && /\b(?:add|icon|top[\s-]?right|search)\b/i.test(t)) return true;
+  // Cart / bag icon corner moves stay micro; full cart+checkout feature packs are gated above.
+  if (/\b(?:bag|cart)\b/i.test(t)
+    && /\b(?:add|put|place|icon|button|top[\s-]?right|search)\b/i.test(t)
+    && !/\b(?:drawer|checkout|place\s+order|Add to cart|bump|count|quantit)\b/i.test(t)) {
+    return true;
+  }
+  if (
+    /\b(?:move|shift|nudge|lower)\b/i.test(t)
+    && /\b(?:card|cards|grid|row|section|content|list)\b/i.test(t)
+    && /\b(?:lower|down|below|breathing|space|spacing|margin|crowd|under)\b/i.test(t)
+  ) return true;
   if (/\bfooter\b/i.test(t) && /\b(?:add|simple|thin)\b/i.test(t)) return true;
   if (/\bhero\s+title\b/i.test(t) || (/\bsubtitle\b/i.test(t) && /\badd\b/i.test(t))) return true;
   // Notes / simple static sites only — do NOT treat Discord layout words as micro.
@@ -820,12 +859,41 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\bbadge\b/i.test(t) && /\b(text|label|to|into)\b/i.test(t)) return true;
   if (/\bequals?\s+button\b/i.test(t) && /\b(larger|bigger)\b/i.test(t)) return true;
   if (/\b(drop|remove|delete|fold)\b[\s\S]{0,80}\babout\b/i.test(t)) return true;
-  if (/\bsticky\b/i.test(t) && /\b(ticket|cta|bottom)\b/i.test(t)) return true;
+  // Sticky / card grid / descriptions / drop-a-heading are shop polish — model path, not micro.
   if (/\bnav\b/i.test(t) && /\b(only|just)\b/i.test(t) && /\b(lineup|contact)\b/i.test(t)) return true;
   if (/\bschedule\s+page\b/i.test(t) || (/\b(add|create|new)\b[\s\S]{0,40}\bschedule\b/i.test(t))) return true;
   if (/\bwaitlist\b/i.test(t)) return true;
   if (/\bnight\s+flow\b/i.test(t)) return true;
   if (/\b(watchlist|orders?\s+tab|help\s+tab|add\s+symbol|buy\s+and\s+sell)\b/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * Marketing / product homepage asks — must never get surgical center-word / flex-center
+ * phone-column CSS. Kept local (no import from createBuildQuality) to avoid cycles.
+ */
+export function askLooksLikeMarketingOrProductHomepage(ask: string): boolean {
+  const t = String(ask || '');
+  if (!t.trim()) return false;
+  if (/\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing|product\s+(?:homepage|marketing|page)|full[- ]?bleed)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:hero|footer|features?|varieties|colorway|specs?)\b/i.test(t)
+    && /\b(?:website|landing|homepage|marketing|brand)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:gaming\s+(?:mouse|keyboard|headset|peripheral)|wireless\s+mouse|mechanical\s+keyboard|dried[- ]?dates?|medjool|fruit\s+brand|specialty[- ]food|liquor|spirits?|bottle\s+shop)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:mouse|keyboard|headset|earbuds?|vacuum|shop|store|dates?|whiskey|whisky|bourbon|vodka|gin)\b/i.test(t)
+    && /\b(?:website|landing|homepage|product|brand|cart|checkout)\b/i.test(t)) {
+    return true;
+  }
+  if (t.length > 160
+    && /\b(?:website|homepage)\b/i.test(t)
+    && /\b(?:sticky\s+nav|full[- ]?bleed|hero|CTA|footer|Shop)\b/i.test(t)) {
+    return true;
+  }
   return false;
 }
 
@@ -838,11 +906,10 @@ export function reactSurgicalMicroAskEdits(
   if (!t.trim()) return [];
   // Piece-by-piece Discord layout asks need full model App.jsx writes, not surgical tweaks.
   if (isStructuralUiPieceAsk(t)) return [];
-  // Full product / quiet-luxury landings must never collapse into a center-word stub.
-  if (
-    /\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing)\b/i.test(t)
-    || (/\b(?:hero|footer|features?)\b/i.test(t) && /\b(?:website|landing|marketing)\b/i.test(t) && t.length > 220)
-  ) {
+  // Shop feature packs must never get a half-patched App (unbound cart / blank Live).
+  if (isShopFeatureStructureAsk(t)) return [];
+  // Full product / marketing landings must never collapse into a center-word stub.
+  if (askLooksLikeMarketingOrProductHomepage(t)) {
     return [];
   }
   if (/\b(scrap|rebuild|from\s+scratch|scaffold\s+(?:a\s+)?new|replace\s+(?:the\s+)?(?:entire\s+)?(?:app|layout|ui)|start\s+over)\b/i.test(t)) {
@@ -852,7 +919,7 @@ export function reactSurgicalMicroAskEdits(
     !isWebMicroAsk(t)
     && !looksLikeNameFontStyleAsk(t)
     && !looksLikeNameTextColorAsk(t)
-    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|add|put|place|remove|delete|copyright|contact|footer|nav|brand)\b/i.test(t)
+    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|add|put|place|move|shift|nudge|lower|remove|delete|copyright|contact|footer|nav|brand|cart|polish)\b/i.test(t)
   ) {
     return [];
   }
@@ -1044,12 +1111,15 @@ export function reactSurgicalMicroAskEdits(
       || t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:says?|reading)\s+["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:says?|reading)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
+      // "heading … saying something like Fresh vegetable plants"
+      || t.match(/\b(?:heading|headline|h1|title)\b[\s\S]{0,100}\b(?:saying|say|that\s+says?)\s+(?:something\s+like\s+)?["“']?([A-Za-z][\w]*(?:\s+[A-Za-z][\w]*){1,6})/i)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase)\b[\s\S]{0,24}["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:words?|text|title)\s+["“']([^"”']{2,80})["”']/i)?.[1]
-      // Unquoted multi-word: "put the words Nightglass After Hours in the center"
-      // No /i — Title-Case only so "centered in the" is not swallowed.
-      || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase|title)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
-      || t.match(/\b(?:change|rename|set|update)\b[\s\S]{0,48}\b(?:centered\s+)?(?:words?|title|text)\s+(?:to|into)\s+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
+      // Unquoted multi-word: "Put the words Nightglass After Hours in the center"
+      // Verb is case-insensitive; Title-Case capture stays case-sensitive so
+      // "centered in the" is not swallowed as the product name.
+      || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase|title)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
+      || t.match(/\b(?:change|rename|set|update)\b[\s\S]{0,48}\b(?:centered\s+)?(?:words?|title|text)\s+(?:to|into)\s+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
       // Brand name / brand should say VOID Peripherals — stop at layout words
       || extractBrandLabel(t)
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:word|text|title)\s+["“']?([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
@@ -1059,6 +1129,7 @@ export function reactSurgicalMicroAskEdits(
     // Strip layout tails if a Title-Case regex still swallowed them — keep "local only"
     const centeredWordFinal = centeredWord
       .replace(/\s+\bonly\s+(?:add|put|place|with|and|no|nothing|keep|leave)\b.*$/i, '')
+      .replace(/\s+\b(?:short|friendly|not|corporate|and)\b.*$/i, '')
       .replace(/\s+\b(?:centered?|centred|in\s+the|middle|clean|white|black|text|on\s+screen|nothing|else)\b.*$/i, '')
       .trim() || centeredWord;
     const wantsCenteredWord = Boolean(centeredWordFinal) && (
@@ -1069,6 +1140,7 @@ export function reactSurgicalMicroAskEdits(
       || /\bonly\s+words?\b/i.test(t)
       || /\bwords?\s+only\b/i.test(t)
       || /\bwording\s+only\b/i.test(t)
+      || /\b(?:drop|add|put|place)\b[\s\S]{0,48}\b(?:heading|headline|h1|title)\b/i.test(t)
       || /\b(?:change|rename|set|update)\b[\s\S]{0,40}\b(?:centered\s+)?(?:words?|title|name)\b/i.test(t)
       || Boolean(extractNameRenameTarget(t))
     );
@@ -1124,17 +1196,32 @@ export function reactSurgicalMicroAskEdits(
     }
 
     // Centered word(s): patch into existing shell — never wipe logo/nav/background with a full App rewrite.
-    if (wantsCenteredWord && centeredWordFinal) {
+    // Marketing / product homepages: never inject flex-center phone-column CSS or a center-word-only App.
+    if (wantsCenteredWord && centeredWordFinal && askLooksLikeMarketingOrProductHomepage(t)) {
+      const label = centeredWordFinal
+        .replace(/[`$]/g, '')
+        .replace(/\s+\bonly\s+(?:add|put|place|with|and|no|nothing|keep|leave)\b.*$/i, '')
+        .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|no|without|empty|centered?|centred|in\s+the|middle|clean|white)\b.*$/i, '')
+        .trim()
+        .slice(0, 72);
+      if (label && !looksLikePromptInstructionLeak(label) && /<h1\b/i.test(app)) {
+        app = app.replace(/(<h1\b[^>]*>)[\s\S]*?(<\/h1>)/i, `$1${label}$2`);
+        touchedApp = true;
+      }
+      // Intentionally skip centerRules / center-word-only rewrite for marketing.
+    } else if (wantsCenteredWord && centeredWordFinal) {
       const label = centeredWordFinal
         .replace(/[`$]/g, '')
         // Stop at trailing instruction tails the regex sometimes swallows.
         // Keep short names that end in "only" (local only / logo only).
         .replace(/\s+\bonly\s+(?:add|put|place|with|and|no|nothing|keep|leave)\b.*$/i, '')
         .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|no|without|empty|centered?|centred|in\s+the|middle|clean|white)\b.*$/i, '')
+        .replace(/\s+\b(?:and\s+)?(?:a\s+)?(?:sage\s+)?pill\s+CTA\b.*$/i, '')
+        .replace(/\s+\bone\s+short\s+support\s+line\b.*$/i, '')
         .trim()
         .slice(0, 72);
-      if (!label) {
-        /* skip empty */
+      if (!label || looksLikePromptInstructionLeak(label)) {
+        /* skip empty / instruction residue */
       } else {
       const white = /\bwhite\b/i.test(t);
       const black = /\bblack\b/i.test(t) && !white;
@@ -1167,6 +1254,12 @@ export function reactSurgicalMicroAskEdits(
           app = app.replace(
             /(<h1\b[^>]*>)([\s\S]*?)(<\/h1>)/i,
             `<h1 className="center-word">${label}</h1>`,
+          );
+        } else if (/<\/nav>/i.test(app)) {
+          // Prefer under the top bar — not above it.
+          app = app.replace(
+            /<\/nav>/i,
+            `</nav>\n      <h1 className="center-word">${label}</h1>`,
           );
         } else {
           app = app.replace(
@@ -1515,17 +1608,56 @@ export default function App() {
       }
     }
 
-    if (wantsBag && !(/\/icons\/bag\.svg|shopping-bag|aria-label=["']Cart/i.test(app))) {
-      const bag = `<img className="nav-icon" src="/icons/bag.svg" alt="" width="20" height="20" aria-label="Cart" />`;
-      if (/className=["']search-bar["'][^>]*>/i.test(app)) {
-        app = app.replace(/(className=["']search-bar["'][^>]*>)/i, `$1${bag}`);
-      } else if (/<div className=["']nav-tools["'][^>]*>/i.test(app)) {
-        app = app.replace(/(<div className=["']nav-tools["'][^>]*>)/i, `$1${bag}`);
+    {
+      const wantsCount = wantsBag && /\b(?:bump|count|increment|qty|quantity|add\s+to\s+cart)\b/i.test(t);
+      const hasCartMark = /\/icons\/bag\.svg|shopping-bag|aria-label=["']Cart|cart-btn|cart-count/i.test(app);
+      if (wantsBag && !hasCartMark) {
+        const bag = wantsCount
+          ? `<button type="button" className="cart-btn" aria-label="Cart" onClick={() => setCart((c) => c + 1)}>Cart <span className="cart-count">{cart}</span></button>`
+          : `<img className="nav-icon" src="/icons/bag.svg" alt="" width="20" height="20" aria-label="Cart" />`;
+        if (/className=["']search-bar["'][^>]*>/i.test(app)) {
+          app = app.replace(/(className=["']search-bar["'][^>]*>)/i, `$1${bag}`);
+        } else if (/<div className=["']nav-tools["'][^>]*>/i.test(app)) {
+          app = app.replace(/(<div className=["']nav-tools["'][^>]*>)/i, `$1${bag}`);
+        } else if (/<\/nav>/i.test(app)) {
+          app = app.replace(/<\/nav>/i, `${bag}\n      </nav>`);
+        }
+        app = app.replace(/import\s+cartIcon\s+from\s+['"]\/path\/to\/[^'"]+['"];?\s*/i, '');
+        app = app.replace(/src=\{cartIcon\}/i, 'src="/icons/bag.svg"');
+        touchedApp = true;
       }
-      // Fix broken placeholder cart imports models leave behind.
-      app = app.replace(/import\s+cartIcon\s+from\s+['"]\/path\/to\/[^'"]+['"];?\s*/i, '');
-      app = app.replace(/src=\{cartIcon\}/i, 'src="/icons/bag.svg"');
-      touchedApp = true;
+      // Upgrade a static bag icon into a counting Cart control when asked to bump.
+      if (wantsCount && !/setCart|cart-count/i.test(app)) {
+        app = app.replace(
+          /<img className=["']nav-icon["'][^>]*aria-label=["']Cart["'][^>]*\/?>/i,
+          `<button type="button" className="cart-btn" aria-label="Cart" onClick={() => setCart((c) => c + 1)}>Cart <span className="cart-count">{cart}</span></button>`,
+        );
+        if (!/\b(?:useState|setCart)\b/.test(app)) {
+          if (!/from\s+['"]react['"]/.test(app)) {
+            app = `import { useState } from 'react';\n${app}`;
+          } else if (!/\buseState\b/.test(app)) {
+            app = app.replace(/import\s+\{([^}]+)\}\s+from\s+['"]react['"]/, (_m, inner: string) => (
+              `import { ${String(inner).trim().replace(/,\s*$/, '')}, useState } from 'react'`
+            ));
+          }
+          app = app.replace(
+            /export\s+default\s+function\s+App\s*\(\s*\)\s*\{/,
+            'export default function App() {\n  const [cart, setCart] = useState(0);',
+          );
+        }
+        if (/Add to cart/i.test(app)) {
+          app = app.replace(
+            /<button([^>]*)>\s*Add to cart\s*<\/button>/gi,
+            '<button type="button" className="add-to-cart" onClick={() => setCart((c) => c + 1)}>Add to cart</button>',
+          );
+        }
+        touchedApp = true;
+        if (cssPath && !/\.cart-btn\b/.test(css)) {
+          css += `\n.cart-btn{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:.35rem}`
+            + `\n.cart-count{font-weight:600}\n.add-to-cart{cursor:pointer}\n`;
+          touchedCss = true;
+        }
+      }
     }
 
     // Sticky product nav — inject without wiping center-word / hero content.
@@ -1768,6 +1900,117 @@ export default function App() {
     if (/\bpolish\b/i.test(t) && /\b(?:spacing|header|hero|footer|premium)\b/i.test(t)) {
       if (cssPath) {
         css += `\n.nav{padding:1.25rem 2rem}.hero{padding:5.5rem 2rem 3rem}.hero h1{letter-spacing:-0.02em}.subtitle{max-width:28rem;margin-left:auto;margin-right:auto}.footer{padding:1.5rem 2rem}\n`;
+        touchedCss = true;
+      }
+    }
+
+    // "move the plant cards lower / more breathing room under the headline"
+    if (
+      cssPath
+      && /\b(?:move|shift|nudge|lower|drop)\b/i.test(t)
+      && /\b(?:card|cards|grid|row|section|content|list)\b/i.test(t)
+      && /\b(?:lower|down|below|breathing|space|spacing|margin|crowd|under)\b/i.test(t)
+    ) {
+      css += `\nmain,.product-cards,.plant-cards,section{margin-top:2.75rem}`
+        + `\nheader+main,header+section{margin-top:2.5rem}`
+        + `\nmain ul,main .product-cards{margin-top:1.75rem}\n`;
+      touchedCss = true;
+    }
+
+    // Soft card shadows + rounded corners + soft green accents (cream page stays).
+    if (
+      cssPath
+      && (
+        (/\b(?:shadows?|box-shadow)\b/i.test(t) && /\b(?:card|soft|plant)\b/i.test(t))
+        || (/\brounded\b/i.test(t) && /\b(?:corner|card)\b/i.test(t))
+      )
+    ) {
+      if (!/box-shadow\s*:[^;]+/i.test(css) || !/\.plant-card|\.product-card/i.test(css)) {
+        css += `\n.plant-card,.product-card,article.card{background:#fffef8;border-radius:14px;`
+          + `box-shadow:0 10px 28px rgba(22,101,52,.12);border:1px solid rgba(22,101,52,.12);padding:1rem 1.1rem}\n`
+          + `.price,.price-tag{color:#166534;font-weight:600}\n`
+          + `button.add-to-cart,.add-to-cart{background:#166534;color:#fff;border:0;border-radius:10px;padding:.55rem 1rem}\n`;
+        touchedCss = true;
+      }
+    }
+
+    // Sticky top bar / nav so brand + cart stay visible while scrolling.
+    if (
+      cssPath
+      && /\bsticky\b/i.test(t)
+      && /\b(?:top\s*bar|header|nav|cart)\b/i.test(t)
+    ) {
+      if (!/position\s*:\s*sticky/i.test(css)) {
+        css += `\nheader,.top-bar,nav.nav,.nav{position:sticky;top:0;z-index:40;`
+          + `backdrop-filter:saturate(1.1) blur(8px);background:rgba(245,240,232,.92)}\n`;
+        touchedCss = true;
+      }
+    }
+
+    // "add a simple top bar with the name Garden Bed on the left — soft green accent, keep cream"
+    {
+      const barName = (
+        t.match(/\b(?:name|called|titled)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,3})(?:\s+on\s+the\s+left)?\b/)?.[1]
+        || ''
+      ).trim();
+      if (
+        barName
+        && /\b(?:top\s*bar|header|nav)\b/i.test(t)
+        && /\b(?:add|put|place|simple)\b/i.test(t)
+      ) {
+        const safe = barName.replace(/[<>&]/g, '').slice(0, 48);
+        if (!new RegExp(safe.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(app)) {
+          ensureNavShell();
+          if (/<div className=["']nav-left["']\s*\/>/i.test(app)) {
+            app = app.replace(
+              /<div className=["']nav-left["']\s*\/>/i,
+              `<div className="nav-left"><span className="brand">${safe}</span></div>`,
+            );
+          } else if (/<div className=["']nav-left["'][^>]*>/i.test(app)) {
+            app = app.replace(
+              /(<div className=["']nav-left["'][^>]*>)([\s\S]*?)(<\/div>)/i,
+              `$1<span className="brand">${safe}</span>$3`,
+            );
+          } else if (/<nav className=["']nav["'][^>]*>/i.test(app)) {
+            app = app.replace(
+              /(<nav className=["']nav["'][^>]*>)/i,
+              `$1\n        <div className="nav-left"><span className="brand">${safe}</span></div>`,
+            );
+          }
+          touchedApp = true;
+        }
+        if (cssPath) {
+          if (!/\.nav\s*\{[^}]*display\s*:\s*flex/i.test(css)) {
+            css += `\n.nav{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.5rem;width:100%;box-sizing:border-box;}\n`;
+            touchedCss = true;
+          }
+          if (!/\.brand\b/.test(css)) {
+            css += `\n.brand{font-weight:700;letter-spacing:.02em;color:#166534;font-size:1.15rem}\n`;
+            touchedCss = true;
+          }
+          if (/\bcream\b/i.test(t) && !/background\s*:\s*#f5f0e8/i.test(css)) {
+            if (/\.app\s*\{[^}]*background/i.test(css)) {
+              css = css.replace(/(\.app\s*\{[^}]*background\s*:\s*)([^;]+)(;)/i, '$1#f5f0e8$3');
+            } else {
+              css += `\n.app{min-height:100vh;background:#f5f0e8;margin:0}\n`;
+            }
+            touchedCss = true;
+          }
+        }
+      }
+    }
+
+    // Responsive plant/product card grid — three across on desktop.
+    if (
+      cssPath
+      && /\b(?:grid|three\s+across|responsive)\b/i.test(t)
+      && /\b(?:card|cards|plant)\b/i.test(t)
+    ) {
+      if (!/\.plant-cards|\.product-cards/i.test(css) || !/grid-template-columns/i.test(css)) {
+        css += `\n.plant-cards,.product-cards,main .cards{display:grid;gap:1.25rem;`
+          + `grid-template-columns:repeat(3,minmax(0,1fr));padding:0 1.25rem 2rem}`
+          + `\n@media (max-width:820px){.plant-cards,.product-cards,main .cards{grid-template-columns:repeat(2,minmax(0,1fr))}}`
+          + `\n@media (max-width:520px){.plant-cards,.product-cards,main .cards{grid-template-columns:1fr}}\n`;
         touchedCss = true;
       }
     }
@@ -2707,6 +2950,18 @@ export function reactUiMicroAskEdits(
  * After a local micro-patch, confirm the ask’s concrete targets actually landed in App.
  * Stops “Done in 131ms” when nothing meaningful changed (or wrong file twin).
  */
+/** True when a string looks like prompt/instruction residue, not UI copy. */
+export function looksLikePromptInstructionLeak(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\b(?:one short support line|sage pill CTA|left-aligned hero|keep orbs|never ship|full-viewport|useState|src\/App)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:add a|change only|do not|don't|rewrite|replace src)\b/i.test(t) && t.length > 40) return true;
+  if (/^[,:;]\s/.test(t)) return true;
+  return false;
+}
+
 export function verifyMicroAskApplied(
   message: string,
   files: WebFileMap,
@@ -2730,10 +2985,13 @@ export function verifyMicroAskApplied(
     return false;
   };
 
-  const quoted = [...t.matchAll(/["“”']([^"“”']{2,80})["“”']/g)].map((m) => m[1].trim()).filter(Boolean);
+  // Double / curly quotes only — ASCII apostrophe breaks on there's / don't.
+  const quoted = [...t.matchAll(/["“”]([^"“”]{2,80})["“”]/g)].map((m) => m[1].trim()).filter(Boolean);
   for (const q of quoted) {
-    // Ignore path-ish quotes
+    // Ignore path-ish quotes and prompt-instruction residue
     if (/\.(jsx?|tsx?|css|html)$/i.test(q)) continue;
+    if (looksLikePromptInstructionLeak(q)) continue;
+    if (/\bbreathing\s+room\b/i.test(q)) continue;
     if (!textInApp(q)) missing.push(q);
   }
 
@@ -2826,43 +3084,80 @@ export function verifyMicroAskApplied(
     }
   }
 
+  // Button label asks only — never treat "Add to cart, bump the count" as a CTA string.
   const cta = (
-    t.match(/\b(?:button|cta|call[\s-]*to[\s-]*action|primary\s+(?:cta|button))\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["'“”]?([^"'“”\n]{1,60})/i)?.[1]
+    t.match(/\b(?:button|cta|call[\s-]*to[\s-]*action|primary\s+(?:cta|button))\b[\s\S]{0,40}\b(?:say|label(?:led)?|reading)\s+["“”]?([^"“”\n]{1,60})/i)?.[1]
+    || t.match(/\b(?:button|cta)\s+(?:text|copy|label)\s*(?:to|as|=|:)?\s*["“”]?([^"“”\n]{1,60})/i)?.[1]
     || ''
   ).trim().replace(/[,;:]+$/, '');
-  if (cta && !textInApp(cta)) {
+  if (
+    cta
+    && !/^(?:cart|the\s+cart|count|bump)\b/i.test(cta)
+    && !/\bbump\s+the\s+count\b/i.test(cta)
+    && !textInApp(cta)
+  ) {
     if (!missing.includes(cta)) missing.push(cta);
   }
 
-  // Solid background color asks (Vite React) — hex must match the named color.
+  // Cart control — real UI signals, not a glued phrase from "to cart, bump…".
+  // Count/qty is best-effort (surgical/model); never fail-closed and revert a landed cart control.
+  // Sticky "keep Cart visible" is not a cart-add ask — don't require cart control for that alone.
+  if (
+    /\bcart\b/i.test(t)
+    && /\b(?:button|bump|count|add\s+to\s+cart)\b/i.test(t)
+    && !/\bsticky\b/i.test(t)
+    && !/\b(?:remove|delete|drop)\s+(?:the\s+)?cart\b/i.test(t)
+  ) {
+    const hasCartUi = /(?:aria-label=["']Cart["']|>\s*Cart\s*<|cart-btn|cart-count|\/icons\/bag\.svg|addToCart|setCart)/i.test(app);
+    if (!hasCartUi) missing.push('cart control');
+  }
+
+  // Solid background color asks (Vite React) — named color family, not one brittle hex.
+  // Prefer "keep cream background" over "soft green accent" so accent never demands green page paint.
   {
-    const colorWord = t.match(
-      /\b(brown|black|white|blue|red|green|teal|pink|orange|navy|cream|purple|yellow)\b/i,
-    )?.[1];
-    if (colorWord && /\bbackground\b/i.test(t) && !/\b(?:glow|accent|gradient|tint|charcoal)\b/i.test(t)) {
-      const want = (
-        /brown|chocolate|sienna/i.test(colorWord) ? '#8B4513'
-        : /black|dark/i.test(colorWord) ? '#000000'
-        : /white/i.test(colorWord) ? '#ffffff'
-        : /pink/i.test(colorWord) ? '#ec4899'
-        : /blue/i.test(colorWord) ? '#2563eb'
-        : /red/i.test(colorWord) ? '#dc2626'
-        : /green/i.test(colorWord) ? '#16a34a'
-        : /teal/i.test(colorWord) ? '#0f766e'
-        : /orange/i.test(colorWord) ? '#f97316'
-        : /navy/i.test(colorWord) ? '#1e3a8a'
-        : /cream/i.test(colorWord) ? '#fef3c7'
-        : /purple/i.test(colorWord) ? '#7c3aed'
-        : /yellow/i.test(colorWord) ? '#eab308'
-        : ''
-      ).toLowerCase();
-      const short = want.length === 7 ? `#${want[1]}${want[3]}${want[5]}` : '';
+    const bgColorExplicit = (
+      t.match(/\b(?:keep|stay|remain|still)\s+(?:that\s+|the\s+|a\s+)?(cream|brown|black|white|blue|red|green|teal|pink|orange|navy|purple|yellow)\s+(?:background|page|canvas)\b/i)?.[1]
+      || t.match(/\b(cream|brown|black|white|blue|red|green|teal|pink|orange|navy|purple|yellow)\s+background\b/i)?.[1]
+      || ''
+    );
+    const colorWord = bgColorExplicit
+      || (
+        /\b(?:glow|accent|gradient|tint)\b/i.test(t)
+          ? ''
+          : t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange|navy|cream|purple|yellow)\b/i)?.[1]
+      );
+    if (colorWord && (bgColorExplicit || /\bbackground\b/i.test(t))) {
       const bgHay = [...app.matchAll(/background(?:-color)?\s*:\s*([^;{}]+)/gi)]
         .map((m) => m[1] || '')
         .join('\n')
         .toLowerCase();
-      if (want && !bgHay.includes(want) && !(short && bgHay.includes(short))) {
-        missing.push(`${colorWord.toLowerCase()} background`);
+      const keepCream = /\b(?:keep|stay|remain|still)\b/i.test(t) && /cream/i.test(colorWord);
+      const creamFamily = /#fef3c7|#fffdd|#f5f5dc|#f5f0e8|#faf6f0|#fff8f0|#f7f3ea|#f8f1e3|#faf7f2|#f4efe6|#faf5ee|cream|ivory|beige|linen|eggshell/i.test(bgHay)
+        || /rgb\(\s*2[4-5]\d\s*,\s*2[3-5]\d\s*,\s*2[0-3]\d/i.test(bgHay);
+      if (/cream/i.test(colorWord)) {
+        if (!(keepCream && creamFamily) && !creamFamily) {
+          missing.push('cream background');
+        }
+      } else {
+        const want = (
+          /brown|chocolate|sienna/i.test(colorWord) ? '#8b4513'
+          : /black|dark/i.test(colorWord) ? '#000000'
+          : /white/i.test(colorWord) ? '#ffffff'
+          : /pink/i.test(colorWord) ? '#ec4899'
+          : /blue/i.test(colorWord) ? '#2563eb'
+          : /red/i.test(colorWord) ? '#dc2626'
+          : /green/i.test(colorWord) ? '#16a34a'
+          : /teal/i.test(colorWord) ? '#0f766e'
+          : /orange/i.test(colorWord) ? '#f97316'
+          : /navy/i.test(colorWord) ? '#1e3a8a'
+          : /purple/i.test(colorWord) ? '#7c3aed'
+          : /yellow/i.test(colorWord) ? '#eab308'
+          : ''
+        );
+        const short = want.length === 7 ? `#${want[1]}${want[3]}${want[5]}` : '';
+        if (want && !bgHay.includes(want) && !(short && bgHay.includes(short))) {
+          missing.push(`${colorWord.toLowerCase()} background`);
+        }
       }
     }
   }
@@ -2994,7 +3289,7 @@ function viteBlackShellEdits(): WebFileEdit[] {
 }
 
 /** Empty full-viewport color shell — used to prove Preview is live (e.g. solid brown). */
-function viteSolidShellEdits(bg: string): WebFileEdit[] {
+export function viteSolidShellEdits(bg: string): WebFileEdit[] {
   const color = String(bg || '#000').trim() || '#000';
   return [
     {
@@ -3002,7 +3297,7 @@ function viteSolidShellEdits(bg: string): WebFileEdit[] {
       content: `import './App.css';
 
 export default function App() {
-  return <div className="app" />;
+  return <div className="app" aria-label="Blank page" />;
 }
 `,
     },
@@ -3023,11 +3318,24 @@ export default function App() {
   ];
 }
 
+/**
+ * True when the USER asked for a blank/empty color page (not a product site).
+ * Always call on the raw user ask — never on ensemble plan fluff.
+ */
+export function looksLikeBlankSolidCreateAsk(ask: string): boolean {
+  return Boolean(blankSolidColorFromAsk(ask));
+}
+
 export function blankSolidColorFromAsk(ask: string): string | null {
-  const t = String(ask || '');
+  // Prefer the user's ask head — ensemble/plan appendages often inject "hero/features/cta"
+  // and must not demote a blank white page into a marketing build.
+  const head = String(ask || '').split(/\n## |\nLAYOUT CONTRACT|\nNOVA DESIGN SPINE|\nEnsemble plan/i)[0] || '';
+  const t = head;
   // Full product / marketing / quiet-luxury creates are never a blank color wipe.
+  // But explicit blank/empty intent always wins.
+  const blankIntent = /\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?)|just (?:a )?(?:solid|pure|flat|basic)|white\s+background|black\s+background)\b/i.test(t);
   if (/\b(?:quiet[\s-]?luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|product\s+marketing|serif|orb|features?|footer|discover|cta)\b/i.test(t)
-    && !/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?))\b/i.test(t)) {
+    && !blankIntent) {
     return null;
   }
   // Follow-up asks that ADD content on an existing colored screen must not re-wipe to a blank shell.
@@ -3048,9 +3356,13 @@ export function blankSolidColorFromAsk(ask: string): string | null {
   // "basic website … solid black background … nothing else", etc.
   const word = (
     t.match(/\b(?:solid|pure|just|blank|flat|basic|full[- ]?(?:screen|viewport|window)|premium|soft)\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|chocolate|sienna|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
-    || t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b[\s\S]{0,48}\b(?:blank|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?))\b/i)?.[1]
+    || t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b[\s\S]{0,48}\b(?:blank|background|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome|buttons?))\b/i)?.[1]
     || t.match(/\bnothing but\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
     || t.match(/\bcover\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1]
+    // "blank website / blank localhost" with a color somewhere in the ask
+    || (/\bblank\b[\s\S]{0,80}\b(?:website|site|page|localhost|app)\b/i.test(t)
+      ? (t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange|yellow|cream|gr[ae]y)\b/i)?.[1] || 'white')
+      : '')
     || ''
   );
   if (!word) return null;
@@ -3058,7 +3370,8 @@ export function blankSolidColorFromAsk(ask: string): string | null {
   const resolved = /\bcream\b/i.test(t) && /white/i.test(word) ? 'cream' : word;
   // Require blank/minimal intent so normal "brown accent" asks don't wipe the site.
   // Do NOT treat "full viewport" alone as blank — premium heroes use that phrase constantly.
-  if (!/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|stop there|no (?:nav|text|icons?|words?|ui|chrome|buttons?)|just (?:a )?(?:solid|pure|flat|basic)|for now|empty otherwise|premium\s+(?:cream|gr[ae]y)|soft\s+gr[ae]y)\b/i.test(t)) {
+  if (!blankIntent
+    && !/\b(?:blank|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|stop there|no (?:nav|text|icons?|words?|ui|chrome|buttons?)|just (?:a )?(?:solid|pure|flat|basic)|for now|empty otherwise|premium\s+(?:cream|gr[ae]y)|soft\s+gr[ae]y)\b/i.test(t)) {
     return null;
   }
   return cssColor(resolved) || null;
@@ -3068,6 +3381,55 @@ function stripSearchChromeFromIndexHtml(html: string): string {
   return String(html || '')
     .replace(/\s*<header class=["']top-bar["'][\s\S]*?<\/header>\s*/i, '\n')
     .replace(/\s*<label class=["']search-bar["'][\s\S]*?<\/label>\s*/i, '\n');
+}
+
+/** Strip prompt-instruction residue from visible titles and tighten basic page layout. */
+export function healBasicUiLayout(files: WebFileMap, opts?: { projectName?: string }): WebFileEdit[] {
+  const flat = flatten(files);
+  const appPath = findReactAppPath(flat);
+  if (!appPath || !flat[appPath]) return [];
+  const cssPath = findReactCssPath(flat, appPath);
+  let app = flat[appPath];
+  let css = flat[cssPath] || '';
+  let touchedApp = false;
+  let touchedCss = false;
+
+  // Remove instruction-leak titles that were pasted into the UI.
+  app = app.replace(/(<(?:h1|h2)([^>]*)>)([\s\S]*?)(<\/(?:h1|h2)>)/gi, (full, open, _attrs, inner, close) => {
+    const text = String(inner || '').replace(/<[^>]+>/g, '').trim();
+    if (!looksLikePromptInstructionLeak(text)) return full;
+    const brand = String(opts?.projectName || 'App').replace(/[<>&]/g, '').slice(0, 40) || 'App';
+    touchedApp = true;
+    return `${open}${brand}${close}`;
+  });
+
+  // Basic coherent shell: full-height column, readable nav, hero breathing room.
+  if (css && !/\.app\s*\{[^}]*min-height\s*:\s*100vh/i.test(css)) {
+    css += `\n.app{min-height:100vh;display:flex;flex-direction:column;margin:0;}\n`;
+    touchedCss = true;
+  }
+  if (css && /className=["']nav["']/i.test(app) && !/\.nav\s*\{[^}]*display\s*:\s*flex/i.test(css)) {
+    css += `\n.nav{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.5rem;width:100%;box-sizing:border-box;}\n`;
+    touchedCss = true;
+  }
+  if (css && /className=["']hero["']/i.test(app) && !/\.hero\s*\{[^}]*padding/i.test(css)) {
+    css += `\n.hero{padding:clamp(2.5rem,8vw,5rem) clamp(1.25rem,4vw,3rem);max-width:72rem;}\n`;
+    touchedCss = true;
+  }
+  if (css && /font-family:\s*var\(--display\)/i.test(css) === false && /className=["']title["']/i.test(app)) {
+    if (!/--display\s*:/i.test(css)) {
+      css = css.replace(/:root\s*\{/i, ':root{\n  --display: Georgia, "Times New Roman", serif;');
+      if (!/--display\s*:/i.test(css)) css = `:root{--display:Georgia,"Times New Roman",serif;}\n${css}`;
+      touchedCss = true;
+    }
+    css += `\n.title,h1{font-family:var(--display);line-height:1.15;}\n`;
+    touchedCss = true;
+  }
+
+  const out: WebFileEdit[] = [];
+  if (touchedApp) out.push({ path: appPath, content: app });
+  if (touchedCss && cssPath) out.push({ path: cssPath, content: css });
+  return out;
 }
 
 export function finalizeWebEdits(
@@ -3098,9 +3460,8 @@ export function finalizeWebEdits(
 
   const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(ask);
   const appMin = exactMinimal ? 160 : 400;
-  // Full marketing / quiet-luxury creates: never let surgical center-word win over model/shell writes.
-  const marketingCreate = /\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing)\b/i.test(ask)
-    || (/\b(?:hero|footer|features?)\b/i.test(ask) && /\b(?:website|landing|marketing)\b/i.test(ask) && ask.length > 220);
+  // Full marketing / product homepage creates: never let surgical center-word win over model/shell writes.
+  const marketingCreate = askLooksLikeMarketingOrProductHomepage(ask);
 
   // Blank solid color MUST win before cinematic / surgical — "just a solid black background,
   // nothing else" was getting upgraded into a multi-stage cinema shell.
@@ -3187,9 +3548,17 @@ export function finalizeWebEdits(
   }
 
   if (cleaned.length && touchesPreviewServing(cleaned.map(e => e.path), files)) {
-    return cleaned;
+    const healed = healBasicUiLayout(
+      { ...flat, ...Object.fromEntries(cleaned.map((e) => [String(e.path).replace(/\\/g, '/'), e.content])) },
+      opts,
+    );
+    if (!healed.length) return cleaned;
+    const byPath = new Map(cleaned.map((e) => [String(e.path).replace(/\\/g, '/'), e]));
+    for (const h of healed) byPath.set(String(h.path).replace(/\\/g, '/'), h);
+    return [...byPath.values()];
   }
 
   // Model only hit junk / nothing previewable. keep remapped if any, else empty (caller may scaffold).
-  return cleaned;
+  const healOnly = healBasicUiLayout(files, opts);
+  return healOnly.length ? healOnly : cleaned;
 }

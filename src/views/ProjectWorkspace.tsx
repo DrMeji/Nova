@@ -164,7 +164,7 @@ type CodeModel = {
 };
 
 const CODE_MODELS: CodeModel[] = [
-  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '' },
+  { id: 'NOVA-auto', name: 'Nova Auto', source: 'auto', detail: '' },
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
@@ -1484,13 +1484,6 @@ export function ProjectWorkspace() {
       window.removeEventListener('drop', onDrop, true);
     };
   }, [myAccess, project?.id, projectId]);
-
-  const pickCodePhotos = async () => {
-    if (!window.novaDesktop?.pickFiles) return;
-    const res = await window.novaDesktop.pickFiles({ imagesOnly: true });
-    if (res?.canceled || !res?.ok || !res.paths?.length) return;
-    await attachCodeImagesFromPaths(res.paths);
-  };
 
   const pickCodeFiles = async () => {
     if (!window.novaDesktop?.pickFiles) return;
@@ -4159,24 +4152,20 @@ export function ProjectWorkspace() {
                   busy={attachBusy}
                   buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
                   onAction={(action: ComposerPlusAction) => {
-                    if (action === 'image') {
-                      void pickCodePhotos();
-                      return;
-                    }
-                    if (action === 'file') {
+                    if (action === 'image' || action === 'attach' || action === 'file') {
                       void pickCodeFiles();
                       return;
                     }
-                    if (action === 'folder') {
+                    if (action === 'bind-path' || action === 'folder') {
                       pickCodeFolder();
-                      return;
-                    }
-                    if (action === 'import-folder') {
-                      void importProjectFolderCopy();
                       return;
                     }
                     if (action === 'enter-path') {
                       void enterPathAndOpen();
+                      return;
+                    }
+                    if (action === 'import-folder') {
+                      void importProjectFolderCopy();
                       return;
                     }
                     if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
@@ -4206,7 +4195,7 @@ export function ProjectWorkspace() {
                     onClick={() => setModelMenuOpen(o => !o)}
                     className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[11rem]"
                     title={activeModel.source === 'auto'
-                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'Nova Multimodal · multi-model routing')
+                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'Nova Auto · one Ready brain per turn')
                       : activeModel.name}
                     aria-label="Select model"
                     aria-expanded={modelMenuOpen}

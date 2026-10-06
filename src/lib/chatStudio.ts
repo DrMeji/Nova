@@ -15,6 +15,7 @@ import { looksLikeConversationalPlanningAsk } from '@/lib/chatIdeaIntent';
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { listGitHubRepos, type GitHubRepo } from '@/lib/github';
 import { parseGithubRepoRef } from '@/lib/novaGitClient';
+import { looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 
 export type ChatStudioFiles = Record<string, string>;
 
@@ -25,6 +26,13 @@ export function looksLikeBuildStart(message: string): boolean {
   if (/\b(?:how\s+(?:do|can|should|would)|get\s+started|help\s+me\s+plan|just\s+(?:talk|plan|discuss)|planning\s+only|no\s+files|do\s+not\s+create|what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|requirements?|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)) {
     return false;
   }
+  // Hard go (on disk / Live / skip plan) with a product signal → scaffold now.
+  if (
+    looksLikeHardCreateGo(t)
+    && /\b(?:app|application|project|website|site|page|shop|store|storefront|landing|homepage|todo|dashboard|ui)\b/i.test(t)
+  ) {
+    return true;
+  }
   // Soft "I want to build" is scaffold when it is a clear product ask (no advice question).
   if (/\bi\s+want\s+to\s+(?:build|make|create|start)\b/i.test(t)) {
     if (
@@ -33,15 +41,15 @@ export function looksLikeBuildStart(message: string): boolean {
     ) {
       return false;
     }
-    if (/\b(?:app|website|site|project|page|chat)\b/i.test(t)) return true;
+    if (/\b(?:app|website|site|project|page|chat|shop|store)\b/i.test(t)) return true;
   }
-  if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
+  if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this|on\s+disk|get\s+(?:it\s+)?live)\b/i.test(t)) {
     return false;
   }
   return (
-    /\b(create|scaffold)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|project)\b/i.test(t)
+    /\b(create|scaffold)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|project|shop|store)\b/i.test(t)
     // "build/make me a website|app|site|project" — create now (no "now/files/scaffold" required)
-    || /\b(build|make)\b[\s\S]{0,40}\b(?:me\s+)?(?:a\s+)?(?:new\s+)?(app|website|site|project|page)\b/i.test(t)
+    || /\b(build|make)\b[\s\S]{0,40}\b(?:me\s+)?(?:a\s+)?(?:new\s+)?(app|website|site|project|page|shop|store)\b/i.test(t)
     || /\b(let'?s|lets)\s+(build|make|create)\s+(?:this|that|it|the\s+project|files)\b/i.test(t)
     || /\bstart with a blank\b/i.test(t)
     || /\banother chat\s*gpt\b/i.test(t)
@@ -70,7 +78,7 @@ export type StudioAskKind =
   | 'freeform';
 
 const SMALLTALK_RE =
-  /^(hi+|hii+|hello+|heelo|hell+o|hey+|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
+  /^(hi+|hii+|hello+|heelo|hell+o|helo|ehello|hey+|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
 
 /** “How can we fix” / “tell me how we can fix”. always debug, never overview. */
 export const STUDIO_FIX_ASK_RE =
@@ -304,6 +312,11 @@ export function isGithubPullAsk(message: string): boolean {
 
 export function wantsGithubCatalog(message: string): boolean {
   const t = message.toLowerCase();
+  // Bound-folder project asks (incl. “full report”) must never list GitHub repos.
+  if (/\b(?:this|the|my|our)\s+(?:project|folder|app|codebase)\b/i.test(t)
+    && /\b(?:report|about|overview|information|details?)\b/i.test(t)) {
+    return false;
+  }
   if (parseGithubRepoRef(message) && /\b(clone|open|pull|work on|bring in)\b/.test(t)) return false;
   return (
     /\b(my (github|repos?|repositor)|list (my )?repos?|what repos? do i have|i have (a |something on )?github)\b/i.test(t)

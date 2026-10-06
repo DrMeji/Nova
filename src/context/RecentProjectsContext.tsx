@@ -3,6 +3,7 @@ import {
   archiveRecentChat,
   deleteCreationPermanently,
   deleteRecentChatPermanently,
+  deleteRecentChatsPermanentlyBulk,
   loadRecentChats,
   loadRecentCreations,
   loadRecentProjects,
@@ -42,6 +43,8 @@ interface RecentProjectsContextValue {
   pinProject: (id: string) => void;
   archiveChat: (chatId: string) => void;
   deleteChatForever: (chatId: string) => void;
+  /** Bulk History wipe — one store pass + one React update (keeps composer responsive). */
+  deleteChatsForeverBulk: (chatIds: string[]) => number;
   deleteCreationForever: (creationId: string) => void;
   refreshCreations: () => void;
   refreshChats: () => void;
@@ -204,6 +207,14 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     setCreations(loadRecentCreations());
   }, []);
 
+  const deleteChatsForeverBulk = useCallback((chatIds: string[]) => {
+    const n = deleteRecentChatsPermanentlyBulk(chatIds);
+    setChats(loadRecentChats());
+    setCreations(loadRecentCreations());
+    setRecent(loadRecentProjects());
+    return n;
+  }, []);
+
   const deleteCreationForever = useCallback((creationId: string) => {
     deleteCreationPermanently(creationId);
     setCreations(loadRecentCreations());
@@ -228,6 +239,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         pinProject,
         archiveChat,
         deleteChatForever,
+        deleteChatsForeverBulk,
         deleteCreationForever,
         refreshCreations,
         refreshChats,

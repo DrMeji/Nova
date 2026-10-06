@@ -1042,19 +1042,20 @@ function looksLikeFullUiBuildAsk(userMessage: string): boolean {
 /**
  * Local models sometimes balloon App.jsx with endless SVG path / attribute repeats.
  * Treat that as unusable so create retries instead of shipping junk.
+ * Keep the bar high — a premium coffee/landing App.tsx is often 6–15KB of real UI.
  */
 export function isPathologicalCodeSource(source: string | undefined | null): boolean {
   const s = String(source || '');
-  if (s.length < 5000) return false;
+  if (s.length < 14_000) return false;
   // Long file with a tiny alphabet (digits/dashes loops) is almost never real UI.
-  if (s.length >= 8000 && new Set(s).size < 100) return true;
-  // Any mid-file 28–48 char probe that appears dozens of times.
+  if (s.length >= 20_000 && new Set(s).size < 100) return true;
+  // Any mid-file 28–48 char probe that appears dozens of times (SVG path spam).
   const start = Math.floor(s.length / 3);
   for (let len = 28; len <= 48; len += 4) {
     for (let off = 0; off < 160; off += 16) {
       const probe = s.slice(start + off, start + off + len);
       if (probe.length < len) continue;
-      if ((s.split(probe).length - 1) >= 40) return true;
+      if ((s.split(probe).length - 1) >= 80) return true;
     }
   }
   if (/\*\*CSS\b|```css|This completes the initial implementation/i.test(s)) return true;

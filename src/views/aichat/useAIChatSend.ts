@@ -18,11 +18,12 @@ import { hydrateStudio } from '@/lib/chatTurnSession';
 import { dispatchOwnedTurn, runChatTurn, runEditTurn } from '@/lib/chatTurnHandlers';
 import { runMediaChatTurn } from '@/lib/chatMediaTurn';
 import { buildRouterHistory } from '@/lib/chatHistory';
-import { setLocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, setLocalPrefs, isEnsembleAutoParked } from '@/lib/localPrefs';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { setActiveBrainId } from '@/lib/brainRoles';
 import { setEngineModel } from '@/lib/novaEngine';
 import { saveAutoThreadBrain } from '@/lib/threadBrain';
+import { defaultModelForKind } from '@/views/aichat/aiChatHelpers';
 import {
   resolveConversationalEditAsk,
   rememberLastEditTopic,
@@ -59,14 +60,20 @@ import { githubToken } from '@/lib/codeGitHubWorkflow';
 import { runDebugClinic, formatClinicReportMessage, parseClinicReportMessage } from '@/lib/debugClinic';
 import {
   runPlanMode,
-  formatPlanReportMessage,
+  formatPlanChatReply,
   looksLikePlanDiscoveryAsk,
   appendPlanDiscoveryNudge,
   looksLikePlanRefineAsk,
+  looksLikePlanIncrementalAdd,
+  looksLikePlanSideChatAsk,
+  buildPlanBriefFromThread,
   findLatestPlanReport,
   serializePlanReportForCreate,
   planReportToPlanLog,
+  countPlanSteps,
 } from '@/lib/planReport';
+import { saveChatPlan, setChatPlanPill } from '@/lib/chatPlanStore';
+import { requestOpenChatPlan } from '@/lib/openChatPlan';
 import { looksLikeImplementGo } from '@/lib/chatPlanMode';
 import { runAgentWorkMode } from '@/lib/agentWorkMode';
 import { wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
@@ -83,6 +90,8 @@ import { getChatTurnStatus } from '@/lib/chatTurnStatusStore';
 import { isBuildArtifactPath } from '@/lib/projectInspect';
 import { studioPathBasename } from '@/lib/chatStudioStore';
 import { requestCloseChatCode, requestOpenChatCode } from '@/lib/openChatCode';
+import { prepareBrainRotation, emitRotationNote } from '@/lib/modelRotation';
+import { buildThreadSummaryFromMessages } from '@/lib/chatHistory';
 
 export type { AIChatSendCtx };
 
@@ -156,7 +165,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
       diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
     });
-    const earlyComposerMode = composerModeFromContent(prep.content) || composerMode;
+    let earlyComposerMode = composerModeFromContent(prep.content) || composerMode;
     const earlyPkg = Object.keys(resolvedStudio.files || {}).some((k) => /(^|\/)package\.json$/i.test(k));
     const earlyAgentCwd = chatStudioDiskRootRef.current
       || prep.chatStudioDiskRoot
@@ -180,28 +189,120 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       );
     };
 
+    // One-seat Auto: preload/handoff on context pressure (ensemble multi-seat stays parked).
+    try {
+      const rotKind = mode === 'code' ? 'coding' as const : 'chat' as const;
+      const pinId = String(pinnedModel?.id || '').trim();
+      const pinLocked = Boolean(pinId && pinId !== 'NOVA-auto' && pinnedModel?.source !== 'auto');
+      const seedBrain = pinnedModel?.source === 'auto'
+        ? threadBrainRef.current
+        : (pinLocked
+          ? {
+              kind: rotKind,
+              modelId: pinId,
+              modelName: String(pinnedModel?.name || pinId),
+              pinnedSource: (pinnedModel?.source === 'cloud' ? 'cloud' : 'local') as 'local' | 'cloud',
+              tier: 'local-free' as const,
+            }
+          : threadBrainRef.current);
+      const rotation = await prepareBrainRotation({
+        scopeId: activeChatId,
+        kind: rotKind,
+        history: buildRouterHistory(
+          messagesRef.current.filter((m) => m.role === 'user' || m.role === 'assistant'),
+          prep.content,
+          undefined,
+          { keepContinuity: true, kind: rotKind === 'coding' ? 'coding' : 'chat' },
+        ),
+        currentModelId: seedBrain?.modelId || pinId || undefined,
+        brain: seedBrain,
+      });
+      if (rotation.brain) {
+        threadBrainRef.current = rotation.brain;
+        prep.setThreadBrain?.(rotation.brain);
+      }
+      if (rotation.swapped && rotation.brain) {
+        const summary = buildThreadSummaryFromMessages(messagesRef.current || []);
+        const name = rotation.brain.modelName || rotation.brain.modelId;
+        emitRotationNote(
+          summary
+            ? `Continuing on ${name} — same project. Where we left off: ${summary.slice(0, 280)}`
+            : `Continuing on ${name} — same project, fresh context.`,
+        );
+        try {
+          pushAssistantStatus(`Continuing on **${name}**…`);
+        } catch { /* ignore */ }
+      }
+    } catch { /* rotation is best-effort */ }
+
     // Plan mode — deep in-chat plan card; no file writes (until “lets build this”).
     // Keep refining / add-to-plan soft-rearms Plan even if the pill was cleared.
     // Never steal Fix / queue / Debug-remaining asks when the Plan pill is still armed.
+    // Never steal DIY tooling / how-to / shopping Q&A into Plan (Python/VS Code, buy parts, etc.).
     const askForPlan = stripComposerPrefix(prep.content);
-    const softPlanRefine = looksLikePlanRefineAsk(askForPlan);
+    const priorPlanForSoft = findLatestPlanReport(messagesRef.current || [], activeChatId);
+    const softPlanRefine = looksLikePlanRefineAsk(askForPlan)
+      || (Boolean(priorPlanForSoft?.steps?.length) && looksLikePlanIncrementalAdd(askForPlan));
+    const planSideChat = looksLikePlanSideChatAsk(askForPlan);
     const clinicFixAskEarly = looksLikeClinicFixAsk(askForPlan);
     const remainingAskEarly = looksLikeRemainingAsk(askForPlan);
     const queueChipAskEarly = looksLikeWorkQueueDoNext(askForPlan)
       || looksLikeWorkQueueFinishAll(askForPlan)
       || looksLikeWorkQueueStop(askForPlan);
+    const {
+      looksLikeBuildToolingAsk,
+      looksLikeHowToGuideAsk,
+      looksLikeShoppingOrPartsLinksAsk,
+    } = await import('@/lib/replySanity');
+    const { looksLikeSimpleBuildToyChatAsk } = await import('@/lib/chatIntent');
+    const diyChatAsk = looksLikeBuildToolingAsk(askForPlan)
+      || looksLikeHowToGuideAsk(askForPlan)
+      || looksLikeShoppingOrPartsLinksAsk(askForPlan)
+      || looksLikeSimpleBuildToyChatAsk(askForPlan);
+    // Soft talk-first (“talk me through / do not create files”) must never fire the Plan card,
+    // even if the Plan pill is still armed from an earlier turn — unless they explicitly ask to plan.
+    // Forbid lists (“Do not create a todo…”) next to hard create are not talk-first.
+    const { isCreateRefusedAsk } = await import('@/lib/createProjectIntent');
+    const talkFirstNoPlanCard = !softPlanRefine && (
+      isCreateRefusedAsk(askForPlan)
+      || /\btalk\s+me\s+through\b/i.test(askForPlan)
+      || /\bfirst\s+version\s+only\b/i.test(askForPlan)
+      || /\bno\s+files\s+yet\b/i.test(askForPlan)
+    );
+    // Sticky Plan pill + a plain chat question (“risks?”, “quick one…”) → answer in chat, keep plan synced.
+    if ((diyChatAsk || talkFirstNoPlanCard || planSideChat) && earlyComposerMode === 'plan' && !softPlanRefine) {
+      try { prep.setComposerMode?.(null); } catch { /* ignore */ }
+    }
+    // Hard create (“on disk now”, “skip plan”, “build it”) must never stall on a Plan card.
+    const hardCreateEscape = looksLikeImplementGo(askForPlan)
+      || /\bskip\s+plan\b/i.test(askForPlan)
+      || /\bon\s+disk\s+now\b/i.test(askForPlan)
+      || /\b(?:create|build|scaffold)\b[\s\S]{0,120}\bon\s+disk\b/i.test(askForPlan);
+    if (hardCreateEscape && earlyComposerMode === 'plan') {
+      try { prep.setComposerMode?.(null); } catch { /* ignore */ }
+    }
     if (
-      (earlyComposerMode === 'plan' || softPlanRefine)
-      && !looksLikeImplementGo(askForPlan)
+      ((earlyComposerMode === 'plan' && !diyChatAsk && !talkFirstNoPlanCard && !planSideChat) || softPlanRefine)
+      && !hardCreateEscape
       && !clinicFixAskEarly
       && !remainingAskEarly
       && !queueChipAskEarly
+      && !diyChatAsk
+      && !talkFirstNoPlanCard
+      && !planSideChat
     ) {
       if (softPlanRefine && earlyComposerMode !== 'plan') {
         try { prep.setComposerMode?.('plan'); } catch { /* ignore */ }
       }
       const ask = askForPlan;
-      const projectName = extractProjectName(ask)
+      const priorPlan = findLatestPlanReport(messagesRef.current || [], activeChatId);
+      // One-line feature adds must stay short so the fast incremental path matches.
+      // Enter-plan phrases stitch recent chat so the model has the product brief.
+      const planBrief = (priorPlan?.steps?.length && looksLikePlanIncrementalAdd(ask))
+        ? ask
+        : buildPlanBriefFromThread(ask, messagesRef.current || []);
+      const projectName = extractProjectName(planBrief)
+        || extractProjectName(ask)
         || createIntentEarly?.name
         || resolvedStudio.name
         || 'your idea';
@@ -211,13 +312,18 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           || 'project')
         : null;
       const setDropHint = typeof prep.setDropHint === 'function' ? prep.setDropHint : null;
-      const priorPlan = findLatestPlanReport(messagesRef.current || []);
       const planTitle = priorPlan?.title || projectName;
-      setDropHint?.(priorPlan ? 'Planning · refining your outline…' : 'Planning · drafting a deeper outline…');
+      const refining = Boolean(priorPlan?.steps?.length);
+      setDropHint?.(refining ? 'Planning · refining your outline…' : 'Planning · drafting a deeper outline…');
       pushAssistantStatus(`Plan · ${planTitle}`);
+      // Live Plan: open the synced overlay while drafting (same idea as live Code).
+      try {
+        setChatPlanPill(activeChatId, true);
+        requestOpenChatPlan({ chatId: activeChatId, openOverlay: true, live: true });
+      } catch { /* ignore */ }
       try {
         const report = await runPlanMode({
-          userMessage: ask,
+          userMessage: planBrief,
           projectName: planTitle,
           boundName,
           preferredModelId: pinnedModel?.id,
@@ -225,10 +331,18 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           onProgress: (msg) => {
             if (turnDead()) return;
             pushAssistantStatus(msg);
+            try {
+              requestOpenChatPlan({ chatId: activeChatId, openOverlay: true, live: true });
+            } catch { /* ignore */ }
           },
         });
         if (await prep.stopIfSuperseded?.()) return;
         const finalTitle = report.title || planTitle;
+        try {
+          saveChatPlan(activeChatId, report);
+          setChatPlanPill(activeChatId, true);
+          requestOpenChatPlan({ chatId: activeChatId, openOverlay: true, live: false });
+        } catch { /* ignore */ }
         setLastPendingGreenfield(activeChatId, {
           name: finalTitle,
           slug: slugifyProjectName(finalTitle),
@@ -241,8 +355,14 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           prep.renameChat?.(activeChatId, cleanProductTitle(finalTitle));
         } catch { /* ignore */ }
         pushAssistantStatus('Outline ready');
-        setDropHint?.('Planning · outline ready · say Let’s build when you want files.');
-        await finishPlainReply(formatPlanReportMessage(report), 'NOVA · Plan');
+        setDropHint?.('Planning · outline ready · open Plan to review, or say Let’s build.');
+        const changeNote = refining && looksLikePlanIncrementalAdd(ask)
+          ? `Added that to **${finalTitle}**. The Plan map now has **${countPlanSteps(report)}** steps — open **Plan** to review.`
+          : undefined;
+        await finishPlainReply(
+          formatPlanChatReply(report, { refining, changeNote }),
+          'NOVA · Plan',
+        );
       } catch (err) {
         if (await prep.stopIfSuperseded?.()) return;
         const detail = err instanceof Error ? err.message : String(err || 'unknown');
@@ -261,14 +381,25 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     // “What’s remaining?” / “rescan” forces a fresh clinic even if composer is still on Fix/Agent.
     // Overview asks (“what is this project about?”) never dump the full clinic — answer the ask.
     const askForMode = stripComposerPrefix(prep.content);
-    const clinicFixAsk = looksLikeClinicFixAsk(askForMode);
-    const remainingAsk = looksLikeRemainingAsk(askForMode);
+    // Explicit edit / landing rewrite must never be swallowed by a sticky Debug composer mode.
+    const explicitEditKind = /<!--\s*(?:nova|ark)-kind:\s*edit\s*-->/i.test(prep.content);
+    const structuralUiEditAsk = /\b(?:replace|rewrite|rebuild)\b/i.test(askForMode)
+      || (/\b(?:nav|hero|footer|eyebrow|cta)\b/i.test(askForMode)
+        && /\b(?:add|update|change|make|build)\b/i.test(askForMode));
+    if ((explicitEditKind || structuralUiEditAsk) && earlyComposerMode === 'debug') {
+      try { prep.setComposerMode?.(null); } catch { /* ignore */ }
+      earlyComposerMode = null;
+    }
+    const clinicFixAsk = looksLikeClinicFixAsk(askForMode)
+      && !explicitEditKind
+      && !structuralUiEditAsk;
+    const remainingAsk = looksLikeRemainingAsk(askForMode) && !explicitEditKind && !structuralUiEditAsk;
     const { looksLikeProjectOverviewAsk } = await import('@/lib/chatProjectDebug');
     const overviewAsk = looksLikeProjectOverviewAsk(askForMode);
     if (overviewAsk && earlyComposerMode === 'debug' && !remainingAsk) {
       if (!workspaceBound) {
         await finishPlainReply(
-          'Open or bind the project folder first (**+ → Bind project**), then ask again what it is about.',
+          'Open or bind the project folder first (**+ → clip → Project folder**), then ask again what it is about.',
           'NOVA · Overview',
         );
         return;
@@ -286,7 +417,6 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         'You are in **Debug** mode. Say **find problems** when you want the full clinic scan.',
         'Or tell me what to add, remove, or fix and I can work on it here.',
       ].join('\n');
-      pushAssistantStatus('Done');
       await finishPlainReply(reply, 'NOVA · Overview');
       return;
     }
@@ -296,7 +426,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       }
       if (!workspaceBound) {
         await finishPlainReply(
-          'Grant access to the project folder you want audited.\n\nUse **+ → Bind project**, then press Enter (or say **find problems**).',
+          'Grant access to the project folder you want audited.\n\nUse **+ → clip → Project folder**, then press Enter (or say **find problems**).',
           'NOVA · Debug',
         );
         return;
@@ -364,7 +494,6 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         if (!statusHistory.some((s) => /^done$/i.test(s.label))) {
           statusHistory.push({ label: 'Done', at: Date.now() });
         }
-        pushAssistantStatus('Done');
         composerClinicHint('done');
         await finishPlainReply(
           formatClinicReportMessage(report, statusHistory),
@@ -410,8 +539,8 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       if (!workspaceBound) {
         await finishPlainReply(
           workMode === 'multitask'
-            ? 'Grant access to the project folder for Multi-agent.\n\nUse **+ → Bind project**, then press Enter.'
-            : 'Grant access to the project folder so I can apply the fix.\n\nUse **+ → Bind project**, then say **fix DBG-002** (or **add a README**) again.',
+            ? 'Grant access to the project folder for Multi-agent.\n\nUse **+ → clip → Project folder**, then press Enter.'
+            : 'Grant access to the project folder so I can apply the fix.\n\nUse **+ → clip → Project folder**, then say **fix DBG-002** (or **add a README**) again.',
           clinicFixAsk ? 'NOVA · Fix' : (workMode === 'multitask' ? 'NOVA · Multi-agent' : 'NOVA · Agent'),
         );
         return;
@@ -713,11 +842,15 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       setDeleteFolderClarifyPrompt: prep.setDeleteFolderClarifyPrompt,
       onCoderPinned: (coder) => {
         try {
-          setActiveBrainId('coder', coder.id);
-          setLocalPrefs({
-            activeCoderId: coder.id,
-            defaultCodeModelId: coder.id,
-          });
+          const parked = isEnsembleAutoParked();
+          // Parked one-seat: warm the locked brain + label only — do not steal chat prefs into a coder seat.
+          if (!parked) {
+            setActiveBrainId('coder', coder.id);
+            setLocalPrefs({
+              activeCoderId: coder.id,
+              defaultCodeModelId: coder.id,
+            });
+          }
           void setEngineModel(coder.id).catch(() => undefined);
           try {
             setLocalPrefs({ lastAnsweredLabel: `Local · ${coder.name}` });
@@ -725,8 +858,9 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           const short = String(coder.name || coder.id)
             .replace(/^Local · /i, '')
             .trim();
+          const label = parked ? 'Building' : 'Craft';
           prep.setCreateLiveModelLabel?.(
-            short ? `Craft · ${short.length > 18 ? `${short.slice(0, 16)}…` : short}` : 'Craft',
+            short ? `${label} · ${short.length > 18 ? `${short.slice(0, 16)}…` : short}` : label,
           );
         } catch { /* ignore */ }
       },
@@ -736,8 +870,11 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           const short = String(phase.name || phase.id)
             .replace(/^Local · /i, '')
             .trim();
-          const roleLabel =
-            role === 'craft' ? 'Craft'
+          const parked = isEnsembleAutoParked();
+          // Parked = one locked brain; phase names are status only (not Craft/Style seats).
+          const roleLabel = parked
+            ? (role === 'done' ? 'Done' : role === 'verify' ? 'Verifying' : 'Building')
+            : (role === 'craft' ? 'Craft'
               : role === 'verify' ? 'Verify'
                 : role === 'design' ? 'Design'
                   : role === 'copy' ? 'Copy'
@@ -745,26 +882,49 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
                       : role === 'critic' ? 'Critic'
                         : role === 'plan' || role === 'spec' ? 'Plan'
                           : role === 'done' ? 'Done'
-                            : 'Build';
+                            : 'Build');
           prep.setCreateLiveModelLabel?.(
             short
-              ? `${roleLabel} · ${short.length > 16 ? `${short.slice(0, 14)}…` : short}`
+              ? `${roleLabel} · ${short.length > 18 ? `${short.slice(0, 16)}…` : short}`
               : roleLabel,
           );
           try {
-            setLocalPrefs({ lastAnsweredLabel: `Local · ${phase.name}` });
+            setLocalPrefs({ lastAnsweredLabel: `${roleLabel} · ${phase.name}` });
           } catch { /* ignore */ }
-          if (phase.role === 'craft' || phase.role === 'verify') {
-            setActiveBrainId('coder', phase.id);
-            setLocalPrefs({
-              activeCoderId: phase.id,
-              defaultCodeModelId: phase.id,
-              lastAnsweredLabel: `Local · ${phase.name}`,
-            });
-            void setEngineModel(phase.id).catch(() => undefined);
+          // Ensemble parked: never mutate coder/design prefs per phase (one seat locked).
+          if (!parked) {
+            if (phase.role === 'craft' || phase.role === 'verify') {
+              setActiveBrainId('coder', phase.id);
+              setLocalPrefs({
+                activeCoderId: phase.id,
+                defaultCodeModelId: phase.id,
+                lastAnsweredLabel: `Craft · ${phase.name}`,
+              });
+            }
+            if (phase.role === 'design' || phase.role === 'style') {
+              try { setActiveBrainId('design', phase.id); } catch { /* ignore */ }
+              setLocalPrefs({ activeDesignId: phase.id });
+            }
           }
+          // Single Brain Create — never unload/reload GGUF on phase labels (OS freeze).
           if (phase.role === 'done') {
-            window.setTimeout(() => prep.setCreateLiveModelLabel?.(null), 1200);
+            // Restore Auto only when the user was already on Auto. An explicit
+            // Ready-row / force-chat-model pin must survive create Done (ladder tests).
+            try {
+              const prefs = getLocalPrefs();
+              const pinned = [prefs.lastChatModelId, prefs.defaultModelId, prefs.activeChatId]
+                .map((s) => String(s || '').trim())
+                .find((id) => id && id !== 'NOVA-auto');
+              if (!pinned) {
+                setLocalPrefs({
+                  lastChatModelId: 'NOVA-auto',
+                  defaultModelId: 'NOVA-auto',
+                  activeChatId: 'NOVA-auto',
+                });
+                prep.setActiveModel?.(defaultModelForKind('chat'));
+              }
+            } catch { /* ignore */ }
+            window.setTimeout(() => prep.setCreateLiveModelLabel?.(null), 1800);
           }
         } catch { /* ignore */ }
       },
@@ -798,15 +958,22 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       .slice(-12);
 
     // Connected plugins (Gmail, Slack, GitHub, …) must win over the local chat model —
-    // but never hijack Debug clinic, and never steal bound-folder project asks.
+    // but never hijack Debug clinic, and never steal bound-folder / Answer Contract disk asks.
     const { looksLikeBoundProjectAsk } = await import('@/lib/chatProjectDebug');
-    const boundProjectAsk = looksLikeBoundProjectAsk(prep.content)
-      && Object.keys(chatStudioFilesRef.current || resolvedStudio.files || {}).length > 0;
+    const { resolveAnswerContract, contractBlocksPlugins } = await import('@/lib/answerContract');
+    const boundFiles = Object.keys(chatStudioFilesRef.current || resolvedStudio.files || {}).length > 0;
+    const answerContract = resolveAnswerContract({
+      message: prep.content,
+      hasBoundFiles: boundFiles,
+    });
+    const boundProjectAsk = (looksLikeBoundProjectAsk(prep.content) && boundFiles)
+      || contractBlocksPlugins(answerContract);
     if (
       prep.pluginId
       && earlyComposerMode !== 'debug'
       && earlyComposerMode !== 'plan'
       && !boundProjectAsk
+      && answerContract.allowPlugins
     ) {
       pushAssistantStatus('Talking to plugin…');
       const liveState = getPluginRuntime(prep.pluginId, loadPluginState());
@@ -827,6 +994,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       earlyComposerMode !== 'debug'
       && earlyComposerMode !== 'plan'
       && !boundProjectAsk
+      && answerContract.allowPlugins
       && wantsGithubCatalog(prep.content)
     ) {
       const token = githubToken();
@@ -885,15 +1053,19 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         prep.renameChat(activeChatId, cleanProductTitle(name));
       },
       finishPlainReply: async (text: string, provider?: string) => {
-        // Soft Plan discovery after normal build-intent chat (never when a mode pill is on,
-        // and never on create/clinic/plan-card results).
+        // Soft Plan discovery after normal build-intent chat (never when a deep mode pill is on,
+        // and never on create/clinic/plan-card results). Ask mode still gets the invite.
         let out = text;
         const raw = String(text || '');
         const skipNudge = /<!--nova-(?:clinic|plan-report|trace|prompt-chips)/i.test(raw)
           || /\b(?:created the project|scaffolded|project folder is ready|@@@FILE|Live preview)\b/i.test(raw)
           || /\bI can't do that yet\b/i.test(raw);
+        const deepMode = earlyComposerMode === 'plan'
+          || earlyComposerMode === 'debug'
+          || earlyComposerMode === 'agent'
+          || earlyComposerMode === 'multitask';
         if (
-          !earlyComposerMode
+          !deepMode
           && !skipNudge
           && looksLikePlanDiscoveryAsk(stripComposerPrefix(prep.content))
         ) {
@@ -955,8 +1127,12 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       const chatOut = await runChatTurn(makeChatHost(bag));
       stickChatBrain(chatOut);
       let replyText = chatOut.text;
+      const deepMode = earlyComposerMode === 'plan'
+        || earlyComposerMode === 'debug'
+        || earlyComposerMode === 'agent'
+        || earlyComposerMode === 'multitask';
       if (
-        !earlyComposerMode
+        !deepMode
         && looksLikePlanDiscoveryAsk(stripComposerPrefix(prep.content))
       ) {
         replyText = appendPlanDiscoveryNudge(replyText, activeChatId);

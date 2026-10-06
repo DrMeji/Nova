@@ -17,7 +17,6 @@ const CHAT_ENGINE_RANK = [
 ];
 
 const CODER_ENGINE_RANK = [
-  'qwen25-coder-32b',
   'qwen25-coder-14b',
   'qwen25-coder-7b',
   'deepseek-coder-v2-lite',
@@ -27,7 +26,6 @@ const CODER_ENGINE_RANK = [
 const WEAK_CHAT = new Set(['qwen25-15b', 'gemma2-2b', 'phi3-mini']);
 
 const MIN_RAM_GB = {
-  'qwen25-coder-32b': 28,
   'qwen25-coder-14b': 16,
   'qwen25-14b': 16,
   'qwen25-coder-7b': 10,

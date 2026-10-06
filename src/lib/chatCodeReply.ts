@@ -128,6 +128,9 @@ export function finalizeCodingChatBubble(opts: {
       /@@@FILE|^\s*css\s*$/i.test(cleanProse)
       || cleanProse.length < 8
       || /And add the following CSS/i.test(cleanProse)
+      // Teach-mode leftovers must never surface as the Done bubble after a disk write.
+      || /\b(?:Here'?s how (?:we|you) can|Steps to Implement|Update the HTML structure|Add CSS for|you (?:can|need to) (?:implement|add|update)|we'll use a combination|Refresh your browser)\b/i.test(cleanProse)
+      || /\b(?:1\.\s*(?:Add|Update|Ensure)|Got it\.\s*To\s+(?:make|ensure|lay|tighten))\b/i.test(cleanProse)
     ) {
       cleanProse = '';
     }

@@ -7,13 +7,21 @@ import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2, ExternalLink,
 } from 'lucide-react';
-import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
+import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass, type HardwareInfo } from '@/lib/api';
 import {
   categoryDisplayLabel,
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/novaEngine';
+import {
+  engineDiskSpace,
+  getEngineStatus,
+  deleteEngineModel,
+  scanExternalGgufs,
+  importGgufPath,
+  importGgufPick,
+  type ExternalGgufHit,
+} from '@/lib/novaEngine';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { useRouter } from '@/context/RouterContext';
@@ -26,6 +34,7 @@ import {
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
 import {
+  getLocalPrefs,
   getProviderApiKeys,
   hasProviderApiKey,
   setLocalPrefs,
@@ -109,15 +118,13 @@ export type CloudModel = {
 const LOCAL_MODELS: LocalModel[] = [
   // Coding: local downloads are free to run on your machine
   { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', description: 'Strong local coding model for most PCs.', size: '4.7 GB', category: 'coding', tiers: ['free'], recommended: true, tone: 'from-sky-500 to-blue-700', initial: 'Qc' },
-  { id: 'qwen25-coder-14b', name: 'Qwen2.5-Coder 14B', description: 'Higher quality coding when you have more VRAM.', size: '9.0 GB', category: 'coding', tiers: ['free'], tone: 'from-blue-500 to-indigo-700', initial: 'Q14' },
-  { id: 'qwen25-coder-32b', name: 'Qwen2.5-Coder 32B', description: 'Top tier local coding for high end hardware.', size: '20 GB', category: 'coding', tiers: ['free'], tone: 'from-indigo-500 to-violet-800', initial: 'Q32' },
+  { id: 'qwen25-coder-14b', name: 'Qwen2.5-Coder 14B', description: 'Higher quality coding when you have more VRAM / RAM.', size: '9.0 GB', category: 'coding', tiers: ['free'], tone: 'from-blue-500 to-indigo-700', initial: 'Q14' },
   { id: 'deepseek-coder-v2-lite', name: 'DeepSeek Coder V2 Lite', description: 'Efficient coding assistant for builds and refactors.', size: '8.9 GB', category: 'coding', tiers: ['free'], tone: 'from-cyan-500 to-teal-700', initial: 'DS' },
   { id: 'codellama-13b', name: 'Code Llama 13B', description: 'Meta coding model for generation and completion.', size: '7.4 GB', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-purple-800', initial: 'CL' },
   { id: 'starcoder2-7b', name: 'StarCoder2 7B', description: 'Code focused model trained on many languages.', size: '4.3 GB', category: 'coding', tiers: ['free'], tone: 'from-amber-500 to-orange-700', initial: 'Sc' },
-  { id: 'codestral-22b', name: 'Codestral 22B', description: 'Mistral coding model for larger local setups.', size: '13 GB', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Cs' },
 
-  // Design — LayoutContract / UI composition (ensemble Design hop)
-  { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', description: 'UI-specialist Design brain — layout rhythm for the Layout Contract hop. Auto-routes as Design when ready.', size: '2.5 GB', category: 'design', tiers: ['free'], recommended: true, tone: 'from-rose-400 to-orange-600', initial: 'UI' },
+  // Design — optional CSS/UI polish brain (Single Brain Create does not require this)
+  { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', description: 'Optional UI polish brain — can refine CSS type/palette when pinned. Create invents original layouts from your brief with any Ready coder/instruct model; this is not required.', size: '2.5 GB', category: 'design', tiers: ['free'], recommended: true, tone: 'from-rose-400 to-orange-600', initial: 'UI' },
 
   // General
   { id: 'llama32-3b', name: 'Llama 3.2 3B', description: 'Light general chat for everyday use.', size: '2.0 GB', category: 'general', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-indigo-700', initial: 'L3' },
@@ -131,7 +138,6 @@ const LOCAL_MODELS: LocalModel[] = [
   // Reasoning
   { id: 'deepseek-r1-distill-8b', name: 'DeepSeek-R1 Distill 8B', description: 'Reasoning focused distill for harder problems.', size: '5.2 GB', category: 'reasoning', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-purple-800', initial: 'R1' },
   { id: 'deepseek-r1-distill-14b', name: 'DeepSeek-R1 Distill 14B', description: 'Stronger reasoning when hardware allows.', size: '9.0 GB', category: 'reasoning', tiers: ['free'], tone: 'from-purple-500 to-violet-900', initial: 'R14' },
-  { id: 'qwq-32b', name: 'QwQ 32B', description: 'Qwen reasoning model for complex steps.', size: '20 GB', category: 'reasoning', tiers: ['free'], tone: 'from-rose-500 to-pink-800', initial: 'Qw' },
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
   // Vision (understand images, not generate)
@@ -361,20 +367,25 @@ function modelHwNeed(model: LocalModel): HardwareClass {
   return 'light';
 }
 
-function canRunOnPc(model: LocalModel, pc: HardwareClass, ramGb = 8) {
+function canRunOnPc(model: LocalModel, pc: HardwareClass, ramGb = 8, hw?: HardwareInfo | null) {
+  // For your PC: only models assessed as a good fit (not stretch / blocked).
+  if (hw) {
+    return assessModelDownloadFit(modelSizeGb(model), hw).level === 'good';
+  }
   const rank: Record<HardwareClass, number> = { light: 0, standard: 1, strong: 2 };
   if (rank[modelHwNeed(model)] > rank[pc]) return false;
   // GGUF needs headroom beyond file size (context + OS).
   const needRam = modelSizeGb(model) * 1.35 + 4;
+  if (modelSizeGb(model) >= 16) return false;
   return ramGb >= needRam || modelSizeGb(model) < 2;
 }
 
-function buildFitLists(pc: HardwareClass, ramGb = 8) {
+function buildFitLists(pc: HardwareClass, ramGb = 8, hw?: HardwareInfo | null) {
   // Prefer models NOVA can actually install; keep others discoverable via Search.
   const installable = LOCAL_MODELS.filter(m => isEngineDownloadable(m.id));
   const pool = installable.length ? installable : LOCAL_MODELS;
   const compatible = sortModelsByCategoryThenSizeDesc(
-    pool.filter(m => canRunOnPc(m, pc, ramGb)),
+    pool.filter(m => canRunOnPc(m, pc, ramGb, hw)),
   );
 
   const bySizeDesc = [...compatible].sort((a, b) => modelSizeGb(b) - modelSizeGb(a));
@@ -564,7 +575,7 @@ function BuildTeamPanel({
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-content-primary">Build team</h2>
             <p className="text-sm text-content-tertiary mt-1">
-              Chat + Design + Coder work together on creates. {ramHint}
+              One locked brain does talk, create, and edit (ensemble Auto is parked — not removed). Install backups for when context fills. {ramHint}
             </p>
           </div>
           {missingInstalls.length > 0 && (
@@ -705,6 +716,9 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   const [queryHuntBusy, setQueryHuntBusy] = useState(false);
   const [huntNote, setHuntNote] = useState('');
   const [huntBusy, setHuntBusy] = useState(false);
+  const [externalHits, setExternalHits] = useState<ExternalGgufHit[]>([]);
+  const [externalNote, setExternalNote] = useState('');
+  const [externalBusy, setExternalBusy] = useState(false);
   const [liveCapacity, setLiveCapacity] = useState<LiveCapacity | null>(null);
   const [showRetiredSources, setShowRetiredSources] = useState(false);
   const [downloadConfirm, setDownloadConfirm] = useState<{
@@ -760,7 +774,20 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
 
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
-  const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
+  const fitLists = useMemo(() => buildFitLists(pcClass, ramGb, hw), [pcClass, ramGb, hw]);
+
+  // Drop retired 32B pins so Auto never tries to load a removed GGUF.
+  useEffect(() => {
+    const prefs = getLocalPrefs();
+    const retired = /coder-32b|32b/i;
+    const patch: Record<string, string> = {};
+    if (retired.test(String(prefs.activeCoderId || ''))) patch.activeCoderId = 'NOVA-auto';
+    if (retired.test(String(prefs.defaultCodeModelId || ''))) patch.defaultCodeModelId = 'NOVA-auto';
+    if (retired.test(String(prefs.defaultModelId || ''))) patch.defaultModelId = 'NOVA-auto';
+    if (retired.test(String(prefs.lastChatModelId || ''))) patch.lastChatModelId = 'NOVA-auto';
+    if (retired.test(String(prefs.activeChatId || ''))) patch.activeChatId = 'NOVA-auto';
+    if (Object.keys(patch).length) setLocalPrefs(patch as Parameters<typeof setLocalPrefs>[0]);
+  }, []);
 
   useEffect(() => {
     if (embedTab) {
@@ -1074,13 +1101,9 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
       const hits = LOCAL_MODELS.filter(match);
       const installable = hits.filter(m => isEngineDownloadable(m.id));
       const discovery = hits.filter(m => !isEngineDownloadable(m.id));
-      const fit = installable.filter(m => canRunOnPc(m, pcClass, ramGb));
-      const stretch = installable.filter(m => !canRunOnPc(m, pcClass, ramGb));
-      const allHits = sortModelsByCategoryThenSizeDesc([
-        ...fit,
-        ...stretch,
-        ...discovery,
-      ]);
+      // Search on For your PC: only good-fit installable models (blocked/oversized stay out).
+      const fit = installable.filter(m => canRunOnPc(m, pcClass, ramGb, hw));
+      const allHits = sortModelsByCategoryThenSizeDesc([...fit, ...discovery.filter(m => canRunOnPc(m, pcClass, ramGb, hw))]);
       return {
         quality: allHits,
         balanced: sortModelsByCategoryThenSizeDesc(
@@ -1100,7 +1123,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
       balanced: sortModelsByCategoryThenSizeDesc(fitLists.balanced.filter(match)),
       performance: sortModelsByCategoryThenSizeDesc(fitLists.performance.filter(match)),
     };
-  }, [fitLists, q, pcClass, ramGb]);
+  }, [fitLists, q, pcClass, ramGb, hw]);
 
   const catalogSearchHits = useMemo(() => {
     if (!q) return [] as LocalModel[];
@@ -1110,7 +1133,9 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   }, [q]);
 
   const onlineSearchHits = useMemo(() => {
-    if (!q) return hunted;
+    const fitsPc = (m: HuntedModel) =>
+      !m.oversize && assessModelDownloadFit(m.sizeGb, hw).allowDownload;
+    if (!q) return hunted.filter(fitsPc);
     const nq = normalizeModelSearch(q);
     const tokens = nq.split(' ').filter(Boolean);
     const matchHunt = (m: HuntedModel) => {
@@ -1119,33 +1144,41 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
       return tokens.length > 0 && tokens.every(t => hay.includes(t));
     };
     const fromPcList = hunted.filter(matchHunt);
-    // Prefer query-specific hunt; merge unique repos.
+    // Prefer query-specific hunt; merge unique repos. For your PC never lists blocked sizes.
     const merged: HuntedModel[] = [];
     const seen = new Set<string>();
     for (const row of [...queryHunted, ...fromPcList]) {
+      if (!fitsPc(row)) continue;
       const key = row.repo.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(row);
     }
     return merged;
-  }, [q, hunted, queryHunted]);
+  }, [q, hunted, queryHunted, hw]);
 
   const localCategories = useMemo(() => {
-    return LOCAL_CATEGORIES.map(cat => ({
-      ...cat,
-      models: sortModelsByCategoryThenSizeDesc(
-        LOCAL_MODELS.filter(m => {
-          if (m.category === 'image' || m.category === 'video') return false;
-          if (m.category !== cat.id) return false;
-          // Default list: only real Engine downloads. Search surfaces discovery-only.
-          if (!q && !isEngineDownloadable(m.id)) return false;
-          if (!q) return true;
-          return modelMatchesQuery(m, q);
-        }),
-      ),
-    })).filter(cat => cat.models.length > 0);
-  }, [q]);
+    return LOCAL_CATEGORIES.map(cat => {
+      const models = LOCAL_MODELS.filter(m => {
+        if (m.category === 'image' || m.category === 'video') return false;
+        if (m.category !== cat.id) return false;
+        // Default list: only real Engine downloads. Search surfaces discovery-only.
+        if (!q && !isEngineDownloadable(m.id)) return false;
+        if (!q) return true;
+        return modelMatchesQuery(m, q);
+      });
+      // Installed first, then not installed (size desc within each group).
+      const on = models.filter(m => installed.has(m.id));
+      const off = models.filter(m => !installed.has(m.id));
+      return {
+        ...cat,
+        models: [
+          ...sortModelsByCategoryThenSizeDesc(on),
+          ...sortModelsByCategoryThenSizeDesc(off),
+        ],
+      };
+    }).filter(cat => cat.models.length > 0);
+  }, [q, installed]);
 
   const installedModels = useMemo(
     () => sortModelsByCategoryThenSizeDesc(
@@ -1716,7 +1749,56 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
             <>
               {!q && (
                 <section className="mb-10">
-                  <h2 className="text-base font-semibold text-content-primary mb-4">Installed</h2>
+                  <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                    <h2 className="text-base font-semibold text-content-primary">Installed</h2>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={externalBusy}
+                        onClick={() => {
+                          void (async () => {
+                            setExternalBusy(true);
+                            setExternalNote('Scanning LM Studio, Hugging Face cache, Desktop, Downloads…');
+                            try {
+                              const r = await scanExternalGgufs();
+                              setExternalHits(r.models || []);
+                              setExternalNote(
+                                r.count
+                                  ? `Found ${r.count} GGUF(s) outside NOVA. Import to use them in chat/create.`
+                                  : (r.note || 'No external GGUFs found on common folders.'),
+                              );
+                            } catch (e) {
+                              setExternalNote(e instanceof Error ? e.message : 'Scan failed');
+                            } finally {
+                              setExternalBusy(false);
+                            }
+                          })();
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/40 hover:bg-surface-hover px-3 py-1.5 text-xs text-content-secondary hover:text-content-primary transition-colors disabled:opacity-50"
+                        title="Find GGUFs from LM Studio, Hugging Face, Downloads, etc."
+                      >
+                        {externalBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        Scan this PC
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void importGgufPick()
+                            .then((r) => {
+                              if (r?.canceled) return;
+                              setOllamaNote(r?.ok ? `Imported ${r.count || 1} GGUF(s) into NOVA Engine.` : 'Import canceled');
+                              window.dispatchEvent(new Event('NOVA:engine-models-changed'));
+                            })
+                            .catch((e) => setOllamaNote(e instanceof Error ? e.message : 'Import failed'));
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/40 hover:bg-surface-hover px-3 py-1.5 text-xs text-content-secondary hover:text-content-primary transition-colors"
+                        title="Pick a .gguf file to add to NOVA Engine"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Import GGUF
+                      </button>
+                    </div>
+                  </div>
                   {installedModels.length === 0 ? (
                     <p className="text-sm text-content-tertiary">No local models installed yet.</p>
                   ) : (
@@ -1746,6 +1828,49 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
                           />
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {(externalNote || externalHits.length > 0) && (
+                    <div className="mt-6 rounded-xl border border-surface-border/80 bg-surface-hover/20 px-3.5 py-3">
+                      <p className="text-xs text-content-secondary leading-relaxed mb-2">{externalNote}</p>
+                      {externalHits.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {externalHits.slice(0, 12).map((hit) => (
+                            <div
+                              key={hit.path}
+                              className="flex items-center gap-3 py-2 min-w-0"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm text-content-primary truncate">{hit.fileName}</span>
+                                <span className="block text-[11px] text-content-tertiary truncate">
+                                  {hit.source} · {hit.sizeGb.toFixed(1)} GB
+                                  {hit.catalogId ? ` · maps to ${hit.catalogId}` : ''}
+                                  {hit.mmproj ? ' · projector' : ''}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                className="nova-btn-secondary text-xs px-2.5 py-1.5 shrink-0"
+                                onClick={() => {
+                                  void importGgufPath(hit.path)
+                                    .then((r) => {
+                                      setOllamaNote(
+                                        r?.importedId
+                                          ? `Imported as ${r.importedId}${r.importMode ? ` (${r.importMode})` : ''}`
+                                          : 'Imported into NOVA Engine',
+                                      );
+                                      setExternalHits((prev) => prev.filter((x) => x.path !== hit.path));
+                                      window.dispatchEvent(new Event('NOVA:engine-models-changed'));
+                                    })
+                                    .catch((e) => setOllamaNote(e instanceof Error ? e.message : 'Import failed'));
+                                }}
+                              >
+                                Add to NOVA
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </section>

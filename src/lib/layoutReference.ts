@@ -1,6 +1,7 @@
 /**
- * Layout-inspiration references ("like apple.com", "use this site as a reference").
- * Product content stays the user's product; composition/type/motion come from the reference.
+ * Optional layout-inspiration overlays ("like apple.com", "use this site as a reference").
+ * Quality does NOT depend on these — Nova Design Spine owns structure by default.
+ * Product content stays the user's product; named sites only nudge tokens when explicit.
  */
 
 export type LayoutReferenceRecipe = {
@@ -131,20 +132,10 @@ export function detectLayoutReference(brief: string): {
   };
 }
 
-/** Prompt block injected into craft / polish when a reference is active. */
-export function layoutReferencePromptLines(brief: string): string[] {
-  const det = detectLayoutReference(brief);
-  if (!det.wantsInspiration) return [];
-  const site = det.namedSite || det.url || 'the referenced site';
-  const lines = [
-    '',
-    `LAYOUT REFERENCE (must honor): ${site}`,
-    '- Match hierarchy, spacing, type scale, motion, and section rhythm from the reference.',
-    '- Keep THIS product\'s name, copy, palette cues, and features from the brief — do not clone the reference brand.',
-    '- If the user asked for exact / 1:1 / clone-the-layout of a public marketing site, push composition fidelity hard while still inventing original copy/assets for THIS product.',
-  ];
-  if (det.recipe) {
-    lines.push(...det.recipe.craftRules);
-  }
-  return lines;
+/**
+ * Retired on create/polish — apple/Linear/cafe recipes must not drive layout.
+ * Kept as a no-op so leftover callers cannot reintroduce recipe prompts.
+ */
+export function layoutReferencePromptLines(_brief: string): string[] {
+  return [];
 }

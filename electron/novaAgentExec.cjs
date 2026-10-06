@@ -7,12 +7,17 @@ const { execFile, spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const os = require('os');
 const novaProjects = require('./novaProjects.cjs');
 const novaSelfGuard = require('./novaSelfGuard.cjs');
 
 /** @type {Map<string, { url: string, pid?: number, child?: import('child_process').ChildProcess }>} */
 const devServersByCwd = new Map();
+/** Last good Vite port per project cwd — avoid scanning 151 ports on every Live. */
+const lastDevPortByCwd = new Map();
+let novaJobs = null;
+try { novaJobs = require('./novaJobs.cjs'); } catch { /* optional */ }
 
 /**
  * Return an existing preview/dev-server session for this cwd, if any.
@@ -61,6 +66,7 @@ function stopAllPreviews() {
     // Windows: npm run dev → vite is a grandchild. Soft kill leaves dozens of node.exe orphans.
     try { killProcessTree(pid); } catch { /* ignore */ }
     try { session.child?.kill?.(); } catch { /* ignore */ }
+    try { session.server?.close?.(); } catch { /* ignore */ }
     devServersByCwd.delete(key);
   }
   return { ok: true };
@@ -91,29 +97,54 @@ function isHeavyPackageInstall(command) {
   return /^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(cmd);
 }
 
-/** Cap npm network/disk pressure so install stays a background neighbor. */
+/** Soften npm install flags without starving the download (2 sockets ≈ multi-minute hangs). */
 function softenPackageInstallCommand(command) {
   const cmd = String(command || '').trim();
   if (!/^(npm)(\.cmd)?\s+/i.test(cmd)) return cmd;
   if (/\s--maxsockets\b/i.test(cmd)) return cmd;
+  // 8 matches a normal CLI install (~10–30s). Keep audit/fund off for less noise.
   if (/^(npm)(\.cmd)?\s+(install|i)(\s|$)/i.test(cmd)) {
     const rest = cmd.replace(/^(npm)(\.cmd)?\s+(install|i)\b/i, '').trim();
-    return `npm install --no-audit --no-fund --progress=false --maxsockets=2${rest ? ` ${rest}` : ''}`;
+    return `npm install --no-audit --no-fund --progress=false --maxsockets=8${rest ? ` ${rest}` : ''}`;
   }
   if (/^(npm)(\.cmd)?\s+ci(\s|$)/i.test(cmd)) {
-    return 'npm ci --no-audit --no-fund --progress=false --maxsockets=2';
+    return 'npm ci --no-audit --no-fund --progress=false --maxsockets=8';
   }
   if (/^(npm)(\.cmd)?\s+add(\s|$)/i.test(cmd)) {
     const rest = cmd.replace(/^(npm)(\.cmd)?\s+add\b/i, '').trim();
-    return `npm install --no-audit --no-fund --progress=false --maxsockets=2${rest ? ` ${rest}` : ''}`;
+    return `npm install --no-audit --no-fund --progress=false --maxsockets=8${rest ? ` ${rest}` : ''}`;
   }
   return cmd;
 }
 
 function packageInstallEnv() {
+  const base = { ...process.env };
+  // Electron GUI launches often miss Program Files\nodejs on PATH even when Node is installed.
+  const extra = [];
+  if (process.platform === 'win32') {
+    extra.push(
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs'),
+    );
+  } else {
+    extra.push('/usr/local/bin', '/usr/bin');
+  }
+  const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+  const cur = String(base[pathKey] || base.PATH || '');
+  const bits = [...extra.filter(Boolean), ...cur.split(path.delimiter)].filter(Boolean);
+  const seen = new Set();
+  const merged = bits.filter((p) => {
+    const k = p.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).join(path.delimiter);
+  base.PATH = merged;
+  if (process.platform === 'win32') base.Path = merged;
   return {
-    ...process.env,
-    npm_config_maxsockets: '2',
+    ...base,
+    npm_config_maxsockets: '8',
     npm_config_fetch_retries: '2',
     npm_config_progress: 'false',
     npm_config_audit: 'false',
@@ -122,12 +153,23 @@ function packageInstallEnv() {
   };
 }
 
+/** Env for everyday agent shells (node/npm) — same PATH heal as installs. */
+function agentShellEnv() {
+  const soft = packageInstallEnv();
+  // Drop npm_config_* noise for non-install commands.
+  const out = { ...soft };
+  for (const k of Object.keys(out)) {
+    if (/^npm_config_/i.test(k)) delete out[k];
+  }
+  return out;
+}
+
 function lowerChildPriority(pid) {
   if (!pid) return;
   try {
-    // Prefer LOWEST for heavy installs so Defender/disk storms stay behind the desktop.
+    // BELOW_NORMAL keeps Nova UI responsive without starving npm (LOWEST caused 5+ min installs).
     const levels = os.constants.priority;
-    const level = levels.PRIORITY_LOWEST ?? levels.PRIORITY_BELOW_NORMAL;
+    const level = levels.PRIORITY_BELOW_NORMAL ?? levels.PRIORITY_NORMAL;
     os.setPriority(pid, level);
   } catch {
     /* ignore — some hosts disallow priority changes */
@@ -286,15 +328,41 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      const viteReadyOnDisk = () => {
+        try {
+          return fs.existsSync(path.join(cwd, 'node_modules', 'vite', 'package.json'))
+            && fs.existsSync(path.join(cwd, 'node_modules', 'react', 'package.json'));
+        } catch {
+          return false;
+        }
+      };
       const timer = setTimeout(() => {
+        // Windows npm often finishes unpack after our wall — if vite is already
+        // on disk, treat as success instead of killing a nearly-done install into failure.
+        const viteReady = viteReadyOnDisk()
+          || (() => { try { return fs.existsSync(path.join(cwd, 'node_modules', 'vite')); } catch { return false; } })();
         try { killProcessTree(child.pid); } catch { /* ignore */ }
         try { child.kill(); } catch { /* ignore */ }
+        if (viteReady) {
+          done(null);
+          return;
+        }
         done(Object.assign(new Error(`Command timed out after ${Math.round(timeoutMs / 1000)}s`), { code: 'ETIMEDOUT', killed: true }));
       }, timeoutMs);
+      // Early success: once vite+react are on disk, stop waiting on a hung npm close.
+      // (Defender / orphan npm can leave the child alive long after packages are usable.)
+      const vitePoll = setInterval(() => {
+        if (settled) return;
+        if (!viteReadyOnDisk()) return;
+        try { killProcessTree(child.pid); } catch { /* ignore */ }
+        try { child.kill(); } catch { /* ignore */ }
+        done(null);
+      }, 5_000);
       const done = (err) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        try { clearInterval(vitePoll); } catch { /* ignore */ }
         finish(err, stdout.slice(0, maxBuffer), stderr.slice(0, maxBuffer));
       };
       child.stdout?.on('data', (chunk) => {
@@ -324,7 +392,7 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
       windowsHide: true,
       timeout: timeoutMs,
       maxBuffer,
-      env: heavy ? packageInstallEnv() : process.env,
+      env: heavy ? packageInstallEnv() : agentShellEnv(),
     }, (err, stdout, stderr) => finish(err, stdout, stderr));
     lowerChildPriority(child?.pid);
   });
@@ -406,11 +474,53 @@ function portFromUrl(url) {
 /** Project Vite previews. start above NOVA's own UI ports (5173–5174). */
 const DEV_PORT_CANDIDATES = Array.from({ length: 151 }, (_, i) => 5200 + i);
 
-async function findFreeDevPort() {
-  for (const port of DEV_PORT_CANDIDATES) {
-    if (!(await httpProbePortAny(port, 400))) return port;
+/** True TCP bind check — HTTP probe alone misses listeners that don't answer GET /. */
+function canBindDevPort(port) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    let server;
+    try {
+      server = net.createServer();
+    } catch {
+      done(false);
+      return;
+    }
+    server.once('error', () => done(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => done(true));
+    });
+    setTimeout(() => {
+      try { server.close(); } catch { /* ignore */ }
+      done(false);
+    }, 800);
+  });
+}
+
+async function findFreeDevPort(preferredPort) {
+  const prefer = Number(preferredPort) || 0;
+  const ordered = prefer
+    ? [prefer, ...DEV_PORT_CANDIDATES.filter((p) => p !== prefer)]
+    : DEV_PORT_CANDIDATES;
+  for (const port of ordered) {
+    // Prefer ports that are neither HTTP-busy nor TCP-bound.
+    if (await httpProbePortAny(port, 300)) continue;
+    if (!(await canBindDevPort(port))) continue;
+    return port;
   }
   return null;
+}
+
+async function findFreeDevPortForCwd(cwd) {
+  const key = String(cwd || '').trim().toLowerCase();
+  const remembered = key ? lastDevPortByCwd.get(key) : 0;
+  const port = await findFreeDevPort(remembered);
+  if (port && key) lastDevPortByCwd.set(key, port);
+  return port;
 }
 
 async function waitForDevServerUrl(port, timeoutMs = 25_000) {
@@ -429,7 +539,8 @@ async function waitForDevServerUrl(port, timeoutMs = 25_000) {
 function spawnHiddenDevServer(cwd, port) {
   // Force IPv4 + an explicit free port so we never steal NOVA's own Vite or miss ::1-only binds.
   const run = `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`;
-  const env = { ...process.env, BROWSER: 'none' };
+  const env = agentShellEnv();
+  env.BROWSER = 'none';
   if (process.platform === 'win32') {
     // npm.cmd + shell:false causes EINVAL on Windows — use cmd /c with hidden window.
     // Do not use detached:true — it forces a visible CMD on Windows despite windowsHide.
@@ -798,7 +909,15 @@ async function ensureNodeModules(cwd, opts = {}) {
   if (treeLooksReady()) {
     return { ok: true };
   }
-  const ran = await runCommand('npm install', cwd, 300_000);
+  // Item 11: serialize npm through novaJobs so it doesn't fight GGUF/disk storms.
+  const runInstall = () => runCommand('npm install', cwd, 420_000);
+  const ran = novaJobs?.enqueue
+    ? await novaJobs.enqueue({
+      kind: 'npm',
+      label: `npm install · ${path.basename(cwd)}`,
+      run: runInstall,
+    }).catch((err) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+    : await runInstall();
   if (!ran.ok) {
     return {
       ok: false,
@@ -827,7 +946,7 @@ async function agentStartDevServer(payload) {
     return { ok: false, error: deps.error || 'npm install failed before starting the preview server.' };
   }
 
-  const port = await findFreeDevPort();
+  const port = await findFreeDevPortForCwd(cwdRes.path);
   if (!port) {
     return { ok: false, error: 'No free port in 5200–5350 for the project dev server.' };
   }
@@ -840,7 +959,7 @@ async function agentStartDevServer(payload) {
       try { killProcessTree(child.pid); } catch { /* ignore */ }
       try { child.kill?.(); } catch { /* ignore */ }
       // npm run dev without JSX transform (common with broken electron Vite) — web-only fallback.
-      const webPort = await findFreeDevPort();
+      const webPort = await findFreeDevPortForCwd(cwdRes.path);
       if (!webPort) {
         return {
           ok: false,
@@ -905,6 +1024,57 @@ function spawnHiddenUvicorn(cwd, port) {
   });
 }
 
+function contentTypeForStatic(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.woff2') return 'font/woff2';
+  if (ext === '.woff') return 'font/woff';
+  return 'text/plain; charset=utf-8';
+}
+
+/** Serve index.html + assets from disk (static-web creates — no npm). */
+function startStaticFolderServer(cwd, port) {
+  const http = require('http');
+  const root = path.resolve(cwd);
+  const server = http.createServer((req, res) => {
+    try {
+      const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+      let rel = urlPath === '/' ? '/index.html' : urlPath;
+      const full = path.normalize(path.join(root, rel));
+      const rootWithSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+      if (full !== root && !full.startsWith(rootWithSep)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      if (!fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+        const fallback = path.join(root, 'index.html');
+        if (fs.existsSync(fallback) && urlPath !== '/index.html') {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          fs.createReadStream(fallback).pipe(res);
+          return;
+        }
+        res.writeHead(404);
+        res.end('Not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': contentTypeForStatic(full) });
+      fs.createReadStream(full).pipe(res);
+    } catch (err) {
+      res.writeHead(500);
+      res.end(String(err?.message || 'error'));
+    }
+  });
+  server.listen(port, '127.0.0.1');
+  return server;
+}
+
 function packageLooksLikeElectronApp(cwd) {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
@@ -954,7 +1124,7 @@ async function agentStartFolderPreview(payload) {
       if (!deps.ok) {
         return { ok: false, error: deps.error || 'npm install failed before starting the preview server.' };
       }
-      const port = await findFreeDevPort();
+      const port = await findFreeDevPortForCwd(cwd);
       if (!port) {
         return { ok: false, error: 'No free port in 5200–5350 for the project preview server.' };
       }
@@ -989,7 +1159,7 @@ async function agentStartFolderPreview(payload) {
     let preferred = readBatUrls(cwd)[0]?.port || 8000;
     // Never attach to a foreign live port — pick a free port if preferred is busy.
     if (await httpProbePortAny(preferred, 400)) {
-      const free = await findFreeDevPort();
+      const free = await findFreeDevPortForCwd(cwd);
       if (!free) {
         return { ok: false, error: 'No free port for the Python preview server.' };
       }
@@ -1002,6 +1172,34 @@ async function agentStartFolderPreview(payload) {
       return { ok: true, cwd, url };
     } catch (err) {
       return { ok: false, error: err?.message || 'Could not start the Python preview server.' };
+    }
+  }
+
+  // Static HTML/CSS/JS projects (no package.json) — serve the folder directly.
+  const indexHtml = path.join(cwd, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    const port = await findFreeDevPortForCwd(cwd);
+    if (!port) {
+      return { ok: false, error: 'No free port for the static preview server.' };
+    }
+    try {
+      const server = startStaticFolderServer(cwd, port);
+      const url = `http://127.0.0.1:${port}/`;
+      await waitForDevServerUrl(port, 8_000);
+      devServersByCwd.set(cwdKey, {
+        url,
+        pid: null,
+        child: {
+          kill() {
+            try { server.close(); } catch { /* ignore */ }
+          },
+        },
+        server,
+        static: true,
+      });
+      return { ok: true, cwd, url, static: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not start the static preview server.' };
     }
   }
 

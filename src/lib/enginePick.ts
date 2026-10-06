@@ -24,9 +24,8 @@ export const CHAT_ENGINE_RANK = [
   'qwen25-15b',
 ] as const;
 
-/** Coding / build asks — quality order (largest first). */
+/** Coding / build asks — quality order (largest create-safe first). */
 export const CODER_ENGINE_RANK = [
-  'qwen25-coder-32b',
   'qwen25-coder-14b',
   'qwen25-coder-7b',
   'deepseek-coder-v2-lite',
@@ -49,13 +48,11 @@ export const CREATE_POLISH_CODER_RANK = [
   'qwen25-coder-7b',
   'deepseek-coder-v2-lite',
   'starcoder2-7b',
-  'qwen25-coder-32b',
 ] as const;
 
 const WEAK_CHAT = new Set(['qwen25-15b', 'gemma2-2b', 'phi3-mini']);
 
 const MIN_RAM_GB: Record<string, number> = {
-  'qwen25-coder-32b': 28,
   'qwen25-coder-14b': 16,
   'qwen25-14b': 16,
   'qwen25-coder-7b': 10,
@@ -220,7 +217,7 @@ export function pickReadyEngineId(
 /**
  * Pick the best ready coder for this PC.
  * - quality: largest that fits (builds / edits)
- * - fast: prefer mid-size (7B–14B) for snappy create polish on mid PCs; still uses 14B/32B when allowed
+ * - fast: prefer mid-size (7B–14B) for snappy create polish on mid PCs; never hops above create-safe 14B
  */
 export function pickBestReadyCoder(
   models: EngineRow[] | undefined,
@@ -305,29 +302,31 @@ export function pickReadyCreatePolishCoder(
       ? 'quality'
       : 'fast';
 
-  // Ignore sticky prefer when picking create craft — always best first.
+  // Explicit pin (chat picker / ladder) always wins when ready — never upgrade to 32B.
+  // Include UIGEN / design GGUFs — ladder stress pins them for create craft.
+  const selected = String(opts?.preferSelectedId || '').trim();
+  if (
+    selected
+    && selected !== 'NOVA-auto'
+    && (isCoderEngineId(selected) || isUiDesignEngineId(selected))
+  ) {
+    const readyRows = (models || []).filter((m) => m.status === 'ready' && m.id);
+    const hit = readyRows.find((m) => m.id === selected);
+    if (hit && fitsRam(selected, ramGb)) {
+      const p = parseParamsB(selected);
+      // Design / small pins ignore coder param caps (ladder / manual stress).
+      if (isUiDesignEngineId(selected) || cappedMax == null || cappedMax <= 0 || p == null || p <= cappedMax + 0.01) {
+        return { id: selected, name: String(hit.name || selected) };
+      }
+    }
+  }
+
   const best = pickBestReadyCoder(models, {
     preferSelectedId: undefined,
     ramGb,
     maxParamsB: cappedMax,
     mode,
   });
-  if (!best) return null;
-
-  const selected = String(opts?.preferSelectedId || '').trim();
-  if (selected && selected !== 'NOVA-auto' && isCoderEngineId(selected)) {
-    const readyRows = (models || []).filter((m) => m.status === 'ready' && m.id);
-    const hit = readyRows.find((m) => m.id === selected);
-    if (hit && fitsRam(selected, ramGb)) {
-      const p = parseParamsB(selected);
-      if (cappedMax == null || cappedMax <= 0 || p == null || p <= cappedMax + 0.01) {
-        // Honor an explicit pin only when it is at least as strong as the best ready coder.
-        if (coderQualityScore(selected) >= coderQualityScore(best.id)) {
-          return { id: selected, name: String(hit.name || selected) };
-        }
-      }
-    }
-  }
   return best;
 }
 

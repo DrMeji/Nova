@@ -17,9 +17,9 @@ import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { NovaMark } from '@/components/NovaMark';
 import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
 import { ChatCodeOverlay } from '@/components/ChatCodeOverlay';
+import { ChatPlanOverlay } from '@/components/ChatPlanOverlay';
 import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
 import { FIRST_RUN_KIND_CHIPS } from '@/lib/chatTurnHandlers';
-import { isTraceMessage } from '@/lib/agentTrace';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
 import { formatReplyElapsed, shortReplyModelLabel } from '@/lib/speedTest';
@@ -35,11 +35,13 @@ import { autoEquippedCaption, autoRingDetail } from '@/lib/threadBrain';
 import { setEngineModel } from '@/lib/novaEngine';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
 import {
-  Loader2, ImageIcon, Video, Code2,
+  Loader2, ImageIcon, Video, Code2, Map,
   Upload, Cpu, Cloud, ChevronDown, Check,
-  Folder, Square, X, ImagePlus,
+  Folder, Square, X, ImagePlus, Download,
   Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
 } from 'lucide-react';
+import { resolveMediaRef } from '@/lib/recentStore';
+import { pushDownloadCompleteToast } from '@/lib/sidebarToast';
 import {
   ChatModeTabs,
   COMPOSER_MODE_LABEL,
@@ -78,6 +80,11 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const chats = props.chats;
   const clonePickedRepo = props.clonePickedRepo;
   const codeOverlayOpen = props.codeOverlayOpen;
+  const planOverlayOpen = props.planOverlayOpen;
+  const planPillSticky = props.planPillSticky;
+  const planLiveDrafting = props.planLiveDrafting;
+  const openPlanWorkspace = props.openPlanWorkspace;
+  const setPlanOverlayOpen = props.setPlanOverlayOpen;
   const liveTurnStatus = useChatTurnStatus();
   const liveWritingPath = liveTurnStatus?.writingPath || null;
   const codePillSticky = props.codePillSticky;
@@ -153,6 +160,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const onMessagesWheel = props.onMessagesWheel;
   const onPickCodeFiles = props.onPickCodeFiles;
   const openCodeWorkspace = props.openCodeWorkspace;
+  const closeCodeOverlay = props.closeCodeOverlay;
   const openProjectFolder = props.openProjectFolder;
   const openProjectPreview = props.openProjectPreview;
   const pendingAttaches = props.pendingAttaches;
@@ -303,9 +311,11 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   <NovaMark className="w-6 h-6" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm text-content-primary truncate">{model.name}</span>
+                  <span className="block text-sm text-content-primary truncate">
+                    {autoEquippedCaption(threadBrain) || 'Best available'}
+                  </span>
                   <span className="block text-[11px] text-content-tertiary truncate">
-                    {autoEquippedCaption(threadBrain) || 'Multi-model · including vision for builds'}
+                    One model for this chat — no hopping
                   </span>
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
@@ -452,8 +462,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
             ))}
           </>
         )}
-        {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && engineLocalModels.length === 0 && (
-          null
+        {kind === 'chat' && keyedCloud.length === 0 && (
+          <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
+            Keys unlock Cloud rows here. Add them in Settings → Providers, then pick Hugging Face, OpenRouter, Google, and more.
+          </p>
         )}
         {activeModel.source !== 'auto' && activeModel.kind === 'chat' && (
           <div className="border-t border-surface-border mt-1 pt-1 px-2 pb-1">
@@ -518,7 +530,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   ) : null;
 
   const composer = (
-    <div className="w-full max-w-3xl mx-auto min-w-0">
+    <div className="w-full mx-auto min-w-0 nova-composer-column">
       {failoverChip}
       <div className="flex flex-col min-w-0 w-full">
         <div className="min-w-0 flex flex-col w-full">
@@ -756,7 +768,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
             type="file"
             multiple
             className="hidden"
-            accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.cs,.cpp,.c,.h,.hpp,.rb,.php,.vue,.svelte,.css,.scss,.html,.json,.toml,.yaml,.yml,.md,.sql,.sh,.ps1,image/*,text/*,application/json"
+            accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.cs,.cpp,.c,.h,.hpp,.rb,.php,.vue,.svelte,.css,.scss,.html,.json,.toml,.yaml,.yml,.md,.txt,.csv,.pdf,.rtf,.sql,.sh,.ps1,.xml,.log,image/*,text/*,application/json,application/pdf"
             onChange={e => {
               void onPickCodeFiles(e.target.files);
               e.target.value = '';
@@ -765,7 +777,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg"
             multiple
             className="hidden"
             onChange={e => {
@@ -797,8 +809,15 @@ export function AIChatFrame(props: AIChatFrameProps) {
               }
               if (e.key === 'Enter' && !e.shiftKey) {
                 if (Date.now() < ignoreEnterUntilRef.current) {
-                  e.preventDefault();
-                  return;
+                  // Dialog-close often fires a bare Enter on an empty box.
+                  // If the user already typed a prompt and/or staged attaches, send anyway.
+                  const hasPayload = Boolean(String(input || '').trim())
+                    || pendingImages.length > 0
+                    || pendingAttaches.some(a => a.kind === 'file' || a.kind === 'image' || a.kind === 'files');
+                  if (!hasPayload) {
+                    e.preventDefault();
+                    return;
+                  }
                 }
                 e.preventDefault();
                 // Editing a cue: Enter saves back into the queue (does not send).
@@ -829,26 +848,30 @@ export function AIChatFrame(props: AIChatFrameProps) {
             placeholder={
               editingQueueId
                 ? 'Edit this cue — Enter to save, Esc to cancel…'
-                : pendingAttaches.length || Object.keys(chatStudioFiles).length
-                  ? 'Press Enter to read this, or type an ask…'
-                  : placeholder
+                : pendingImages.length
+                  ? 'Type an ask, then Enter — photo goes with the message…'
+                  : pendingAttaches.length || Object.keys(chatStudioFiles).length
+                    ? 'Press Enter to read this, or type an ask…'
+                    : placeholder
             }
             rows={1}
             title={
               editingQueueId
                 ? 'Enter saves this cue · Esc cancels · Shift+Enter for a new line'
-                : 'Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots'
+                : 'Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots · + → clip attaches files or a project'
             }
             aria-label={
               editingQueueId
                 ? 'Edit queued message. Enter to save, Escape to cancel'
-                : 'Message. Enter to send, Shift+Enter for a new line'
+                : 'Message. Enter to send with any attached photos or files. Shift+Enter for a new line'
             }
-            className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[2.75rem] px-3 pt-2.5 pb-1"
+            className="w-full bg-transparent border-none resize-none text-[0.9375rem] text-content-primary placeholder:text-content-tertiary focus:outline-none leading-[1.55] min-h-[2.5rem] px-3 pt-2 pb-1"
             style={{ overflowY: 'hidden' }}
           />
 
-          <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0 border-t border-transparent">
+          <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0 border-t border-transparent min-w-0">
+            {/* Left tools + status chips — may compress; never steal space from Stop/mic/model. */}
+            <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
             {mode === 'image' && (
               <button
                 type="button"
@@ -906,7 +929,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
               <button
                 type="button"
                 onClick={() => void openProjectFolder()}
-                className="inline-flex items-center gap-1 max-w-[12rem] rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0"
+                className="inline-flex items-center gap-1 max-w-[8.5rem] rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/25 transition-colors shrink min-w-0"
                 title={`Bound project folder:\n${chatStudioDiskRoot}`}
                 aria-label={`Bound folder ${workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}`}
               >
@@ -928,7 +951,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   );
                   void browseBindFolder();
                 }}
-                className="inline-flex items-center gap-1 max-w-[12rem] rounded-full border border-dashed border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200/90 hover:bg-amber-500/20 transition-colors shrink-0"
+                className="inline-flex items-center gap-1 max-w-[8.5rem] rounded-full border border-dashed border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200/90 hover:bg-amber-500/20 transition-colors shrink-0"
                 title={
                   composerMode === 'debug'
                     ? 'Bind a project folder to audit'
@@ -966,33 +989,75 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 <span className="relative">Code</span>
               </button>
             ) : null}
+            {(mode === 'general' || mode === 'code') && (planPillSticky || planOverlayOpen || planLiveDrafting) ? (
+              <button
+                type="button"
+                onClick={() => openPlanWorkspace?.()}
+                className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
+                  planLiveDrafting
+                    ? 'border-sky-500/50 bg-sky-500/20 text-sky-100'
+                    : 'border-sky-500/40 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25'
+                }`}
+                title={
+                  planLiveDrafting
+                    ? 'Plan — NOVA is drafting the map. Click to watch live.'
+                    : 'Open Plan — synced outline for this chat'
+                }
+                aria-label={planLiveDrafting ? 'Plan — drafting in progress' : 'Open Plan'}
+              >
+                {planLiveDrafting ? (
+                  <span
+                    className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-sky-300/40 animate-pulse"
+                    aria-hidden
+                  />
+                ) : null}
+                <Map className="w-3.5 h-3.5 text-sky-300 relative" />
+                <span className="relative">Plan</span>
+              </button>
+            ) : null}
             {(mode === 'general' || mode === 'code')
               && chatStudioDiskRoot
               && createJobLive?.status === 'npm'
               ? (
               <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 shrink-0"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-1 text-xs font-medium text-amber-100 shrink-0"
                 title="Installing npm dependencies for this project"
               >
                 <span className="relative flex h-2 w-2" aria-hidden>
                   <span className="absolute inset-0 rounded-full bg-amber-300/50 animate-ping" />
                   <span className="relative h-2 w-2 rounded-full bg-amber-300" />
                 </span>
-                Installing…
+                <span className="hidden sm:inline">Installing…</span>
+                <span className="sm:hidden">npm…</span>
+              </span>
+            ) : null}
+            {(mode === 'general' || mode === 'code')
+              && chatStudioDiskRoot
+              && createJobLive?.status === 'verifying'
+              ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-1 text-xs font-medium text-sky-100 shrink-0 max-w-[7.5rem]"
+                title={createJobLive.lastObservation || createJobLive.stage || 'Verifying Live evidence'}
+              >
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+                  <span className="absolute inset-0 rounded-full bg-sky-300/50 animate-ping" />
+                  <span className="relative h-2 w-2 rounded-full bg-sky-300" />
+                </span>
+                <span className="truncate">
+                  {createJobLive.stage === 'fix' ? 'Fixing…' : 'Verifying…'}
+                </span>
               </span>
             ) : null}
             {(mode === 'general' || mode === 'code')
               && chatStudioDiskRoot
               && !generating
+              && createJobLive?.status !== 'npm'
+              && createJobLive?.status !== 'verifying'
               && (
                 createJobLive?.status === 'ready'
+                || createJobLive?.status === 'failed'
                 || Boolean(previewUrl)
-                // After Preview Ready reply, job may drop off the store — still offer Live.
-                || (
-                  createJobLive?.status !== 'writing'
-                  && createJobLive?.status !== 'npm'
-                  && Object.keys(chatStudioFiles).some((p) => /App\.(tsx|jsx)$/i.test(p) || /index\.html$/i.test(p))
-                )
+                || Object.keys(chatStudioFiles).some((p) => /App\.(tsx|jsx)$/i.test(p) || /index\.html$/i.test(p))
               )
               ? (
               <button
@@ -1000,19 +1065,22 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 onClick={() => void openProjectPreview()}
                 className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
                 title={
-                  createJobLive?.previewUrl
-                    ? `Open Live (${createJobLive.previewUrl})`
-                    : previewUrl
-                      ? `Open Live (${previewUrl})`
-                      : 'Open Live window'
+                  createJobLive?.status === 'failed' && createJobLive.error
+                    ? `Open Live — last check: ${createJobLive.error}`
+                    : createJobLive?.previewUrl
+                      ? `Open Live (${createJobLive.previewUrl})`
+                      : previewUrl
+                        ? `Open Live (${previewUrl})`
+                        : 'Open Live window'
                 }
               >
                 <Globe className="w-3.5 h-3.5 text-sky-300" />
                 Live
               </button>
             ) : null}
-            <div className="flex-1 min-w-0" aria-hidden />
-            <div className="flex items-center gap-1.5 shrink-0">
+            </div>
+            {/* Mic + model + Stop — always fully visible; never clipped by Verifying/Code chips. */}
+            <div className="flex items-center gap-1.5 shrink-0 pl-1">
               <button
                 type="button"
                 onClick={() => toggleComposerDictation()}
@@ -1028,43 +1096,44 @@ export function AIChatFrame(props: AIChatFrameProps) {
               >
                 {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
-              {/* Chat: locked to Nova Multimodal (Auto). Image/video keep a picker. */}
-              {mode === 'image' || mode === 'video' ? (
-                <>
-                  <button
-                    ref={modelButtonRef}
-                    type="button"
-                    onClick={() => setModelMenuOpen(o => !o)}
-                    className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-nova-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[11.5rem]"
-                    title={`Active model · ${activeModel.name}`}
-                    aria-label="Select model"
-                    aria-expanded={modelMenuOpen}
-                  >
-                    {mode === 'image' ? (
-                      <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    ) : (
-                      <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    )}
-                    <span className="font-medium truncate">{activeModel.name}</span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {modelMenu}
-                </>
-              ) : (
-                <div
-                  className="inline-flex items-center rounded-full border border-surface-border bg-nova-navy-800 px-2.5 py-1 text-xs text-content-primary max-w-[12.5rem]"
-                  title={
-                    threadBrain
-                      ? `Nova Multimodal · currently using ${autoEquippedCaption(threadBrain) || autoModelLabel}`
-                      : 'Nova Multimodal · Auto picks the best chat or coder brain per turn'
-                  }
-                  aria-label="Nova Multimodal — automatic model routing"
-                >
-                  <span className="font-medium truncate">
-                    {autoModelLabel === 'Multimodal' ? 'Multimodal' : autoModelLabel}
-                  </span>
-                </div>
-              )}
+              {/* Model picker — chat, image, and video. Chat defaults to Auto; cloud rows appear when keys are saved. */}
+              <button
+                ref={modelButtonRef}
+                type="button"
+                onClick={() => setModelMenuOpen(o => !o)}
+                className="inline-flex items-center gap-1 px-1 py-1 text-xs text-content-secondary hover:text-content-primary transition-colors max-w-[9.5rem] bg-transparent border-0 rounded-none shrink-0"
+                title={
+                  /^(Craft|Style|Verify|Done)\s·/i.test(String(autoModelLabel || ''))
+                    ? `Create · ${autoModelLabel}`
+                    : activeModel.source === 'auto'
+                      ? (threadBrain
+                        ? `Using ${autoEquippedCaption(threadBrain) || autoModelLabel}`
+                        : 'Picks one model and stays on it for this chat')
+                      : `Active model · ${activeModel.name}`
+                }
+                aria-label="Select model"
+                aria-expanded={modelMenuOpen}
+              >
+                {mode === 'image' ? (
+                  <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                ) : mode === 'video' ? (
+                  <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                ) : activeModel.source === 'cloud' ? (
+                  <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                ) : activeModel.source === 'local' ? (
+                  <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                ) : null}
+                <span className="font-medium truncate">
+                  {/^(Craft|Style|Verify|Done)\s·/i.test(String(autoModelLabel || ''))
+                    || activeModel.source === 'auto'
+                    ? (autoModelLabel === 'Multimodal' || autoModelLabel === 'Auto' || autoModelLabel === 'Ready'
+                      ? (autoEquippedCaption(threadBrain) || autoModelLabel || 'Ready')
+                      : autoModelLabel)
+                    : activeModel.name}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {modelMenu}
 
               {generating && (
                 <button
@@ -1103,6 +1172,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 <TokenUsageRing
                   contextRatio={tokenRatio}
                   modelRatio={modelRatio}
+                  working={generating}
                   className="shrink-0"
                   modelName={
                     activeModel.source === 'auto'
@@ -1313,18 +1383,18 @@ export function AIChatFrame(props: AIChatFrameProps) {
         />
       ) : showEmpty ? (
         mode === 'general' ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full min-h-0">
-            <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-8 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full min-h-0 nova-chat-surface">
+            <h1 className="nova-chat-hero font-semibold text-content-primary tracking-tight mb-6 text-center">
               {greeting}
             </h1>
-            <div className="w-full max-w-3xl">
+            <div className="w-full nova-composer-column">
               {composer}
             </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col px-4 sm:px-8 pt-[min(12vh,5.5rem)] pb-4 min-h-0 overflow-hidden">
-            <div className="shrink-0 flex flex-col items-center w-full max-w-3xl mx-auto">
-              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-8 text-center">
+            <div className="shrink-0 flex flex-col items-center w-full nova-composer-column nova-chat-surface mx-auto">
+              <h1 className="nova-chat-hero font-semibold text-content-primary tracking-tight mb-6 text-center">
                 {greeting}
               </h1>
               {composer}
@@ -1373,10 +1443,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
               onWheel={onMessagesWheel}
               className="flex-1 min-h-0 overflow-auto px-3 sm:px-5 lg:px-8 py-6 NOVA-scroll-quiet"
             >
-            <div className="max-w-6xl mx-auto w-full space-y-5">
+            <div className="nova-chat-stream nova-chat-surface w-full space-y-4">
               {messages.length === 0 && showOpenThread && (
-                <div className="text-center py-10 space-y-4">
-                  <p className="text-sm text-content-secondary">
+                <div className="text-center py-8 space-y-3">
+                  <p className="text-[0.8125rem] text-content-secondary">
                     Type what to build.
                   </p>
                   <div className="flex flex-wrap justify-center gap-1.5">
@@ -1393,17 +1463,20 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   </div>
                 </div>
               )}
-              {messages.map(msg => (
+              {messages.map(msg => {
+                return (
                 <div
                   key={msg.id}
-                  className={`flex gap-3 animate-fade-in w-full ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+                  className={`nova-msg-row animate-fade-in ${
+                    msg.role === 'user'
+                      ? 'nova-msg-row--user'
+                      : 'nova-msg-row--assistant'
                   }`}
                 >
                   <div
-                    className={`text-sm text-content-primary min-w-0 ${
+                    className={`nova-chat-bubble text-content-primary min-w-0 ${
                       msg.role === 'user'
-                        ? 'max-w-[min(48rem,88%)] min-w-0 break-words [overflow-wrap:anywhere] overflow-hidden flex flex-col items-end gap-1'
+                        ? 'min-w-0 break-words [overflow-wrap:anywhere] overflow-hidden flex flex-col items-end gap-1'
                         : isMediaOnlyContent(msg.content)
                           || (
                             msg.content.startsWith('__generating__:image:')
@@ -1415,58 +1488,153 @@ export function AIChatFrame(props: AIChatFrameProps) {
                             && msg.id === messages[messages.length - 1]?.id
                             && (mode === 'image' || mode === 'video')
                           )
-                          ? 'shrink-0 max-w-[min(56rem,94%)]'
+                          ? 'shrink-0'
                           // overflow-x-auto (not hidden) so 10+ list markers and long code stay visible
-                          : 'max-w-[min(56rem,94%)] min-w-0 break-words [overflow-wrap:anywhere] overflow-x-auto'
+                          : 'min-w-0 break-words [overflow-wrap:anywhere] overflow-x-auto'
                     }`}
                   >
                     {msg.role === 'user' ? (
-                      <>
-                        <div className="min-w-0 max-w-full rounded-xl px-3.5 py-2.5 bg-surface-hover text-[13px] leading-5 text-content-primary">
-                          <MessageContent
-                            content={msg.content}
-                            live={false}
-                            tone="user"
-                            onPromptChipPick={(prompt) => {
-                              if (prompt === '<!--nova-arm-plan-->') {
-                                handlePlusAction('plan');
-                                return;
+                      (() => {
+                        const raw = String(msg.content || '').trim();
+                        const hasMedia = /!\[[^\]]*]\([^)]+\)/.test(raw) || raw.includes('nova-media:');
+                        const promptText = stripComposerPrefix(raw)
+                          .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+                          .replace(/<!--[\s\S]*?-->/g, '')
+                          .trim();
+                        const mediaMatch = raw.match(/!\[[^\]]*]\(([^)]+)\)/);
+                        const mediaSrc = mediaMatch?.[1] || '';
+                        const copied = copiedMsgId === msg.id;
+
+                        const copyPrompt = () => {
+                          void navigator.clipboard.writeText(promptText || raw).then(() => {
+                            setCopiedMsgId(msg.id);
+                            window.setTimeout(() => {
+                              setCopiedMsgId(prev => (prev === msg.id ? null : prev));
+                            }, 1600);
+                          }).catch(() => undefined);
+                        };
+
+                        const downloadImage = () => {
+                          void (async () => {
+                            try {
+                              let src = mediaSrc;
+                              if (src.startsWith('nova-media:')) {
+                                src = (await resolveMediaRef(src.slice('nova-media:'.length))) || '';
                               }
-                              const p = String(prompt || '').trim();
-                              // Let’s build → handoff: Plan pill disappears; builder takes over.
-                              if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
-                                setComposerMode(null);
-                                setDropHint(null);
+                              if (!src) return;
+                              const res = await fetch(src);
+                              const blob = await res.blob();
+                              const buf = await blob.arrayBuffer();
+                              const u8 = new Uint8Array(buf);
+                              let ext = 'jpg';
+                              if (u8.length >= 8 && u8[0] === 0x89 && u8[1] === 0x50) ext = 'png';
+                              else if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8) ext = 'jpg';
+                              else if (u8.length >= 12 && u8[0] === 0x52 && u8[8] === 0x57) ext = 'webp';
+                              const fileName = `NOVA-${Date.now()}.${ext}`;
+                              const bytes = Array.from(u8);
+                              if (window.novaDesktop?.saveToDownloads) {
+                                const saved = await window.novaDesktop.saveToDownloads({
+                                  fileName,
+                                  bytes,
+                                  mime: blob.type || 'image/jpeg',
+                                });
+                                if (saved?.ok && saved.folderPath) {
+                                  pushDownloadCompleteToast({
+                                    fileName: saved.fileName || fileName,
+                                    folderPath: saved.folderPath,
+                                  });
+                                  return;
+                                }
                               }
-                              tryStartTurn(prompt);
-                            }}
-                          />
-                        </div>
-                        {(() => {
-                          const raw = String(msg.content || '').trim();
-                          if (!raw) return null;
-                          const copied = copiedMsgId === msg.id;
+                              const url = URL.createObjectURL(new Blob([buf], { type: blob.type || 'image/jpeg' }));
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = fileName;
+                              document.body.appendChild(a);
+                              a.click();
+                              a.remove();
+                              window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+                              pushDownloadCompleteToast({ fileName, folderPath: '' });
+                            } catch {
+                              /* ignore */
+                            }
+                          })();
+                        };
+
+                        if (hasMedia) {
+                          // Image + prompt share one right edge (not centered in a fat column).
+                          const mediaOnly = (raw.match(/!\[[^\]]*]\([^)]+\)/g) || []).join('\n');
                           return (
-                            <button
-                              type="button"
-                              title={copied ? 'Copied' : 'Copy prompt'}
-                              aria-label={copied ? 'Copied' : 'Copy prompt'}
-                              className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
-                              onClick={() => {
-                                const toCopy = stripComposerPrefix(raw);
-                                void navigator.clipboard.writeText(toCopy || raw).then(() => {
-                                  setCopiedMsgId(msg.id);
-                                  window.setTimeout(() => {
-                                    setCopiedMsgId(prev => (prev === msg.id ? null : prev));
-                                  }, 1600);
-                                }).catch(() => undefined);
-                              }}
-                            >
-                              {copied ? <Check className="w-3.5 h-3.5 text-nova-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
+                            <div className="w-fit max-w-full self-end flex flex-col items-end gap-2">
+                              {mediaOnly ? (
+                                <div className="w-fit max-w-[min(100%,22rem)] [&_img]:rounded-2xl [&_img]:shadow-[0_8px_28px_rgba(0,0,0,0.35)]">
+                                  <MessageContent content={mediaOnly} live={false} tone="user" />
+                                </div>
+                              ) : null}
+                              {promptText ? (
+                                <div className="nova-chat-bubble w-fit max-w-full rounded-xl px-3 py-2 bg-surface-hover text-content-primary">
+                                  <MessageContent content={promptText} live={false} tone="user" />
+                                </div>
+                              ) : null}
+                              <div className="flex items-center gap-0.5 -mt-0.5">
+                                <button
+                                  type="button"
+                                  title="Download image"
+                                  aria-label="Download image"
+                                  className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
+                                  onClick={downloadImage}
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title={copied ? 'Copied' : 'Copy prompt'}
+                                  aria-label={copied ? 'Copied' : 'Copy prompt'}
+                                  className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
+                                  onClick={copyPrompt}
+                                >
+                                  {copied ? <Check className="w-3.5 h-3.5 text-nova-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </div>
                           );
-                        })()}
-                      </>
+                        }
+
+                        return (
+                          <>
+                            <div className="nova-chat-bubble min-w-0 max-w-full rounded-xl px-3 py-2 bg-surface-hover text-content-primary">
+                              <MessageContent
+                                content={msg.content}
+                                live={false}
+                                tone="user"
+                                onPromptChipPick={(prompt) => {
+                                  if (prompt === '__NOVA_ARM_PLAN__' || prompt === '<!--nova-arm-plan-->') {
+                                    handlePlusAction('plan');
+                                    return;
+                                  }
+                                  const p = String(prompt || '').trim();
+                                  if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
+                                    setComposerMode(null);
+                                    setDropHint(null);
+                                  }
+                                  tryStartTurn(prompt);
+                                }}
+                              />
+                            </div>
+                            {raw ? (
+                              <button
+                                type="button"
+                                title={copied ? 'Copied' : 'Copy prompt'}
+                                aria-label={copied ? 'Copied' : 'Copy prompt'}
+                                className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
+                                onClick={copyPrompt}
+                              >
+                                {copied ? <Check className="w-3.5 h-3.5 text-nova-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            ) : null}
+                          </>
+                        );
+                      })()
                     ) : (
                       <>
                     {(() => {
@@ -1507,10 +1675,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
                       return (
                         <MessageContent
                           content={msg.content}
-                          live={Boolean(generating && isLast && isAssistant && isTraceMessage(raw))}
+                          live={Boolean(generating && isLast && isAssistant)}
                           messageId={msg.id}
                           onPromptChipPick={(prompt) => {
-                            if (prompt === '<!--nova-arm-plan-->') {
+                            if (prompt === '__NOVA_ARM_PLAN__' || prompt === '<!--nova-arm-plan-->') {
                               handlePlusAction('plan');
                               return;
                             }
@@ -1753,7 +1921,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                     )}
                   </div>
                 </div>
-              ))}
+              );
+              })}
               <div ref={messagesEndRef} />
             </div>
             </div>
@@ -1761,9 +1930,11 @@ export function AIChatFrame(props: AIChatFrameProps) {
               <button
                 type="button"
                 onClick={jumpToBottom}
-                title="Jump to latest"
-                aria-label="Jump to latest message"
-                className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full border border-white/10 bg-nova-navy-950/75 text-content-tertiary/80 hover:text-content-secondary hover:bg-nova-navy-900/95 hover:border-white/20 backdrop-blur-sm flex items-center justify-center opacity-55 hover:opacity-100 transition-opacity shadow-sm"
+                title={generating ? 'New reply in progress — jump to latest' : 'Jump to latest'}
+                aria-label={generating ? 'Jump to latest — reply in progress' : 'Jump to latest message'}
+                className={`absolute bottom-2 left-1/2 -translate-x-1/2 z-10 h-9 w-9 rounded-full border border-violet-400/35 bg-nova-navy-950/90 text-violet-200 hover:text-white hover:bg-nova-navy-900/95 hover:border-violet-300/50 backdrop-blur-sm flex items-center justify-center shadow-md shadow-black/40 ${
+                  generating ? 'animate-pulse' : 'animate-bounce'
+                }`}
               >
                 <ChevronDown className="w-4 h-4" />
               </button>
@@ -1802,9 +1973,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
       />
       <ChatCodeOverlay
         open={codeOverlayOpen}
-        onClose={() => setCodeOverlayOpen(false)}
+        onClose={() => (closeCodeOverlay ? closeCodeOverlay() : setCodeOverlayOpen(false))}
         files={chatStudioFiles}
         readOnly={generating}
+        smoothTyping={generating}
         followPath={generating ? liveWritingPath : null}
         projectName={
           loadChatStudio(route.name === 'chat' ? (route.chatId || '') : '')?.name
@@ -1838,6 +2010,13 @@ export function AIChatFrame(props: AIChatFrameProps) {
             });
           }
         }}
+      />
+      <ChatPlanOverlay
+        open={Boolean(planOverlayOpen)}
+        onClose={() => setPlanOverlayOpen?.(false)}
+        chatId={route.name === 'chat' ? (route.chatId || routeChatIdRef.current || null) : (routeChatIdRef.current || null)}
+        live={Boolean(planLiveDrafting)}
+        liveLabel={dropHint && /planning/i.test(String(dropHint)) ? String(dropHint) : null}
       />
       <DeleteProjectFolderModal
         prompt={deleteProjectPrompt}

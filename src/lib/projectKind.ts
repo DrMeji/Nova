@@ -9,6 +9,32 @@ export type ProjectKind = 'static-web' | 'vite-react' | 'python' | 'node-cli' | 
 export function detectProjectKind(text: string): ProjectKind {
   const t = String(text || '');
   const lower = t.toLowerCase();
+  // Tiny single-page toys (sticky note, todo, timer, counter) → static HTML, no npm.
+  // Must beat prefersReactAppScaffold so Live opens without a 5-minute install wall.
+  if (
+    /\b(?:notedot|note\s*dot|sticky\s*notes?|notepad)\b/.test(lower)
+    || (
+      /\b(?:note|notes|sticky)\b/.test(lower)
+      && /\b(?:title|text\s*box|textarea|type|typing)\b/.test(lower)
+      && (/\b(?:tiny|simple|basic|just|only|most basic|nothing else)\b/.test(lower) || t.length < 220)
+    )
+  ) {
+    return 'static-web';
+  }
+  if (
+    /\b(?:todo(?:s)?|to-?dos?|to\s+do\s+list|checklist|task\s*list)\b/.test(lower)
+    && t.length < 360
+    && !/\b(?:landing|dashboard|discord|react|vite)\b/.test(lower)
+  ) {
+    return 'static-web';
+  }
+  if (
+    /\b(?:timer|stopwatch|pomodoro|countdown|click\s+counter|counter\s+app)\b/.test(lower)
+    && t.length < 360
+    && !/\b(?:landing|dashboard|react|vite)\b/.test(lower)
+  ) {
+    return 'static-web';
+  }
   // Static tool UIs that ship without npm (must beat prefersReactAppScaffold / vite default).
   if (/\bcalculator\b/.test(lower) || (/\bcalc\b/.test(lower) && /\b(scientific|professional|pro)\b/.test(lower))) {
     return 'static-web';
@@ -68,6 +94,14 @@ export function resolveProjectKindForCreate(
   parsedKind: ProjectKind,
 ): ProjectKind {
   const s = String(summary || '');
+  // Micro single-page toys never need Vite/npm — keep Live instant.
+  const micro = detectProjectKind(s);
+  if (micro === 'static-web' && (
+    /\b(?:notedot|sticky|notepad|todo|timer|stopwatch|pomodoro|countdown|click\s+counter|calculator)\b/i.test(s)
+    || (/\b(?:note|notes)\b/i.test(s) && /\b(?:title|text\s*box|textarea)\b/i.test(s))
+  )) {
+    return 'static-web';
+  }
   if (/\bcalculator\b/i.test(s) || (/\bcalc\b/i.test(s) && /\b(scientific|professional|pro)\b/i.test(s))) {
     return 'static-web';
   }

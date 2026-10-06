@@ -15,6 +15,8 @@ export type ModelFitAssessment = {
   needRamGb: number;
   pcRamGb: number;
   pcClass: HardwareClass;
+  /** When false, UI must not start the download (oversized / create-unsafe). */
+  allowDownload: boolean;
 };
 
 export type SimilarModelPick = {
@@ -35,6 +37,9 @@ type CompatCandidate = {
   preferred?: boolean;
 };
 
+/** GGUFs at/above this size stall create/polish on consumer PCs — always blocked. */
+export const CREATE_UNSAFE_SIZE_GB = 16;
+
 function needRamForSize(sizeGb: number): number {
   return Math.round((sizeGb * 1.35 + 4) * 10) / 10;
 }
@@ -47,6 +52,7 @@ function classForSize(sizeGb: number): HardwareClass {
 
 /**
  * Assess whether a GGUF (or similar) download is a good fit for this PC.
+ * Poor = blocked. Stretch = warned (Download anyway). Good = normal confirm.
  */
 export function assessModelDownloadFit(
   sizeGb: number,
@@ -59,7 +65,11 @@ export function assessModelDownloadFit(
   const rank: Record<HardwareClass, number> = { light: 0, standard: 1, strong: 2 };
 
   let level: ModelFitLevel = 'good';
-  if (rank[modelClass] > rank[pcClass] || pcRamGb < need * 0.85) {
+
+  // Hard create-safe ceiling — RAM alone is not enough for reliable craft.
+  if (sizeGb >= CREATE_UNSAFE_SIZE_GB) {
+    level = 'poor';
+  } else if (rank[modelClass] > rank[pcClass] || pcRamGb < need * 0.85) {
     level = 'poor';
   } else if (pcRamGb < need || (sizeGb >= 8 && pcClass === 'standard')) {
     level = 'stretch';
@@ -70,33 +80,41 @@ export function assessModelDownloadFit(
   if (level === 'good') {
     return {
       level,
-      headline: 'Compatible with this PC',
-      body: `${sizeGb.toFixed(1)} GB fits your ${pcRamGb} GB system. You can download it into NOVA Engine.`,
+      headline: 'Fits this PC',
+      body: `${sizeGb.toFixed(1)} GB fits your ${pcRamGb} GB system. Safe to download into NOVA Engine.`,
       sizeGb,
       needRamGb: need,
       pcRamGb,
       pcClass,
+      allowDownload: true,
     };
   }
   if (level === 'stretch') {
     return {
       level,
-      headline: 'May run with limits on this PC',
-      body: `This ${sizeGb.toFixed(1)} GB model needs about ${need} GB free RAM alongside the OS. On your ${pcRamGb} GB system it may load slowly or use a shorter context. You can continue, or choose a similar model that fits more comfortably.`,
+      headline: 'Tight fit — may stall on heavier work',
+      body: `This ${sizeGb.toFixed(1)} GB model needs about ${need} GB free RAM alongside the OS. On your ${pcRamGb} GB system it may load slowly, use a shorter context, or struggle on create/build. Prefer a smaller model below, or continue knowing it may not run smoothly.`,
       sizeGb,
       needRamGb: need,
       pcRamGb,
       pcClass,
+      allowDownload: true,
     };
   }
+  const createUnsafe = sizeGb >= CREATE_UNSAFE_SIZE_GB;
   return {
     level,
-    headline: 'Not recommended for this PC',
-    body: `This ${sizeGb.toFixed(1)} GB model typically needs about ${need} GB of available memory. Your system reports ${pcRamGb} GB RAM (${pcClass} profile), so it may fail to load or run unreliably. A similar, smaller model is recommended below.`,
+    headline: createUnsafe
+      ? 'Too large for reliable create on this PC'
+      : 'Not recommended for this PC',
+    body: createUnsafe
+      ? `This ${sizeGb.toFixed(1)} GB model is above NOVA’s create-safe size (~${CREATE_UNSAFE_SIZE_GB} GB). It typically stalls, thrash-rewrites, or fails on craft/polish even when RAM looks high. Download is blocked — pick a smaller model sized for your PC.`
+      : `This ${sizeGb.toFixed(1)} GB model typically needs about ${need} GB of available memory. Your system reports ${pcRamGb} GB RAM (${pcClass} profile), so it may fail to load or run unreliably. Download is blocked — choose a similar smaller model below.`,
     sizeGb,
     needRamGb: need,
     pcRamGb,
     pcClass,
+    allowDownload: false,
   };
 }
 
@@ -131,6 +149,7 @@ export function findSimilarRecommendedModel(
   const scored = candidates
     .filter((c) => c.id !== requested.id)
     .filter((c) => c.sizeGb > 0 && c.sizeGb < requested.sizeGb)
+    .filter((c) => c.sizeGb < CREATE_UNSAFE_SIZE_GB)
     .filter((c) => sameLane(c.category, requested.category) || !requested.category)
     .map((c) => {
       const need = needRamForSize(c.sizeGb);
@@ -173,24 +192,28 @@ export function modelDownloadConfirmCopy(fit: ModelFitAssessment): {
   title: string;
   primaryLabel: string;
   secondaryLabel: string;
+  allowConfirm: boolean;
 } {
   if (fit.level === 'good') {
     return {
       title: 'Confirm download',
       primaryLabel: 'Download',
       secondaryLabel: 'Cancel',
+      allowConfirm: true,
     };
   }
   if (fit.level === 'stretch') {
     return {
-      title: 'Review before downloading',
+      title: 'This model may struggle on your PC',
       primaryLabel: 'Download anyway',
       secondaryLabel: 'Cancel',
+      allowConfirm: true,
     };
   }
   return {
-    title: 'Hardware recommendation',
-    primaryLabel: 'Download anyway',
-    secondaryLabel: 'Cancel',
+    title: 'Too big for this PC',
+    primaryLabel: 'Blocked',
+    secondaryLabel: 'Close',
+    allowConfirm: false,
   };
 }

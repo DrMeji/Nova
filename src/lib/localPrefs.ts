@@ -98,8 +98,9 @@ export type LocalPrefs = {
   /** Max tool steps per Agent loop (4–60). */
   agentLoopMaxSteps: number;
   /**
-   * Create craft via Nova tool loop (legacy). Default **off** — createV2 is single-coder
-   * whole-file write. Opt in under Settings only if you need the multi-step agent loop.
+   * Create craft via Nova tool loop (legacy). Default **off** — createV2 is staged craft;
+   * gather→act→verify lives in createRuntimeLoop + createPassSpine (not this pref).
+   * Opt in under Settings only for experimental full tool-loop craft.
    */
   agentLoopOnCreate: boolean;
   /** Edit follow-ups prefer the tool loop when agentLoopEnabled is on (default on). */
@@ -109,8 +110,16 @@ export type LocalPrefs = {
    * Default off so first-time builds stay one-shot; power users can enable.
    */
   planApproveGate: boolean;
-  /** When true, create may run Design/Copy ensemble hops (opt-in). Default off — single coder only. */
+  /**
+   * @deprecated Removed — Single Brain Create only. Kept for prefs migrate; always treated as false.
+   */
   multiModelCreate: boolean;
+  /**
+   * When true (default), multimodal / ensemble Auto is parked: one locked model does
+   * the job; create multi-hop seats stay in code but never activate. Set false later
+   * to re-enable cooperative ensemble Auto without deleting that code.
+   */
+  ensembleAutoParked: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
   agentLoopCommitOnSuccess: boolean;
   /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
@@ -139,7 +148,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   presenceStatus: 'online',
   defaultModelId: 'NOVA-auto',
   defaultCodeModelId: 'NOVA-auto',
-  prefsVersion: 4,
+  prefsVersion: 13,
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
@@ -152,7 +161,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   reduceMotion: false,
   orbBlurPx: 7,
   compactSidebar: false,
-  sidebarWidth: 256,
+  sidebarWidth: 232,
   showStatusBar: true,
   autoFailover: true,
   askBeforeCloudFailover: false,
@@ -182,9 +191,10 @@ const DEFAULT_PREFS: LocalPrefs = {
   agentLoopInWorkspace: false,
   agentLoopMaxSteps: 32,
   agentLoopOnCreate: false,
-  agentLoopOnEdit: true,
+  agentLoopOnEdit: false,
   planApproveGate: false,
   multiModelCreate: false,
+  ensembleAutoParked: true,
   agentLoopCommitOnSuccess: false,
   chatFirst: true,
   voiceChatEnabled: false,
@@ -241,6 +251,114 @@ export function getLocalPrefs(): LocalPrefs {
         localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
       } catch { /* ignore */ }
     }
+    // v5: tighter default chat type (14px) so more messages fit in view.
+    if ((merged.prefsVersion || 0) < 5) {
+      merged.fontSizePx = 14;
+      merged.prefsVersion = 5;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v6: new-install default is 16px again. Do not overwrite an existing user’s choice.
+    if ((merged.prefsVersion || 0) < 6) {
+      merged.prefsVersion = 6;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v7: create relay on — Plan/Design/Copy seats hand off to Craft (no critic fights).
+    if ((merged.prefsVersion || 0) < 7) {
+      merged.multiModelCreate = true;
+      merged.agentLoopOnCreate = false;
+      merged.prefsVersion = 7;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v8: restore compact chrome (narrow rail + denser composer) after relaunch drift.
+    if ((merged.prefsVersion || 0) < 8) {
+      merged.density = 'compact';
+      merged.compactSidebar = true;
+      if (typeof merged.fontSizePx !== 'number' || merged.fontSizePx >= 16) {
+        merged.fontSizePx = 15;
+      }
+      merged.prefsVersion = 8;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v9: (superseded) briefly forced comfortable/16px — felt zoomed-out / sparse.
+    if ((merged.prefsVersion || 0) < 9) {
+      merged.prefsVersion = 9;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v10: (superseded) compact+14px made the rail/chat feel cramped after relaunch.
+    if ((merged.prefsVersion || 0) < 10) {
+      merged.prefsVersion = 10;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v11: LOCK roomy chrome — comfortable + 16px. Always re-assert so nothing can shrink it.
+    if ((merged.prefsVersion || 0) < 11) {
+      merged.prefsVersion = 11;
+    }
+    // v12: Single Brain Create — kill Multimodal relay; agent edit loop off by default.
+    if ((merged.prefsVersion || 0) < 12) {
+      merged.multiModelCreate = false;
+      merged.agentLoopOnCreate = false;
+      merged.agentLoopOnEdit = false;
+      merged.prefsVersion = 12;
+    }
+    // v13: permanent chrome size lock — comfortable + 16px root. Stops density/font thrash
+    // that felt like the whole UI was zooming in/out between launches.
+    if ((merged.prefsVersion || 0) < 13) {
+      merged.density = 'comfortable';
+      merged.fontSizePx = 16;
+      merged.compactSidebar = false;
+      merged.prefsVersion = 13;
+    }
+    // v14: park multimodal ensemble Auto (keep code; default one-seat).
+    if ((merged.prefsVersion || 0) < 14) {
+      if (typeof merged.ensembleAutoParked !== 'boolean') merged.ensembleAutoParked = true;
+      merged.multiModelCreate = false;
+      merged.prefsVersion = 14;
+    }
+    // Dead feature — never honor stale true from older blobs after v12.
+    merged.multiModelCreate = false;
+    if (typeof merged.ensembleAutoParked !== 'boolean') merged.ensembleAutoParked = true;
+    // Density / font: clamp only — do not re-lock every read after v13 migrate.
+    if (typeof merged.fontSizePx !== 'number' || Number.isNaN(merged.fontSizePx)) {
+      merged.fontSizePx = 16;
+    } else {
+      merged.fontSizePx = Math.max(12, Math.min(22, Math.round(merged.fontSizePx)));
+    }
+    if (merged.density !== 'compact' && merged.density !== 'comfortable') {
+      merged.density = 'comfortable';
+    }
+    // Only persist when we actually migrated this read (avoid rewrite thrash).
+    const shouldPersist = (merged.prefsVersion || 0) >= 14;
+    if (shouldPersist) {
+      try {
+        const prev = raw ? JSON.parse(raw) as Partial<LocalPrefs> : null;
+        const changed = !prev
+          || prev.prefsVersion !== merged.prefsVersion
+          || prev.fontSizePx !== merged.fontSizePx
+          || prev.density !== merged.density
+          || prev.multiModelCreate === true
+          || prev.ensembleAutoParked !== merged.ensembleAutoParked
+          || prev.compactSidebar !== merged.compactSidebar;
+        if (changed) {
+          localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+        }
+      } catch {
+        try {
+          localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+        } catch { /* ignore */ }
+      }
+    }
     return merged;
   } catch {
     return { ...DEFAULT_PREFS };
@@ -263,6 +381,15 @@ const GRANT_PREF_KEYS = [
   'agentExecutionMode',
 ] as const;
 
+/** Multimodal / ensemble Auto is parked (default). Code stays; multi-seat hops stay off. */
+export function isEnsembleAutoParked(): boolean {
+  try {
+    return getLocalPrefs().ensembleAutoParked !== false;
+  } catch {
+    return true;
+  }
+}
+
 export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
   const next = { ...getLocalPrefs(), ...patch } as LocalPrefs;
   for (const [key, value] of Object.entries(patch)) {
@@ -270,6 +397,16 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
       delete (next as Record<string, unknown>)[key];
     }
   }
+  // Keep rail open by default; density/font honor Settings (no silent re-lock).
+  if (typeof next.compactSidebar !== 'boolean') next.compactSidebar = false;
+  if (typeof next.fontSizePx === 'number' && !Number.isNaN(next.fontSizePx)) {
+    next.fontSizePx = Math.max(12, Math.min(22, Math.round(next.fontSizePx)));
+  }
+  next.prefsVersion = Math.max(14, Number(next.prefsVersion) || 0);
+  next.multiModelCreate = false;
+  if (typeof next.ensembleAutoParked !== 'boolean') next.ensembleAutoParked = true;
+  // Keep create craft on createV2 staged write; runtime pass spine owns verify/fix.
+  if (typeof next.agentLoopOnCreate !== 'boolean') next.agentLoopOnCreate = false;
   try {
     // Do not invent grant keys from DEFAULT_PREFS — writing false would wipe Electron grants
     // on the next sync. Only persist grants when already stored or explicitly patched.
@@ -287,16 +424,12 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
       }
     }
     localStorage.setItem(PREFS_KEY, JSON.stringify(toStore));
-        try {
-          } catch {
-      /* ignore */
-    }
   } catch {
     /* quota / private mode — still return next so UI can update this session */
   }
   try {
     window.dispatchEvent(new CustomEvent(PREFS_CHANGED_EVENT, { detail: next }));
-      } catch {
+  } catch {
     /* ignore */
   }
   return next;

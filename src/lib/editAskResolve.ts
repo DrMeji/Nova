@@ -68,8 +68,14 @@ export function normalizeMessyUiEditAsk(message: string): string {
   }
 
   // Font style: "change the name into cursive instead of bold" / "… inside a bold"
+  // Never collapse full landing rewrites / multi-section asks into a one-line font tip.
+  const structuralRewrite = /\b(?:replace|rewrite|rebuild|from\s+scratch|start\s+over)\b/i.test(t)
+    || /\b(?:nav|hero|footer|eyebrow|cta|discover|sign\s*in)\b/i.test(t)
+    || t.length > 220
+    || /<!--\s*(?:nova|ark)-kind\s*:/i.test(t);
   if (
-    /\b(?:name|title|word|text|heading)\b/i.test(t)
+    !structuralRewrite
+    && /\b(?:name|title|word|text|heading)\b/i.test(t)
     && new RegExp(`\\b(?:${FONT_STYLE_WORDS})\\b`, 'i').test(t)
     && /\b(?:change|make|set|update|look|style|into|to)\b/i.test(t)
   ) {

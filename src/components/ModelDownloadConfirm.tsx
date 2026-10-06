@@ -29,8 +29,9 @@ export function ModelDownloadConfirm({
   const purpose = modelPurposeText({ category, name, detail });
   const copy = fit
     ? modelDownloadConfirmCopy(fit)
-    : { title: 'Confirm download', primaryLabel: 'Download', secondaryLabel: 'Cancel' };
+    : { title: 'Confirm download', primaryLabel: 'Download', secondaryLabel: 'Cancel', allowConfirm: true };
   const level = fit?.level || 'good';
+  const allowConfirm = copy.allowConfirm !== false && fit?.allowDownload !== false;
   const tone =
     level === 'good'
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
@@ -112,19 +113,29 @@ export function ModelDownloadConfirm({
           <button type="button" onClick={onCancel} className="nova-btn-secondary flex-1" disabled={busy}>
             {copy.secondaryLabel}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            className={`flex-1 disabled:opacity-40 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${
-              level === 'good'
-                ? 'nova-btn-primary'
-                : 'border border-surface-border bg-surface-hover/60 text-content-primary hover:bg-surface-hover'
-            }`}
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {busy ? 'Starting…' : copy.primaryLabel}
-          </button>
+          {allowConfirm ? (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={busy}
+              className={`flex-1 disabled:opacity-40 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${
+                level === 'good'
+                  ? 'nova-btn-primary'
+                  : 'border border-amber-500/40 bg-amber-500/15 text-amber-50 hover:bg-amber-500/25'
+              }`}
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {busy ? 'Starting…' : copy.primaryLabel}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold border border-rose-500/30 bg-rose-500/10 text-rose-100/80 opacity-70 cursor-not-allowed"
+            >
+              Too large for this PC
+            </button>
+          )}
         </div>
       </div>
     </div>

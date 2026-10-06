@@ -3,7 +3,7 @@
  */
 
 import { looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
-import { looksLikeImplementGo } from '@/lib/chatPlanMode';
+import { looksLikeImplementGo, looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 import { looksLikeSingleFileCreateAsk } from '@/lib/chatCreateBrief';
 import {
   greenfieldToCreateIntent,
@@ -31,6 +31,7 @@ import {
 
 export type { ProjectKind } from '@/lib/projectKind';
 export { detectProjectKind, resolveProjectKindForCreate } from '@/lib/projectKind';
+export { looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 
 export type NewProjectIntent = {
   name: string;
@@ -48,23 +49,48 @@ const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
 
 const PROJECT_NOUN_RE =
-  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage|todo(?:s)?|to-?dos?|timer|counter|checklist|list)\b/i;
+  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage|shop|store|storefront|boutique|todo(?:s)?|to-?dos?|timer|counter|checklist|list)\b/i;
+
+/**
+ * True when the user is refusing file/project creation (talk-first).
+ * Forbid lists like "Do not create a todo / tip app" next to a hard create
+ * ("on disk", "Skip Plan", "Build … now") must NOT veto create.
+ */
+export function isCreateRefusedAsk(message: string): boolean {
+  const t = String(message || '').trim();
+  if (!t) return false;
+  if (/\b(?:do\s+not|don't|dont|never|without)\s+create\s+(?:any\s+)?(?:files?|projects?|apps?|anything|software)\b/i.test(t)) {
+    return true;
+  }
+  if (!/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
+  // "Do not create a todo list, tip calculator…" = product forbid, not a veto.
+  if (looksLikeHardCreateGo(t)
+    || /^(?:please\s+)?(?:build|create|scaffold)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?/i.test(t)) {
+    return false;
+  }
+  return true;
+}
 
 /** Shared create-verb + product-noun gate (classifyTurn / createBrief / buildStart). */
 export function isCreateVerbNoun(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
-  if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
+  if (isCreateRefusedAsk(t)) return false;
   if (wantsPlanningOnly(t)) return false;
   if (looksLikeTalkBeforeCreateAsk(t)) return false;
   // "what do I need / requirements" even if wantsPlanningOnly missed a variant
   if (/\b(?:what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|requirements?)\b/i.test(t)
-    && !/\b(?:build\s+it\s+now|scaffold\s+now|on\s+disk)\b/i.test(t)) {
+    && !/\b(?:build\s+it\s+now|scaffold\s+now|on\s+disk|skip\s+(?:the\s+)?plan|get\s+(?:it\s+)?live)\b/i.test(t)) {
     return false;
   }
+  const named = extractProjectName(t);
+  const hasProduct = PROJECT_NOUN_RE.test(t) || Boolean(named);
+  const hardGo = looksLikeImplementGo(t) || looksLikeHardCreateGo(t);
+  // Hard go + named product / shop|site|page → create now (even soft "put … together").
+  if (hardGo && hasProduct) return true;
   return (
     CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t) || looksLikeBuildStart(t)
-  ) && PROJECT_NOUN_RE.test(t);
+  ) && hasProduct;
 }
 
 /** Lightweight create detect. no project name required (used by route guards). */
@@ -91,9 +117,17 @@ export function fallbackCreateProjectName(text: string): string {
   const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
   if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
   if (/\b(?:todo(?:s)?|to-?dos?|checklist)\b/i.test(t)) return 'Todo List';
+  if (/\b(?:tip\s*(?:calc|calculator)|tipwise)\b/i.test(t)) return 'Tip Calculator';
   if (/\b(?:timer|stopwatch|pomodoro)\b/i.test(t)) return 'Timer';
   if (/\b(?:counter|click\s+count)\b/i.test(t)) return 'Click Counter';
   if (/\b(?:game|arcade|fps|shooter)\b/i.test(t)) return 'Game';
+  // "no cafe menus" / forbid lines must never name the product Coffee Shop.
+  if (
+    /\b(?:coffee|cafe|café|brew)\b/i.test(t)
+    && !/\b(?:no|never|not|without|forbid(?:den)?|avoid)\b[\s\S]{0,32}\b(?:coffee|cafe|café|brew)\b/i.test(t)
+  ) {
+    return 'Coffee Shop';
+  }
   if (/\b(?:bot|cli|script)\b/i.test(t) && kind === 'python') return 'Tool';
   if (kind === 'static-web' || /\b(?:website|site|landing|page|homepage)\b/i.test(t)) return 'Site';
   if (kind === 'vite-react' || /\b(?:app|application|spa|react)\b/i.test(t)) return 'App';
@@ -105,6 +139,13 @@ export function extractProjectName(text: string): string | null {
   // Prefer explicit called/named titles before "create the project on disk" (which used to
   // capture the junk name "on disk").
   const patterns = [
+    // "Product: Maskline Viper X …" / "website for Maskline —"
+    /\bProduct:\s*([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,4})\b/,
+    /\b(?:website|site|app|landing)\s+for\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,2})\b/,
+    /\bfor\s+([A-Z][A-Za-z0-9]{2,40})\s*[—–\-,.:]/,
+    // "call the project Garden Bed" / "name the project …"
+    /\b(?:call|name)\s+the\s+project\s+["“']?([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})["”']?/i,
+    /\b(?:call|name)\s+the\s+project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})["”']?/i,
     /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
     /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})\b/,
     /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
@@ -114,9 +155,11 @@ export function extractProjectName(text: string): string | null {
     /\b(?:ok(?:ay)?\s+)?(?:lets?\s+)?start\s+building\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b/,
     /\bbuilding\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b/,
     // Prefer explicit "build ProductName …" before "create the project on disk" junk.
-    /\b(?:ok\s+)?(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b(?=\s*[.!,;:—–-]|\s+(?:now|phone|tiny|simple|with|for|a|an|the|and)\b)/,
-    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\s+on\s+disk\b/,
-    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
+    // Case-insensitive verb — ladder: "Build TipWise Harbor l5or on disk" (optional lowercase tag).
+    /\b(?:ok\s+)?(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,3})(?:\s+[a-z0-9]{2,12})?\s+on\s+disk\b/i,
+    /\b(?:ok\s+)?(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+now)?\b(?=\s*[.!,;:—–-]|\s+(?:now|phone|tiny|simple|with|for|a|an|the|and)\b)/i,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\s+on\s+disk\b/i,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/i,
     /\b(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+for\s+me)?\b(?=\s*[—–\-:.,]|\s+(?:a|an|the|with|for|that|as)\b)/,
     /\b(?:go\s+ahead\s+and\s+)?(?:build|create)\s+([A-Z][A-Za-z0-9.]{1,40})\s+for\s+me\b/i,
     // "Create the project Peach" — never "create the project on disk…"
@@ -143,7 +186,11 @@ export function extractProjectName(text: string): string | null {
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
       // Reject ultra-generic leftovers from older chats / "create the project on disk".
-      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website|nova|projects)$/i.test(raw)) continue;
+      if (/^(my|me|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website|nova|projects)$/i.test(raw)) continue;
+      // "Build me a website" — "me" is the pronoun, not a product name.
+      if (/^(?:build|make|create)\s+me\b/i.test(t) && /^me$/i.test(raw)) continue;
+      // Adverbs / filler after "create the project …" — never a product name.
+      if (/^(immediately|now|here|today|please|asap|quickly|again|once|first|next|soon|properly|correctly)$/i.test(raw)) continue;
       if (/^on\s+disk\b/i.test(raw)) continue;
       // Never take the parent "NOVA Projects" folder as the product name.
       if (/^nova(\s+projects?)?$/i.test(raw) || (/\bprojects?\b/i.test(raw) && /^nova\b/i.test(raw))) continue;
@@ -205,7 +252,7 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
 
   if (wantsPlanningOnly(t)) return null;
   if (looksLikeTalkBeforeCreateAsk(t)) return null;
-  if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return null;
+  if (isCreateRefusedAsk(t)) return null;
   if (/\bask\s+me\b[\s\S]{0,80}\b(?:clarifying\s+)?questions?\b/i.test(t)) return null;
   if (/\bclarifying\s+questions?\s+first\b/i.test(t)) return null;
   if (looksLikeInPlaceRebuildAsk(t)) return null;

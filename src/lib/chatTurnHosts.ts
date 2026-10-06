@@ -29,6 +29,7 @@ import {
 } from '@/lib/scrubForeignBleed';
 import { inferEditTopicFromAsk, rememberLastEditTopic } from '@/lib/editAskResolve';
 import { pushApplySnapshot } from '@/lib/chatApplySnapshotStore';
+import { isEnsembleAutoParked } from '@/lib/localPrefs';
 
 /** Shared wiring from AIChat send — refs, setters, turn locals. */
 export type HostBag = {
@@ -109,35 +110,58 @@ export type HostBag = {
 function turnStillActive(bag: HostBag): boolean {
   const chatId = bag.activeChatId;
   const liveSeq = bag.genSeqByChatRef?.current?.[chatId] ?? bag.genSeqRef.current;
-  const stopped = Boolean(
-    bag.stopRequestedByChatRef?.current?.[chatId]
-    || bag.stopRequestedRef.current,
-  );
-  // Global stopRequested only aborts if we lack per-chat map (legacy) —
-  // with per-chat map, only that chat's flag counts.
+  const perChatStopped = Boolean(bag.stopRequestedByChatRef?.current?.[chatId]);
+  const globalStopped = Boolean(bag.stopRequestedRef.current);
+  // Prefer per-chat stop; also honor global Stop when this chat is the active generator.
   if (bag.stopRequestedByChatRef?.current) {
-    return bag.mySeq === liveSeq && !bag.stopRequestedByChatRef.current[chatId];
+    if (perChatStopped) return false;
+    // Global stop without a per-chat flag (race) — still abort this turn.
+    if (globalStopped && bag.mySeq !== liveSeq) return false;
+    return bag.mySeq === liveSeq;
   }
-  return bag.mySeq === liveSeq && !stopped;
+  return bag.mySeq === liveSeq && !globalStopped;
 }
 
 export function makeCreateHost(bag: HostBag): CreateTurnHost {
   const { content, mode, activeChatId, createIntentEarly, workspaceActiveForCreate, pinnedModel } = bag;
-  const stickyRaw = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
-  const sticky = stickyRaw && isCoderEngineId(stickyRaw.modelId) ? stickyRaw : null;
-  // Prefer active coder prefs when the menu is on Auto — create polish needs a real GGUF id.
+  // Honor whatever the chat menu pinned — including Instruct 7B. Do NOT drop
+  // non-coder stickies (old code required isCoderEngineId and then Auto hopped to 32B).
+  // One-seat parked: explicit pin is the locked sticky for create too.
+  const stickyRaw = pinnedModel.source === 'auto'
+    ? bag.threadBrainRef.current
+    : (isEnsembleAutoParked() && pinnedModel.id && pinnedModel.id !== 'NOVA-auto'
+      ? {
+          modelId: pinnedModel.id,
+          modelName: pinnedModel.name || pinnedModel.id,
+        }
+      : null);
+  const sticky = stickyRaw?.modelId && !isWeakCoderId(stickyRaw.modelId) ? stickyRaw : null;
+  // Explicit menu pin always wins. Only when Auto: prefer last chat model, then coder.
   let preferredId = pinnedModel.id;
   let preferredName = pinnedModel.name;
   if (pinnedModel.id === 'NOVA-auto' || pinnedModel.source === 'auto') {
-    const coderPref = getActiveBrainId('coder');
-    if (
-      coderPref
-      && coderPref !== 'NOVA-auto'
-      && !isWeakCoderId(coderPref)
-      && isCoderEngineId(coderPref)
-    ) {
-      preferredId = coderPref;
-      preferredName = coderPref;
+    const prefs = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('NOVA:local-prefs') || '{}') as Record<string, string>;
+      } catch {
+        return {} as Record<string, string>;
+      }
+    })();
+    const chatPin = String(prefs.lastChatModelId || prefs.activeChatId || prefs.defaultModelId || '').trim();
+    if (chatPin && chatPin !== 'NOVA-auto' && !isWeakCoderId(chatPin)) {
+      preferredId = chatPin;
+      preferredName = chatPin;
+    } else {
+      const coderPref = getActiveBrainId('coder');
+      if (
+        coderPref
+        && coderPref !== 'NOVA-auto'
+        && !isWeakCoderId(coderPref)
+        && isCoderEngineId(coderPref)
+      ) {
+        preferredId = coderPref;
+        preferredName = coderPref;
+      }
     }
   }
   return {
@@ -269,7 +293,15 @@ export function makeRunCmdHost(bag: HostBag): RunCmdTurnHost {
 
 export function makeEditHost(bag: HostBag): RunEditTurnHost {
   const { turnCtx, pinnedModel, activeChatId, assistantId, resolvedStudio } = bag;
-  const sticky = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  // One-seat parked: user pin locks edit sticky too (not only Auto threadBrain).
+  const sticky = pinnedModel.source === 'auto'
+    ? bag.threadBrainRef.current
+    : (isEnsembleAutoParked() && pinnedModel.id && pinnedModel.id !== 'NOVA-auto'
+      ? {
+          modelId: pinnedModel.id,
+          modelName: pinnedModel.name || pinnedModel.id,
+        }
+      : null);
   const files = Object.keys(turnCtx.files || {}).length
     ? turnCtx.files
     : (bag.chatStudioFilesRef.current || resolvedStudio.files || {});
@@ -289,6 +321,7 @@ export function makeEditHost(bag: HostBag): RunEditTurnHost {
     preferredModelName: pinnedModel.name,
     onCoderPinned: bag.onCoderPinned,
     onCreatePhaseModel: bag.onCreatePhaseModel,
+    shouldAbort: () => !turnStillActive(bag),
     pushStatus: bag.pushAssistantStatus,
     countLineDiff,
     buildStudioTraceMessage,
@@ -367,15 +400,25 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
     .slice(-16);
   // Stick to the last *chat* brain only. A coding sticky from a prior build must not
   // reload the coder GGUF for normal conversation (that mid-turn unload/load freezes UI).
-  const threadBrain = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  // One-seat parked: honor the locked thread brain (or explicit pin) for talk+create+edit.
+  const ensembleParked = isEnsembleAutoParked();
+  const threadBrain = pinnedModel.source === 'auto'
+    ? bag.threadBrainRef.current
+    : (ensembleParked && pinnedModel.id && pinnedModel.id !== 'NOVA-auto'
+      ? {
+          kind: 'chat' as const,
+          modelId: pinnedModel.id,
+          modelName: pinnedModel.name || pinnedModel.id,
+          pinnedSource: (pinnedModel.source === 'cloud' ? 'cloud' : 'local') as 'local' | 'cloud',
+        }
+      : null);
   const stickyIsCoder = /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(
     String(threadBrain?.modelId || threadBrain?.modelName || ''),
   );
   const stickyChat =
     threadBrain
-    && threadBrain.kind !== 'coding'
-    && !stickyIsCoder
     && threadBrain.pinnedSource
+    && (ensembleParked || (threadBrain.kind !== 'coding' && !stickyIsCoder))
       ? threadBrain
       : null;
   return {
@@ -415,6 +458,14 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
       const userAsk = String(bag.content || '').trim();
       text = scrubUnexpectedForeignScript(text, userAsk) || text;
       if (text.length < 2) return;
+      // Item 13: coalesce React stream paints (~80ms) so the whole thread doesn't re-render every chunk.
+      const now = Date.now();
+      const lastPaint = Number((bag as { __deltaPaintAt?: number }).__deltaPaintAt || 0);
+      const curLen = String(
+        (bag.messagesRef?.current || []).find((m: { id?: string }) => m.id === assistantId)?.content || '',
+      ).length;
+      if (now - lastPaint < 80 && text.length - curLen < 48) return;
+      (bag as { __deltaPaintAt?: number }).__deltaPaintAt = now;
       bag.setMessages((prev: { id?: string; content?: string }[]) => {
         const cur = prev.find((m) => m.id === assistantId);
         const prevText = String(cur?.content || '');

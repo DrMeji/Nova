@@ -37,7 +37,7 @@ function formatWhen(iso: string) {
 
 export function Dashboard() {
   const { navigate } = useRouter();
-  const { chats, deleteChatForever } = useRecentProjects();
+  const { chats, deleteChatForever, deleteChatsForeverBulk } = useRecentProjects();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabId>('all');
   const [view, setView] = useState<ViewMode>('list');
@@ -136,12 +136,14 @@ export function Dashboard() {
     )) {
       return;
     }
-    for (const item of toDelete) {
-      if (item.chatId) deleteChatForever(item.chatId);
-    }
+    const chatIds = toDelete.map((item) => item.chatId!).filter(Boolean);
+    // Single-pass wipe — avoids multi-second main-thread freeze that locks the composer.
+    deleteChatsForeverBulk(chatIds);
     clearSelection();
     setNotice(`Deleted ${n} chat${n === 1 ? '' : 's'}.`);
     window.setTimeout(() => setNotice(null), 3000);
+    // Return to a fresh chat so the composer is immediately usable for the next test.
+    navigate({ name: 'chat' });
   };
 
   return (

@@ -17,6 +17,7 @@ const novaModelRank = require('./novaModelRank.cjs');
 const novaHunt = require('./novaHunt.cjs');
 const novaFfmpeg = require('./novaFfmpeg.cjs');
 const { DEFAULT_BRAIN_ID, CATALOG } = require('./novaCatalog.cjs');
+const novaExternalModels = require('./novaExternalModels.cjs');
 const os = require('os');
 function catalogAll() {
   const hunt = novaHunt.list().filter((h) => !CATALOG.some((c) => c.id === h.id));
@@ -142,6 +143,8 @@ function listModels() {
     };
   }).concat(
     ggufs
+      // mmproj is a vision projector companion — not a selectable chat/create brain.
+      .filter((g) => !/mmproj/i.test(String(g.file || '')))
       .filter((g) => !catalogAll().some((c) => !c.builtin && novaGguf.findGgufForModel(c.id) === g.path))
       .map((g) => ({
         id: `gguf:${g.file}`,
@@ -167,6 +170,8 @@ function getStatus() {
   }
   const active = models.find((m) => m.id === activeModelId) || models[0];
   const llamaBin = novaGguf.findLlamaBinary();
+  // One GGUF dir scan per status (cached in novaGguf) — was 3× readdir+stat.
+  const modelFiles = novaGguf.listGgufFiles();
   return {
     ok: phase === 'online',
     service: 'nova-engine',
@@ -178,17 +183,17 @@ function getStatus() {
     modelsDirDefault: novaPaths.defaultModelsDir(),
     modelsDirIsCustom: novaPaths.modelsDirInfo().isCustom,
     models,
-    modelFiles: novaGguf.listGgufFiles(),
+    modelFiles,
     ggufBinary: Boolean(llamaBin),
     ggufBinaryPath: llamaBin,
-    ggufCount: novaGguf.listGgufFiles().length,
+    ggufCount: modelFiles.length,
     ggufServerPort: novaGguf.getServerPort?.() || 8788,
     ggufServer: novaGguf.getServerStatus?.() || { ok: true, error: null, port: 8788 },
     defaultBrainId: DEFAULT_BRAIN_ID,
     ffmpegHint: novaFfmpeg.ffmpegInstallHint?.() || null,
     note:
       phase === 'online'
-        ? (llamaBin && novaGguf.listGgufFiles().length
+        ? (llamaBin && modelFiles.length
           ? 'NOVA Engine online · local GGUF brain ready'
           : 'NOVA Engine online · install a local brain for zero-key chat')
         : phase === 'degraded'
@@ -595,6 +600,27 @@ function deleteInstalledModel(id) {
   return { ...getStatus(), ok: true, deleted: raw, removed };
 }
 
+function linkOrCopyGguf(src, dest) {
+  if (path.resolve(src) === path.resolve(dest)) return 'same';
+  if (fs.existsSync(dest)) {
+    const a = fs.statSync(src);
+    const b = fs.statSync(dest);
+    if (a.size === b.size) return 'exists';
+    throw new Error(`Destination already exists with a different size: ${path.basename(dest)}`);
+  }
+  // Prefer hardlink (no extra disk) → symlink → full copy.
+  try {
+    fs.linkSync(src, dest);
+    return 'hardlink';
+  } catch { /* cross-volume */ }
+  try {
+    fs.symlinkSync(src, dest, 'file');
+    return 'symlink';
+  } catch { /* needs privilege on some Windows setups */ }
+  fs.copyFileSync(src, dest);
+  return 'copy';
+}
+
 function importGgufFile(filePath) {
   if (!filePath || typeof filePath !== 'string') throw new Error('No file path');
   const src = path.resolve(filePath);
@@ -602,13 +628,25 @@ function importGgufFile(filePath) {
   if (!src.toLowerCase().endsWith('.gguf')) throw new Error('Only .gguf files can be imported');
   ensureDirs();
   const base = path.basename(src);
-  const dest = path.join(modelsDir(), base);
-  if (path.resolve(dest) !== src) {
-    fs.copyFileSync(src, dest);
+  const catalogId = novaExternalModels.guessCatalogId(base);
+  const destName = catalogId ? `${catalogId}.gguf` : base;
+  const dest = path.join(modelsDir(), destName);
+  const mode = linkOrCopyGguf(src, dest);
+  let id = `gguf:${destName}`;
+  if (catalogId) {
+    const meta = catalogAll().find((m) => m.id === catalogId);
+    if (meta) {
+      writeMarker(catalogId, meta, { path: dest, importedFrom: src, importMode: mode });
+      id = catalogId;
+    }
   }
-  const id = `gguf:${base}`;
   activeModelId = id;
-  return getStatus();
+  const status = getStatus();
+  return { ...status, ok: true, importedId: id, importMode: mode, sourcePath: src };
+}
+
+function scanExternalGgufs() {
+  return novaExternalModels.scanExternalGgufs();
 }
 
 function downloadProgress(id) {
@@ -805,7 +843,9 @@ async function generate(message, opts = {}) {
   if (novaGguf.findGgufForModel(ggufId) && novaGguf.findLlamaBinary()) {
     try {
       const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
-      const timeoutMs = kind === 'coding' ? 420_000 : 300_000;
+      // Coding crafts need long walls — 32B Q4 often needs 15–25+ min for a full App.
+      // Old 7-minute cap killed mid-@@@FILE and looked like "incomplete code".
+      const timeoutMs = kind === 'coding' ? 1_800_000 : 600_000;
       const nPredictMin = kind === 'coding' ? 16384 : 8192;
       const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
@@ -825,7 +865,7 @@ async function generate(message, opts = {}) {
         timeoutMs,
         nPredict,
         temperature,
-        { jobId: opts.jobId, chatId: opts.chatId },
+        { jobId: opts.jobId, chatId: opts.chatId, kind },
       );
       let reply = gguf.reply;
       if (gguf.truncated || (reply && reply.length > nPredict * 3)) {
@@ -882,6 +922,7 @@ module.exports = {
   downloadError,
   cancelDownload,
   importGgufFile,
+  scanExternalGgufs,
   deleteInstalledModel,
   diskSpaceForModels,
   ensureRuntime,

@@ -12,4 +12,7 @@ export {
   looksLikeFillerStubAppSource,
   isEmptyOrStubAppSource,
   buildBriefInteractiveFloor,
+  healNearReadyCreateUi,
+  ensureProductBrandInApp,
+  buildUtilityCompanionCss,
 } from '@/lib/createBuildQuality';

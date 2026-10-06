@@ -362,7 +362,12 @@ export function realizeBriefUi(
   const href = heroHref(next, productName);
   // Apple.com-style briefs win over game/spatial heuristics (those false-positive on
   // marketing words like "viewport" / "3d transforms" in ensemble plans).
-  const appleLike = briefLooksLikeAppleStyleHomepage(brief);
+  // Never force Mac/iPad shells onto unrelated brands (vacuum, lamp, cafe, …).
+  // Ignore "Forbidden: Apple Mac/iPad clones" mentions in the ask.
+  const appleBrand = /\bapple\b/i.test(String(productName || ''))
+    || /\b(?:build|create|make|start building)\s+apple\b/i.test(String(brief || ''))
+    || /\bexact\s+apple(?:\.com)?[- ]?style\b/i.test(String(brief || ''));
+  const appleLike = appleBrand && briefLooksLikeAppleStyleHomepage(brief);
   if (appleLike) {
     const beforeBands = app;
     app = healHiddenProductBands(app);

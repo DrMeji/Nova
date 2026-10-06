@@ -166,7 +166,7 @@ function AppContent() {
   useEffect(() => {
     const applyPrefs = () => {
       const p = getLocalPrefs();
-      document.documentElement.style.fontSize = `${p.fontSizePx || 15}px`;
+      document.documentElement.style.fontSize = `${p.fontSizePx || 16}px`;
       document.documentElement.dataset.density = p.density;
       void import('@/lib/workspaceGrants').then(m => m.syncWorkspaceGrantsFromPrefs());
     };

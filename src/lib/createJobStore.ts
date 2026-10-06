@@ -1,9 +1,10 @@
 /**
  * Create job lifecycle — Preview / UI subscribe while npm runs in background.
  * Persists to sessionStorage so a tab refresh can still show Progress / Ready.
+ * `ready` means Live verified (evidence.pass) — never unlock without a preview URL.
  */
 
-export type CreateJobStatus = 'writing' | 'npm' | 'ready' | 'failed';
+export type CreateJobStatus = 'writing' | 'npm' | 'verifying' | 'ready' | 'failed';
 
 export type CreateJob = {
   id: string;
@@ -15,6 +16,12 @@ export type CreateJob = {
   status: CreateJobStatus;
   previewUrl?: string | null;
   error?: string;
+  /** CRL stage label for status strip */
+  stage?: string;
+  /** Last evidence / observation snippet */
+  lastObservation?: string;
+  /** Evidence pass summary for Jobs / ladder */
+  evidencePass?: boolean | null;
   updatedAt: number;
 };
 
@@ -51,8 +58,17 @@ function hydrateFromSession(chatId: string): CreateJob | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CreateJob;
     if (!parsed?.id || !parsed.chatId) return null;
+    // Stale in-flight jobs must not trap Live forever after a crash / kill.
+    const age = Date.now() - (Number(parsed.updatedAt) || 0);
+    const inflight = parsed.status === 'writing' || parsed.status === 'npm' || parsed.status === 'verifying';
+    if (inflight && age > 25 * 60_000) {
+      parsed.status = 'failed';
+      parsed.error = parsed.error || 'Create interrupted (stale job) — say rebuild the UI or run Preview';
+      parsed.evidencePass = false;
+    }
     jobs.set(parsed.id, parsed);
     byChat.set(parsed.chatId, parsed.id);
+    if (inflight && age > 25 * 60_000) persistJob(parsed);
     return parsed;
   } catch {
     return null;
@@ -128,13 +144,39 @@ export function updateCreateJob(id: string, patch: Partial<CreateJob>): CreateJo
 }
 
 export function markCreateJobNpm(id: string): void {
-  updateCreateJob(id, { status: 'npm' });
+  updateCreateJob(id, { status: 'npm', stage: 'install' });
 }
 
-export function markCreateJobReady(id: string, previewUrl?: string | null): void {
-  updateCreateJob(id, { status: 'ready', previewUrl: previewUrl ?? null, error: undefined });
+export function markCreateJobVerifying(id: string, stage?: string, observation?: string): void {
+  updateCreateJob(id, {
+    status: 'verifying',
+    stage: stage || 'live',
+    lastObservation: observation ? String(observation).slice(0, 400) : undefined,
+  });
 }
 
-export function markCreateJobFailed(id: string, error: string): void {
-  updateCreateJob(id, { status: 'failed', error });
+export function markCreateJobReady(id: string, previewUrl?: string | null, observation?: string): void {
+  const url = String(previewUrl || '').trim();
+  if (!url) {
+    // CONFLICT REMOVED: Ready-without-Live URL unlocked blank Live windows.
+    markCreateJobFailed(id, 'Cannot mark Ready without a Live preview URL');
+    return;
+  }
+  updateCreateJob(id, {
+    status: 'ready',
+    previewUrl: url,
+    error: undefined,
+    evidencePass: true,
+    stage: 'verified',
+    lastObservation: observation ? String(observation).slice(0, 400) : 'Live evidence PASS',
+  });
+}
+
+export function markCreateJobFailed(id: string, error: string, observation?: string): void {
+  updateCreateJob(id, {
+    status: 'failed',
+    error,
+    evidencePass: false,
+    lastObservation: observation ? String(observation).slice(0, 400) : String(error || '').slice(0, 400),
+  });
 }

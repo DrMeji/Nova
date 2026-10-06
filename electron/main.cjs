@@ -1,5 +1,6 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const novaEngine = require('./novaEngine.cjs');
 const novaPreview = require('./novaPreview.cjs');
 const novaMedia = require('./novaMedia.cjs');
@@ -37,7 +38,7 @@ function refreshArkSelfGuard() {
 }
 refreshArkSelfGuard();
 
-const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 /** True only when Vite dev server is running (`npm run electron:dev`). Bat builds use dist/ instead. */
 const isDev = process.env.NOVA_DEV === '1';
 const isUpdaterMode = process.argv.includes('--nova-updater');
@@ -52,11 +53,24 @@ let brainPort = BRAIN_PORT;
     const dir = path.join(appData, 'NOVA-Dev');
     fs.mkdirSync(dir, { recursive: true });
     app.setPath('userData', dir);
-    return;
+  } else {
+    const dir = path.join(appData, 'NOVA');
+    fs.mkdirSync(dir, { recursive: true });
+    app.setPath('userData', dir);
   }
-  const dir = path.join(appData, 'NOVA');
-  fs.mkdirSync(dir, { recursive: true });
-  app.setPath('userData', dir);
+  // Drop Chromium per-host zoom leftovers before sessions load. Live preview used to
+  // call setZoomFactor on 127.0.0.1 and that map leaked into the shell (same host in dev).
+  try {
+    const prefsPath = path.join(app.getPath('userData'), 'Preferences');
+    if (!fs.existsSync(prefsPath)) return;
+    const parsed = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    if (parsed?.partition?.per_host_zoom_levels) {
+      delete parsed.partition.per_host_zoom_levels;
+      fs.writeFileSync(prefsPath, JSON.stringify(parsed));
+    }
+  } catch {
+    /* prefs optional / locked */
+  }
 })();
 
 
@@ -297,6 +311,100 @@ function cleanupStaleDevStartupEntry() {
   }
 }
 
+function chromeZoomPath() {
+  return path.join(app.getPath('userData'), 'nova-chrome-zoom.json');
+}
+
+function readChromeZoomFactor() {
+  // Locked at 1 — do not persist Ctrl+/- / pinch zoom. Accidental zoom-out was
+  // shrinking the rail + composer on every relaunch and feeling like “everything shrunk”.
+  try {
+    const raw = fs.readFileSync(chromeZoomPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    const z = Number(parsed?.zoomFactor);
+    // Migrate any saved non-1 zoom back to locked baseline.
+    if (Number.isFinite(z) && Math.abs(z - 1) > 0.001) {
+      writeChromeZoomFactor(1);
+    }
+  } catch { /* default */ }
+  return 1;
+}
+
+function writeChromeZoomFactor(factor) {
+  try {
+    // Always persist 1 (chrome size lock). Ignore factor argument.
+    void factor;
+    fs.writeFileSync(chromeZoomPath(), JSON.stringify({ zoomFactor: 1 }, null, 2), 'utf8');
+  } catch { /* ignore */ }
+}
+
+/** Permanent shell size lock — zoomFactor 1, zoomLevel 0, no pinch/Ctrl+/- drift. */
+function lockMainWindowChromeZoom(win) {
+  if (!win || win.isDestroyed()) return;
+  const apply = () => {
+    try {
+      win.webContents.setZoomFactor(1);
+      win.webContents.setZoomLevel(0);
+      writeChromeZoomFactor(1);
+    } catch { /* ignore */ }
+  };
+  try {
+    win.webContents.setVisualZoomLevelLimits(1, 1);
+  } catch { /* ignore */ }
+  apply();
+
+  win.webContents.on('zoom-changed', () => apply());
+  win.webContents.on('did-finish-load', () => apply());
+  win.webContents.on('did-navigate', () => apply());
+  win.webContents.on('did-navigate-in-page', () => apply());
+
+  // Always block zoom chords (dev + packaged). Packaged still blocks DevTools separately.
+  win.webContents.on('before-input-event', (event, input) => {
+    const key = String(input.key || '');
+    const keyLower = key.toLowerCase();
+    const ctrl = Boolean(input.control || input.meta);
+    if (!ctrl) return;
+    // Ctrl/Cmd + +/- / = / 0 / NumpadAdd/Subtract
+    const zoomKey =
+      key === '='
+      || key === '+'
+      || key === '-'
+      || key === '_'
+      || key === '0'
+      || keyLower === 'add'
+      || keyLower === 'subtract'
+      || keyLower === 'numpadadd'
+      || keyLower === 'numpadsubtract'
+      || keyLower === 'equal';
+    if (zoomKey && (input.type === 'keyDown' || input.type === 'keyUp')) {
+      event.preventDefault();
+      apply();
+      return;
+    }
+    // Ctrl + mouse wheel (when surfaced as before-input)
+    if (input.type === 'mouseWheel' || keyLower === 'mousewheel') {
+      event.preventDefault();
+      apply();
+    }
+  });
+
+  // Re-assert while focused — catches trackpad pinch that skips zoom-changed on some builds.
+  const pulse = setInterval(() => {
+    if (!win || win.isDestroyed()) {
+      clearInterval(pulse);
+      return;
+    }
+    try {
+      const zf = Number(win.webContents.getZoomFactor());
+      const zl = Number(win.webContents.getZoomLevel());
+      if (Math.abs(zf - 1) > 0.001 || Math.abs(zl) > 0.01) apply();
+    } catch {
+      clearInterval(pulse);
+    }
+  }, 1500);
+  win.on('closed', () => clearInterval(pulse));
+}
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     showMainWindow();
@@ -329,6 +437,12 @@ function createWindow() {
   });
 
   mainWindow = win;
+
+  // Chrome zoom permanently locked at 1 (no Ctrl+/- / pinch / wheel drift).
+  try {
+    void readChromeZoomFactor();
+    lockMainWindowChromeZoom(win);
+  } catch { /* zoom optional */ }
 
   // Packaged builds only — keep Vite HMR unconstrained in bat/dev.
   if (packaged) {
@@ -415,22 +529,61 @@ function createWindow() {
   });
 
   // If the renderer boots to an empty #root (common when a build lacked Vite env),
-  // surface a visible error instead of a permanent black window.
+  // retry load once, then show a locked professional recovery screen (logo, no scroll).
+  let blankLoadRetried = false;
   win.webContents.on('did-finish-load', async () => {
     if (win.isDestroyed()) return;
     try {
-      await new Promise((r) => setTimeout(r, 2500));
+      await new Promise((r) => setTimeout(r, 2200));
       if (win.isDestroyed()) return;
       const rootLen = await win.webContents.executeJavaScript(
         `(() => { const r = document.getElementById('root'); return r ? (r.innerHTML || '').length : 0; })()`,
       );
-      if (typeof rootLen === 'number' && rootLen < 40) {
-        await win.webContents.executeJavaScript(`(() => {
-          const root = document.getElementById('root') || document.body;
-          root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0b;color:#f5f5f5;font-family:Segoe UI,system-ui,sans-serif;padding:32px;text-align:center"><div><p style="font-size:18px;font-weight:600;margin:0 0 8px">NOVA UI failed to load</p><p style="opacity:.7;font-size:13px;margin:0">The window stayed blank. Quit NOVA fully from the tray, reinstall the latest release, or run Open-NOVA-Build.bat after a successful npm run build.</p></div></div>';
-        })()`);
-        reveal();
+      if (!(typeof rootLen === 'number' && rootLen < 40)) return;
+
+      // One automatic reload — covers race where dist/index.html loaded before assets settled.
+      if (!blankLoadRetried && !isDev) {
+        blankLoadRetried = true;
+        try {
+          win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+        } catch {
+          /* fall through to recovery UI */
+        }
+        return;
       }
+
+      let logoDataUrl = '';
+      try {
+        const { image } = resolveAppIcon();
+        if (image && !image.isEmpty()) {
+          logoDataUrl = image.resize({ width: 96, height: 96 }).toDataURL();
+        }
+      } catch {
+        /* text wordmark only */
+      }
+      const logoHtml = logoDataUrl
+        ? `<img src="${logoDataUrl}" width="72" height="72" alt="NOVA" style="display:block;margin:0 auto 20px;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.45)" />`
+        : `<div style="width:72px;height:72px;margin:0 auto 20px;border-radius:16px;background:linear-gradient(145deg,#3d5afe,#7c4dff);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;letter-spacing:.04em;box-shadow:0 12px 40px rgba(0,0,0,.45)">N</div>`;
+      const recoveryHtml = [
+        '<div id="nova-ui-recovery" style="position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;display:flex;align-items:center;justify-content:center;',
+        'background:radial-gradient(ellipse 80% 60% at 50% 40%,#14141a 0%,#0a0a0b 70%);color:#f5f5f5;',
+        'font-family:Segoe UI,system-ui,sans-serif;padding:32px;text-align:center;box-sizing:border-box;user-select:none">',
+        `<div style="max-width:360px;width:100%;transform:translateZ(0)">${logoHtml}`,
+        '<p style="font-size:13px;font-weight:600;letter-spacing:.28em;text-transform:uppercase;margin:0 0 10px;opacity:.9">NOVA</p>',
+        '<p style="font-size:17px;font-weight:600;margin:0 0 10px;line-height:1.35">UI didn\\\'t finish loading</p>',
+        '<p style="opacity:.72;font-size:13px;margin:0;line-height:1.55">Quit NOVA from the tray, then reopen. If it stays blank, reinstall the latest release or run Open-NOVA-Build.bat after a successful npm run build.</p>',
+        '</div></div>',
+      ].join('');
+      await win.webContents.executeJavaScript(`(() => {
+        try {
+          document.documentElement.style.overflow = 'hidden';
+          document.body.style.overflow = 'hidden';
+          document.body.style.margin = '0';
+        } catch {}
+        const root = document.getElementById('root') || document.body;
+        root.innerHTML = ${JSON.stringify(recoveryHtml)};
+      })()`);
+      reveal();
     } catch {
       /* ignore probe failures */
     }
@@ -447,6 +600,7 @@ function createWindow() {
 
   // Packaged app: block DevTools / element inspector so end users cannot view source.
   // Dev / unpackaged builds still allow F12 and Ctrl+Shift+I for debugging.
+  // Zoom chords are blocked for all builds inside lockMainWindowChromeZoom().
   if (packaged && !isDev) {
     win.webContents.on('before-input-event', (event, input) => {
       const key = String(input.key || '').toLowerCase();
@@ -464,6 +618,26 @@ function createWindow() {
       win.webContents.closeDevTools();
     } catch { /* ignore */ }
   }
+
+  // Renderer-side belt: kill Ctrl+wheel zoom even if Chromium skips before-input.
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.executeJavaScript(`
+      (function () {
+        if (window.__novaChromeZoomLock) return true;
+        window.__novaChromeZoomLock = true;
+        const stopZoom = (e) => {
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+          }
+        };
+        window.addEventListener('wheel', stopZoom, { passive: false, capture: true });
+        window.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false, capture: true });
+        window.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false, capture: true });
+        document.documentElement.style.zoom = '1';
+        return true;
+      })();
+    `, true).catch(() => {});
+  });
 
   if (!app.isPackaged) {
     win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -824,7 +998,13 @@ ipcMain.handle('NOVA:open-path', async (_event, targetPath) => {
   }
   const resolved = path.resolve(targetPath);
   const userData = path.resolve(app.getPath('userData'));
+  let downloadsDir = '';
+  try { downloadsDir = path.resolve(app.getPath('downloads')); } catch { /* ignore */ }
   const allowed = novaProjects.isPathUnderRoot(resolved, userData)
+    || (downloadsDir && (
+      resolved.toLowerCase() === downloadsDir.toLowerCase()
+      || novaProjects.isPathUnderRoot(resolved, downloadsDir)
+    ))
     || novaProjects.isAllowedExternalPath(resolved);
   if (!allowed) {
     return { ok: false, error: 'Path is not in an allowed folder. Re-open it with + → Open folder first.' };
@@ -835,6 +1015,35 @@ ipcMain.handle('NOVA:open-path', async (_event, targetPath) => {
   const err = await shell.openPath(resolved);
   if (err) return { ok: false, error: err };
   return { ok: true };
+});
+
+ipcMain.handle('NOVA:save-to-downloads', async (_event, payload) => {
+  try {
+    const fileName = String(payload?.fileName || `NOVA-${Date.now()}.bin`)
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+      .slice(0, 180);
+    const bytes = payload?.bytes;
+    if (!Array.isArray(bytes) || !bytes.length) {
+      return { ok: false, error: 'No file bytes' };
+    }
+    const downloads = app.getPath('downloads');
+    require('fs').mkdirSync(downloads, { recursive: true });
+    let dest = path.join(downloads, fileName);
+    if (require('fs').existsSync(dest)) {
+      const ext = path.extname(fileName);
+      const base = path.basename(fileName, ext);
+      dest = path.join(downloads, `${base}-${Date.now()}${ext}`);
+    }
+    require('fs').writeFileSync(dest, Buffer.from(bytes));
+    return {
+      ok: true,
+      path: dest,
+      folderPath: downloads,
+      fileName: path.basename(dest),
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Save failed' };
+  }
 });
 
 ipcMain.handle('NOVA:open-external', async (_event, url) => {
@@ -915,10 +1124,12 @@ ipcMain.handle('NOVA:voice-neural-speak', async (_e, payload) =>
 ipcMain.handle('NOVA:engine-status', async () => novaEngine.getStatus());
 ipcMain.handle('NOVA:engine-start', async () => novaEngine.start());
 ipcMain.handle('NOVA:engine-stop', async () => novaEngine.stop());
-ipcMain.handle('NOVA:engine-set-model', async (_e, id) => {
+ipcMain.handle('NOVA:engine-set-model', async (event, id) => {
   try {
     if (!id || typeof id !== 'string') throw new Error('Missing model id');
-    return novaEngine.setActiveModel(id);
+    const st = novaEngine.setActiveModel(id);
+    try { event.sender.send('NOVA:engine-changed', { activeModelId: id }); } catch { /* ignore */ }
+    return st;
   } catch (err) {
     console.warn('[NOVA] engine-set-model', err instanceof Error ? err.message : err);
     try { return novaEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
@@ -945,6 +1156,13 @@ ipcMain.handle('NOVA:engine-download-progress', async (_e, id) => novaEngine.dow
 ipcMain.handle('NOVA:engine-download-error', async (_e, id) => novaEngine.downloadError?.(id) ?? null);
 ipcMain.handle('NOVA:engine-download-cancel', async (_e, id) => novaEngine.cancelDownload?.(id) ?? { ok: false });
 ipcMain.handle('NOVA:engine-import-gguf', async (_e, filePath) => novaEngine.importGgufFile?.(filePath));
+ipcMain.handle('NOVA:engine-scan-external-ggufs', async () => {
+  try {
+    return novaEngine.scanExternalGgufs?.() ?? { ok: false, models: [], count: 0, error: 'Scan not available' };
+  } catch (err) {
+    return { ok: false, models: [], count: 0, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 ipcMain.handle('NOVA:engine-delete-model', async (_e, id) => {
   try {
     return novaEngine.deleteInstalledModel?.(id) ?? { ok: false, error: 'Delete not available' };
@@ -993,6 +1211,11 @@ ipcMain.handle('NOVA:engine-generate', async (_e, payload) => {
 ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
   const webContentsId = event.sender.id;
   const novaJobs = require('./novaJobs.cjs');
+  // Craft must not wait behind leftover npm/vite from a prior create.
+  try {
+    novaJobs.cancelQueued?.({ kind: 'npm' });
+    novaJobs.cancelQueued?.({ kind: 'vite' });
+  } catch { /* ignore */ }
   return novaJobs.enqueue({
     kind: 'gguf',
     label: 'engine-generate-stream',
@@ -1024,8 +1247,8 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
         onChunk: (text) => {
           chunkBuf += String(text || '');
           if (chunkTimer) return;
-          // Coalesce tokens (~80ms) so IPC does not flood the renderer / desktop.
-          chunkTimer = setTimeout(flushChunks, 80);
+          // Coalesce lightly (~24ms) so Code can paint near line-by-line, not big chunks.
+          chunkTimer = setTimeout(flushChunks, 24);
         },
       }).finally(() => {
         flushChunks();
@@ -1036,6 +1259,11 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
 
 ipcMain.handle('NOVA:engine-generate-cancel', async (_e, payload) => {
   try {
+    // Drop waiting craft jobs so retry does not sit behind a zombie generate.
+    try {
+      const novaJobs = require('./novaJobs.cjs');
+      novaJobs.cancelQueued?.({ kind: 'gguf' });
+    } catch { /* ignore */ }
     return novaGguf.cancelGguf?.({
       jobId: payload?.jobId,
       chatId: payload?.chatId,
@@ -1107,6 +1335,9 @@ ipcMain.handle('NOVA:preview-reload', async (_e, projectId) =>
 );
 ipcMain.handle('NOVA:preview-capture-live', async () =>
   novaPreview.captureLivePreview(),
+);
+ipcMain.handle('NOVA:preview-probe-mounted', async (_e, payload) =>
+  novaPreview.probePreviewMounted(payload || {}),
 );
 ipcMain.handle('NOVA:preview-status', async (_e, projectId) =>
   novaPreview.previewStatus(projectId),
@@ -1563,7 +1794,8 @@ ipcMain.handle('NOVA:pick-files', async (_e, payload) => {
       if (!imagesOnly) return true;
       return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p);
     });
-    if (imagesOnly) grantUserSelectedImages(paths);
+    // Always grant image paths so Attach (photos + files) can readDataUrl.
+    grantUserSelectedImages(paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)));
     return { ok: true, paths };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'pick failed', paths: [] };
@@ -1923,6 +2155,7 @@ if (isUpdaterMode) {
       novaEngine.start();
       startBrainApi();
       createWindow();
+      try { novaPreview.restoreShellChromeZoom?.(); } catch { /* ignore */ }
       createTray();
       powerMonitor.on('suspend', () => {
         for (const w of BrowserWindow.getAllWindows()) {

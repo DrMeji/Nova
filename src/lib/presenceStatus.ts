@@ -1,5 +1,11 @@
 /** Presence / online status for NOVA Connect (Message list + sidebar). */
 
+/**
+ * Sidebar Online / Idle / DND / Inactive picker + avatar status ring.
+ * Paused — flip to true when Connect presence ships for real.
+ */
+export const PRESENCE_UI_ENABLED = false;
+
 export type PresenceStatus = 'online' | 'idle' | 'dnd' | 'inactive';
 
 export const PRESENCE_OPTIONS: {

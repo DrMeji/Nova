@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, Folder } from 'lucide-react';
 import {
   cancelEngineDownload,
   dismissEngineDownloadError,
@@ -18,7 +18,13 @@ import { ROTATION_NOTE_EVENT } from '@/lib/modelRotation';
 import { SIDEBAR_TOAST_EVENT, type SidebarToastDetail } from '@/lib/sidebarToast';
 import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
 
-type ToastRow = { id: string; message: string };
+type ToastRow = {
+  id: string;
+  message: string;
+  kind?: 'info' | 'download';
+  folderPath?: string;
+  fileName?: string;
+};
 
 function jobRoleLabel(job: EngineDownloadJob): string {
   const id = String(job.id || '').toLowerCase();
@@ -112,7 +118,13 @@ export function JobsStrip({
       const ttl = detail.ttlMs ?? 10_000;
       setToasts(prev => {
         const without = prev.filter(t => t.id !== id);
-        return [...without, { id, message: detail.message }];
+        return [...without, {
+          id,
+          message: detail.message,
+          kind: detail.kind,
+          folderPath: detail.folderPath,
+          fileName: detail.fileName,
+        }];
       });
       if (ttl > 0) {
         window.setTimeout(() => {
@@ -179,48 +191,69 @@ export function JobsStrip({
     : Math.round(updateJob?.percent ?? 0);
 
   if (compactRail) {
+    const dlToasts = toasts.filter(t => t.kind === 'download');
     return (
       <>
         <div className="mb-2 flex flex-col items-center gap-1.5 px-1">
-          <div
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-nova-navy-950/95"
-            title={
-              lead
-                ? `${jobRoleLabel(lead)} lead · ${downloading.length} model${downloading.length === 1 ? '' : 's'} · ${displayPct}%`
-                : 'Download'
-            }
-            aria-label={`Download ${displayPct} percent`}
-          >
-            <svg className="absolute inset-1" viewBox="0 0 36 36" aria-hidden>
-              <circle
-                cx="18"
-                cy="18"
-                r="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                className="text-white/10"
-              />
-              <circle
-                cx="18"
-                cy="18"
-                r="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                className="text-sky-400 transition-[stroke-dashoffset] duration-300"
-                style={{
-                  strokeDasharray: `${2 * Math.PI * 14}`,
-                  strokeDashoffset: `${2 * Math.PI * 14 * (1 - Math.min(100, displayPct) / 100)}`,
-                  transform: 'rotate(-90deg)',
-                  transformOrigin: '50% 50%',
-                }}
-              />
-            </svg>
-            <Loader2 className="relative z-[1] h-3.5 w-3.5 text-sky-300 animate-spin" />
-          </div>
-          <span className="text-[10px] tabular-nums text-content-tertiary leading-none">{displayPct}%</span>
+          {dlToasts.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                if (t.folderPath && window.novaDesktop?.openPath) {
+                  void window.novaDesktop.openPath(t.folderPath);
+                }
+              }}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/20 nova-dl-pulse"
+              title={t.message}
+              aria-label={t.message}
+            >
+              <Folder className="w-4 h-4 text-emerald-300" aria-hidden />
+            </button>
+          ))}
+          {(downloading.length > 0 || updateJob) ? (
+            <>
+              <div
+                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-nova-navy-950/95"
+                title={
+                  lead
+                    ? `${jobRoleLabel(lead)} lead · ${downloading.length} model${downloading.length === 1 ? '' : 's'} · ${displayPct}%`
+                    : 'Download'
+                }
+                aria-label={`Download ${displayPct} percent`}
+              >
+                <svg className="absolute inset-1" viewBox="0 0 36 36" aria-hidden>
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    className="text-white/10"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    className="text-sky-400 transition-[stroke-dashoffset] duration-300"
+                    style={{
+                      strokeDasharray: `${2 * Math.PI * 14}`,
+                      strokeDashoffset: `${2 * Math.PI * 14 * (1 - Math.min(100, displayPct) / 100)}`,
+                      transform: 'rotate(-90deg)',
+                      transformOrigin: '50% 50%',
+                    }}
+                  />
+                </svg>
+                <Loader2 className="relative z-[1] h-3.5 w-3.5 text-sky-300 animate-spin" />
+              </div>
+              <span className="text-[10px] tabular-nums text-content-tertiary leading-none">{displayPct}%</span>
+            </>
+          ) : null}
         </div>
         <PlayWhileDownloading open={playOpen} onClose={() => setPlayOpen(false)} />
       </>
@@ -236,9 +269,37 @@ export function JobsStrip({
     <>
       <div className={shell}>
         {toasts.map(t => (
-          <p key={t.id} className="text-[11px] text-content-secondary leading-snug">
-            {t.message}
-          </p>
+          t.kind === 'download' ? (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                const folder = t.folderPath;
+                if (folder && window.novaDesktop?.openPath) {
+                  void window.novaDesktop.openPath(folder);
+                }
+              }}
+              className="w-full flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-left hover:bg-emerald-500/15 transition-colors group"
+              title={t.folderPath ? `Open ${t.folderPath}` : t.message}
+              aria-label={t.message}
+            >
+              <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/20 nova-dl-pulse">
+                <Folder className="w-4 h-4 text-emerald-300" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11px] font-medium text-emerald-100/95 truncate leading-tight">
+                  Downloaded
+                </span>
+                <span className="block text-[10px] text-content-tertiary truncate leading-tight mt-0.5">
+                  {t.fileName || t.message}
+                </span>
+              </span>
+            </button>
+          ) : (
+            <p key={t.id} className="text-[11px] text-content-secondary leading-snug">
+              {t.message}
+            </p>
+          )
         ))}
 
         {downloading.length > 0 && lead ? (

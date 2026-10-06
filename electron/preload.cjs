@@ -24,6 +24,7 @@ const novaDesktopApi = {
   windowControls: true,
   openExternal: (url) => ipcRenderer.invoke('NOVA:open-external', url),
   openPath: (targetPath) => ipcRenderer.invoke('NOVA:open-path', targetPath),
+  saveToDownloads: (payload) => ipcRenderer.invoke('NOVA:save-to-downloads', payload || {}),
   systemInfo: () => ipcRenderer.invoke('NOVA:system-info'),
   speedTest: () => ipcRenderer.invoke('NOVA:speed-test'),
   appMeta: () => ipcRenderer.invoke('NOVA:app-meta'),
@@ -122,6 +123,7 @@ const novaDesktopApi = {
   engineDownloadCancel: (id) => ipcRenderer.invoke('NOVA:engine-download-cancel', id),
   engineImportGguf: (filePath) => ipcRenderer.invoke('NOVA:engine-import-gguf', filePath),
   engineImportGgufPick: () => ipcRenderer.invoke('NOVA:engine-import-gguf-pick'),
+  engineScanExternalGgufs: () => ipcRenderer.invoke('NOVA:engine-scan-external-ggufs'),
   engineDeleteModel: (id) => ipcRenderer.invoke('NOVA:engine-delete-model', id),
   engineDiskSpace: () => ipcRenderer.invoke('NOVA:engine-disk-space'),
   engineEnsureRuntime: () => ipcRenderer.invoke('NOVA:engine-ensure-runtime'),
@@ -139,6 +141,7 @@ const novaDesktopApi = {
   previewUpdate: (payload) => ipcRenderer.invoke('NOVA:preview-update', payload),
   previewReload: (projectId) => ipcRenderer.invoke('NOVA:preview-reload', projectId),
   previewCaptureLive: () => ipcRenderer.invoke('NOVA:preview-capture-live'),
+  previewProbeMounted: (payload) => ipcRenderer.invoke('NOVA:preview-probe-mounted', payload),
   previewSession: (cwd) => ipcRenderer.invoke('NOVA:preview-session', cwd),
   getOrAttachPreview: (cwd) => ipcRenderer.invoke('NOVA:preview-get-or-attach', cwd),
   mediaLibrary: () => ipcRenderer.invoke('NOVA:media-library'),
@@ -231,6 +234,11 @@ if (!isPackagedApp) {
 contextBridge.exposeInMainWorld('novaDesktop', novaDesktopApi);
 
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
+ipcRenderer.on('NOVA:engine-changed', (_event, payload) => {
+  try {
+    window.dispatchEvent(new CustomEvent('NOVA:engine-changed', { detail: payload || {} }));
+  } catch { /* ignore */ }
+});
 ipcRenderer.on('NOVA:open-settings', (_event, payload) => {
   window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: payload || {} }));
 });

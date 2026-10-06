@@ -20,8 +20,8 @@ import {
   parseClinicStatusHistory,
 } from '@/lib/debugClinic';
 import { DebugClinicReport } from '@/components/DebugClinicReport';
-import { isPlanReportMessage, parsePlanReport } from '@/lib/planReport';
-import { PlanReport } from '@/components/PlanReport';
+import { isPlanReportMessage, isPlanLinkMessage, parsePlanLinkMessage, parsePlanReport, countPlanSteps } from '@/lib/planReport';
+import { PlanOpenPill } from '@/components/PlanOpenPill';
 import { AgentProgressStatus } from '@/components/AgentProgressStatus';
 import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
 import { stripComposerPrefix } from '@/lib/chatAgentTurn';
@@ -96,11 +96,11 @@ export function GeneratingPlaceholder({
 
   if (kind === 'chat') {
     const shown = label || 'Thinking…';
-    const webSearch = /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references)\b|\blayout\s+references\b/i.test(shown);
+    const webSearch = /\bsearch(?:ing)?\s+(?:the\s+)?web\b|\breading\s+(?:results|layout\s+references|sources?)\b|\blayout\s+references\b|\bweb\s+lookup\b|\bdeep\s+research\b/i.test(shown);
     return (
       <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
         {webSearch ? (
-          <Globe className="w-3.5 h-3.5 shrink-0 text-sky-400 animate-pulse" aria-hidden />
+          <Globe className="w-3.5 h-3.5 shrink-0 text-content-tertiary" aria-hidden />
         ) : (
           <span className="inline-flex items-center gap-1.5" aria-hidden>
             <span className="nova-status-dot nova-status-dot-1" />
@@ -108,7 +108,7 @@ export function GeneratingPlaceholder({
             <span className="nova-status-dot nova-status-dot-3" />
           </span>
         )}
-        <span className={`min-w-0 flex-1 text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere] ${webSearch ? 'text-sky-300' : 'text-content-secondary'}`}>{shown}</span>
+        <span className="min-w-0 flex-1 text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere] text-content-secondary">{shown}</span>
       </div>
     );
   }
@@ -261,12 +261,28 @@ function MediaLightbox({
   );
 }
 
-function MediaActions({ src, alt }: { src: string; alt: string }) {
+function MediaActions({
+  src,
+  alt,
+  copyText,
+}: {
+  src: string;
+  alt: string;
+  /** When set, Copy pastes this text (user prompt) instead of the image bytes. */
+  copyText?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
 
   const onCopy = async () => {
     try {
+      if (copyText != null) {
+        const text = String(copyText || '').trim();
+        if (text) await navigator.clipboard.writeText(text);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+        return;
+      }
       const res = await fetch(src);
       const blob = await res.blob();
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
@@ -278,7 +294,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       try {
-        await navigator.clipboard.writeText(alt || '');
+        await navigator.clipboard.writeText(copyText?.trim() || alt || '');
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1400);
       } catch {
@@ -295,7 +311,6 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         const buf = await blob.arrayBuffer();
         const sniffed = sniffImageExt(buf);
         let ext = isVideo ? 'mp4' : (sniffed || mediaDownloadExt(src, false));
-        // Never offer a broken .svg wrapper for real raster bytes.
         if (ext === 'svg') ext = sniffed || 'jpg';
         const mime =
           ext === 'png' ? 'image/png'
@@ -303,17 +318,37 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
               : ext === 'gif' ? 'image/gif'
                 : ext === 'mp4' ? 'video/mp4'
                   : 'image/jpeg';
+        const fileName = `NOVA-${Date.now()}.${ext}`;
+        const bytes = Array.from(new Uint8Array(buf));
+
+        if (window.novaDesktop?.saveToDownloads) {
+          const saved = await window.novaDesktop.saveToDownloads({
+            fileName,
+            bytes,
+            mime,
+          });
+          if (saved?.ok && saved.folderPath) {
+            const { pushDownloadCompleteToast } = await import('@/lib/sidebarToast');
+            pushDownloadCompleteToast({
+              fileName: saved.fileName || fileName,
+              folderPath: saved.folderPath,
+            });
+            return;
+          }
+        }
+
         const out = new Blob([buf], { type: mime });
         const url = URL.createObjectURL(out);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `NOVA-${Date.now()}.${ext}`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         a.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
+        const { pushDownloadCompleteToast } = await import('@/lib/sidebarToast');
+        pushDownloadCompleteToast({ fileName, folderPath: '' });
       } catch {
-        // Fallback: still avoid .svg from base64 false-positives
         const a = document.createElement('a');
         a.href = src;
         a.download = `NOVA-${Date.now()}.${mediaDownloadExt(src, isVideo)}`;
@@ -328,8 +363,8 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         type="button"
         onClick={() => void onCopy()}
         className="p-1.5 rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover/80 transition-colors"
-        title="Copy"
-        aria-label="Copy"
+        title={copyText != null ? 'Copy prompt' : 'Copy'}
+        aria-label={copyText != null ? 'Copy prompt' : 'Copy'}
       >
         {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
@@ -337,7 +372,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         type="button"
         onClick={onDownload}
         className="p-1.5 rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover/80 transition-colors"
-        title="Download"
+        title="Download to Downloads folder"
         aria-label="Download"
       >
         <Download className="w-3.5 h-3.5" />
@@ -346,7 +381,19 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; preview?: boolean }) {
+function ResolvedMedia({
+  src,
+  alt,
+  preview,
+  copyText,
+  hideActions,
+}: {
+  src: string;
+  alt: string;
+  preview?: boolean;
+  copyText?: string;
+  hideActions?: boolean;
+}) {
   const [lightbox, setLightbox] = useState(false);
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
   const looksSvg = /^data:image\/svg\+xml/i.test(src) || /\.svg(\?|$)/i.test(src);
@@ -376,13 +423,13 @@ function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; previe
         >
           <img
             src={src}
-            alt={alt}
+            alt={alt === 'photo' || !alt ? '' : alt}
             className="rounded-2xl object-contain bg-[#0d1117] block pointer-events-none"
-            style={{ maxWidth: 'min(100%, 420px)', maxHeight: 480, width: 'auto', height: 'auto' }}
+            style={{ maxWidth: 'min(100%, 352px)', maxHeight: 440, width: 'auto', height: 'auto' }}
           />
         </button>
       )}
-      <MediaActions src={src} alt={alt} />
+      {!hideActions ? <MediaActions src={src} alt={alt} copyText={copyText} /> : null}
       {lightbox ? (
         <MediaLightbox
           src={src}
@@ -395,7 +442,19 @@ function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; previe
   );
 }
 
-function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?: boolean }) {
+function ArkMediaImage({
+  id,
+  alt,
+  preview,
+  copyText,
+  hideActions,
+}: {
+  id: string;
+  alt: string;
+  preview?: boolean;
+  copyText?: string;
+  hideActions?: boolean;
+}) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -409,7 +468,15 @@ function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?
   if (!src) {
     return <GeneratingPlaceholder kind="image" label="Loading…" />;
   }
-  return <ResolvedMedia src={src} alt={alt} preview={preview} />;
+  return (
+    <ResolvedMedia
+      src={src}
+      alt={alt}
+      preview={preview}
+      copyText={copyText}
+      hideActions={hideActions}
+    />
+  );
 }
 
 export function MessageContent({
@@ -490,6 +557,44 @@ export function MessageContent({
     }
   }
 
+  if (isPlanLinkMessage(content) || (isPromptChipsMessage(content) && isPlanLinkMessage(parsePromptChipsMessage(content).body))) {
+    const { body, chips } = isPromptChipsMessage(content)
+      ? parsePromptChipsMessage(content)
+      : { body: content, chips: [] as { label: string; prompt: string }[] };
+    const link = parsePlanLinkMessage(body || content);
+    const prose = String(body || '')
+      .replace(/<!--nova-plan-link-->[\s\S]*?<!--\/nova-plan-link-->/i, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .trim();
+    return (
+      <div className="space-y-3 w-full max-w-full">
+        {prose ? (
+          <div className="text-base text-content-primary/95 leading-relaxed">
+            <ChatMarkdown text={prose} tone={tone} />
+          </div>
+        ) : null}
+        {link ? (
+          <PlanOpenPill title={link.title} stepCount={link.stepCount} />
+        ) : null}
+        {onPromptChipPick && chips.length ? (
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {chips.map((chip) => (
+              <button
+                key={chip.prompt}
+                type="button"
+                className="text-[11px] rounded-full border border-white/15 bg-white/[0.04] text-content-secondary px-3 py-1.5 hover:bg-white/[0.08] hover:text-content-primary transition-colors"
+                onClick={() => onPromptChipPick(chip.prompt)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Legacy full plan cards → same clickable Plan pill (opens overlay). Never expand inline.
   if (isPlanReportMessage(content) || (isPromptChipsMessage(content) && isPlanReportMessage(parsePromptChipsMessage(content).body))) {
     const { body, chips } = isPromptChipsMessage(content)
       ? parsePromptChipsMessage(content)
@@ -503,22 +608,18 @@ export function MessageContent({
           ?.replace(/<!--[\s\S]*?-->/g, '')
           .trim()
         || '';
-      const introNorm = intro.replace(/\*\*/g, '').trim().toLowerCase();
-      const sumNorm = String(report.summary || '').replace(/\*\*/g, '').trim().toLowerCase();
-      const hideSummary = Boolean(intro)
-        && (
-          !sumNorm
-          || sumNorm === introNorm
-          || (sumNorm.length >= 24 && introNorm.includes(sumNorm.slice(0, 48)))
-        );
       return (
         <div className="space-y-3 w-full max-w-full">
           {intro ? (
-            <div className="text-[14px] text-content-primary/95 leading-relaxed">
+            <div className="text-base text-content-primary/95 leading-relaxed">
               <ChatMarkdown text={intro} tone={tone} />
             </div>
           ) : null}
-          <PlanReport report={report} hideSummary={hideSummary} />
+          <PlanOpenPill
+            title={report.title}
+            stepCount={countPlanSteps(report)}
+            report={report}
+          />
           {onPromptChipPick && chips.length ? (
             <div className="flex flex-wrap gap-1.5 pt-0.5">
               {chips.map((chip) => (
@@ -565,15 +666,17 @@ export function MessageContent({
 
   if (isChatAttachMessage(content)) {
     const rest = stripChatAttach(content);
-    if (rest && (/!\[[^\]]*\]\([^)]+\)/.test(rest) || rest.includes('nova-media:'))) {
+    // Hide image filename chips when the photo itself is shown as markdown media.
+    const hasMedia = /!\[[^\]]*\]\([^)]+\)/.test(rest) || rest.includes('nova-media:');
+    if (rest && hasMedia) {
       return (
         <div className="space-y-2">
-          <AttachMessageBody content={content} />
-          <MessageContent content={rest} live={live} />
+          <AttachMessageBody content={content} cardsOnly hideImageChips />
+          <MessageContent content={rest} live={live} tone={tone} messageId={messageId} onPromptChipPick={onPromptChipPick} />
         </div>
       );
     }
-    return <AttachMessageBody content={content} />;
+    return <AttachMessageBody content={content} hideImageChips={hasMedia} />;
   }
 
   if (content.startsWith('__generating__:')) {
@@ -650,7 +753,15 @@ export function MessageContent({
   if (last < content.length) chunks.push({ type: 'text', value: content.slice(last) });
   if (chunks.length === 0) chunks.push({ type: 'text', value: content });
 
-  const onlyMedia = chunks.every(c => c.type === 'media' || !c.value.trim());
+  // ChatGPT-style user bubble: image on top, prompt under it.
+  const ordered = tone === 'user'
+    ? [
+      ...chunks.filter(c => c.type === 'media'),
+      ...chunks.filter(c => c.type === 'text'),
+    ]
+    : chunks;
+
+  const onlyMedia = ordered.every(c => c.type === 'media' || !c.value.trim());
   const previewHint = /not a finished|motion still|offline fallback|real:\s*false|demo placeholder/i.test(content);
   // Build/create turns keep an expandable step list while live. Settled plain chat
   // never shows a leftover "Done" bar — that clutter is for long builds only.
@@ -680,28 +791,47 @@ export function MessageContent({
   } : null;
 
   return (
-    <div className={onlyMedia ? 'space-y-2' : 'space-y-3'}>
+    <div className={onlyMedia ? 'space-y-2 w-fit max-w-full' : 'space-y-3'}>
       {finishedSteps ? (
         <AgentProgressStatus
           label={finishedSteps.label || 'Build steps'}
           history={finishedSteps.history}
         />
       ) : null}
-      {chunks.map((chunk, i) => {
+      {ordered.map((chunk, i) => {
         if (chunk.type === 'media') {
           const src = chunk.value;
           const alt = chunk.alt || 'NOVA generation';
+          // User photo turns: Download + Copy live under the prompt in the frame (not on the image).
           if (
             src.startsWith('data:image/')
             || src.startsWith('data:video/')
             || src.startsWith('http://')
             || src.startsWith('https://')
           ) {
-            return <ResolvedMedia key={i} src={src} alt={alt} preview={previewHint} />;
+            return (
+              <div key={i} className={tone === 'user' ? 'w-fit max-w-full ml-auto' : undefined}>
+                <ResolvedMedia
+                  src={src}
+                  alt={alt}
+                  preview={previewHint}
+                  hideActions={tone === 'user'}
+                />
+              </div>
+            );
           }
           if (src.startsWith('nova-media:')) {
             const id = src.slice('nova-media:'.length);
-            return <ArkMediaImage key={i} id={id} alt={alt} preview={previewHint} />;
+            return (
+              <div key={i} className={tone === 'user' ? 'w-fit max-w-full ml-auto' : undefined}>
+                <ArkMediaImage
+                  id={id}
+                  alt={alt}
+                  preview={previewHint}
+                  hideActions={tone === 'user'}
+                />
+              </div>
+            );
           }
           return (
             <p key={i} className="text-xs text-content-tertiary break-all">

@@ -920,9 +920,10 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
               // Only grow lastGoodLive when the new text continues the same reply.
               if (!lastGoodLive) {
                 lastGoodLive = liveClean;
-              } else if (liveClean.startsWith(lastGoodLive.slice(0, Math.min(40, lastGoodLive.length)))) {
+              } else if (liveClean.startsWith(lastGoodLive.slice(0, Math.min(48, lastGoodLive.length)))) {
                 lastGoodLive = liveClean;
               }
+              // Never paint a different-family failover stream over a solid first reply.
               sawToken = true;
             }
             // Fast-fail when the model is only re-emitting the system prompt.
@@ -1034,8 +1035,8 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
           const live = String(lastGoodLive || '').trim();
           const final = String(response || '').trim();
           if (live.length >= 24 && final && final !== live && !looksLikePromptEcho(live)) {
-            const prefixLen = Math.min(48, live.length, final.length);
-            const sameFamily = prefixLen >= 12
+            const prefixLen = Math.min(64, live.length, final.length);
+            const sameFamily = prefixLen >= 20
               && (final.startsWith(live.slice(0, prefixLen)) || live.startsWith(final.slice(0, prefixLen)));
             if (!sameFamily) {
               response = live;
@@ -1356,8 +1357,8 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
         && final !== live
         && !looksLikePromptEcho(live)
       ) {
-        const prefixLen = Math.min(48, live.length, final.length);
-        const sameFamily = prefixLen >= 12
+        const prefixLen = Math.min(64, live.length, final.length);
+        const sameFamily = prefixLen >= 20
           && (final.startsWith(live.slice(0, prefixLen)) || live.startsWith(final.slice(0, prefixLen)));
         if (!sameFamily) response = live;
       }

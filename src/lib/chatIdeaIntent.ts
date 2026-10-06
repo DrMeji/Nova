@@ -6,7 +6,7 @@ import { slugifyProjectName } from './projectNames';
 import { looksLikeProjectBuildAsk } from './chatBuildIntent';
 import { looksLikeLandingBrief, prefersReactAppScaffold, wantsChatAppScaffold } from '@/lib/webLandingFromBrief';
 import { detectProjectKind, resolveProjectKindForCreate, type ProjectKind } from '@/lib/projectKind';
-import { looksLikeImplementGo } from '@/lib/chatPlanMode';
+import { looksLikeImplementGo, looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 
 export type { ProjectKind };
 
@@ -63,8 +63,8 @@ function isNonSoftwareBuildAsk(text: string): boolean {
   }
   if (/\b(?:operating\s+playbook|radio\s+station|underwriting|on-air|board-op|live-show)\b/i.test(t)) return true;
   if (/\b(?:marina|berth|harbormaster|haul-out|pump-out)\b/i.test(t) && /\b(?:design|plan|clarif|not\s+build)\b/i.test(t)) return true;
-  return /\b(?:gaming\s+pc|build\s+a\s+pc|pc\s+build|custom\s+pc|fpv\s+drone|drone|quadcopter|car\s+engine|gasoline|fish\s+breathe|how\s+do\s+fish|motherboard|cpu\s+and\s+gpu|frame\s+size|radio\s+first|mid-?range\s+gaming)\b/i.test(t)
-    || (/\b(?:pc|drone|car|bike|house|robot|engine)\b/i.test(t) && /\b(?:build|assemble|pick|recommend)\b/i.test(t));
+  return /\b(?:gaming\s+pc|build\s+a\s+pc|pc\s+build|custom\s+pc|fpv\s+drone|drone|quadcopter|car\s+engine|gasoline|fish\s+breathe|how\s+do\s+fish|motherboard|cpu\s+and\s+gpu|frame\s+size|radio\s+first|mid-?range\s+gaming|mechanical\s+keyboard|keyboard\s+(?:switches?|pcb|keycaps?)|build\s+(?:a\s+)?(?:keyboard|pc|drone|bike|desk|webcam|web\s*camera|camera)|web\s*camera|webcam)\b/i.test(t)
+    || (/\b(?:pc|drone|car|bike|house|robot|engine|keyboard|camera|webcam)\b/i.test(t) && /\b(?:build|assemble|pick|recommend|parts?)\b/i.test(t));
 }
 
 /** User asked to talk / clarify / plan first. never scaffold or auto-create. */
@@ -86,6 +86,22 @@ export function wantsClarifyBeforeCreate(text: string): boolean {
 export function looksLikeRequirementsAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Hardware / DIY how-to guides are not software product-requirement chats.
+  // (Imported lazily-safe: keep the check inline to avoid circular imports.)
+  if (
+    /\b(?:exactly\s+how|how\s+(?:do|can|would|to)\s+(?:i|you|we)?\s+(?:\w+\s+){0,3}(?:build|make|assemble)|i(?:'m| am)\s+trying\s+to\s+build|from\s+scratch)\b/i.test(t)
+    && /\b(?:camera|webcam|web\s*camera|keyboard|drone|pcb|arduino|raspberry|hardware|sensor|lens|circuit|prototype)\b/i.test(t)
+    && !/\b(?:vite|react\s+app|saas|landing\s+page|scaffold|website\s+app)\b/i.test(t)
+  ) {
+    return false;
+  }
+  // Tooling Qs (Python / VS Code / what program) stay normal chat — never requirements/plan.
+  if (
+    /\b(?:python|vs\s*code|vscode|arduino\s+ide|what\s+program)\b/i.test(t)
+    && /\b(?:do\s+i\s+(?:need|use)|should\s+i\s+use|what\s+program|how\s+do\s+i\s+(?:\w+\s+){0,3}build)\b/i.test(t)
+  ) {
+    return false;
+  }
   // Explicit go-build wins over advice wording.
   if (/\b(?:build\s+it\s+now|scaffold\s+now|create\s+(?:the\s+)?(?:files|project)\s+now|lets?\s+build\s+(?:this|that|it)|go\s+build|on\s+disk|open\s+preview)\b/i.test(t)) {
     return false;
@@ -136,19 +152,48 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
 
-  const hardGo =
-    /\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|on\s+disk|open\s+preview|build\s+this\s+out|start\s+building|ok(?:ay)?\s+start\s+building)\b/i.test(t)
+  // Mini demos (calculator / todo / timer) want working code in chat — not product-plan talk.
+  if (
+    /\b(?:calculator|todo(?:s)?|to-?dos?|checklist|timer|stopwatch|pomodoro|counter|tic-?tac-?toe)\b/i.test(t)
+    && !/\b(?:saas|landing\s+page|vite|react\s+app|on\s+disk)\b/i.test(t)
+  ) {
+    return false;
+  }
+
+  // Business / ops advice is not a software greenfield talk-first create.
+  if (
+    /\b(?:validate|validation|solo\s+founder|niche\s+saas|week[- ]by[- ]week|30\s+days|almost\s+no\s+budget|customer\s+interviews?)\b/i.test(t)
+    && !/\b(?:vite|react|scaffold|landing\s+page|create\s+(?:files|project)|on\s+disk)\b/i.test(t)
+  ) {
+    return false;
+  }
+
+  const hardGo = looksLikeHardCreateGo(t)
     || /\b(?:create|scaffold|spin\s+up)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\s+(?:on\s+disk|now|here)\b/i.test(t)
-    || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t);
+    || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t)
+    // Imperative greenfield: "Build a brand-new … website/site/app" (not "help me build…").
+    || (
+      /^(?:please\s+)?(?:build|create|make|scaffold)(?:\s+me)?\b/i.test(t)
+      && /\b(?:website|web\s*site|site|app|application|landing|homepage|vite|react|shop|store)\b/i.test(t)
+      && !/^(?:please\s+)?(?:can\s+you|could\s+you|help\s+me)\b/i.test(t)
+      && !/\?/.test(t)
+    );
 
   if (hardGo) return false;
 
-  // Soft asks — talk first (Plan nudge), never instant create stubs.
-  // “Build me a portfolio / restaurant / todo…” is conversation, not a disk create.
+  // Soft “build me…” — talk first when exploratory; short concrete product asks create.
+  // e.g. “Build me a website” → create · “Build me a coffee shop? what features?” → talk
   if (
     /^(?:please\s+)?(?:build|make)\s+me\b/i.test(t)
     && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
   ) {
+    const exploratory =
+      /\?/.test(t)
+      || /\b(?:help|thinking|ideas?|advice|recommend|should\s+i|what\s+if|familiar|features?|requirements?)\b/i.test(t);
+    const shortConcrete =
+      t.length < 100
+      && /\b(?:website|web\s*site|site|app|application|page|landing|todo|dashboard|portfolio)\b/i.test(t);
+    if (!exploratory && shortConcrete) return false;
     return true;
   }
   if (
@@ -195,10 +240,12 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
     return true;
   }
   // Layout sketch without a create command — nav / hero / bands / footer described.
+  // Never steal imperative "Build a … website" briefs that list sections (Maskline etc.).
   if (
     t.length >= 60
     && t.length < 1200
-    && !/\b(?:build\s+it|create\s+(?:a\s+)?(?:new\s+)?(?:project|files)|scaffold|go\s+build|on\s+disk|start\s+building)\b/i.test(t)
+    && !/^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
+    && !/\b(?:build\s+it|create\s+(?:a\s+)?(?:new\s+)?(?:project|files)|scaffold|go\s+build|on\s+disk|start\s+building|get\s+it\s+live)\b/i.test(t)
     && /\b(?:nav|navigation|hero|footer)\b/i.test(t)
     && /\b(?:band|section|white\s+space|motion|cta|button)\b/i.test(t)
     && /\b(?:homepage|home\s*page|landing|apple\.com|product)\b/i.test(t)
@@ -218,10 +265,15 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
 
   // Feature-sketch follow-ups: "yeah something like a little shelf you browse…"
   // Describe UX / constraints without an explicit build/create command → keep talking.
+  // Never steal imperative UI edits ("ok cool. add a top bar / heading / cards").
   if (
     t.length >= 24
     && t.length < 500
     && !/\b(?:build|create|scaffold|spin\s+up|make\s+me|on\s+disk|open\s+preview|start\s+building|write\s+(?:the\s+)?(?:code|files))\b/i.test(t)
+    && !(
+      /\b(?:add|put|place|drop|move|change|update|fix|remove)\b/i.test(t)
+      && /\b(?:bar|nav|header|footer|heading|title|button|card|row|section|background|color|margin|padding|drawer|cart)\b/i.test(t)
+    )
     && (
       /^(?:yeah|yep|yes|exactly|right|ok|okay|sure|basically|kinda|kind\s+of|something\s+like)\b/i.test(t)
       || /\bsomething\s+like\b/i.test(t)
@@ -680,6 +732,7 @@ export function parseGreenfieldIdea(text: string): GreenfieldIdeaIntent | null {
 export function looksLikeGreenfieldCreateGo(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeHardCreateGo(t)) return true;
   return (
     /\bcreate\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
     || /\b(?:yes|yeah|sure|ok(?:ay)?)[\s,]*create\b/i.test(t)

@@ -29,8 +29,14 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/no[_ -]?encryption|encryption (?:is )?unavailable|not encrypted|plaintext.*(?:refus|blocked)|safe storage.*unavailable/i.test(lower)) {
     return { code: 'NO_ENCRYPTION', message: msg, action: 'Open Security' };
   }
-  if (/already running|generation already running|another local generation/i.test(lower)) {
-    return { code: 'RATE_LIMITED', message: msg, action: 'Stop the current reply, then send again' };
+  if (/already running|generation already running|another local generation|local brain is busy|loading a model/i.test(lower)) {
+    return {
+      code: 'RATE_LIMITED',
+      message: msg.includes('Local brain is busy')
+        ? msg
+        : 'Local brain is busy (loading a model or finishing another reply). Press Stop, wait, then send again.',
+      action: 'Stop the current reply, then send again',
+    };
   }
   if (/rate[_ -]?limit|too many requests|\b429\b|quota (?:exceeded|reached)|capacity limit/i.test(lower)) {
     return { code: 'RATE_LIMITED', message: msg, action: 'Try another model' };

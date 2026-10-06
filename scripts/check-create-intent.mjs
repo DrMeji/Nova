@@ -46,7 +46,11 @@ function check(name, ok, detail = '') {
 {
   const intent = parseNewProjectIntent('Help me build a coffee shop site');
   const planning = looksLikeConversationalPlanningAsk('Help me build a coffee shop site');
-  check('A: Help me build coffee shop → create', Boolean(intent && !intent.preferPlan) && !planning);
+  check(
+    'A: Help me build coffee shop → talk-before (null create intent)',
+    intent == null || planning,
+    intent ? `name=${intent.name}` : 'null',
+  );
 }
 {
   const ask = 'Add the title Nightglass After Hours in the center';
@@ -100,7 +104,7 @@ check('A: looksLikeBuildStart(build me a website)', looksLikeBuildStart('build m
 }
 
 // ── Tier C / D ──────────────────────────────────────────
-check('C4: multiModelCreate default off', getLocalPrefs().multiModelCreate === false);
+check('C4: multiModelCreate default off (Single Brain Create)', getLocalPrefs().multiModelCreate === false);
 {
   const c = classifyTurn('Build me a website called Demo');
   check('D1: classifyTurn create', c.kind === 'create', c.kind);

@@ -10,6 +10,8 @@ import {
   pluginMentionsText,
   runCatalogPluginLive,
 } from '@/lib/catalogPlugins';
+import { looksLikeBoundProjectAsk } from '@/lib/chatProjectDebug';
+import { resolveAnswerContract, contractBlocksPlugins } from '@/lib/answerContract';
 
 const STATE_KEY = 'NOVA:plugin-state';
 
@@ -319,6 +321,8 @@ export function pluginIntentMatches(pluginId: string, userText: string): boolean
   if (/<!--nova-debug-clinic-->/i.test(raw) || /^Debug this\.\s*find the issue/i.test(raw) || /^\[Debug\]/i.test(raw)) {
     return false;
   }
+  // Bound-folder project asks never belong to a catalog plugin.
+  if (looksLikeBoundProjectAsk(raw)) return false;
   const lower = raw.toLowerCase();
   const plugin = getPluginById(pluginId);
   if (!plugin) return pluginMentionsText(pluginId, lower);
@@ -412,6 +416,13 @@ export function runPluginStub(pluginId: string, userText: string): string | null
  * When several match (e.g. "issue"), prefer the one named in the text, else first id order.
  */
 export function detectPluginIntent(text: string, candidateIds: string[]): string | null {
+  const raw0 = String(text || '').trim();
+  if (raw0 && looksLikeBoundProjectAsk(raw0)) return null;
+  // Answer Contract: disk / bound_project blocks plugins even before scoring.
+  if (raw0) {
+    const c = resolveAnswerContract({ message: raw0, hasBoundFiles: true });
+    if (contractBlocksPlugins(c) && c.topic === 'bound_project') return null;
+  }
   if (!candidateIds.length) return null;
   const raw = String(text || '').trim();
   if (!raw) return null;

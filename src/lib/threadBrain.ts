@@ -171,16 +171,18 @@ export function threadBrainFromResult(
   };
 }
 
-/** Compact pill label when Nova Multimodal is selected — show the live brain while building. */
+/** Compact pill label — always the equipped model, never the word Auto. */
 export function autoPillLabel(brain?: ThreadBrain | null): string {
-  if (brain?.kind === 'coding' && brain.modelName) {
+  if (brain?.modelName) {
     const short = brain.modelName
       .replace(/^Local · /i, '')
+      .replace(/^Free · /i, '')
+      .replace(/^Cloud · /i, '')
       .replace(/\s+Instruct$/i, '')
       .trim();
     if (short) return short.length > 22 ? `${short.slice(0, 20).trim()}…` : short;
   }
-  return 'Multimodal';
+  return 'Ready';
 }
 
 /** Short line for the Auto menu row. Auto stays selected; this is the brain it picked. */
@@ -194,7 +196,7 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
     .replace(/ · switched$/i, '')
     .trim();
   const name = short.length > 28 ? `${short.slice(0, 26).trim()}…` : short;
-  if (!name) return 'Nova Multimodal';
+  if (!name) return 'Nova Auto';
   if (brain.pinnedSource === 'local') return `Local · ${name}`;
   if (brain.tier === 'free-key' || brain.tier === 'no-key-free' || brain.pinnedSource === 'optional') {
     return `${name} · free`;

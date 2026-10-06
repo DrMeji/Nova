@@ -114,14 +114,6 @@ const CATALOG = [
     url: 'https://huggingface.co/bartowski/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf',
   },
   {
-    id: 'qwen25-coder-32b',
-    name: 'Qwen2.5-Coder 32B Instruct',
-    detail: 'Coding · ~20 GB · Q4_K_M · 32 GB+ RAM',
-    sizeGb: 20,
-    status: 'missing',
-    url: 'https://huggingface.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf',
-  },
-  {
     id: 'deepseek-coder-v2-lite',
     name: 'DeepSeek Coder V2 Lite',
     detail: 'Coding · ~8.9 GB · Q4_K_M',
@@ -228,7 +220,6 @@ const MODEL_ALIASES = {
   'qwen2.5-coder': 'qwen25-coder-7b',
   'qwen2.5-coder:7b': 'qwen25-coder-7b',
   'qwen2.5-coder:14b': 'qwen25-coder-14b',
-  'qwen2.5-coder:32b': 'qwen25-coder-32b',
   mistral: 'mistral-7b',
   'mistral:7b': 'mistral-7b',
   gemma2: 'gemma2-2b',

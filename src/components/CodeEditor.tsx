@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useMemo } from 'react';
+import { forwardRef, useEffect, useMemo, useRef } from 'react';
 import { highlightCode, languageFromPath } from '@/lib/syntaxHighlight';
 
 type CodeEditorProps = {
@@ -8,10 +8,13 @@ type CodeEditorProps = {
   readOnly?: boolean;
   jumpLine?: number;
   onSave?: () => void;
+  /** When true (Live typing), keep the viewport pinned to the growing bottom. */
+  followTail?: boolean;
 };
 
 export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
-  function CodeEditor({ path, value, onChange, readOnly, jumpLine, onSave }, ref) {
+  function CodeEditor({ path, value, onChange, readOnly, jumpLine, onSave, followTail }, ref) {
+    const localRef = useRef<HTMLTextAreaElement | null>(null);
     const language = languageFromPath(path);
     const rawLineCount = Math.max(1, value.split('\n').length);
     // Huge lockfiles / dumps: never mount thousands of gutter nodes (scroll glitch).
@@ -31,9 +34,29 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
       [lineCount],
     );
 
+    const setTaRef = (node: HTMLTextAreaElement | null) => {
+      localRef.current = node;
+      if (typeof ref === 'function') ref(node);
+      else if (ref) ref.current = node;
+    };
+
+    const scrollToTail = () => {
+      const ta = localRef.current;
+      if (!ta) return;
+      ta.scrollTop = ta.scrollHeight;
+      const root = ta.parentElement;
+      const pre = root?.querySelector('.nova-code-highlight') as HTMLElement | null;
+      const gutter = root?.querySelector('.nova-code-gutter') as HTMLElement | null;
+      if (pre) {
+        pre.scrollTop = ta.scrollTop;
+        pre.scrollLeft = ta.scrollLeft;
+      }
+      if (gutter) gutter.scrollTop = ta.scrollTop;
+    };
+
     useEffect(() => {
       if (!jumpLine || jumpLine < 1) return;
-      const root = typeof ref === 'object' && ref?.current ? ref.current : null;
+      const root = localRef.current;
       if (!root) return;
       root.scrollTop = Math.max(0, (jumpLine - 1) * 20 - 40);
       try {
@@ -44,23 +67,27 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
       } catch {
         /* ignore */
       }
-    }, [jumpLine, path, ref, value]);
+    }, [jumpLine, path, value]);
 
-    // Keep highlighted layer + gutter locked to the textarea when value grows (live write).
+    // Pin viewport to the growing end while Live types / craft streams.
     useEffect(() => {
-      if (!readOnly) return;
-      const ta = typeof ref === 'object' && ref?.current ? ref.current : null;
-      if (!ta) return;
-      const root = ta.parentElement;
-      const pre = root?.querySelector('.nova-code-highlight') as HTMLElement | null;
-      const gutter = root?.querySelector('.nova-code-gutter') as HTMLElement | null;
-      ta.scrollTop = ta.scrollHeight;
-      if (pre) {
-        pre.scrollTop = ta.scrollTop;
-        pre.scrollLeft = ta.scrollLeft;
-      }
-      if (gutter) gutter.scrollTop = ta.scrollTop;
-    }, [value, path, readOnly, ref]);
+      if (!followTail && !readOnly) return;
+      let cancelled = false;
+      const run = () => {
+        if (cancelled) return;
+        scrollToTail();
+      };
+      // Double rAF — wait until highlight + textarea layout finish after value paint.
+      const id = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(run);
+      });
+      const t = window.setTimeout(run, 32);
+      return () => {
+        cancelled = true;
+        window.cancelAnimationFrame(id);
+        window.clearTimeout(t);
+      };
+    }, [paintValue, path, readOnly, followTail, lineCount]);
 
     return (
       <div className="nova-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
@@ -75,7 +102,7 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
           dangerouslySetInnerHTML={{ __html: `${highlighted}\n` }}
         />
         <textarea
-          ref={ref}
+          ref={setTaRef}
           data-nova-code-editor=""
           value={paintValue}
           readOnly={readOnly || truncated}

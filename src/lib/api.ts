@@ -22,7 +22,6 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'llama32-3b',
   'qwen25-coder-7b',
   'qwen25-coder-14b',
-  'qwen25-coder-32b',
   'deepseek-coder-v2-lite',
   'starcoder2-7b',
   'uigen-fx-4b',

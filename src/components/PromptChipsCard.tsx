@@ -11,7 +11,7 @@ export function PromptChipsCard({
   onPick: (prompt: string) => void;
 }) {
   return (
-    <div className="space-y-3 text-[13px] leading-relaxed">
+    <div className="space-y-3 text-base leading-relaxed">
       {body ? <ChatMarkdown text={body} /> : null}
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5 pt-0.5">

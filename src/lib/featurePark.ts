@@ -88,3 +88,11 @@ export function isBetaSettingsEnabled(): boolean {
 export function isCodeTabEnabled(): boolean {
   return false;
 }
+
+/**
+ * Debug composer mode — shown in the + menu but parked (Coming Soon), same idea as
+ * Message / Networking. Flip to false when Debug clinic is ready for users again.
+ */
+export function isDebugComposerParked(): boolean {
+  return true;
+}

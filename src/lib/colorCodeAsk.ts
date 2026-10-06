@@ -42,6 +42,14 @@ const NAMED_HEX: Array<[RegExp, string, string]> = [
 export function looksLikeColorCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length > 160) return false;
+  // Memory plant / recall — stay in normal chat so the thread can remember.
+  if (
+    /\b(?:remember\s+this|for\s+later|did\s+i\s+tell|i\s+told\s+you|you\s+(?:said|told|suggested|recommend|gave)|earlier|before\s+this|what\s+(?:accent\s+)?(?:color|colour|hex).{0,40}(?:earlier|before|i\s+told|i\s+asked|did\s+i))\b/i.test(t)
+    || /\bmy\s+(?:favorite|favourite)\s+(?:accent\s+)?(?:color|colour)\b/i.test(t)
+    || /\bremember\b[\s\S]{0,48}\b(?:color|colour|hex)\b[\s\S]{0,40}\b(?:earlier|before|i\s+asked)\b/i.test(t)
+  ) {
+    return false;
+  }
   // Project/UI edit asks stay on the edit path.
   if (/\b(?:background|button|header|banner|css|change|make|set|use)\b/i.test(t)
     && /\b(?:color|colour)\b/i.test(t)

@@ -262,6 +262,23 @@ export function getBoundStudio(chatId: string): BoundStudio | null {
 
 export function loadChatStudio(chatId: string): ChatStudioSnapshot | null {
   if (!chatId) return null;
+  // Debounced saves: prefer in-memory pending so callers never see a false miss.
+  const pending = studioPersistPending.get(chatId);
+  if (pending) {
+    const files = pending.files || {};
+    const hasFiles = Object.keys(files).length > 0;
+    const hasRoot = Boolean(pending.diskRoot);
+    if (hasFiles || hasRoot) {
+      return {
+        files,
+        projectId: pending.projectId || null,
+        name: pending.name || undefined,
+        diskRoot: pending.diskRoot || null,
+        previewUrl: pending.previewUrl || null,
+        savedAt: Date.now(),
+      };
+    }
+  }
   try {
     const raw = localStorage.getItem(chatStudioKey(chatId));
     if (!raw) return null;
@@ -285,6 +302,10 @@ export function loadChatStudio(chatId: string): ChatStudioSnapshot | null {
 
 export function clearChatStudio(chatId: string) {
   if (!chatId) return;
+  studioPersistPending.delete(chatId);
+  const t = studioPersistTimers.get(chatId);
+  if (t) clearTimeout(t);
+  studioPersistTimers.delete(chatId);
   try {
     localStorage.removeItem(chatStudioKey(chatId));
   } catch {

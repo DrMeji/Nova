@@ -25,9 +25,13 @@ const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
   { size: 175, colorClass: 'auth-orb-tone-g' },
   { size: 210, colorClass: 'auth-orb-tone-h' },
   { size: 165, colorClass: 'auth-orb-tone-i' },
+  // Three extras — one large, two smaller mixed sizes.
+  { size: 340, colorClass: 'auth-orb-tone-j' },
+  { size: 185, colorClass: 'auth-orb-tone-k' },
+  { size: 125, colorClass: 'auth-orb-tone-l' },
 ];
 
-/** App shell uses all nine solid bouncing circles. */
+/** App shell uses all twelve solid bouncing circles. */
 const APP_ORB_SETUP = ORB_SETUP;
 
 const SPEED_MIN = 0.28;

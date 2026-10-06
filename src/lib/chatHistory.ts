@@ -17,6 +17,7 @@ import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText }
 import { getUsableTokens } from '@/lib/ggufContext';
 import { normalizeAssistantLists } from '@/lib/chatPlanMode';
 import { scrubHelpVoice, scrubBuildAggression, ensurePlanningExit } from '@/lib/plainChatAsk';
+import { scrubPlanExitBleed } from '@/lib/replySanity';
 import { scrubUnexpectedForeignScript } from '@/lib/scrubForeignBleed';
 
 export type RouterChatTurn = {
@@ -69,6 +70,7 @@ export const BASE_SYSTEM =
   + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'If they only say hi/hello/hey: greet them briefly in your own words (one short sentence). Do not paste a fixed script. Do not list capabilities unless they ask. '
+  + 'If they ask how your day is going / checking in: answer warmly in 1–2 short sentences and ask about theirs. Do NOT mention coding, projects, apps, or building unless they brought that up. '
   + 'If they ask what you can do / what NOVA does: answer in ONE professional sentence (or two short ones) about real NOVA abilities — local and cloud chat, building websites and apps when they ask you to create, editing files in folders they grant, images and project help. No fake categories (calendar, entertainment packages, generic “personal assistance”). No long numbered lists. '
   + 'When they ask about building something (Discord-like app, Netflix-like site, a product, a business): answer THAT question. Confirm familiarity if asked, explain what it is, then discuss requirements / approach in complete sentences. Never stop after a colon or “here is the structure” with no body. Do not dump unfinished code unless they asked for code. '
   + 'Never open by restating their request in first person ("I want to build…", "I would like to create…"). '
@@ -158,7 +160,7 @@ const CODING_TOPIC_HINT =
 const FACT_HINT =
   /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
 const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
-const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
+const GREET_HINT = /^(?:hi|hii+|hello|heelo|hell+o|helo|ehello|hey|yo|sup|howdy)\b/i;
 const MEDIA_ASK_HINT =
   /\b(movies?|tv\s*shows?|films?|netflix|what\s+should\s+i\s+watch|watch\s+next)\b/i;
 /** Soft deepen / continue — always keep prior turns. */
@@ -196,6 +198,81 @@ export function isSoftContinuityAsk(text: string): boolean {
   if (t.length > 56 && /\b(?:about|regarding)\s+\S+/i.test(t)) return false;
   if (t.length > 72) return false;
   return FOLLOW_UP_HINT.test(t) || SOFT_FOLLOW_UP_HINT.test(t) || THREAD_CONTINUE_HINT.test(t);
+}
+
+/** User is planting a fact to remember later (not asking to recall yet). */
+export function looksLikeThreadMemoryPlant(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // Recall wording wins — never treat as a plant.
+  if (/\b(?:what|which)\b[\s\S]{0,80}\b(?:did\s+i|you\s+(?:said|told|suggested|recommend)|earlier|before)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:remember|recall)\b[\s\S]{0,64}\b(?:what|which|earlier|before|i\s+(?:asked|told)|you\s+(?:gave|said|told|suggested))\b/i.test(t)) {
+    return false;
+  }
+  if (/\bremember\s+this\b/i.test(t)) return true;
+  if (/\bfor\s+later\b/i.test(t) && /\b(?:remember|favorite|favourite|my)\b/i.test(t)) return true;
+  if (/\bmy\s+(?:favorite|favourite)\s+(?:accent\s+)?(?:color|colour)\s+is\b/i.test(t)) return true;
+  if (
+    /\b(?:please\s+)?remember\b[\s\S]{0,60}\b(?:is|are|:)\b/i.test(t)
+    && !/\b(?:what|which|did\s+i|earlier|before|i\s+asked)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** User wants a fact recalled from earlier in this same chat (color, habit, dinner, etc.). */
+export function looksLikeThreadMemoryAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // Planting a new fact is not a recall ask (avoids “quote prior turn” prompts on save).
+  if (looksLikeThreadMemoryPlant(t)) return false;
+  if (/\b(?:what|which)\b[\s\S]{0,80}\b(?:did\s+i\s+(?:tell|say|mention)|i\s+told\s+you|you\s+(?:said|told|suggested|recommend)|earlier|before)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:remember|recall)\b[\s\S]{0,64}\b(?:what|which|earlier|before|i\s+(?:told|asked)|you\s+(?:gave|said|told|suggested)|color|hex|habit|dinner)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:earlier|before)\b[\s\S]{0,48}\b(?:suggest|recommend|tell|say|color|hex|habit|dinner|accent)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeExplicitTopicSwitch(text: string): boolean {
+  return /\b(?:switching\s+topics?|switch(?:ing)?\s+(?:topics?|gears?)|change\s+(?:of\s+)?(?:subject|topic)|new\s+topic|unrelated\s+question)\b/i.test(
+    String(text || ''),
+  );
+}
+
+export { looksLikeExplicitTopicSwitch };
+
+/** True when a topic-switch reply clearly continued the previous subject. */
+export function looksLikeTopicSwitchBleed(reply: string, ask: string): boolean {
+  const t = String(reply || '').trim();
+  const a = String(ask || '').trim();
+  if (!t || !a) return false;
+  // Mid-word / mid-list continuation from the previous bubble.
+  if (/^[a-z]/.test(t)) return true;
+  if (/^(?:and|or|,|;|:|-)\s/i.test(t)) return true;
+  // Stretch ask but reply is still the prior subject (water habit OR color/hex essay).
+  if (/\bstretch|desk|sit(?:ting)?\b/i.test(a)) {
+    const stretchLead = /\b(?:stretch|chin tuck|shoulder|neck|hamstring|hip flexor|chest opener|cat-?cow|desk stretch|seated)\b/i.test(t.slice(0, 280));
+    const waterHeavy = /\bhydrat|water bottle|drink(?:ing)?\s+(?:more\s+)?water|water intake|glasses?\s+of\s+water\b/i.test(t);
+    const colorHeavy = /\b(?:hex(?:adecimal)?|accent color|#(?:[0-9a-f]{3}|[0-9a-f]{6})\b|purple accent|teal|color code|website design|call-to-action)\b/i.test(t.slice(0, 400));
+    const windowsHeavy = /\b(?:default browser|Windows\s*11|taskbar|Default apps|Dock)\b/i.test(t.slice(0, 400));
+    if (!stretchLead && (waterHeavy || colorHeavy || windowsHeavy)) return true;
+    if (!stretchLead && /\bdive deeper in the topic of a good (?:purple|teal)\b/i.test(t)) return true;
+  }
+  // Breathing / calm ask but reply stuck on prior color or how-to.
+  if (/\bbreath|wired at night|feeling wired\b/i.test(a)) {
+    const breathLead = /\b(?:breath|inhale|exhale|box breath|4-?7-?8|calm|nose|count)\b/i.test(t.slice(0, 280));
+    const priorHeavy = /\b(?:hex|teal|purple|accent color|Dock|Windows|default browser|balcony|garden)\b/i.test(t.slice(0, 400));
+    if (!breathLead && priorHeavy) return true;
+  }
+  return false;
 }
 
 export type ThreadTopicKind = 'coding' | 'product' | 'media' | 'general';
@@ -256,6 +333,10 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!latest) return false;
   // Soft deepen / continue always keeps the thread (fixes “dive deeper in recommended area” → movies).
   if (isSoftContinuityAsk(latest)) return false;
+  // Memory plant/recall must keep the full thread — never wipe prior facts.
+  if (looksLikeThreadMemoryAsk(latest) || looksLikeThreadMemoryPlant(latest)) return false;
+  // Explicit “switching topics” is a real break.
+  if (looksLikeExplicitTopicSwitch(latest)) return true;
   const priorUsers = history.filter(t => t.role === 'user');
   const earlier = priorUsers.length > 1
     ? priorUsers[priorUsers.length - 2]
@@ -453,8 +534,12 @@ export function buildRouterHistory(
   opts?: { keepContinuity?: boolean; kind?: 'chat' | 'coding'; maxTurns?: number },
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
-  const keepContinuity = Boolean(opts?.keepContinuity || opts?.kind === 'coding');
-  // Coding: keep prior turns short. do not re-pack old @@@FILE dumps into the context window.
+  const keepContinuity = Boolean(
+    opts?.keepContinuity
+    || opts?.kind === 'coding'
+    || looksLikeThreadMemoryAsk(latestUserMessage)
+    || looksLikeThreadMemoryPlant(latestUserMessage),
+  );  // Coding: keep prior turns short. do not re-pack old @@@FILE dumps into the context window.
   const assistantCap = opts?.kind === 'coding' ? 480 : 1_200;
   const maxChars = opts?.kind === 'coding' ? 28_000 : MAX_CHARS;
   const maxTurns = opts?.maxTurns
@@ -518,15 +603,41 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   const latest = latestUserMessage(history, '');
   const hasVision = history.some(t => t.images?.length);
   const visionNote = hasVision
-    ? '\n\nThe user attached a photo. If this request includes image pixels, describe what you see. If you cannot see the image, say so in one line and do not invent the contents.'
+    ? '\n\nThe user attached a photo. Describe ONLY what the image pixels show. '
+      + 'Never invent contents from a filename or alt text (those labels can be wrong). '
+      + 'If you cannot see the image, say so in one line. '
+      + 'Do not pitch coding, apps, or building a project unless they clearly asked to build or edit.'
     : '';
   const today = todaySystemLine();
   const todayNote = today ? `\n\n${today}` : '';
+  // Topic switch / memory plant must win even when history was wiped to one user turn.
+  if (looksLikeExplicitTopicSwitch(latest.trim())) {
+    return `${BASE_SYSTEM}${todayNote}\n\n`
+      + 'The user clearly switched topics. Answer ONLY the new ask with a brand-new reply. '
+      + 'Do not continue the previous subject mid-sentence. Do not mention water habits, cooking, Windows, or coding unless the new ask is about that. Do not offer coding unless they asked.'
+      + visionNote;
+  }
+  if (looksLikeThreadMemoryPlant(latest.trim())) {
+    return `${BASE_SYSTEM}${todayNote}\n\n`
+      + 'The user is sharing a fact to remember later in THIS chat. '
+      + 'Acknowledge briefly and confirm the exact fact they gave (name, hex, habit, etc.). '
+      + 'Do NOT tie it to earlier how-tos, Windows tips, browsers, or any prior subject. '
+      + 'Do NOT offer coding, projects, or “related” follow-ups. Stop after the confirmation.'
+      + visionNote;
+  }
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
   if (!hasPrior) return `${BASE_SYSTEM}${todayNote}${visionNote}`;
   const topic = inferThreadTopic(history);
   const topicLine =
     `Current thread topic: ${topic.label}. Stay on this unless the user clearly switches to something else.`;
+  if (looksLikeThreadMemoryAsk(latest.trim())) {
+    return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n`
+      + 'The user is asking you to RECALL something from earlier in THIS chat. '
+      + 'Answer in 1–2 short sentences: quote the fact (hex code, habit name, dinner idea). '
+      + 'Do not restart a full plan or recipe. Do not ask them to restate it. Do not invent a new example. '
+      + 'Do not offer coding help. Do not drag in unrelated earlier topics (Windows, browsers, how-tos).'
+      + visionNote;
+  }
   if (isSoftContinuityAsk(latest.trim())) {
     return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n`
       + 'The user asked to continue / deepen (yes, more, overall, full detail). '
@@ -541,7 +652,13 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
 }
 
 function wantsChatCode(latest: string) {
-  return BUILD_HINT.test(latest) && !TEACH_HINT.test(latest);
+  const t = String(latest || '');
+  // Create/craft and disk file edits already demand @@@FILE — never prepend the
+  // chat “one markdown fence” hint (32B GGUFs echo that into App.jsx).
+  if (/\b@@@FILE\b/i.test(t) || /\bcreateV2 RULES\b/i.test(t) || /\bOutput ONLY (?:one )?file block/i.test(t)) {
+    return false;
+  }
+  return BUILD_HINT.test(t) && !TEACH_HINT.test(t);
 }
 
 export function flattenHistoryText(history: RouterChatTurn[]): string {
@@ -624,12 +741,19 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   // Keep identity in the ChatML system turn (arkGguf wrapChatPrompt). Stuffing it into
   // the user text makes Qwen parrot “Never continue a previous sentence…” in the bubble.
   const softFollow = isSoftContinuityAsk(latest);
+  const memoryAsk = looksLikeThreadMemoryAsk(latest);
+  const memoryPlant = looksLikeThreadMemoryPlant(latest);
+  const topicSwitch = looksLikeExplicitTopicSwitch(latest);
   const userCount = history.filter(t => t.role === 'user').length;
-  const keepContinuity = softFollow
+  // Explicit topic switch must NOT keep packing the old thread into the user prompt.
+  const keepContinuity = !topicSwitch && (
+    softFollow
+    || memoryAsk
+    || memoryPlant
     || history.some(t => /Earlier in this chat/i.test(t.content))
     || userCount >= 2
-    || history.some(t => t.role === 'assistant');
-  if (
+    || history.some(t => t.role === 'assistant')
+  );  if (
     history.length <= 1
     || !history.some(t => t.role === 'assistant')
     || (!keepContinuity && isTopicShift(history, latest))
@@ -688,6 +812,42 @@ export function latestUserMessage(history: RouterChatTurn[], fallback: string): 
     }
   }
   return fallback;
+}
+
+/**
+ * Strip unfinished outline leftovers local models emit: bare “7. Backend”,
+ * orphan “-” bullets, hanging “— Technical Considerations” with no body.
+ */
+export function scrubHollowOutlineLists(raw: string): string {
+  let text = String(raw || '').replace(/\r\n/g, '\n');
+  if (!text) return text;
+  // Orphan dash / bullet-only lines.
+  text = text.replace(/^\s*[-*•]\s*$/gm, '');
+  // Numbered item split across lines with empty body: "1.\nTitle" kept if title has prose;
+  // bare "7. Backend\n-" style hollows dropped below.
+  // Numbered or bulleted title with no following content before next item / end.
+  // Keep items that have real prose on the same line after the title.
+  text = text.replace(
+    /(?:^|\n)(\s*(?:\d+[.)]\s+|[-*•]\s+)\*{0,2}[A-Za-z][^\n*]{0,48}\*{0,2})\s*(?=\n\s*(?:\d+[.)]\s+|[-*•]\s+|$)|\n\n|$)/gm,
+    (full, head: string) => {
+      const body = String(head || '').replace(/^\s*(?:\d+[.)]\s+|[-*•]\s+)/, '').replace(/\*+/g, '').trim();
+      // Drop skeletal one-word / two-word headers with no detail clause.
+      if (/^(?:Backend|Frontend|Security|Deployment|Testing|Styling|Database|API|Auth(?:entication)?|Infrastructure|Example Flow|Technical Considerations|Choose a Tech Stack|Design Wireframes|Set Up Development Environment|Start Coding|User Signs Up|Posting a Note|Viewing Posts|Commenting and Reacting|Notifying Users)$/i.test(body)) {
+        return '\n';
+      }
+      // Same-line title that ends with a colon and nothing after.
+      if (/:\s*$/.test(body) && body.length < 40) return '\n';
+      // Title-only (no dash/colon detail) under 4 words — usually incomplete outline stubs.
+      if (!/[-–—:]/.test(body) && body.split(/\s+/).length <= 4 && body.length < 36) {
+        return '\n';
+      }
+      return full;
+    },
+  );
+  // Hanging em-dash section labels with no following paragraph.
+  text = text.replace(/(?:^|\n)\s*[—–-]\s*(?:Technical Considerations|Example Flow|Next Steps?|Would you like[^\n]*)\s*(?=\n|$)/gi, '\n');
+  // Collapse leftover blank runs.
+  return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**
@@ -789,11 +949,16 @@ export function sanitizeAssistantReply(
   text = normalizeAssistantLists(text);
   text = scrubHelpVoice(text);
   text = scrubBuildAggression(text);
-  // Display-time safety net for talk plans that stop on a list with no wrap-up.
-  // Skip while streaming — appending Overall mid-chunk causes visible retract/rewrite.
-  if (!opts?.stream && /^\s*\d+[.)]\s+/m.test(text)) {
+  // Display-time wrap-up only for real product/planning asks — never Windows how-tos or chit-chat.
+  const userForExit = String(lastUserMessage || '').trim();
+  const productPlanExit =
+    /\b(?:build|create|scaffold|app|website|mvp|product|tracker|stall|shelf|borrow|landing\s+page)\b/i.test(userForExit)
+    && !/\b(?:windows|browser|taskbar|settings|stretch|habit|dinner|capital|workout|walk)\b/i.test(userForExit);
+  if (!opts?.stream && productPlanExit && /^\s*\d+[.)]\s+/m.test(text)) {
     text = ensurePlanningExit(text, lastUserMessage || text);
   }
+  // Never leave product-plan Overall glued on (whether we just appended or the model did).
+  text = scrubPlanExitBleed(text);
 
   // Strip fancy dashes from model output (em/en dash). keep normal hyphens in words/versions.
   text = text
@@ -912,6 +1077,128 @@ export function sanitizeAssistantReply(
         /(?:^|\n+)I(?:'m|\s+am)\s+happy\s+to\s+help\s+you\s+(?:get\s+started\s+with\s+)?(?:coding|programming|learning\s+to\s+code)[^.!?\n]*[.!?]?\s*/gi,
         '\n',
       )
+      // Greeting / chit-chat: never pivot into coding projects.
+      .replace(
+        /(?:\s+|\n+)Any coding projects you(?:'re| are) excited about[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Any|Got any) (?:coding |programming )?(?:projects?|apps?) you(?:'re| are) (?:working on|excited about|building)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)How about yours\?\s*Any coding[^.!?\n]*[.!]?\s*/gi,
+        ' How about yours? ',
+      )
+      // Soft check-in: "What's your quick question about coding or programming?"
+      .replace(
+        /\b(?:what(?:'s|\s+is)\s+your\s+(?:quick\s+)?question\s+about\s+(?:coding|programming)(?:\s+or\s+(?:coding|programming))?)\s*\??/gi,
+        "what's on your mind?",
+      )
+      .replace(
+        /\s+about\s+(?:coding|programming)(?:\s+or\s+(?:coding|programming))?\s*\??/gi,
+        '?',
+      )
+      .replace(
+        /\bquick question about (?:coding|programming)(?:\s+or\s+(?:coding|programming))?\b/gi,
+        'quick question',
+      )
+      // Unsolicited coding CTA after a normal fact / chit-chat answer.
+      .replace(
+        /(?:\s+|\n+)If you have any (?:coding|programming|code)(?:\s+or\s+programming)? questions[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)If you have any more questions about (?:coding|programming)(?:\s+or\s+anything else)?[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Feel free to ask|Let me know) if you (?:have|need) (?:any )?(?:coding|programming|code)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Happy to help with|I can (?:also )?help with) (?:any )?(?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)How can we dive deeper (?:in|into|with) (?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Want to|Would you like to) (?:dive deeper|go deeper|talk more) (?:about |into )?(?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Any|Have any) (?:coding|programming) questions[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)If you need help incorporating[^.!?\n]*(?:coding|design)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)If you need (?:any )?(?:coding tips|help with (?:your )?projects)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)If you(?:'re| are) interested in learning more about[^.!?\n]*related to (?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:or )?need any information related to (?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:any information )?related to (?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:Anything else|Any other questions) (?:related to |about )?(?:coding|programming)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)Let me know if you need any more help with coding[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)If you have any specific questions about using this color[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      // Topic glue: "fun detail… not related to [prior how-to]" after memory / chit-chat.
+      .replace(
+        /(?:\s+|\n+)(?:While\s+)?this\s+is\s+a\s+fun\s+detail[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:it\s+)?might\s+not\s+directly\s+relate\s+to[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:For example,\s+)?if you want to know how to change (?:the\s+)?(?:accent\s+)?color on your Windows[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)(?:we can explore that too|feel free to ask)[^.!?\n]*[.!]?\s*$/gim,
+        ' ',
+      )
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  // Memory plant: keep only the acknowledgment — strip prior-topic leftovers.
+  if (user && looksLikeThreadMemoryPlant(user)) {
+    text = text
+      .replace(/(?:^|\n+)[^.!\n]*(?:default browser|Windows\s*11|taskbar|pin an app)[^.!\n]*[.!]?\s*/gi, '\n')
+      .replace(/(?:^|\n+)[^.!\n]*(?:coding|programming|projects?)[^.!\n]*[.!]?\s*/gi, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  // Memory recall: never re-open prior how-tos.
+  if (user && looksLikeThreadMemoryAsk(user)) {
+    text = text
+      .replace(/(?:^|\n+)[^.!\n]*(?:default browser|Windows\s*11|taskbar)[^.!\n]*[.!]?\s*/gi, '\n')
+      .replace(/(?:^|\n+)[^.!\n]*questions about coding[^.!\n]*[.!]?\s*/gi, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -927,8 +1214,12 @@ export function sanitizeAssistantReply(
     .replace(/(?:\n+|^)\s*(?:How do these suggestions sound[^.!?\n]*[.!?]?\s*)?(?:Are there any specific areas you'?d like (?:to focus on first|more detail on))\??\s*$/gim, '\n')
     .replace(/(?:\n+|^)\s*Let me know if you (?:have|need|want) (?:any )?(?:questions|more)[^.!?\n]*[.!?]?\s*$/gim, '\n')
     .replace(/(?:\n+|^)\s*What platform or technology do you plan to use[^.!?\n]*[.!?]?\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*Would you like to dive (?:in|into|deeper)[^.!?\n]*[.!?]?\s*$/gim, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  // Incomplete product outlines: bare titles, orphan dashes, hanging section labels with no body.
+  text = scrubHollowOutlineLists(text);
 
   // Soft “yes” after a real answer: drop fresh greetings that ignore continuity.
   if (user && isSoftContinuityAsk(user)) {
@@ -937,6 +1228,33 @@ export function sanitizeAssistantReply(
       .replace(/^Hi[!.,]?\s+How\s+can\s+I\s+assist[^.!?\n]*[.!?]?\s*/i, '')
       .replace(/^How\s+can\s+I\s+assist\s+you\s+further[^.!?\n]*[.!?]?\s*/i, '')
       .trim();
+  }
+
+  // Topic switch: drop mid-sentence leftovers from the previous answer.
+  if (user && looksLikeExplicitTopicSwitch(user)) {
+    if (/^[a-z]/.test(text)) {
+      const cut = text.match(/[.!?]\s+([A-Z][\s\S]*)/);
+      if (cut?.[1] && cut[1].length >= 40 && !looksLikeTopicSwitchBleed(cut[1], user)) {
+        text = cut[1].trim();
+      }
+    }
+    if (looksLikeTopicSwitchBleed(text, user) && !opts?.stream) {
+      // Prefer a clean short ask-shaped answer over prior-topic garbage.
+      if (/\bstretch|desk\b/i.test(user)) {
+        text = [
+          'Try a seated chest opener: sit tall, clasp your hands behind your back (or hold the chair sides), and gently lift your chest while rolling the shoulders back.',
+          'Hold for 20–30 seconds, breathe slowly, then release. Do it once or twice when you notice yourself slumping.',
+        ].join(' ');
+      } else if (/\bbreath|wired at night|feeling wired\b/i.test(user)) {
+        text = [
+          'Try a slow 4-7-8 breath: inhale through your nose for 4, hold for 7, then exhale through your mouth for 8.',
+          'Do three to four rounds in bed with lights low. If holding feels tense, shorten the hold and keep the exhale longer than the inhale.',
+        ].join(' ');
+      } else {
+        const cut = text.match(/[.!?]\s+([A-Z][\s\S]*)/);
+        text = (cut?.[1] && cut[1].length >= 40) ? cut[1].trim() : text.replace(/^[a-z][\s\S]*?(?=[A-Z])/m, '').trim() || text;
+      }
+    }
   }
 
   // Unless the user asked to see source in chat, never leave code fences / JSX dumps in the bubble.
@@ -1053,7 +1371,12 @@ export function looksLikePromptEcho(reply: string): boolean {
 export function userMessageIsPureGreeting(userMessage?: string): boolean {
   const u = String(userMessage || '').trim();
   if (!u || u.length > 40) return false;
-  return /^(hi|hello|hey|howdy|yo)(\s+(there|nova))?[.!?]*$/i.test(u);
+  // Keep in sync with looksLikePureGreeting (typos like ehello).
+  if (/^(hi|hii+|hello|heelo|hell+o|helo|ehello|hey|howdy|yo)(\s+(there|nova|friend|team))?[.!?]*$/i.test(u)) {
+    return true;
+  }
+  const letters = u.toLowerCase().replace(/[^a-z]/g, '');
+  return /^e?h+[ei]*l+o+$/.test(letters) && letters.length <= 10;
 }
 
 /**

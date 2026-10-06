@@ -141,8 +141,39 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   // Explicit disk-apply asks always count as edits (even when phrasing is feature-heavy).
   if (/\bapply\b[\s\S]{0,80}\b(?:edits?|changes?|this|them|it)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t)) return true;
   if (/\b(?:edits?|changes?)\s+on\s+disk\b/i.test(t) && /\b(?:apply|save|write|patch)\b/i.test(t)) return true;
-  if (/\b(add|put|place|move|insert|create|drop|fold)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero|badge|avatar|chip|bar|indicator)\b/i.test(t)
+  if (/\b(add|put|place|move|insert|create|drop|fold|nudge|shift|lower)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero|badge|avatar|chip|bar|indicator|card|cards|cart|headline|heading|row|grid)\b/i.test(t)
   ) {
+    return true;
+  }
+  // Layout spacing on a bound project — never teach the user to do it themselves.
+  if (
+    /\b(?:move|shift|nudge|lower|raise)\b/i.test(t)
+    && /\b(?:card|cards|section|content|row|grid|list)\b/i.test(t)
+    && /\b(?:lower|down|below|breathing|space|spacing|margin|crowd|under|headline|heading)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Bound shop / UI polish — apply on disk, never teach-mode chat.
+  if (
+    /\bsticky\b/i.test(t)
+    && /\b(?:top\s*bar|header|nav|cart)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    (/\b(?:shadow|rounded|border-radius)\b/i.test(t) && /\b(?:card|corner|soft)\b/i.test(t))
+    || (/\b(?:grid|three\s+across|responsive)\b/i.test(t) && /\b(?:card|cards|plant)\b/i.test(t))
+    || (/\bdescription\b/i.test(t) && /\b(?:card|plant|under\s+the\s+name)\b/i.test(t))
+    || (/\b(?:heading|headline)\b/i.test(t) && /\b(?:drop|add|say|saying|middle)\b/i.test(t))
+    || (/\btypography\b/i.test(t) || (/\btighten\b/i.test(t) && /\b(?:type|font|heading|spacing)\b/i.test(t)))
+    || (/\bcart\b/i.test(t) && /\b(?:empty|Escape|click\s+outside|drawer|close)\b/i.test(t))
+    || (/\bfilter\b/i.test(t) && /\b(?:All|Vegetables|Herbs|Leafy|plant)\b/i.test(t))
+    || (/\b(?:quantity|stepper|qty)\b/i.test(t) && /\b(?:card|plant|cart|minus|plus)\b/i.test(t))
+  ) {
+    return true;
+  }
+  if (/\b(?:give|lay|close|make|keep|expand|show)\b/i.test(t)
+    && /\b(?:card|cards|cart|grid|bar|drawer|filter|description|plant)\b/i.test(t)) {
     return true;
   }
   if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab|footer|copyright|line|text|link|icon|panel|clutter|sidebar|hud|indicator)\b/i.test(t)) {

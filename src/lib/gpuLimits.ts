@@ -45,8 +45,8 @@ export function maxCoderParamsBForVram(vramGb: number | null | undefined): numbe
   if (v < 4) return 0;
   if (v < 6) return 3;
   if (v < 12) return 7;
-  if (v < 20) return 14;
-  return 32;
+  // Create-safe ceiling: 14B. Larger GGUFs stall craft/polish even on high VRAM.
+  return 14;
 }
 
 export function estimateGgufGb(paramsB: number, quant: GgufQuant = 'Q4_K_M'): number {

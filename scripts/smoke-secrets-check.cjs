@@ -46,7 +46,18 @@ function walk(dir, hits) {
       continue;
     }
     if (SECRET_BASENAMES.has(name) && !/\.example$/i.test(name)) {
-      hits.push(path.relative(root, path.join(dir, name)));
+      const abs = path.join(dir, name);
+      // Local gitignored env files are fine on a dev machine — only fail if tracked.
+      try {
+        const { execFileSync } = require('child_process');
+        const tracked = execFileSync('git', ['ls-files', '--error-unmatch', abs], {
+          cwd: root,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        if (tracked) hits.push(path.relative(root, abs));
+      } catch {
+        /* untracked / gitignored — ok */
+      }
     }
   }
 }

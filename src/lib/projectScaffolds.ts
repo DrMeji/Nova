@@ -153,31 +153,22 @@ createRoot(document.getElementById('root')${preferTs ? '!' : ''}).render(
       path: `src/App.${appExt}`,
       content: `import './App.css';
 
+/** Bare Vite mount — craft owns the product UI (no phone-column title stub). */
 export default function App() {
-  return (
-    <div className="app">
-      <h1 className="title">${title.replace(/[`$\\]/g, '')}</h1>
-    </div>
-  );
+  return <div className="app" id="root-app" />;
 }
 `,
     },
     {
       path: 'src/App.css',
-      content: `.app {
+      content: `/* Bare shell — craft fills layout. Do not center a title stub. */
+.app {
   min-height: 100vh;
   margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  display: block;
   background: #0f1419;
   color: #f4f7fb;
-}
-.title {
-  margin: 0;
-  font-size: clamp(1.8rem, 5vw, 3rem);
-  font-weight: 650;
-  letter-spacing: -0.03em;
 }
 `,
     },

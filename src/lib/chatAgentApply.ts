@@ -29,6 +29,9 @@ export type ChatApplyResult = {
   files: ProjectFileMap;
   reply: string;
   error?: string;
+  /** Set when App.jsx still fails the Live syntax gate after heal — callers must not say Done. */
+  syntaxFailed?: boolean;
+  syntaxReasons?: string[];
 };
 
 function joinDisk(root: string, rel: string): string {
@@ -366,6 +369,35 @@ export async function applyChatReplyEdits(opts: {
     for (const key of Object.keys(next)) delete next[key];
     Object.assign(next, twin.files);
   }
+  // Family anti-bleed (all edit/apply paths) — strip COVER / orphan products.ts without inventing UI.
+  {
+    const hasViteApp = Object.keys(next).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')));
+    if (hasViteApp) {
+      try {
+        const { buildProductPlan, antiBleedForFamily } = await import('@/lib/createProductPlan');
+        const plan = buildProductPlan(rawUser, opts.projectName || '');
+        const bled = antiBleedForFamily(next, plan);
+        if (bled.changed) {
+          const hadProducts = Boolean(next['src/data/products.ts']);
+          for (const key of Object.keys(next)) {
+            if (!Object.prototype.hasOwnProperty.call(bled.files, key)) {
+              delete next[key];
+              if (!twinRemoved.includes(key)) twinRemoved.push(key);
+            }
+          }
+          Object.assign(next, bled.files);
+          for (const key of Object.keys(bled.files)) {
+            if (typeof next[key] === 'string' && !changed.includes(key)) changed.push(key);
+          }
+          if (hadProducts && !bled.files['src/data/products.ts'] && !twinRemoved.includes('src/data/products.ts')) {
+            twinRemoved.push('src/data/products.ts');
+          }
+        }
+      } catch {
+        /* anti-bleed best-effort */
+      }
+    }
+  }
   // Hard reject accidental NOVA search-chrome stubs on Vite App.jsx (piece builds / black shell).
   {
     const searchWanted = /\bsearch\s*bar\b/i.test(rawUser)
@@ -394,6 +426,33 @@ export async function applyChatReplyEdits(opts: {
       }
     }
   }
+  // Heal App.jsx compile crashers before Live sees them (edit path used to skip create's gate).
+  let syntaxFailed = false;
+  let syntaxReasons: string[] = [];
+  {
+    const hasViteApp = Object.keys(next).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')));
+    if (hasViteApp) {
+      try {
+        const { runCreateSyntaxGate } = await import('@/lib/createSyntaxGate');
+        const syn = runCreateSyntaxGate(next);
+        Object.assign(next, syn.files);
+        if (syn.healed) {
+          for (const key of Object.keys(syn.files)) {
+            if (/(^|\/)src\/App\.(jsx|tsx|css)$/i.test(key.replace(/\\/g, '/')) && !changed.includes(key)) {
+              changed.push(key);
+            }
+          }
+        }
+        if (!syn.ok) {
+          syntaxFailed = true;
+          syntaxReasons = syn.reasons || [];
+        }
+      } catch {
+        /* syntax gate best-effort */
+      }
+    }
+  }
+
   const payloadFiles = Object.fromEntries(
     changed.filter((p: string) => typeof next[p] === 'string').map((p: string) => [p, next[p]]),
   );
@@ -509,6 +568,7 @@ export async function applyChatReplyEdits(opts: {
     deleted,
     files: next,
     reply,
+    ...(syntaxFailed ? { syntaxFailed: true, syntaxReasons } : {}),
   };
 }
 

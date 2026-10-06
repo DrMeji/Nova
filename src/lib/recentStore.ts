@@ -405,17 +405,23 @@ export function archiveRecentChat(chatId: string) {
   return list;
 }
 
-/**
- * Permanently wipe a chat and linked local data (thread, creation meta, thumbs, project folder).
- * Does not leave a recoverable copy on this PC.
- */
-export function deleteRecentChatPermanently(chatId: string) {
-  const existing = loadRecentChats().find(c => c.id === chatId);
-  const mediaIds = collectChatMediaIds(chatId, existing?.creationId);
+/** Known per-chat keys (no full localStorage scan). */
+function removeKnownChatKeys(chatId: string) {
+  try {
+    localStorage.removeItem(`NOVA:chat-studio-files:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-studio:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-code-pill:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-build-memory:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-plan-pill:${chatId}`);
+    localStorage.removeItem(`NOVA:chat-plan:${chatId}`);
+    localStorage.removeItem(`NOVA:plan-nudge-at:${chatId}`);
+    localStorage.removeItem(chatThreadKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}
 
-  markChatDeleted(chatId);
-
-  // Wipe linked Code / create project folder from build memory when present.
+function wipeLinkedChatProjects(chatId: string, opts?: { quiet?: boolean }) {
   try {
     const raw = localStorage.getItem(`NOVA:chat-build-memory:${chatId}`);
     if (raw) {
@@ -429,11 +435,25 @@ export function deleteRecentChatPermanently(chatId: string) {
     /* ignore */
   }
 
-  // Also wipe any Recent project whose id matches this chat (create-from-chat pattern).
   try {
     const linked = loadRecentProjects().filter(
       (p) => p.id === chatId || p.id === `chat:${chatId}` || p.id.startsWith(`${chatId}-`),
     );
+    if (!linked.length) return;
+
+    if (opts?.quiet) {
+      for (const p of linked) {
+        void window.novaDesktop?.projectDeleteFiles?.(p.id)?.catch?.(() => undefined);
+        if (p.diskPath) {
+          void window.novaDesktop?.workspaceDeleteFolder?.({ targetPath: p.diskPath })?.catch?.(() => undefined);
+        }
+        markProjectDeleted(p.id, p.diskPath || null, p.name || null);
+      }
+      const drop = new Set(linked.map((p) => p.id));
+      saveRecentProjects(loadRecentProjects().filter((x) => !drop.has(x.id)));
+      return;
+    }
+
     for (const p of linked) {
       void window.novaDesktop?.projectDeleteFiles?.(p.id)?.catch?.(() => undefined);
       if (p.diskPath) {
@@ -444,47 +464,113 @@ export function deleteRecentChatPermanently(chatId: string) {
   } catch {
     /* ignore */
   }
+}
 
-  // Drop studio snapshot for this thread so a resurrected id cannot rehydrate a folder.
-  try {
-    localStorage.removeItem(`NOVA:chat-studio-files:${chatId}`);
-    localStorage.removeItem(`NOVA:chat-studio:${chatId}`);
-    localStorage.removeItem(`NOVA:chat-code-pill:${chatId}`);
-  } catch { /* ignore */ }
-
-  const nextChats = loadRecentChats().filter(c => c.id !== chatId);
-  saveRecentChats(nextChats);
-
-  try {
-    localStorage.removeItem(chatThreadKey(chatId));
-  } catch {
-    /* ignore */
-  }
-
-  // Clear any draft/thread keys that reference this id
+function removeLocalStorageKeysMatching(ids: Set<string>) {
+  if (!ids.size) return;
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k) keys.push(k);
+      if (!k) continue;
+      for (const id of ids) {
+        if (k.includes(id)) {
+          keys.push(k);
+          break;
+        }
+      }
     }
-    for (const k of keys) {
-      if (k.includes(chatId)) localStorage.removeItem(k);
-    }
+    for (const k of keys) localStorage.removeItem(k);
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Permanently wipe a chat and linked local data (thread, creation meta, thumbs, project folder).
+ * Does not leave a recoverable copy on this PC.
+ */
+export function deleteRecentChatPermanently(chatId: string) {
+  const existing = loadRecentChats().find(c => c.id === chatId);
+  const mediaIds = collectChatMediaIds(chatId, existing?.creationId);
+
+  markChatDeleted(chatId);
+  wipeLinkedChatProjects(chatId);
+  removeKnownChatKeys(chatId);
+
+  const nextChats = loadRecentChats().filter(c => c.id !== chatId);
+  saveRecentChats(nextChats);
+
+  removeLocalStorageKeysMatching(new Set([chatId]));
 
   for (const creationId of mediaIds) {
     wipeCreationLocal(creationId);
   }
 
-  // Drop any leftover creations still tagged to this chat
   saveRecentCreations(loadRecentCreations().filter(c => c.chatId !== chatId));
 
   window.dispatchEvent(new Event('NOVA:chats-changed'));
   window.dispatchEvent(new Event('NOVA:creations-changed'));
   return nextChats;
+}
+
+/**
+ * Bulk permanent wipe — one deleted-id write, one localStorage scan, one chats/creations save,
+ * one UI event. Avoids freezing the composer (~5s) after deleting many History rows.
+ */
+export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
+  const ids = [...new Set((chatIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!ids.length) return 0;
+
+  const idSet = new Set(ids);
+  const chats = loadRecentChats();
+  const mediaIds = new Set<string>();
+
+  // One tombstone write for all ids.
+  markChatsDeleted(ids);
+
+  for (const chatId of ids) {
+    const existing = chats.find((c) => c.id === chatId);
+    for (const mid of collectChatMediaIds(chatId, existing?.creationId)) {
+      mediaIds.add(mid);
+    }
+    wipeLinkedChatProjects(chatId, { quiet: true });
+    removeKnownChatKeys(chatId);
+  }
+
+  // One leftover key scan for the whole batch.
+  removeLocalStorageKeysMatching(idSet);
+
+  for (const creationId of mediaIds) {
+    markMediaDeleted(creationId);
+    memoryThumbs.delete(creationId);
+    try {
+      localStorage.removeItem(`NOVA:chat-thread:creation:${creationId}`);
+      localStorage.removeItem(`NOVA:media-feedback:${creationId}`);
+    } catch {
+      /* ignore */
+    }
+    void window.novaDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+  }
+
+  saveRecentChats(loadRecentChats().filter((c) => !idSet.has(c.id)));
+  saveRecentCreations(
+    loadRecentCreations().filter(
+      (c) => !mediaIds.has(c.id) && (!c.chatId || !idSet.has(c.chatId)),
+    ),
+  );
+
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:creations-changed'));
+  window.dispatchEvent(new Event('NOVA:projects-changed'));
+  try {
+    window.dispatchEvent(
+      new CustomEvent('NOVA:chats-bulk-deleted', { detail: { chatIds: ids } }),
+    );
+  } catch {
+    /* ignore */
+  }
+  return ids.length;
 }
 
 function loadDeletedMediaIds(): Set<string> {
@@ -512,8 +598,15 @@ function loadDeletedChatIds(): Set<string> {
 /** Tombstone so upserts cannot resurrect a forever-deleted chat. */
 export function markChatDeleted(id: string) {
   if (!id) return;
+  markChatsDeleted([id]);
+}
+
+/** Batch tombstone write — used by bulk History delete. */
+export function markChatsDeleted(chatIds: string[]) {
+  const add = (chatIds || []).map((id) => String(id || '').trim()).filter(Boolean);
+  if (!add.length) return;
   const ids = loadDeletedChatIds();
-  ids.add(id);
+  for (const id of add) ids.add(id);
   try {
     localStorage.setItem(DELETED_CHATS_KEY, JSON.stringify([...ids].slice(-400)));
   } catch {

@@ -23,6 +23,8 @@ assert.equal(maxCoderParamsBForVram(3), 0);
 assert.equal(maxCoderParamsBForVram(5), 3);
 assert.equal(maxCoderParamsBForVram(8), 7);
 assert.equal(maxCoderParamsBForVram(16), 14);
+// Create-safe ceiling — even 24 GB VRAM stays at 14B (no 32B).
+assert.equal(maxCoderParamsBForVram(24), 14);
 assert.equal(preferredCoderQuant(12), 'Q5_K_M');
 assert.equal(preferredCoderQuant(6), 'Q4_K_M');
 assert.equal(allowTwoLocalModels(32, 8), true);
@@ -81,6 +83,8 @@ const fatPc = {
   reason: '32 GB · GPU 12 GB',
 };
 assert.equal(assertCoderAllowed(fatPc, 'qwen25-coder-7b', '7B').ok, true);
+assert.equal(assertCoderAllowed(fatPc, 'uigen-fx-4b', 'UIGEN').ok, true);
+assert.equal(assertCoderAllowed(fatPc, 'qwen25-7b', 'Instruct').ok, false);
 assert.equal(assertCoderAllowed(fatPc, 'qwen25-15b', '1.5B').ok, false);
 assert.equal(assertMultiModelAllowed(fatPc).ok, true);
 

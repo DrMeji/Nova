@@ -70,7 +70,9 @@ export async function announceCreatePhase(
   if (phase === 'craft' || phase === 'verify') {
     try { host.onCoderPinned?.({ id: model.id, name: model.name }); } catch { /* ignore */ }
   }
-  if (opts?.setEngine !== false && model.id && model.id !== 'NOVA-auto') {
+  // Single Brain Create: never swap GGUF on phase announce unless caller opts in
+  // (craft binds once elsewhere). Default is setEngine=false to stop OS freezes.
+  if (opts?.setEngine === true && model.id && model.id !== 'NOVA-auto') {
     try {
       const { setEngineModel } = await import('@/lib/novaEngine');
       void setEngineModel?.(model.id);

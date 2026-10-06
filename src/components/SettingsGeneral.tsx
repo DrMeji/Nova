@@ -359,7 +359,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
 
                 <SettingsGroup title="Skills">
                   <p className="text-[11px] text-content-tertiary leading-relaxed mb-3">
-                    NOVA skills are build contracts injected into create and edit prompts so Multimodal builds stay Preview-ready.
+                    NOVA skills are build contracts injected into create and edit prompts so Auto builds stay Preview-ready.
                     Drop custom packs in a bound project at <span className="font-mono text-content-secondary">.nova/skills/packName/SKILL.md</span>.
                     Preview contract stays on for every create/build.
                   </p>

@@ -1,8 +1,8 @@
 /**
- * Create pipeline ownership — ordered hops only.
- * Talk stays in chat.ts. Craft stays in createCraft / novaBuildLoop.
- *
- * Order: plan → design → copy → craft → style → verify → critic
+ * Create helpers (legacy ensemble exports).
+ * Live create path is Single Brain Create in chatTurnHandlers/create.ts:
+ * bare Vite → craft from brief → same-model style → originality lint → Live.
+ * Plan/design/copy hops are dead for create (do not re-wire seat swaps).
  */
 
 export {

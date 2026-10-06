@@ -4,7 +4,8 @@
 import { useEffect } from 'react';
 import { MessageSquare, AudioLines } from 'lucide-react';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
-import { getLocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, hasProviderApiKey } from '@/lib/localPrefs';
+import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { stopSpeaking } from '@/lib/voiceSession';
 import { isVoiceTabEnabled } from '@/lib/featurePark';
 import type { ArkRouterResult } from '@/lib/novaRouter';
@@ -200,16 +201,16 @@ export type ChatModelOption = {
 
 export const CHAT_MODELS: ChatModelOption[] = [
   // Chat. only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'chat' },
+  { id: 'NOVA-auto', name: 'Nova Auto', source: 'auto', detail: '', kind: 'chat' },
   // Image. paths that generate today
-  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'image' },
+  { id: 'NOVA-auto', name: 'Nova Auto', source: 'auto', detail: '', kind: 'image' },
   { id: 'NOVA-image-core', name: 'NOVA Image Core', source: 'local', detail: '', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: '', kind: 'image' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: '', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: '', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: '', kind: 'image' },
   // Video. NOVA Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
-  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'video' },
+  { id: 'NOVA-auto', name: 'Nova Auto', source: 'auto', detail: '', kind: 'video' },
   { id: 'NOVA-video-core', name: 'NOVA Video Core', source: 'local', detail: '', kind: 'video' },
 ];
 
@@ -237,18 +238,50 @@ export function kindForMode(mode: ChatMode): ModelKind {
 }
 
 export function defaultModelForKind(kind: ModelKind): ChatModelOption {
-  // Chat always runs Nova Multimodal (Auto). Users install brains in Models;
-  // Auto picks chat vs coder vs vision per turn — no manual chat picker.
-  if (kind === 'chat') {
-    return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
+  const multimodal = (): ChatModelOption =>
+    CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === kind) ?? {
       id: 'NOVA-auto',
-      name: 'Nova Multimodal',
+      name: 'Nova Auto',
       source: 'auto',
+      detail: '',
+      kind,
+    };
+
+  const prefs = getLocalPrefs();
+
+  if (kind === 'chat') {
+    const prefId = String(prefs.lastChatModelId || prefs.defaultModelId || '').trim();
+    if (!prefId || prefId === 'NOVA-auto') return multimodal();
+
+    const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId && m.kind === 'chat');
+    if (cloud) {
+      if (hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
+      // Key removed / provider disabled — fall back to Auto.
+      return multimodal();
+    }
+
+    const catalog = CHAT_MODELS.find(m => m.id === prefId && m.kind === 'chat');
+    if (catalog) return catalog;
+
+    // Engine / Ollama pin — keep a stub until live lists hydrate the real row.
+    if (prefId.startsWith('ollama:')) {
+      return {
+        id: prefId,
+        name: prefId.replace(/^ollama:/i, '') || prefId,
+        source: 'local',
+        detail: 'Ollama',
+        kind: 'chat',
+      };
+    }
+    return {
+      id: prefId,
+      name: prefId,
+      source: 'local',
       detail: '',
       kind: 'chat',
     };
   }
-  const prefs = getLocalPrefs();
+
   const roleId = prefs.activeCoderId || prefs.defaultCodeModelId || prefs.defaultModelId;
   const prefId =
     roleId && roleId !== 'NOVA-auto'
@@ -261,7 +294,7 @@ export function defaultModelForKind(kind: ModelKind): ChatModelOption {
     const hit = CHAT_MODELS.find(m => m.id === prefId && m.kind === kind);
     if (hit) return hit;
   }
-  const auto = CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === kind);
+  const auto = multimodal();
   if (auto) return auto;
   const local = CHAT_MODELS.find(m => m.kind === kind && m.source === 'local');
   return local ?? CHAT_MODELS.find(m => m.kind === kind) ?? CHAT_MODELS[0];
@@ -605,12 +638,17 @@ export async function resolveStudioFiles(opts: {
   };
 }
 
-export function persistModeThread(
-  mode: ChatMode,
-  messages: ChatMessage[],
-  opts?: { chatId?: string; creationId?: string; libraryId?: string; assistantId?: string },
-) {
+/** Debounced persist — avoid main-thread JSON.stringify on every stream tick (item 15). */
+const persistTimers = new Map<string, number>();
+const persistPending = new Map<string, { mode: ChatMode; messages: ChatMessage[]; opts?: { chatId?: string; creationId?: string; libraryId?: string; assistantId?: string } }>();
+
+function flushPersistModeThread(key: string) {
+  persistTimers.delete(key);
+  const pending = persistPending.get(key);
+  persistPending.delete(key);
+  if (!pending) return;
   try {
+    const { mode, messages, opts } = pending;
     const slim = messages.map(m => ({
       ...m,
       content:
@@ -618,18 +656,31 @@ export function persistModeThread(
           ? slimChatContent(m.content, opts.libraryId)
           : slimChatContent(m.content),
     }));
+    const json = JSON.stringify(slim);
     if (opts?.chatId) {
-      localStorage.setItem(chatThreadKey(opts.chatId), JSON.stringify(slim));
+      localStorage.setItem(chatThreadKey(opts.chatId), json);
     }
     if (mode !== 'general') {
-      localStorage.setItem(`NOVA:chat-thread:${mode}`, JSON.stringify(slim));
+      localStorage.setItem(`NOVA:chat-thread:${mode}`, json);
     }
     if (opts?.creationId) {
-      localStorage.setItem(`NOVA:chat-thread:creation:${opts.creationId}`, JSON.stringify(slim));
+      localStorage.setItem(`NOVA:chat-thread:creation:${opts.creationId}`, json);
     }
   } catch {
     /* ignore */
   }
+}
+
+export function persistModeThread(
+  mode: ChatMode,
+  messages: ChatMessage[],
+  opts?: { chatId?: string; creationId?: string; libraryId?: string; assistantId?: string },
+) {
+  const key = String(opts?.chatId || opts?.creationId || mode || 'general');
+  persistPending.set(key, { mode, messages, opts });
+  if (persistTimers.has(key)) return;
+  const id = window.setTimeout(() => flushPersistModeThread(key), 450);
+  persistTimers.set(key, id);
 }
 
 /** Human-friendly delete prepare error (logs raw error to console for devtools). */

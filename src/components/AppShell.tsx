@@ -16,6 +16,7 @@ import { useSocial } from '@/context/SocialContext';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   PRESENCE_OPTIONS,
+  PRESENCE_UI_ENABLED,
   presenceDotClass,
   presenceRingClass,
   type PresenceStatus,
@@ -692,7 +693,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className={`flex-1 min-w-0 text-left truncate nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             {item.label}
           </span>
-          <span className={`shrink-0 mr-1.5 text-[9px] uppercase tracking-wide text-content-tertiary nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
+          <span className={`shrink-0 mr-1.5 text-[10px] uppercase tracking-wide text-content-tertiary nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             Soon
           </span>
         </button>
@@ -739,23 +740,23 @@ export function AppShell({ children }: { children: ReactNode }) {
         onMouseEnter={openSidebarHover}
         onMouseLeave={scheduleSidebarClose}
       >
-          <div className="flex-none h-12 flex items-center">
+          <div className="flex-none h-10 flex items-center">
             {collapsed ? (
               <button
                 type="button"
                 onClick={() => setSearchOpen(true)}
-                className="nova-nav-item w-full nova-nav-item-rail !py-0 !min-h-0 h-12"
+                className="nova-nav-item w-full nova-nav-item-rail !py-0 !min-h-0 h-10"
                 title="Search (Ctrl+K)"
                 aria-label="Search"
               >
-                <span className="nova-nav-icon !h-12">
+                <span className="nova-nav-icon !h-10">
                   <Search />
                 </span>
               </button>
             ) : (
-              <div className="flex items-center justify-between gap-2 min-w-0 w-full h-12 pr-2">
-                <span className="nova-nav-icon !h-12">
-                  <NovaMark className="w-7 h-7 text-content-primary" title="NOVA" />
+              <div className="flex items-center justify-between gap-2 min-w-0 w-full h-10 pr-2">
+                <span className="nova-nav-icon !h-10">
+                  <NovaMark className="w-6 h-6 text-content-primary" title="NOVA" />
                 </span>
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
@@ -787,14 +788,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
 
-          <nav className="flex-1 min-h-0 flex flex-col gap-1 pt-3">
+          <nav className="flex-1 min-h-0 flex flex-col">
             {/* Locked primary nav — Chat / Work / Tools / Connect never scroll away */}
-            <div className="flex-none shrink-0 flex flex-col gap-1">
+            <div className="nova-nav-stack flex-none shrink-0 flex flex-col">
               {NAV_GROUPS.map(group => (
-                <div key={group.id} className={group.label ? 'mt-2 first:mt-0' : ''}>
+                <div key={group.id} className={group.label ? 'nova-nav-group' : ''}>
                   {group.label ? (
                     <p
-                      className={`nova-nav-section-label text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 ${
+                      className={`nova-nav-section-label uppercase text-content-tertiary whitespace-nowrap pl-4 pr-2 ${
                         collapsed ? 'opacity-0' : ''
                       }`}
                       aria-hidden={collapsed || undefined}
@@ -808,7 +809,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
 
             {/* Recent only scrolls */}
-            <div className="mt-1.5 min-h-0 flex-1 flex flex-col pt-1 border-t border-surface-border">
+            <div className="mt-3 min-h-0 flex-1 flex flex-col pt-2 border-t border-surface-border">
               <button
                 type="button"
                 onClick={() => setRecentOpen(o => !o)}
@@ -871,11 +872,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
             <div
-              className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}
+              className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'px-1 pt-2 pb-2.5' : 'p-3 pt-2 pb-3'}`}
               data-status-menu
             >
             <JobsStrip variant="sidebar" collapsed={collapsed} />
-            {statusMenuOpen && (
+            {PRESENCE_UI_ENABLED && statusMenuOpen && (
               <div
                 className={`absolute z-50 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
                   collapsed ? 'left-full bottom-2 ml-2' : 'left-3 right-3 bottom-full mb-2'
@@ -923,16 +924,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => setStatusMenuOpen(v => !v)}
-                  title="Change status"
-                  className={`w-9 h-9 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${presenceRingClass(presence)}`}
-                  aria-label="Change status"
-                  aria-expanded={statusMenuOpen}
+                  onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
+                  title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
+                  className={`w-9 h-9 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${
+                    PRESENCE_UI_ENABLED ? presenceRingClass(presence) : ''
+                  }`}
+                  aria-label={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
+                  aria-expanded={PRESENCE_UI_ENABLED ? statusMenuOpen : undefined}
                 >
                   {profile?.avatar_url ? (
                     <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                    <NovaMark className="w-5 h-5 text-content-primary" title="NOVA" />
                   )}
                 </button>
               </div>
@@ -965,11 +968,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-nova-navy-900 px-2.5 py-2">
                   <button
                     type="button"
-                    onClick={() => setStatusMenuOpen(v => !v)}
-                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden ${presenceRingClass(presence)}`}
-                    title="Change status"
-                    aria-label="Change status"
-                    aria-expanded={statusMenuOpen}
+                    onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
+                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden ${
+                      PRESENCE_UI_ENABLED ? presenceRingClass(presence) : ''
+                    }`}
+                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
+                    aria-label={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
+                    aria-expanded={PRESENCE_UI_ENABLED ? statusMenuOpen : undefined}
                   >
                     {profile?.avatar_url ? (
                       <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
@@ -979,9 +984,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStatusMenuOpen(v => !v)}
+                    onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
                     className="flex-1 min-w-0 text-left"
-                    title="Change status"
+                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
                   >
                     <span className="block text-xs font-medium text-content-primary truncate">
                       {displayName}

@@ -18,7 +18,6 @@ export const ENGINE_UI_CATALOG: EngineUiModel[] = sortModelsByCategoryThenSizeDe
   { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', category: 'general', sizeGb: 2.0, tone: 'from-violet-500 to-indigo-700', initial: 'L3' },
   { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', category: 'coding', sizeGb: 4.7, tone: 'from-cyan-500 to-teal-700', initial: 'Q7' },
   { id: 'qwen25-coder-14b', name: 'Qwen2.5-Coder 14B', category: 'coding', sizeGb: 9.0, tone: 'from-blue-500 to-indigo-700', initial: '14' },
-  { id: 'qwen25-coder-32b', name: 'Qwen2.5-Coder 32B', category: 'coding', sizeGb: 20, tone: 'from-indigo-500 to-violet-800', initial: '32' },
   { id: 'deepseek-coder-v2-lite', name: 'DeepSeek Coder V2 Lite', category: 'coding', sizeGb: 8.9, tone: 'from-cyan-500 to-teal-700', initial: 'DS' },
   { id: 'starcoder2-7b', name: 'StarCoder2 7B', category: 'coding', sizeGb: 4.3, tone: 'from-amber-500 to-orange-700', initial: 'Sc' },
   { id: 'uigen-fx-4b', name: 'UIGEN-FX 4B', category: 'design', sizeGb: 2.5, tone: 'from-rose-400 to-orange-600', initial: 'UI' },

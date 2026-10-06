@@ -27,6 +27,30 @@ assert.ok(verifyAsk('add Brown background color', blackOnly).missing.some((m) =>
 assert.equal(verifyAsk('change the background to pink', blackOnly).ok, false);
 assert.equal(verifyAsk('make the background black', blackOnly).ok, true);
 
+// Soft green accent + keep cream must NOT demand a green page background.
+const creamPage = {
+  'src/App.jsx': `export default function App(){return <div className="app"><nav className="nav"><span className="brand">Garden Bed</span></nav></div>}`,
+  'src/App.css': `.app{min-height:100vh;background:#f5f0e8}.nav{display:flex}.brand{color:#166534}`,
+};
+const softGreenCream = 'ok cool. add a simple top bar with the name Garden Bed on the left — soft green accent is fine, keep that cream background';
+assert.equal(verifyAsk(softGreenCream, creamPage).ok, true, 'soft green + keep cream should pass on cream page');
+assert.ok(!verifyAsk(softGreenCream, creamPage).missing.some((m) => /green background/i.test(m)));
+
+// "drop a heading saying something like …" must require the copy — not false already-applied.
+const headingAsk = 'now drop a big heading in the middle of the page saying something like Fresh vegetable plants — short and friendly';
+assert.equal(verifyAsk(headingAsk, creamPage).ok, false);
+assert.ok(verifyAsk(headingAsk, creamPage).missing.some((m) => /Fresh vegetable/i.test(m)));
+const withHeading = {
+  ...creamPage,
+  'src/App.jsx': `export default function App(){return <div className="app"><h1 className="center-word">Fresh vegetable plants</h1></div>}`,
+};
+assert.equal(verifyAsk(headingAsk, withHeading).ok, true);
+
+// Card shadows must not pass from cream color alone.
+const shadowAsk = 'add soft card shadows and a bit of rounded corners — still cream page, soft green accents, no dark mode';
+assert.equal(verifyAsk(shadowAsk, creamPage).ok, false);
+assert.ok(verifyAsk(shadowAsk, creamPage).missing.some((m) => /shadow|rounded/i.test(m)));
+
 const pinkPage = {
   'src/App.jsx': `export default function App(){return <div className="app" />}`,
   'src/App.css': `.app{min-height:100vh;background:#ec4899}`,

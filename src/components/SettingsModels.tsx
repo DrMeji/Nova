@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   SettingsSection,
   Field,
@@ -40,6 +41,34 @@ import {
   Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
 } from 'lucide-react';
 
+type SettingsModelRow = {
+  id: string;
+  label: string;
+  detail: string;
+  source: 'auto' | 'local' | 'cloud';
+};
+
+function cloudProviderForModel(id: string): string | null {
+  if (id.includes('claude')) return 'anthropic';
+  if (id.includes('gemini')) return 'google';
+  if (id.includes('deepseek')) return 'deepseek';
+  if (id.startsWith('gpt')) return 'openai';
+  return null;
+}
+
+function modelReadyRank(opts: {
+  source: string;
+  installed: boolean;
+  missingKey: boolean;
+  isAuto: boolean;
+}): number {
+  // Lower = higher in the list. Installed / ready first; missing last.
+  if (opts.isAuto) return 0;
+  if (opts.source === 'local' && opts.installed) return 1;
+  if (opts.source === 'cloud' && !opts.missingKey) return 2;
+  if (opts.source === 'cloud' && opts.missingKey) return 4;
+  return 3; // local not installed
+}
 
 export function SettingsModels({ ctx }: { ctx: any }) {
   const {
@@ -64,23 +93,78 @@ export function SettingsModels({ ctx }: { ctx: any }) {
   void setLocalReports;
   void refreshBlocked;
 
+  const modelRows = useMemo(() => {
+    const byId = new Map<string, SettingsModelRow>();
+    for (const m of DEFAULT_MODELS) {
+      byId.set(m.id, { id: m.id, label: m.label, detail: m.detail || '', source: m.source });
+    }
+    // Surface every ready Engine GGUF even if it is not in the static quick-pick list.
+    for (const m of installedModels || []) {
+      const id = String(m.id || '');
+      if (!id || id === 'NOVA-core' || id.startsWith('NOVA-')) continue;
+      if (/mmproj/i.test(`${id} ${m.name || ''}`)) continue;
+      if (byId.has(id)) continue;
+      byId.set(id, {
+        id,
+        label: String(m.name || id),
+        detail: String(m.detail || ''),
+        source: 'local',
+      });
+    }
+    const readyIds = new Set(
+      (engineStatus?.models || [])
+        .filter((x: { id?: string; status?: string }) => x.status === 'ready' && x.id)
+        .map((x: { id: string }) => x.id),
+    );
+    const rows = [...byId.values()].map((m) => {
+      const providerId = m.source === 'cloud' ? cloudProviderForModel(m.id) : null;
+      const installed = m.source === 'local' && readyIds.has(m.id);
+      const missingKey = providerId ? !providerKeys[providerId] : false;
+      const rank = modelReadyRank({
+        source: m.source,
+        installed,
+        missingKey,
+        isAuto: m.source === 'auto',
+      });
+      return { ...m, providerId, installed, missingKey, rank };
+    });
+    rows.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+    return rows;
+  }, [engineStatus, installedModels, providerKeys]);
+
+  const providerRowsSorted = useMemo(() => {
+    const rows = PROVIDER_ROWS.filter((p: { id: string }) => p.id !== 'github-models' || showLegacyProviders);
+    return [...rows].sort((a, b) => {
+      const aOn = Boolean(providerKeys[a.id]) ? 0 : 1;
+      const bOn = Boolean(providerKeys[b.id]) ? 0 : 1;
+      return aOn - bOn || a.name.localeCompare(b.name);
+    });
+  }, [providerKeys, showLegacyProviders]);
 
   return (
     <>
           {activeSection === 'models' && (
             <SettingsSection title="Models">
+              {brainProfileReason ? (
+                <p className="text-xs text-content-tertiary mb-3 leading-relaxed">
+                  For this PC: {brainProfileReason}
+                </p>
+              ) : null}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {DEFAULT_MODELS.map((m: any) => {
-                  const providerId = m.source === 'cloud'
-                    ? (m.id.includes('claude') ? 'anthropic'
-                      : m.id.includes('gemini') ? 'google'
-                      : m.id.includes('deepseek') ? 'deepseek'
-                      : m.id.startsWith('gpt') ? 'openai'
-                      : null)
-                    : null;
-                  const installed = m.source === 'local' && (engineStatus?.models || []).some((x: any) => x.id === m.id && x.status === 'ready');
-                  const missingKey = providerId ? !providerKeys[providerId] : false;
+                {modelRows.map((m) => {
                   const isSelected = prefs.defaultModelId === m.id;
+                  const statusLine = m.source === 'auto'
+                    ? 'Auto · picks a fit model for this PC'
+                    : m.source === 'local'
+                      ? (m.installed
+                        ? 'Installed in NOVA Engine'
+                        : 'Not installed — open Models library to download')
+                      : (m.missingKey ? 'Key needed' : 'Cloud key ready');
+                  const statusTone = m.source === 'local' && m.installed
+                    ? 'text-emerald-400/90'
+                    : m.source === 'cloud' && !m.missingKey
+                      ? 'text-emerald-400/80'
+                      : 'text-content-tertiary';
                   return (
                     <button
                       key={`model-${m.id}`}
@@ -93,11 +177,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                       }`}
                     >
                       <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                      {(installed || missingKey) && (
-                        <p className="text-[10px] text-content-tertiary mt-0.5">
-                          {installed ? 'Installed' : ''}{installed && missingKey ? ' · ' : ''}{missingKey ? 'Key needed' : ''}
-                        </p>
-                      )}
+                      <p className={`text-[10px] mt-0.5 ${statusTone}`}>{statusLine}</p>
                       {isSelected && (
                         <p className="text-[10px] text-nova-blue-300 mt-1">Selected</p>
                       )}
@@ -138,13 +218,16 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                     <p className="text-sm font-medium text-content-primary">Cloud connections</p>
                     <p className="text-xs text-content-secondary">
                       {keyedCount} API key{keyedCount === 1 ? '' : 's'} saved locally
+                      {keyedCount > 0
+                        ? ' · pick them in the chat model menu next to Auto'
+                        : ' · then choose a Cloud model in chat'}
                     </p>
                   </div>
                   <KeyRound className="w-4 h-4 text-content-tertiary" />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {PROVIDER_ROWS.filter((p: any) => p.id !== 'github-models' || showLegacyProviders).map((p: any) => {
+                  {providerRowsSorted.map((p: any) => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
                     return (

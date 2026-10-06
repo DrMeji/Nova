@@ -171,7 +171,7 @@ export async function runCreateProjectFlow(
   let finalName = cleaned.name;
   let finalSlug = cleaned.slug;
   let mkdir: { ok?: boolean; error?: string; path?: string; existed?: boolean; created?: boolean } | undefined;
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 80; i++) {
     const trySlug = i === 0 ? cleaned.slug : `${cleaned.slug}-${i + 1}`;
     const tryName = i === 0 ? cleaned.name : `${cleaned.name} ${i + 1}`;
     const tryPath = i === 0 ? parentPath : joinPath(parentDir, trySlug);
@@ -413,6 +413,41 @@ function npmInstallLooksFailed(outcome: { ok?: boolean; reply?: string; handled?
   return true;
 }
 
+/** True when node_modules/vite is on disk (usable install, even if npm timed out). */
+async function projectHasViteModules(projectPath: string): Promise<boolean> {
+  try {
+    const base = String(projectPath || '').replace(/[\\/]+$/, '');
+    if (!base) return false;
+    const vitePath = `${base}/node_modules/vite`.replace(/\//g, '\\');
+    const st = await window.novaDesktop?.pathStat?.(vitePath);
+    return Boolean(st?.ok && (st.isDirectory || st.isFile));
+  } catch {
+    return false;
+  }
+}
+
+/** After a timed-out / killed npm, keep polling briefly — Windows often finishes unpack late. */
+async function waitForViteModules(
+  projectPath: string,
+  opts?: { onStatus?: (label: string) => void; waitMs?: number },
+): Promise<boolean> {
+  const waitMs = Math.max(5_000, opts?.waitMs ?? 90_000);
+  const t0 = Date.now();
+  if (await projectHasViteModules(projectPath)) return true;
+  opts?.onStatus?.(
+    'npm reported a timeout — checking whether packages finished unpacking…',
+  );
+  while (Date.now() - t0 < waitMs) {
+    await new Promise((r) => window.setTimeout(r, 2_500));
+    if (await projectHasViteModules(projectPath)) return true;
+    const s = Math.round((Date.now() - t0) / 1000);
+    opts?.onStatus?.(
+      `Waiting for node_modules/vite after npm timeout… ${s}s`,
+    );
+  }
+  return projectHasViteModules(projectPath);
+}
+
 /** npm install + dev server. only when the project actually uses npm. */
 export async function bootstrapProjectWorkspace(
   projectPath: string,
@@ -435,9 +470,15 @@ export async function bootstrapProjectWorkspace(
   );
   const diskHasPkg = filesHavePkg || (await folderHasPackageJson(projectPath));
 
-  // Static HTML/CSS/JS scaffolds (calculator, landings, etc.) must never run npm.
-  if (!diskHasPkg || !projectUsesNpm(kind)) {
+  // Static HTML/CSS/JS scaffolds (no package.json) must never run npm.
+  // If package.json exists on disk/files, ALWAYS install — wrong kind (e.g. static-web
+  // mis-detect on a Vite todo) used to skip npm and then claim Live without node_modules.
+  if (!diskHasPkg) {
     return { npmInstalled: true };
+  }
+  if (!projectUsesNpm(kind)) {
+    // package.json present but kind says static — still treat as npm project.
+    opts?.onStatus?.('package.json found — installing deps even though kind looked static…');
   }
 
   // If createJob already has a live URL, attach only — never start another Vite.
@@ -449,7 +490,8 @@ export async function bootstrapProjectWorkspace(
     return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
   }
 
-  const npmTimeoutMs = Math.max(60_000, opts?.npmTimeoutMs ?? 180_000);
+  // Windows Defender + first Vite install often needs >5 min; keep a long wall.
+  const npmTimeoutMs = Math.max(180_000, opts?.npmTimeoutMs ?? 420_000);
   const depHint = (() => {
     const pkgRaw = opts?.files
       && Object.entries(opts.files).find(([p]) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')))?.[1];
@@ -487,48 +529,68 @@ export async function bootstrapProjectWorkspace(
   }
   let install: Awaited<ReturnType<typeof runAgentCommand>>;
   try {
-    install = await Promise.race([
-      runAgentCommand({
-        command: 'npm install',
-        cwd: projectPath,
-        skipConfirm: true,
-        timeoutMs: npmTimeoutMs,
-      }),
-      new Promise<Awaited<ReturnType<typeof runAgentCommand>>>((resolve) => {
-        window.setTimeout(() => {
-          resolve({
-            handled: true,
-            ok: false,
-            reply: `npm install timed out after ${Math.round(npmTimeoutMs / 1000)}s. Say **install npm dependencies** to retry.`,
-          });
-        }, npmTimeoutMs + 2_000);
-      }),
-    ]);
+    // Single wall: Electron agentRun timeout. Do not Promise.race a second
+    // renderer timer — that raced ahead, reported failure, and left npm/Vite half-done.
+    install = await runAgentCommand({
+      command: 'npm install',
+      cwd: projectPath,
+      skipConfirm: true,
+      timeoutMs: npmTimeoutMs,
+    });
   } finally {
     if (npmBeat != null) window.clearInterval(npmBeat);
   }
 
   if (npmInstallLooksFailed(install)) {
-    // No winget — tell the user once. Background hammer freezes weak PCs.
-    const nodeOk = await window.novaDesktop?.agentRun?.({
-      command: 'node -v',
-      cwd: undefined,
-      skipConfirm: true,
-      userConfirmed: true,
+    // Timeout/kill often happens after packages are already on disk — recover.
+    const recovered = await waitForViteModules(projectPath, {
+      onStatus: opts?.onStatus,
+      waitMs: 90_000,
     });
-    if (!nodeOk?.ok) {
+    if (!recovered) {
+      // Probe node from the project folder (homedir often fails the workspace-grant check
+      // and falsely reports “Node.js is not installed”).
+      const nodeOk = await window.novaDesktop?.agentRun?.({
+        command: 'node -v',
+        cwd: projectPath,
+        skipConfirm: true,
+        userConfirmed: true,
+      });
+      const nodeMissing = !nodeOk?.ok
+        && /not recognized|ENOENT|command not found|is not recognized/i.test(
+          String(nodeOk?.error || nodeOk?.output || ''),
+        );
+      if (nodeMissing) {
+        return {
+          npmInstalled: false,
+          previewLive: false,
+          bootstrapNote: 'Node.js is not installed. Install Node.js LTS, then say **install npm dependencies** or **run Preview**.',
+        };
+      }
       return {
         npmInstalled: false,
         previewLive: false,
-        bootstrapNote: 'Node.js is not installed. Install Node.js LTS, then say **install npm dependencies** or **run Preview**.',
+        bootstrapNote: sanitizeBootstrapNote(install.reply)
+          || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
       };
     }
-    return {
-      npmInstalled: false,
-      previewLive: false,
-      bootstrapNote: sanitizeBootstrapNote(install.reply)
-        || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
-    };
+    opts?.onStatus?.('Packages found on disk after npm timeout — continuing to Live…');
+  }
+
+  // Install "ok" but node_modules missing → still not runnable (Windows race / partial unpack).
+  if (!(await projectHasViteModules(projectPath))) {
+    const late = await waitForViteModules(projectPath, {
+      onStatus: opts?.onStatus,
+      waitMs: 45_000,
+    });
+    if (!late) {
+      return {
+        npmInstalled: false,
+        previewLive: false,
+        bootstrapNote:
+          'npm finished without a usable node_modules (vite missing). Say **install npm dependencies** to retry.',
+      };
+    }
   }
 
   // Prefer an already-running create/preview session — never start a second Vite.
@@ -542,7 +604,23 @@ export async function bootstrapProjectWorkspace(
 
   // SSOT: getOrAttachPreview attaches or starts once for this cwd.
   if (window.novaDesktop?.getOrAttachPreview) {
-    const live = await window.novaDesktop.getOrAttachPreview(projectPath);
+    let live = await window.novaDesktop.getOrAttachPreview(projectPath);
+    if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
+      return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
+    }
+    // Zombie Vite on 5200–5350 is a common Windows fail — free ports and retry once.
+    opts?.onStatus?.('Live port busy — clearing stale preview servers and retrying…');
+    try {
+      await window.novaDesktop?.agentRun?.({
+        command: 'powershell -NoProfile -Command "5200..5220 | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }"',
+        cwd: projectPath,
+        skipConfirm: true,
+        userConfirmed: true,
+        timeoutMs: 20_000,
+      });
+    } catch { /* best-effort */ }
+    await new Promise((r) => setTimeout(r, 1500));
+    live = await window.novaDesktop.getOrAttachPreview(projectPath);
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
     }
@@ -601,58 +679,55 @@ export function formatCreateProjectReply(
   let body: string;
   if (livePreview && codeVerified) {
     body = [
-      `Created **${displayName}**.`,
-      '',
-      '- Project files written on disk',
-      '- Dependencies installed',
-      '- Code scan passed — Live preview verified',
+      `**${displayName}** is up — files on disk, install finished, Live checked out.`,
       folderLine,
       '',
-      'Open **Live** under the chat to view it, or tell me what to change next.',
+      'Peek at **Live** under the chat, or tell me what to tweak.',
     ].filter(Boolean).join('\n');
   } else if (livePreview) {
     body = [
-      `Created **${displayName}**.`,
-      '',
-      '- Project files written on disk',
-      '- Dependencies installed',
-      '- Live server started (code scan incomplete — check Live carefully)',
+      `**${displayName}** is on disk. Live started, but quality is still open — the app may look unfinished.`,
       folderLine,
       '',
-      'Open **Live** under the chat to view it, or tell me what to change next.',
+      'Open **Live** under the chat to see it, or say what to fix.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmPending) {
     body = [
-      `Created **${displayName}** — finishing setup.`,
-      '',
-      '- Project files written on disk',
-      '- Installing dependencies now',
-      '- Live unlocks when Ready',
+      `**${displayName}** is on disk — still installing packages.`,
       folderLine,
       '',
-      'If install stalls, say **install npm dependencies**.',
+      'Live unlocks when that finishes. If it stalls, say **install npm dependencies**.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmInstalled === false) {
     body = [
-      `Created **${displayName}**, but setup did not finish.`,
-      '',
-      '- Project files are on disk',
-      '- Dependencies are not installed yet',
-      '- Live is unavailable until install succeeds',
+      `Got **${displayName}** on disk, but install did not finish — Live stays locked until it does.`,
       folderLine,
       '',
-      bootstrap.bootstrapNote || 'Say **install npm dependencies** to retry.',
+      bootstrap.bootstrapNote || 'Say **install npm dependencies** and I will retry.',
     ].filter(Boolean).join('\n');
   } else if (intent.kind === 'python') {
     body = [
-      `Created **${displayName}**.`,
-      '',
-      '- Project files written on disk',
+      `**${displayName}** is on disk.`,
       folderLine,
       '',
-      'Edit `app/main.py` next, or tell me what to build.',
+      'We can dig into `app/main.py` next, or you can tell me what to build.',
     ].filter(Boolean).join('\n');
-  } else if (isStatic || hasPackageJson || projectUsesNpm(intent.kind)) {
+  } else if (hasPackageJson || projectUsesNpm(intent.kind)) {
+    // Vite/npm apps must never claim casual success without Live evidence.
+    body = [
+      `**${displayName}** is on disk, but Live did not verify.`,
+      '',
+      '- Project files written on disk',
+      bootstrap?.npmInstalled !== true
+        ? '- Dependencies are not installed yet'
+        : '- Dependencies may be installed, but Live evidence did not pass',
+      '- Live stays locked until mount + console + smoke verify',
+      folderLine,
+      '',
+      bootstrap?.bootstrapNote
+        || 'Say **rebuild the UI** or **run Preview** to retry. I will not claim success until Live verifies.',
+    ].filter(Boolean).join('\n');
+  } else if (isStatic) {
     body = [
       `Created **${displayName}**.`,
       '',

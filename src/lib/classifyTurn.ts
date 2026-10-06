@@ -13,12 +13,14 @@ import {
   looksLikeGreenfieldCreateGo,
   resolveGreenfieldFromThread,
 } from '@/lib/chatIdeaIntent';
+import { looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 import {
   parseNewProjectIntent,
   looksLikeCreateProjectBrief,
   fallbackCreateProjectName,
   extractProjectName,
   isCreateVerbNoun,
+  isCreateRefusedAsk,
   findBestProductBrief,
 } from '@/lib/createProjectIntent';
 import {
@@ -33,6 +35,7 @@ import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { classifyDiskIntent } from '@/lib/chatDiskIntent';
 import { looksLikeConversationalEditShorthand } from '@/lib/editAskResolve';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
+import { looksLikeSimpleBuildToyChatAsk } from '@/lib/chatIntent';
 
 export type TurnKind =
   | 'chat'
@@ -92,12 +95,12 @@ export function classifyTurn(
   const t0 = String(message || '').trim();
   if (!t0) return { kind: 'chat', reason: 'empty' };
 
-  // Chip / composer explicit kind wins over regex.
+  // Chip / composer explicit kind wins over regex (nova-kind or legacy ark-kind).
   const explicit = (() => {
-    const m = t0.match(/<!--\s*ark-kind:\s*(create|edit|plan|keep_building|chat|delete|open_folder|run_cmd)\s*-->/i);
+    const m = t0.match(/<!--\s*(?:nova|ark)-kind:\s*(create|edit|plan|keep_building|chat|delete|open_folder|run_cmd)\s*-->/i);
     return m?.[1]?.toLowerCase() as TurnKind | undefined;
   })();
-  const t = t0.replace(/<!--\s*ark-kind:\s*[\w]+\s*-->/gi, '').trim() || t0;
+  const t = t0.replace(/<!--\s*(?:nova|ark)-kind:\s*[\w]+\s*-->/gi, '').trim() || t0;
   if (explicit) {
     if (explicit === 'create') {
       return {
@@ -115,33 +118,57 @@ export function classifyTurn(
     return { kind: 'chat', reason: 'talk-before-create' };
   }
 
-  // Simple build toys (todo / timer / counter / name dance) — CREATE only when they
-  // clearly command a build, not when they are still exploring.
-  {
-    const toyCreate = /\b(?:build|create|make|scaffold)\b/i.test(t)
-      && /\b(?:todo(?:s)?|to-?dos?|checklist|timer|stopwatch|pomodoro|counter|click\s+count|name\s+danc|css\s+animation)\b/i.test(t)
+  // Hard create-now: skip plan / on disk / get Live + a product signal → create immediately.
+  // Catches soft assembly asks (“put a shop together… skip plan, on disk, Live”) without
+  // requiring an imperative “build/create me a website” opener.
+  if (looksLikeHardCreateGo(t) && !wantsPlanningOnly(t) && !isCreateRefusedAsk(t)) {
+    const named = extractProjectName(t);
+    const hasProduct = Boolean(named)
+      || /\b(?:app|application|project|website|site|page|shop|store|storefront|landing|homepage|todo|dashboard)\b/i.test(t);
+    if (hasProduct) {
+      return {
+        kind: 'create',
+        reason: 'hard-create-go',
+        createName: named || fallbackCreateProjectName(t) || 'App',
+      };
+    }
+  }
+
+  // Simple build toys (todo / timer / counter / calculator) — chat demos by default.
+  // CREATE only on a clear hard command (no “help me / can you / show me”, no “?”).
+  // Soft “help me make a click counter page” must NEVER fall through to create-verb-noun.
+  if (looksLikeSimpleBuildToyChatAsk(t)) {
+    const toyHardCreate = /\b(?:build|create|make|scaffold)\b/i.test(t)
       && !/\b(?:do\s+not|don't|dont)\s+(?:create|build)\b/i.test(t)
       && !wantsPlanningOnly(t)
-      && !/\b(?:help\s+me|can\s+you|could\s+you|i'?d\s+like|i\s+want\s+to|what\s+if|thinking\s+about)\b/i.test(t)
-      && !/\?/.test(t);
-    if (toyCreate) {
+      && !/\b(?:help\s+me|can\s+you|could\s+you|show\s+me|write\s+me|give\s+me|i'?d\s+like|i\s+want\s+to|what\s+if|thinking\s+about)\b/i.test(t)
+      && !/\?/.test(t)
+      && (
+        /\b(?:on\s+disk|scaffold|create\s+(?:the\s+)?(?:files|project)|lets?\s+build\s+this|build\s+it\s+now|open\s+preview)\b/i.test(t)
+        || /^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
+      );
+    if (toyHardCreate) {
       return {
         kind: 'create',
         reason: 'simple-toy-create',
         createName: extractProjectName(t) || fallbackCreateProjectName(t) || 'App',
       };
     }
+    return { kind: 'chat', reason: 'simple-build-toy-chat' };
   }
 
-  // Bare “Build a simple X” with product-ish noun → create (avoids chat prose dumps).
-  // Must look like an imperative build, not exploratory “Build me / I want to build / help me”.
+  // Bare “Build / Build me a … website|app|page” → create (avoids chat prose dumps).
+  // Soft explore (“help me / can you / what if”) stays chat via talk-before above.
+  // Long product briefs with Get it Live / Vite still create (520-char cap used to steal them).
   if (
-    /^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
-    && !/^(?:please\s+)?(?:can\s+you|could\s+you|help\s+me|build\s+me|make\s+me)\b/i.test(t)
-    && /\b(?:todo|to-?do|timer|counter|page|site|app|website|dashboard|landing|list)\b/i.test(t)
-    && t.length < 280
+    /^(?:please\s+)?(?:build|create|make|scaffold)(?:\s+me)?\b/i.test(t)
+    && !/^(?:please\s+)?(?:can\s+you|could\s+you|help\s+me)\b/i.test(t)
+    && /\b(?:todo|to-?do|timer|counter|page|site|app|website|dashboard|landing|list|vite|react)\b/i.test(t)
+    && (t.length < 520 || /\b(?:get\s+it\s+live|on\s+disk|vite|brand[- ]?new|one-?page)\b/i.test(t))
+    && t.length < 4000
     && !/\b(?:how\s+(?:do|can|would)|what\s+is|explain|tell\s+me|familiar|want\s+to\s+build|thinking\s+about|are\s+you|i'?d\s+like|help\s+me)\b/i.test(t)
     && !wantsPlanningOnly(t)
+    && !/\?/.test(t)
   ) {
     return {
       kind: 'create',
@@ -169,9 +196,28 @@ export function classifyTurn(
     return { kind: 'chat', reason: 'confirm-plan-in-prose' };
   }
 
-  // 1. Explicit plan-only
-  if (wantsPlanningOnly(t) || /\b(?:plan\s+only|planning\s+only|don'?t\s+build\s+yet|questions?\s+only|just\s+plan)\b/i.test(t)) {
+  // Soft “talk me through / do not create files” = plain chat conversation.
+  // Forbid lists (“Do not create a todo…”) next to hard create must still create.
+  if (
+    isCreateRefusedAsk(t)
+    || /\btalk\s+me\s+through\b/i.test(t)
+    || /\bfirst\s+version\s+only\b/i.test(t)
+    || /\bno\s+files\s+yet\b/i.test(t)
+  ) {
+    return { kind: 'chat', reason: 'talk-first-no-plan-card' };
+  }
+
+  // Explicit Plan-mode card only (composer Plan pill / “plan only” / “help me plan”).
+  if (
+    /\b(?:plan\s+only|planning\s+only|help\s+me\s+plan|questions?\s+only|just\s+plan|plan\s+this\s+out|let'?s\s+plan(?:\s+this)?(?:\s+out)?|go\s+into\s+plan(?:\s+mode)?)\b/i.test(t)
+    || (/\b(?:don't|do\s+not)\s+build\s+yet\b/i.test(t) && /\bplan\b/i.test(t))
+    || (/\bstill\s+planning\s+only\b/i.test(t))
+  ) {
     return { kind: 'plan', reason: 'explicit-plan-only' };
+  }
+  // Other wantsPlanningOnly signals (requirements / clarify) stay chat — talk first.
+  if (wantsPlanningOnly(t)) {
+    return { kind: 'chat', reason: 'planning-advice-chat' };
   }
 
   const workspace = hasActiveWorkspace({
@@ -216,6 +262,20 @@ export function classifyTurn(
     return { kind: 'open_folder', reason: 'folder-path-ask' };
   }
 
+  // Explicit craft-fail nudge must never become soft chat (“Step 1: folder structure…”).
+  // Prefer bound folder; if studio files exist but diskRoot was dropped after reload, still edit.
+  if (looksLikeInPlaceRebuildAsk(t) && !brandNewProductAsk(t)) {
+    const hasStudioFiles = Object.keys(opts?.files || {}).some((p) =>
+      /^(?:src\/|index\.html|package\.json|vite\.config)/i.test(p),
+    );
+    if (workspace || hasStudioFiles) {
+      return {
+        kind: 'keep_building',
+        reason: workspace ? 'inplace-rebuild-bound' : 'inplace-rebuild-studio-files',
+      };
+    }
+  }
+
   // 2. Bound folder: edit / keep_building (unless brand-new product or a clear *new* create ask)
   if (workspace && !brandNewProductAsk(t)) {
     if (looksLikeKeepBuildingAsk(t) || looksLikeInPlaceRebuildAsk(t)) {
@@ -243,7 +303,7 @@ export function classifyTurn(
       }
       return { kind: 'edit', reason: 'create-wording-on-bound-folder' };
     }
-    if (/\b(?:add|put|place|change|update|fix|remove|delete)\b/i.test(t)) {
+    if (/\b(?:add|put|place|change|update|fix|remove|delete|move|nudge|shift|make|give|lay|close|keep|tighten|expand|show|wire|stick)\b/i.test(t)) {
       return { kind: 'edit', reason: 'mutate-verb-bound' };
     }
     // Bound folder + problem language (no fix verb yet) → chat diagnose (explain only).

@@ -10,6 +10,33 @@ const GO_AHEAD_BUILD_RE =
 const IMPLEMENT_GO_NEG_RE =
   /\b(?:don'?t|do\s+not|never|not\s+yet|later|just\s+plan|keep\s+planning|don'?t\s+build|do\s+not\s+build)\b/i;
 
+/**
+ * Hard “create now” — disk / Live / skip-plan / scaffold-now.
+ * Talk-first soft asks stay chat; these signals mean write files immediately.
+ * Shared by classifyTurn, create intent, and Plan→implement gates.
+ */
+export function looksLikeHardCreateGo(message: string): boolean {
+  const t = String(message || '').trim();
+  if (!t) return false;
+  // Clear refuse-to-build wins unless the same turn also hard-commands files/Live.
+  const hardDiskLive =
+    /\b(?:on\s+disk|put\s+(?:it|this|the\s+(?:project|app|site|page))\s+on\s+disk|files?\s+immediately)\b/i.test(t)
+    || /\b(?:get\s+(?:it\s+)?live(?:\s+going)?|open\s+(?:the\s+)?(?:live\s+)?preview|preview\s+live)\b/i.test(t)
+    || /\bskip\s+(?:the\s+)?plan\b/i.test(t);
+  if (
+    (/\b(?:don'?t|do\s+not|never)\s+(?:build|create|implement|scaffold)\b/i.test(t)
+      || /\b(?:not\s+yet|just\s+plan|keep\s+planning|planning\s+only|no\s+files?\s+yet)\b/i.test(t))
+    && !hardDiskLive
+  ) {
+    return false;
+  }
+  if (hardDiskLive) return true;
+  if (/\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|start\s+building|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|build\s+this\s+out|ok(?:ay)?\s+start\s+building)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 export function isPlanPrefixedMessage(message: string): boolean {
   const t = String(message || '');
   if (/<!--nova-plan-mode-->/i.test(t)) return true;
@@ -24,7 +51,8 @@ export function looksLikeImplementGo(message: string): boolean {
     // "do not rush building" is still a go — only block clear refuse-to-build.
     if (/\b(?:don'?t|do\s+not|never)\s+(?:build|create|implement|scaffold)\b/i.test(t)
       || /\b(?:not\s+yet|just\s+plan|keep\s+planning)\b/i.test(t)) {
-      return false;
+      // Hard disk/Live/skip-plan still means go.
+      if (!looksLikeHardCreateGo(t)) return false;
     }
   }
   // Chip: "Create project <Name>". always execute, never re-plan.
@@ -36,6 +64,8 @@ export function looksLikeImplementGo(message: string): boolean {
   if (/\b(?:build|create|scaffold)\s+[A-Za-z][A-Za-z0-9.]{1,40}\b/i.test(t) && /\bon\s+disk\b/i.test(t)) {
     return true;
   }
+  // "skip the plan, put it on disk and get Live going"
+  if (looksLikeHardCreateGo(t)) return true;
   return GO_AHEAD_BUILD_RE.test(t);
 }
 
@@ -53,7 +83,8 @@ export function planModeSystemHint(): string {
   return [
     'The user is in **Plan** mode. Take your time. Produce a thorough, accurate build plan only.',
     'No @@@FILE blocks, no file writes, no scaffolding.',
-    'Restate what they want, then numbered steps with concrete detail, then 0–3 open questions.',
+    'Restate what they want in plain human language, then numbered steps with REAL detail (fields, layout, look, done-when) — not one-liners.',
+    'Each step should read like work left to do: step 1 we do X, step 2 we do Y, down the list.',
     'Prefer product decisions over tech-stack quizzes. NOVA picks sensible defaults.',
     'End ready for “lets build this” — do not create files yet.',
   ].join(' ');
@@ -64,13 +95,14 @@ export function planningConversationHint(topicHint?: string): string {
   const topic = topicHint ? ` Focus on: ${topicHint.slice(0, 280)}` : '';
   return [
     'Planning conversation only. Do not create files, folders, or projects.',
-    'Write like a sharp human collaborator — warm, clear, specific — not a quiz bot or template.',
+    'Write like a sharp human collaborator — warm, clear, specific — not a quiz bot, not a corporate template, not “As an AI…”.',
+    'Sound like a person in a chat: short natural openers, contractions, react to what they just said. Avoid stiff outlines unless they asked for a plan.',
     'This is a real back-and-forth. Do NOT rush them to build. Do NOT end by saying “say go and I’ll create files” unless they already asked to build.',
-    'Reply in complete sentences. Never stop mid-phrase. Aim for about 100–180 words each planning turn.',
+    'Reply in complete sentences. Never stop mid-phrase. Aim for about 80–160 words each planning turn.',
     'Open by restating their idea in your own words (one full sentence), then give a concrete best-way-to-start take (2–4 sentences).',
     'Name the problem you heard and a practical resolution path before asking anything.',
-    'Then ask 1–3 product questions in plain language.',
-    'LIST FORMAT RULES: Each new reply starts numbering at 1. Use numbers ONLY for the main outline (1, 2, 3…). Under each main step, use normal dashes (- bullets) for details — never ★ stars, never restart a nested list at 1. Never leave fragments like “3.js.”',
+    'Then ask 1–2 product questions in plain language — like a friend helping, not a requirements form.',
+    'LIST FORMAT RULES: Prefer prose first. If you use a list, start at 1 and use numbers ONLY for the main outline. Under each, use - bullets — never ★ stars, never restart nested lists at 1.',
     'Never end with “Would you like more information on any of these steps?” or “Do you have specific questions?”',
     'Good questions: web vs phone app, who it is for, the one must-have for v1, calm vs playful feel, offline or online.',
     'If they want a phone/mobile app, ask whether it is for overall iOS, overall Android, or a specific device (e.g. iPhone 16, Galaxy S23) — never quiz them on tech stacks.',

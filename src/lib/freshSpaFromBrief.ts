@@ -67,8 +67,8 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   if (/\buseState\s*\(/.test(s) && !/\bimport\s+/.test(s) && !/\bfrom\s+['"]react['"]/.test(s)) return true;
   // JSX attribute-as-child bug: onClick={...}\n  Play\n</button>
   if (/onClick=\{[^}]+\}\s*\n\s*[A-Za-z][A-Za-z ]{0,24}\s*\n\s*<\//.test(s)) return true;
-  // Unclosed opening tag before nested tag: onClick={...}\n  <img
-  if (/onClick=\{[^}]+\}\s*\n\s*</.test(s)) return true;
+  // Unclosed opening tag before nested tag: onClick={...}\n  <img  (not onClick={...}>\n  <img)
+  if (/onClick=\{[^}]+\}(?!>)\s*\n\s*</.test(s)) return true;
   // Default export may be App, FPS_Arena, Game, etc. — main.jsx binds it as App either way.
   const hasAppComponent =
     /export\s+default\s+function\s+[A-Za-z_$][\w$]*/i.test(s)
@@ -156,6 +156,16 @@ export function looksLikeTruncatedUiSource(source: string | undefined | null): b
       || /export\s+\{\s*default\s*\}\s*;?\s*$/.test(s);
     if (!endsClean) return true;
   }
+  // Incomplete open tag then a close tag mid-tree: `<button\n    </li>`
+  if (/<[A-Za-z][\w.:-]*\b[^>]*\n\s*<\/[A-Za-z]/.test(s)) return true;
+  // Incomplete CLOSE tag at EOF: `</footer` / `</div` (no `>`) — common GGUF cut
+  if (/<\/[A-Za-z][\w.-]*\s*$/.test(s)) return true;
+  // Incomplete close then another close on next line: `</footer\n    </footer>`
+  if (/<\/[A-Za-z][\w.-]*\s*\n\s*<\//.test(s)) return true;
+  // Extra paren junk near EOF: `</div>))` — not a normal `return ( … )\n}` close.
+  if (/<\/[A-Za-z][\w.-]*>\s*\){2,}/.test(s.slice(-120))) return true;
+  // Accidental over-close from a bad heal / model cut: `)))}}` / `}}}}`
+  if (/\){3,}\s*\}+\s*$/.test(s) || /\}{3,}\s*$/.test(s)) return true;
   // Far more open JSX tags than closes (truncated return tree)
   const openTags = (s.match(/<[A-Za-z][\w.-]*\b[^>]*(?<!\/)\s*>/g) || []).length;
   const closeTags = (s.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;
@@ -166,6 +176,104 @@ export function looksLikeTruncatedUiSource(source: string | undefined | null): b
   const closeBrace = (s.match(/\}/g) || []).length;
   if (openBrace >= 1 && openBrace > closeBrace) return true;
   return false;
+}
+
+/**
+ * Best-effort close for near-complete App/CSS that the local coder cut mid-token.
+ * Generic (any product) — strips incomplete trailing tags and balances JSX/braces.
+ * Returns original when healing would be unsafe or useless.
+ */
+export function healNearCompleteTruncatedSource(
+  path: string,
+  source: string | undefined | null,
+): string {
+  const rel = String(path || '').replace(/\\/g, '/');
+  let s = String(source || '').replace(/\s+$/g, '');
+  if (!s || s.length < 200) return String(source || '');
+  if (!looksLikeTruncatedUiSource(s)) return s;
+
+  if (/\.css$/i.test(rel)) {
+    // Drop incomplete trailing declaration, then close open braces.
+    s = s.replace(/[{;]\s*[\w-]+\s*:\s*[^;{}]*$/i, (m) => m.startsWith('{') ? '{' : ';');
+    s = s.replace(/:\s*#[0-9a-fA-F]{1,5}\s*$/i, '').trimEnd();
+    const openBrace = (s.match(/\{/g) || []).length;
+    const closeBrace = (s.match(/\}/g) || []).length;
+    if (openBrace > closeBrace) s += '\n'.repeat(1) + '}'.repeat(openBrace - closeBrace);
+    return looksLikeTruncatedUiSource(s) ? String(source || '') : s;
+  }
+
+  // Strip incomplete trailing opening tag: `<footer className="footer` / `<div` / `<p className`
+  s = s.replace(/<[A-Za-z][\w.:-]*\b[^>]*["'][^"'>]*$/g, '').trimEnd();
+  // Bare tag + prop name with no `=` yet (common GGUF cut): `<p className`
+  s = s.replace(/<[A-Za-z][\w.:-]*(?:\s+[A-Za-z_$][\w$-]*)+\s*$/g, '').trimEnd();
+  s = s.replace(/<[A-Za-z][\w.:-]*\b[^>]*$/g, '').trimEnd();
+  s = s.replace(/<[A-Za-z][\w.:-]*\s*$/g, '').trimEnd();
+  // Incomplete CLOSE tag cut mid-name: `</footer` / `</div` → close it
+  s = s.replace(/<\/([A-Za-z][\w.-]*)\s*$/g, '</$1>');
+  // Broken `</footer\n    </footer>` duplicate — keep one close
+  s = s.replace(/<\/([A-Za-z][\w.-]*)\s*\n\s*<\/\1>/g, '</$1>');
+  // Incomplete open tag then a close tag: `<button\n    </li>` → `</li>`
+  s = s.replace(/<[A-Za-z][\w.:-]*\b[^>]*\n\s*(<\/[A-Za-z])/g, '$1');
+  // Strip dangling incomplete prop value
+  s = s.replace(/\s+[A-Za-z_$][\w$-]*=(?:"[^"]*|'[^']*|\{[^}]*)$/g, '').trimEnd();
+  s = s.replace(/[=({[,:]\s*$/g, '').trimEnd();
+  // Collapse accidental ))) / }} from bad brace fills
+  s = s.replace(/\){3,}/g, ')').replace(/\}{3,}/g, '}');
+  // `</div>)`  /  `</div>))` before end of component
+  s = s.replace(/<\/([A-Za-z][\w.-]*)\s*\)+/g, '</$1>');
+  // Typical broken end after a cut: `</div>)))\n}}` → `</div>\n  );\n}\n`
+  s = s.replace(/\n\s*<\/div>\)+\s*\}+\s*$/g, '\n    </div>\n  );\n}\n');
+  s = s.replace(/\)+\s*\}+\s*$/g, ')\n}\n');
+  // Ensure return closes: `</div>\n}` → `</div>\n  );\n}`
+  if (/<\/[A-Za-z][\w.-]*>\s*\n\s*\}\s*$/.test(s) && !/\)\s*;?\s*\n\s*\}\s*$/.test(s)) {
+    s = s.replace(/\n\s*\}\s*$/, '\n  );\n}\n');
+  }
+
+  const voidRe = /^(?:img|input|br|hr|meta|link|source|area|base|col|embed|track|wbr)$/i;
+  const stack: string[] = [];
+  const tagRe = /<\/?([A-Za-z][\w.-]*)\b[^>]*\/?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(s))) {
+    const full = m[0];
+    const name = m[1];
+    if (full.startsWith('</')) {
+      if (stack.length) stack.pop();
+    } else if (!/\/>$/.test(full) && !voidRe.test(name)) {
+      stack.push(name);
+    }
+  }
+  while (stack.length) {
+    s += `\n    </${stack.pop()}>`;
+  }
+
+  const openParen = (s.match(/\(/g) || []).length;
+  const closeParen = (s.match(/\)/g) || []).length;
+  const openBrace = (s.match(/\{/g) || []).length;
+  const closeBrace = (s.match(/\}/g) || []).length;
+  // Prefer a proper return close over bare `</div>)` which looksLikeTruncated flags.
+  if (openParen > closeParen && /<\/[A-Za-z][\w.-]*>\s*$/.test(s)) {
+    s += '\n  );';
+    if (openParen - closeParen > 1) s += ')'.repeat(Math.min(7, openParen - closeParen - 1));
+  } else if (openParen > closeParen) {
+    s += ')'.repeat(Math.min(8, openParen - closeParen));
+  }
+  if (openBrace > closeBrace) s += `\n${'}'.repeat(Math.min(12, openBrace - closeBrace))}`;
+  if (/export\s+default/i.test(s) && !/\}\s*;?\s*$/.test(s)) s += '\n}\n';
+  // Normalize `</div>)\n}` → `</div>\n  );\n}`
+  s = s.replace(/\n\s*<\/([A-Za-z][\w.-]*)>\s*\)+\s*\n\s*\}+\s*$/g, '\n    </$1>\n  );\n}\n');
+  s = s.replace(/<\/([A-Za-z][\w.-]*)>\s*\)+\s*;?\s*\n\s*\}+\s*$/g, '</$1>\n  );\n}\n');
+
+  // Reject heal if still truncated or suspiciously shorter than a real component.
+  // Keep a partial heal when we clearly closed the cut tag (better than shipping mid-`<p className`).
+  if (looksLikeTruncatedUiSource(s) || s.length < 200) {
+    const improved = s.length >= 200
+      && s !== String(source || '').replace(/\s+$/g, '')
+      && !/<[A-Za-z][\w.:-]*(?:\s+[A-Za-z_$][\w$-]*)*\s*$/.test(s)
+      && !/<\/[A-Za-z][\w.-]*\s*$/.test(s);
+    if (improved && /\}\s*;?\s*$/.test(s)) return s;
+    return String(source || '');
+  }
+  return s;
 }
 
 /** True when App.jsx is the old meta "What you asked for" checklist shell. */
@@ -254,6 +362,11 @@ export function looksLikeFpsGame(summary: string, title = ''): boolean {
 /** Playable canvas / arcade games (shooters, runners, score+lives). Not marketing sites. */
 export function looksLikePlayableCanvasGame(summary: string, title = ''): boolean {
   const t = `${stripSkillNoise(summary)} ${title}`.toLowerCase();
+  // Todo / tip / utility apps are never arcade games (ensemble fluff may say "playable").
+  if (/\b(?:todo|task\s*list|tip\s*(?:calc|calculator|wise)|checklist|counter|timer|notepad)\b/.test(t)
+    && !/\b(?:game|arcade|pac-?man|snake|dino|shooter|pong)\b/.test(t)) {
+    return false;
+  }
   if (looksLikeChromeDinoGame(summary, title) || looksLikePacManGame(summary, title) || looksLikeSnakeGame(summary, title)) return true;
   if (looksLikeFpsGame(summary, title)) return true;
   if (/\b(?:buy\s+now|shopping\s+bag|storefront|landing\s+page)\b/.test(t) && !/\b(?:game|playable|arcade|canvas)\b/.test(t)) {
@@ -282,7 +395,14 @@ export function looksLikeChromeDinoGame(summary: string, title = ''): boolean {
 
 /** Interactive 3D / viewport modeling tool — not a marketing site. */
 export function looksLikeSpatialApp(summary: string, title = ''): boolean {
-  const t = `${stripSkillNoise(summary)} ${title}`.toLowerCase();
+  // Strip “No Three.js / never WebGL…” so forbid text never forces the 3D Ready gate.
+  const cleaned = `${stripSkillNoise(summary)} ${title}`
+    .replace(
+      /\b(?:do\s+not|never|forbidden|forbidding|don't|dont|avoid|no)\b[^\n.]{0,80}\b(?:three\.?js|webgl|babylon|orbit\s*controls?)\b[^\n.]*/gi,
+      ' ',
+    )
+    .toLowerCase();
+  const t = cleaned;
   // Layout-inspiration copy ("first viewport", apple.com bands) is NOT a 3D app.
   if (
     /\b(?:apple\.com|full[- ]?bleed|product\s+band|landing\s+page|home\s*page|marketing)\b/.test(t)

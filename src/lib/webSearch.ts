@@ -2,6 +2,7 @@
 
 import { looksLikeColorCodeAsk } from '@/lib/colorCodeAsk';
 import { detectLayoutReference } from '@/lib/layoutReference';
+import { linkLabelMatchesUrl, shopSearchUrlForLabel } from '@/lib/replySanity';
 
 /**
  * Mid-thread side quests: weather, lyrics, sports, news, stocks, etc.
@@ -125,6 +126,11 @@ export function filterWebSources<T extends { title?: string; url?: string }>(sou
     const u = String(s?.url || '').trim();
     if (!/^https?:\/\//i.test(u)) return false;
     if (isJunkWebSourceUrl(u)) return false;
+    const blob = `${s?.title || ''} ${u}`.toLowerCase();
+    // Phrase-search bleed: pages about asking for “more information”, not the thread topic.
+    if (/\b(?:polite ways to request more information|how to say ['"]?more information|request more information professionally|howtosayguide)\b/i.test(blob)) {
+      return false;
+    }
     return true;
   });
   return cleaned.sort((a, b) => sourceHostRank(String(a.url)) - sourceHostRank(String(b.url)));
@@ -388,6 +394,13 @@ export function looksLikeCreativeAsk(text: string): boolean {
 export function looksLikeIdentifyMediaAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length < 16) return false;
+  // Already named the work / author and wants discussion — not “what book is this?”
+  if (
+    /\b(?:let'?s\s+talk|what\s+(?:makes|did\s+you\s+think)|storytelling|no\s+shopping\s+links|stay\s+on\s+this\s+book)\b/i.test(t)
+    && /\b(?:by\s+[A-Z][a-z]+|rothfuss|kvothe|harry\s+potter|name\s+of\s+the\s+wind)\b/i.test(t)
+  ) {
+    return false;
+  }
   if (/\b(?:what(?:'s|\s+is)\s+the\s+name\s+of\s+(?:this|the|that)\s+(?:book|novel|movie|film|show|series)|(?:name|title)\s+of\s+(?:this|the|that)\s+(?:book|novel|movie|film)|which\s+(?:book|novel|movie|film)|what\s+book\s+(?:is|was)\s+this|identify\s+(?:this|the)\s+(?:book|novel|movie|film)|what(?:'s|\s+is)\s+(?:this|that)\s+(?:book|novel|movie|film)\s+called)\b/i.test(t)) {
     return true;
   }
@@ -412,10 +425,13 @@ export function looksLikeIdentifyMediaAsk(text: string): boolean {
     return true;
   }
   // Long plot dump that clearly asks for a real book/movie title.
+  // Do NOT treat “The Name of the Wind … Stay on this book” as identify — “name” is in the title.
   if (
     t.length >= 100
     && /\b(?:book|novel|movie|film)\b/i.test(t)
-    && /\b(?:name|title|called|remember|author|familiar|talking\s+about|thinking\s+of)\b/i.test(t)
+    && /\b(?:title|called|remember|author|familiar|talking\s+about|thinking\s+of)\b/i.test(t)
+    && !/\b(?:let'?s\s+talk|what\s+makes|storytelling|no\s+shopping)\b/i.test(t)
+    && !/\bthe\s+name\s+of\s+the\s+wind\b/i.test(t)
   ) {
     return true;
   }
@@ -1101,11 +1117,46 @@ export function looksLikeBookFindOrBuyAsk(text: string): boolean {
 }
 
 /**
+ * Bare “more info / tell me more / give me more info” with no new subject in this message.
+ * These are thread expands — never search the literal phrase “more information”.
+ */
+export function looksLikeBareExpandAsk(text: string): boolean {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw || raw.length > 120) return false;
+  // Has an explicit new subject after on/about → not bare.
+  if (/\b(?:more\s+(?:info|information|details?)|tell\s+me\s+more)\s+(?:on|about)\s+(?!that\b|this\b|it\b)\S+/i.test(raw)) {
+    return false;
+  }
+  if (/\b(?:who\s+(?:is|are)|what\s+is|net\s*worth|look\s+up|search\s+the\s+web)\b/i.test(raw)
+    && !/^(?:can|could|would|please|hey|ok|okay|so)\b/i.test(raw)) {
+    // Allow "who is" only if it's the whole ask with a name — those aren't bare expand.
+    if (/\bwho\s+(?:is|are)\s+\S+/i.test(raw)) return false;
+  }
+  const core = raw
+    .replace(/^(?:hey|hi|ok|okay|so|please|um+|uh+)\s*,?\s*/i, '')
+    .replace(/^(?:can|could|would)\s+you\s+(?:please\s+)?/i, '')
+    .replace(/^(?:give|gave|gimme|show|tell)\s+(?:me\s+)?/i, '')
+    .replace(/[.!?]+$/g, '')
+    .trim();
+  if (/^(?:more\s+(?:info|information|details?)(?:\s+(?:on|about)\s+(?:that|this|it))?|tell\s+me\s+more(?:\s+(?:about|on)\s+(?:that|this|it))?|expand(?:\s+(?:on|upon)\s+(?:that|this|it))?|go\s+(?:deeper|on)|keep\s+going|continue|more)$/i.test(core)) {
+    return true;
+  }
+  if (/^(?:can|could|would)\s+you\s+(?:please\s+)?(?:give|tell|show)\s+me\s+more\s+(?:info|information|details?)(?:\s+(?:on|about)\s+(?:that|this|it))?[.!?]*$/i.test(raw)) {
+    return true;
+  }
+  if (/^(?:give|gave|gimme)\s+(?:me\s+)?more\s+(?:info|information|details?)[.!?]*$/i.test(raw)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Search when external info would actually help — not on every message.
  *
- * Yes: people / news / predictions, “more information”, design refs (apple.com UI),
+ * Yes: people / news / predictions, “more information about X”, design refs (apple.com UI),
  *      explicit “search the web”, book/movie identify-from-plot, build asks that need a live layout look.
- * No:  plain stories/jokes, greeting, color codes, routine coding without a reference.
+ * No:  plain stories/jokes, greeting, color codes, routine coding without a reference,
+ *      bare “more info” follow-ups (those expand the prior thread topic).
  */
 export function looksLikeWebGroundedAsk(text: string): boolean {
   const t = String(text || '').trim();
@@ -1116,6 +1167,13 @@ export function looksLikeWebGroundedAsk(text: string): boolean {
     && !/\b(?:github\.com|https?:\/\/|apple\.com|figma|dribbble)\b/i.test(t)) {
     return false;
   }
+  // “Full report on this project” / overview phrasing — never web (even without “this project” pair).
+  if (/\b(?:full\s+)?report\s+on\s+(?:this|the|my|our)\b/i.test(t)) return false;
+  if (/\bmore\s+(?:info|information|details?)\s+(?:on|about)\s+(?:this|the|my|our)\s+(?:project|folder|app)\b/i.test(t)) {
+    return false;
+  }
+  // Bare “more info” / “give me more info” — thread expand, not a web query for the phrase.
+  if (looksLikeBareExpandAsk(t)) return false;
 
   // Design / layout references win even on build asks (“site like apple.com”).
   if (looksLikeDesignReferenceAsk(t)) return true;
@@ -1126,6 +1184,16 @@ export function looksLikeWebGroundedAsk(text: string): boolean {
   }
   // “Where can I buy / give me links to read” — need real store URLs.
   if (looksLikeBookFindOrBuyAsk(t)) return true;
+  // Parts / product shopping links (any topic — keyboard, PC, drone, etc.).
+  if (/\b(?:give\s+me\s+(?:some\s+)?links?|where\s+(?:can|do)\s+i\s+(?:buy|purchase|get|order)|links?\s+to\s+(?:where|buy))\b/i.test(t)
+    && /\b(?:buy|purchase|parts?|components?|materials?|supplies|amazon|vendor|store)\b/i.test(t)) {
+    return true;
+  }
+  // DIY / exactly-how-to-build guides — need live vendor / module context when possible.
+  if (/\b(?:exactly\s+how|how\s+(?:do|can|would|to)\s+(?:i|you|we)?\s*(?:build|make|assemble)|from\s+scratch|step[- ]by[- ]step)\b/i.test(t)
+    && /\b(?:camera|webcam|keyboard|drone|pcb|arduino|raspberry|hardware|sensor|lens|circuit|prototype|build)\b/i.test(t)) {
+    return true;
+  }
 
   if (looksLikeOfflineOnlyAsk(t)) return false;
   if (looksLikeCreativeAsk(t)) return false;
@@ -1150,16 +1218,16 @@ export function looksLikeWebGroundedAsk(text: string): boolean {
   }
   if (/\bhow\s+much\s+(?:is|are|does|did|has|have)\b/i.test(t)) return true;
 
-  // Deep / accurate lookups about people, orgs, products.
+  // Deep / accurate lookups about people, orgs, products — needs a subject, not bare expand.
   if (looksLikeComprehensiveAsk(t)) return true;
-  if (/\b(?:more\s+(?:info|information|details?)(?:\s+(?:on|about))?|tell\s+me\s+more|full\s+(?:bio|biography|profile))\b/i.test(t)) {
+  if (/\b(?:more\s+(?:info|information|details?)\s+(?:on|about)\s+\S|tell\s+me\s+more\s+about\s+\S|full\s+(?:bio|biography|profile)\b)/i.test(t)) {
     return true;
   }
   if (/\b(?:who\s+(?:is|are|was|were)|who(?:'s)|tell\s+me\s+about)\b/i.test(t)
     && !/\b(?:file|folder|project|button|css|component|function)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:info(?:rmation)?\s+(?:on|about)|find\s+out\s+(?:about|more)|look\s+up)\b/i.test(t)) return true;
+  if (/\b(?:info(?:rmation)?\s+(?:on|about)\s+\S|find\s+out\s+(?:about|more)\s+\S|look\s+up\s+\S)/i.test(t)) return true;
   if (/\b(?:who\s+created|founded|founder|when\s+was\b.{0,40}\bfounded)\b/i.test(t)) return true;
 
   // Specs / “is it worth it” product digs — not bare “what is a mouse”.
@@ -1262,6 +1330,7 @@ function extractLookupEntities(blob: string): string[] {
 export function looksLikeThreadFollowUpAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length < 4) return false;
+  if (looksLikeBareExpandAsk(t)) return true;
   if (looksLikeRejectedPriorAnswerAsk(t) || looksLikeExplicitResearchAsk(t)) return true;
   if (/\b(?:he|she|they|him|his|her|them|their)\b/i.test(t) && t.length < 160) return true;
   if (/\b(?:the\s+game|that\s+game|this\s+game|more\s+(?:info|information|details?)|tell\s+me\s+more)\b/i.test(t)) {
@@ -1336,6 +1405,34 @@ export function buildContextualWebQuery(
     if (compressed.length >= 12) return compressed;
   }
 
+  // Bare “more info” → search the prior substantive topic, never the phrase itself.
+  if (looksLikeBareExpandAsk(ask)) {
+    const priorUser = [...priorTurns]
+      .reverse()
+      .find((t) => {
+        if (t.role !== 'user') return false;
+        const c = String(t.content || '').trim();
+        return c.length >= 8 && !looksLikeBareExpandAsk(c);
+      });
+    const topic = priorUser ? normalizeWebSearchQuery(String(priorUser.content || '').slice(0, 180)) : '';
+    if (topic.length >= 8) {
+      const withEntities = entities.length
+        ? `${entities.join(' ')} ${topic}`.replace(/\s+/g, ' ').trim()
+        : topic;
+      return `${withEntities} detailed explanation`.replace(/\s+/g, ' ').trim().slice(0, 220);
+    }
+  }
+
+  // How-to / DIY build → bias search toward real modules / vendor pages.
+  if (/\b(?:webcam|web\s*camera|camera\s+module|build\s+(?:a\s+)?(?:webcam|camera|keyboard|drone))\b/i.test(ask)
+    || (/\b(?:exactly\s+how|how\s+to\s+build|from\s+scratch)\b/i.test(ask) && /\b(?:build|camera|keyboard|drone|pcb)\b/i.test(ask))) {
+    let q = normalizeWebSearchQuery(ask);
+    if (/\b(?:webcam|web\s*camera|camera)\b/i.test(ask) && !/\b(?:IMX|Arducam|UVC)\b/i.test(q)) {
+      q = `${q} Arducam IMX219 USB UVC camera module buy`.trim();
+    }
+    return q.slice(0, 220);
+  }
+
   let q = normalizeWebSearchQuery(ask);
 
   if (looksLikeThreadFollowUpAsk(ask) && entities.length) {
@@ -1382,12 +1479,12 @@ export function formatWebLookupForPrompt(
     ]
     : comprehensive
     ? [
-      '- The user asked for a FULL / comprehensive answer — do NOT hold back to a short card.',
-      '- Write a thorough profile (~250–450 words) using every usable fact from the notes.',
-      '- Suggested sections (skip any you lack facts for): **Overview**, **Early life / background**, **Career**, **Companies & projects**, **Public role / recent notes**.',
-      '- Use short paragraphs and bullet lists where helpful — never pad with “Not specified” rows.',
-      '- NEVER invent earnings, follower counts, birth dates, net worth figures, or quotes. Only use numbers that appear in the notes.',
-      '- At the end, add a **Sources** list with at most 4 markdown links copied from the Sources list below (exact URLs). Prefer Wikipedia / official sites. Do not invent biography.com or random blog links.',
+      '- The user asked for a FULL / deep answer — do NOT hold back to a short card.',
+      '- If this is a how-to / DIY / build ask: give options (easy prototype vs advanced), a first build path, named parts when known, rough price bands, markdown buy links from Sources when available, and a simple text signal-flow. Professional tone, no emojis, no “would you like to start with hardware or software?” as the whole closer.',
+      '- If this is a person/profile ask: write ~250–450 words with sections (Overview, Early life / background, Career, Companies & projects, Public role / recent notes).',
+      '- Use every usable fact from the notes. Never pad with “Not specified” rows.',
+      '- NEVER invent earnings, follower counts, birth dates, net worth figures, or fake product SKUs. Only use numbers that appear in the notes (or clearly mark estimates).',
+      '- At the end, add a **Sources** list with at most 6 markdown links copied from the Sources list below (exact URLs). Prefer Wikipedia / official / vendor sites. Do not invent biography.com or random blog links.',
     ]
     : [
       '- Lead with who/what they are in 1–2 sentences, then a tight **Quick facts** list (only fields you actually know from the notes).',
@@ -1481,6 +1578,7 @@ export function scrubSideQuestBleed(reply: string, userMessage: string): string 
 export function repairReplySourceLinks(
   reply: string,
   sources?: { title: string; url: string }[],
+  opts?: LinkRepairOpts,
 ): string {
   let out = String(reply || '');
   if (!out.trim()) return out;
@@ -1529,6 +1627,25 @@ export function repairReplySourceLinks(
     },
   );
 
+  // Shopping: empty “Raspberry Pi Zero W:” / “USB Webcams:” bullets → Amazon search link.
+  if (opts?.allowShopHosts) {
+    out = out.replace(
+      /^([ \t]*[-*•]\s*)\*{0,2}([^:\n*]{2,60}?)\*{0,2}\s*:\s*$/gim,
+      (_m, bullet, label) => {
+        const lab = String(label || '').trim();
+        if (!lab || /^(?:goodreads|open library|wikipedia|amazon|scholastic|google books|sources?|links?)$/i.test(lab)) {
+          return `${bullet}**${lab}:**`;
+        }
+        // Prefer a verified source whose title/URL mentions the part; else Amazon search for THAT label.
+        const fromSources = pick(new RegExp(lab.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 24), 'i'));
+        const url = (fromSources && linkLabelMatchesUrl(lab, fromSources))
+          ? fromSources
+          : (shopSearchUrlForLabel(lab) || `https://www.amazon.com/s?k=${encodeURIComponent(lab)}`);
+        return `${bullet}**${lab}:** [${lab}](${url})`;
+      },
+    );
+  }
+
   // “live here ↗” / **live here** with no URL — attach best tracker link.
   if (/\blive\s+here\b/i.test(out) && !/\[live\s+here\]\(https?:\/\//i.test(out)) {
     const url = pick(/forbes|bloomberg|net.?worth|track/i) || urls[0];
@@ -1540,8 +1657,25 @@ export function repairReplySourceLinks(
   // Drop dangling ↗ that isn't next to a link.
   out = out.replace(/(?<!\])\s*↗/g, '');
   out = scrubJunkDomainMentions(out);
-  return scrubUnverifiedMarkdownLinks(out, sources);
+  return scrubUnverifiedMarkdownLinks(out, sources, opts);
 }
+
+/** Hosts that are reasonable for “where can I buy parts” answers (not junk blogs). */
+export function isAllowedShopOrPartsHost(url: string): boolean {
+  try {
+    const host = new URL(String(url || '').trim()).hostname.replace(/^www\./i, '').toLowerCase();
+    return /(?:^|\.)(?:amazon\.[a-z.]+|amzn\.to|ebay\.[a-z.]+|digikey\.com|mouser\.com|adafruit\.com|sparkfun\.com|aliexpress\.com|newegg\.com|bestbuy\.com|raspberrypi\.com|raspberrypi\.org|github\.com|shapeways\.com|printables\.com|thingiverse\.com|adafruit\.com|piishop\.com|microcenter\.com|arrow\.com|newark\.com|jlcpcb\.com|pcbway\.com)$/i.test(host);
+  } catch {
+    return false;
+  }
+}
+
+export type LinkRepairOpts = {
+  /** Keep Amazon/Digi-Key/etc. even when live search returned different URLs. */
+  allowShopHosts?: boolean;
+  /** Cap after scrub (default 4; shopping needs more part links). */
+  maxLinks?: number;
+};
 
 /** Strip hallucinated citations to known junk hosts (even as plain prose). */
 export function scrubJunkDomainMentions(reply: string): string {
@@ -1559,13 +1693,14 @@ export function scrubJunkDomainMentions(reply: string): string {
 }
 
 /**
- * Keep only markdown links whose URL matches a verified lookup source.
- * Invented biography.com / blog URLs that look clickable but go nowhere are removed entirely.
- * When no verified sources exist, strip all markdown links (labels become plain text).
+ * Keep markdown links whose URL matches a verified lookup source.
+ * Invented biography.com / blog URLs that look clickable but go nowhere are removed.
+ * Shopping mode keeps known vendor hosts so streamed buy-links are not retracted on finalize.
  */
 export function scrubUnverifiedMarkdownLinks(
   reply: string,
   sources?: { title: string; url: string }[],
+  opts?: LinkRepairOpts,
 ): string {
   let out = String(reply || '');
   if (!out.trim()) return out;
@@ -1573,12 +1708,18 @@ export function scrubUnverifiedMarkdownLinks(
   const verified = (sources || [])
     .map((s) => String(s?.url || '').trim())
     .filter((u) => /^https?:\/\//i.test(u) && !isJunkWebSourceUrl(u));
+  const allowShop = Boolean(opts?.allowShopHosts);
+  const maxLinks = Math.max(1, Math.min(Number(opts?.maxLinks) || (allowShop ? 8 : 4), 12));
 
   const urlAllowed = (href: string): boolean => {
     const h = String(href || '').trim().replace(/[),.;]+$/g, '');
     if (!/^https?:\/\//i.test(h)) return false;
     if (isJunkWebSourceUrl(h)) return false;
-    if (!verified.length) return false;
+    if (allowShop && isAllowedShopOrPartsHost(h)) return true;
+    if (!verified.length) {
+      // No live sources: only keep shop hosts when shopping mode; otherwise strip invented links.
+      return false;
+    }
     try {
       const u = new URL(h);
       return verified.some((raw) => {
@@ -1600,20 +1741,29 @@ export function scrubUnverifiedMarkdownLinks(
     }
   };
 
-  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (full, _label, href) => (
-    urlAllowed(href) ? full : ''
-  ));
+  // Keep the label when dropping a bad href — never leave a blank hole mid-sentence.
+  // Shopping: if the URL host is fine but the product page does not match the label,
+  // rewrite to an Amazon search for that exact label (stops “OV5647” → wrong Adafruit SKU).
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (full, label, href) => {
+    const lab = String(label || '').trim();
+    const h = String(href || '').trim();
+    if (!urlAllowed(h)) return lab;
+    if (allowShop && isAllowedShopOrPartsHost(h) && !linkLabelMatchesUrl(lab, h)) {
+      const search = shopSearchUrlForLabel(lab);
+      return search ? `[${lab}](${search})` : lab;
+    }
+    return full;
+  });
 
-  // Cap Sources dumps — prefer first N verified links only (already ranked).
-  const maxLinks = 4;
+  // Cap Sources dumps — prefer first N verified/allowed links only.
   let linkCount = 0;
   out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, (full) => {
     linkCount += 1;
-    return linkCount <= maxLinks ? full : '';
+    return linkCount <= maxLinks ? full : full.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/i, '$1');
   });
 
   // Bare https URLs not in the verified set (common under Sources)
-  if (verified.length) {
+  if (verified.length || allowShop) {
     out = out.replace(/https?:\/\/[^\s)\]>]+/gi, (url) => (urlAllowed(url) ? url : ''));
   } else {
     // No verified sources — remove markdown-style citation links already stripped;

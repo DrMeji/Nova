@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus } from 'lucide-react';
+import { Bug, ChevronLeft, Folder, Paperclip, Plus } from 'lucide-react';
+import { isDebugComposerParked } from '@/lib/featurePark';
 
 export type ComposerPlusAction =
   | 'plan'
@@ -13,13 +14,16 @@ export type ComposerPlusAction =
   | 'import-folder'
   | 'enter-path'
   | 'bind-path'
-  | 'image';
+  | 'models-brain'
+  | 'image'
+  /** Combined photo + file picker (chat/code). */
+  | 'attach';
 
 type Props = {
   onAction: (action: ComposerPlusAction) => void;
-  /** chat = full attach menu; image = photos only; code = file/folder/photo for workspace */
+  /** chat = modes + attach; image = attach photos; code = modes + attach */
   scope?: 'chat' | 'image' | 'code';
-  /** @deprecated Image is handled via Add file */
+  /** @deprecated Image is handled via Attach */
   showImage?: boolean;
   /** Spinning ring around + while folder/files upload */
   busy?: boolean;
@@ -30,32 +34,49 @@ type Props = {
 type MenuItem = {
   id: ComposerPlusAction;
   label: string;
+  /** Icon-only paperclip — opens file / project attach panel. */
+  clip?: boolean;
+  /** Optional leading icon for attach-panel rows. */
+  icon?: 'folder' | 'clip' | 'bug';
+  /** Parked like Message / Networking — visible, not clickable. */
+  comingSoon?: boolean;
 };
 
-const MODE_ITEMS: MenuItem[] = [
-  { id: 'plan', label: 'Plan' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'multitask', label: 'Multi-agent' },
-  { id: 'debug', label: 'Debug' },
-];
-
+/** Mode ids (for separator between modes and attach). */
 const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
 
-function itemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
+function modeItemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
   if (scope === 'image') {
-    return [{ id: 'image', label: 'Add photo' }];
+    return [{ id: 'attach', label: '', clip: true }];
   }
-  if (scope === 'code') {
-    return [
-      ...MODE_ITEMS,
-      { id: 'bind-path', label: 'Bind project' },
-      { id: 'import-folder', label: 'Import copy' },
-    ];
-  }
+  // Debug visible (parked Soon until clinic is ready); Plan/Agent/Multi-agent stay out.
+  // Attach (files + project bind) under the paperclip.
   return [
-    ...MODE_ITEMS,
-    { id: 'bind-path', label: 'Bind project' },
+    {
+      id: 'debug',
+      label: 'Debug',
+      icon: 'bug',
+      comingSoon: isDebugComposerParked(),
+    },
+    { id: 'attach', label: '', clip: true },
   ];
+}
+
+function attachPanelItems(scope: 'chat' | 'image' | 'code'): MenuItem[] {
+  if (scope === 'image') {
+    return [{ id: 'attach', label: 'Photos', icon: 'clip' }];
+  }
+  const items: MenuItem[] = [
+    { id: 'attach', label: 'Files', icon: 'clip' },
+    { id: 'bind-path', label: 'Project folder', icon: 'folder' },
+  ];
+  if (scope === 'code') {
+    items.push(
+      { id: 'enter-path', label: 'Enter path', icon: 'folder' },
+      { id: 'import-folder', label: 'Import copy', icon: 'folder' },
+    );
+  }
+  return items;
 }
 
 type MenuPos =
@@ -70,13 +91,18 @@ export function ComposerPlusMenu({
   buttonClassName = '',
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [attachPanel, setAttachPanel] = useState(false);
   const [pos, setPos] = useState<MenuPos | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const visible = itemsForScope(scope);
+  const modes = modeItemsForScope(scope);
+  const attachItems = attachPanelItems(scope);
+  const visible = attachPanel ? attachItems : modes;
 
   useEffect(() => {
     if (!open || busy) return;
+    let lastKey = '';
+    let timer: ReturnType<typeof setInterval> | null = null;
     const place = () => {
       const btn = btnRef.current;
       if (!btn) return;
@@ -91,22 +117,28 @@ export function ComposerPlusMenu({
       const spaceAbove = (shellRect?.top ?? r.top) - gap;
       // Prefer below the composer; only flip above when the thread/viewport is cramped below.
       const openAbove = spaceBelow < estimatedMenuH + 12 && spaceAbove > spaceBelow;
-      if (openAbove) {
-        const topEdge = shellRect?.top ?? r.top;
-        setPos({ left, bottom: window.innerHeight - topEdge + gap });
-      } else {
-        const bottomEdge = shellRect?.bottom ?? r.bottom;
-        setPos({ left, top: bottomEdge + gap });
-      }
+      const next: MenuPos = openAbove
+        ? { left, bottom: window.innerHeight - (shellRect?.top ?? r.top) + gap }
+        : { left, top: (shellRect?.bottom ?? r.bottom) + gap };
+      // Avoid setState spam — only commit when the bar actually moved (sidebar hover anim).
+      const key = next.top != null
+        ? `t:${Math.round(next.left)}:${Math.round(next.top)}`
+        : `b:${Math.round(next.left)}:${Math.round(next.bottom!)}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      setPos(next);
     };
     place();
+    // Light poll while open (sidebar anim) — not a continuous rAF CPU burn.
+    timer = setInterval(place, 120);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     return () => {
+      if (timer) clearInterval(timer);
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open, busy]);
+  }, [open, busy, attachPanel]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,9 +146,16 @@ export function ComposerPlusMenu({
       const t = e.target as Node;
       if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);
+      setAttachPanel(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        if (attachPanel) {
+          setAttachPanel(false);
+          return;
+        }
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -124,15 +163,36 @@ export function ComposerPlusMenu({
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, attachPanel]);
 
   useEffect(() => {
-    if (busy) setOpen(false);
+    if (busy) {
+      setOpen(false);
+      setAttachPanel(false);
+    }
   }, [busy]);
 
   const pick = (action: ComposerPlusAction) => {
     setOpen(false);
+    setAttachPanel(false);
     onAction(action);
+  };
+
+  const onItemClick = (m: MenuItem) => {
+    if (m.comingSoon) return;
+    // Image scope: clip fires attach directly.
+    if (scope === 'image' && m.clip) {
+      pick('attach');
+      return;
+    }
+    // Modes strip: clip opens the attach panel (files + project), does not close the bar.
+    if (!attachPanel && m.clip) {
+      setAttachPanel(true);
+      return;
+    }
+    // Parked Debug must never arm even if comingSoon flag is stale.
+    if (m.id === 'debug' && isDebugComposerParked()) return;
+    pick(m.id);
   };
 
   const menu: ReactNode = open && pos && !busy
@@ -149,19 +209,87 @@ export function ComposerPlusMenu({
         }}
       >
         <div className="flex flex-wrap items-center gap-0.5">
+          {attachPanel && scope !== 'image' ? (
+            <button
+              type="button"
+              onClick={() => setAttachPanel(false)}
+              title="Back to modes"
+              aria-label="Back to modes"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
+            </button>
+          ) : null}
           {visible.map((m, i) => {
-            const showSep = i > 0 && MODE_IDS.has(visible[i - 1]!.id) && !MODE_IDS.has(m.id);
+            const showSep =
+              !attachPanel
+              && i > 0
+              && MODE_IDS.has(visible[i - 1]!.id)
+              && !MODE_IDS.has(m.id);
+            const isClipOnly = Boolean(m.clip) && !m.label;
+            const soon = Boolean(m.comingSoon);
             return (
-              <span key={m.id} className="contents">
+              <span key={`${attachPanel ? 'a' : 'm'}-${m.id}-${i}`} className="contents">
                 {showSep ? (
                   <span className="mx-1 h-4 w-px bg-surface-border shrink-0" aria-hidden />
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => pick(m.id)}
-                  className="px-2.5 py-1.5 rounded-lg text-[13px] font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors whitespace-nowrap"
+                  disabled={soon}
+                  aria-disabled={soon || undefined}
+                  onClick={(e) => {
+                    if (soon) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      return;
+                    }
+                    onItemClick(m);
+                  }}
+                  title={
+                    soon
+                      ? `${m.label} · Coming Soon — find issues in a bound project`
+                      : isClipOnly
+                        ? 'Files, photos, or bind a project folder'
+                        : m.id === 'attach'
+                          ? 'Upload photos, PDFs, notes, or other files'
+                          : m.id === 'bind-path'
+                            ? 'Bind a project folder for Debug and edits'
+                            : m.id === 'enter-path'
+                              ? 'Type or paste a folder path on this PC'
+                              : m.id === 'import-folder'
+                                ? 'Import a copy of a project folder'
+                                : m.id === 'debug'
+                                  ? 'Debug — find issues in a bound project and how to fix them'
+                                  : undefined
+                  }
+                  aria-label={
+                    soon
+                      ? `${m.label} (coming soon)`
+                      : isClipOnly
+                        ? 'Attach files or project'
+                        : m.label
+                  }
+                  className={
+                    soon
+                      ? 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-content-tertiary opacity-55 cursor-not-allowed whitespace-nowrap'
+                      : isClipOnly
+                        ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'
+                        : 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors whitespace-nowrap'
+                  }
                 >
-                  {m.label}
+                  {m.clip || m.icon === 'clip' ? (
+                    <Paperclip className="w-3.5 h-3.5 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                  ) : null}
+                  {m.icon === 'folder' ? (
+                    <Folder className="w-3.5 h-3.5 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                  ) : null}
+                  {m.icon === 'bug' ? (
+                    <Bug className="w-3.5 h-3.5 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                  ) : null}
+                  {m.label || null}
+                  {soon ? (
+                    <span className="text-[10px] uppercase tracking-wide text-content-tertiary">Soon</span>
+                  ) : null}
                 </button>
               </span>
             );
@@ -179,12 +307,15 @@ export function ComposerPlusMenu({
         type="button"
         onClick={() => {
           if (busy) return;
-          setOpen(o => !o);
+          setOpen(o => {
+            if (o) setAttachPanel(false);
+            return !o;
+          });
         }}
         disabled={busy}
         className={`relative ${buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'} ${busy ? 'opacity-90 cursor-wait' : ''}`}
-        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Modes and project'}
-        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Modes and project'}
+        title={busy ? 'Uploading…' : scope === 'image' ? 'Attach photo' : 'Modes, files, and project'}
+        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Attach photo' : 'Modes, files, and project'}
         aria-expanded={open}
         aria-busy={busy}
       >

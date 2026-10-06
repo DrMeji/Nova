@@ -2,9 +2,10 @@
  * Level-B agent tool loop: search → read → patch/write → run → verify → repeat.
  * Bound workspace only. Allowlisted shell. Abortable. Continuable.
  *
- * Product decision: Nova create/edit may call this via `novaBuildLoop.ts`
- * when `agentLoopOnCreate` / `agentLoopOnEdit` are on (default on for create).
- * Original Nova tools include `ready` + `assets` (Preview Ready + public images).
+ * Product decision: Nova create craft may call this via `novaBuildLoop.ts`
+ * when `agentLoopOnCreate` is on. Default create uses createV2 craft then
+ * Create Runtime Loop (Live evidence) — tool loop is for fix rounds.
+ * Tools include `ready` + `assets` (static preflight + public images).
  * Free forever — no paywall hooks in this loop.
  */
 
@@ -43,6 +44,7 @@ export type AgentLoopToolName =
   | 'git_status'
   | 'mcp'
   | 'ready'
+  | 'live'
   | 'assets'
   | 'done';
 
@@ -115,7 +117,7 @@ export type AgentLoopOpts = {
 };
 
 const DEFAULT_MAX = 24;
-const TOOL_NAMES = 'list|read|grep|write|patch|run|git_status|mcp|ready|assets|done';
+const TOOL_NAMES = 'list|read|grep|write|patch|run|git_status|mcp|ready|live|assets|done';
 
 function pushStep(
   steps: AgentLoopStep[],
@@ -308,7 +310,10 @@ function buildLoopSystemPrompt(opts: {
     'COMMAND: npm test',
     '',
     'TOOL: ready',
-    '(Nova) Check Preview Ready gates for this product',
+    '(Nova) Check Preview Ready gates for this product (static preflight only)',
+    '',
+    'TOOL: live',
+    '(Nova) Attach Live preview and collect evidence (mount + console + smoke)',
     '',
     'TOOL: assets',
     '(Nova) Check public heroes/logo/covers referenced by the app',
@@ -318,7 +323,7 @@ function buildLoopSystemPrompt(opts: {
     'ARGS: {"key":"value"}',
     '',
     'TOOL: done',
-    'ANSWER: markdown summary',
+    'ANSWER: markdown summary (blocked until ready/live evidence passes)',
     '',
     'Or JSON: {"tool":"patch","path":"src/App.tsx","search":"old","replace":"new"}',
     opts.mcpTools ? `\nRegistered MCP tools:\n${opts.mcpTools}` : '',
@@ -518,9 +523,10 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
 
     let modelReply = '';
     try {
-      // Hard wall so one hung infer cannot pin create on "Thinking (step N/14)" forever.
-      // Resolve (don't reject) + cancel GGUF — same pattern as studioAnswerEngine polish timeout.
-      const STEP_MS = 45_000;
+      // Hard wall so one hung infer cannot pin create forever — but local GGUF
+      // TOOL: write of a full App often needs 2–3+ minutes. 45s was aborting mid-write
+      // (chat showed “(stopped)” + partial TOOL: write dumps).
+      const STEP_MS = createMode ? 210_000 : 180_000;
       const routePromise = opts.callModel({ prompt }).then(
         (r) => ({ ok: true as const, routed: r }),
         (err) => ({ ok: false as const, error: err }),
@@ -987,8 +993,10 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         const filler = looksLikeFillerStubAppSource(appBody);
         const ok = ready.ok && !filler;
         const detail = ok
-          ? 'Preview Ready PASS'
+          ? 'Preview Ready PASS (preflight)'
           : [...(ready.reasons || []), ...(filler ? ['filler stub App'] : [])].join('; ');
+        // Static Ready alone is not verifyOk — Live evidence owns success.
+        if (!ok) verifyOk = false;
         observations.push(`ready → ${ok ? 'PASS' : 'FAIL'}\n${detail}`);
         pushStep(steps, {
           tool: 'ready',
@@ -998,8 +1006,64 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         }, opts.onStep);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'ready check failed';
+        verifyOk = false;
         observations.push(`ready error: ${msg}`);
         pushStep(steps, { tool: 'ready', label: 'Preview Ready error', detail: msg, ok: false }, opts.onStep);
+      }
+      continue;
+    }
+
+    if (action.tool === 'live') {
+      pushStep(steps, { tool: 'live', label: 'Live evidence…' }, opts.onStep);
+      try {
+        const disk = String(opts.diskRoot || '').trim();
+        if (!disk) {
+          verifyOk = false;
+          observations.push('live → FAIL\nno diskRoot');
+          pushStep(steps, { tool: 'live', label: 'Live evidence FAIL', detail: 'no diskRoot', ok: false }, opts.onStep);
+          continue;
+        }
+        const attach = await window.novaDesktop?.getOrAttachPreview?.(disk);
+        const liveUrl = String(attach?.url || '').trim();
+        if (!attach?.ok || !liveUrl) {
+          verifyOk = false;
+          const detail = attach?.error || 'Live did not start';
+          observations.push(`live → FAIL\n${detail}`);
+          pushStep(steps, { tool: 'live', label: 'Live evidence FAIL', detail, ok: false }, opts.onStep);
+          continue;
+        }
+        const {
+          collectLiveEvidence,
+          emptyCreateEvidence,
+          finalizeCreateEvidence,
+          formatEvidenceForAgent,
+        } = await import('@/lib/createEvidence');
+        const live = await collectLiveEvidence({
+          liveUrl,
+          productName: projectName,
+          files,
+          brief: opts.brief,
+          requireSmoke: true,
+        });
+        const ev = finalizeCreateEvidence(emptyCreateEvidence({
+          staticReady: true,
+          npmInstalled: true,
+          ...live,
+        }));
+        verifyOk = ev.pass;
+        const detail = formatEvidenceForAgent(ev);
+        observations.push(detail);
+        pushStep(steps, {
+          tool: 'live',
+          label: ev.pass ? 'Live evidence PASS' : 'Live evidence FAIL',
+          detail: detail.slice(0, 600),
+          ok: ev.pass,
+        }, opts.onStep);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'live check failed';
+        verifyOk = false;
+        observations.push(`live error: ${msg}`);
+        pushStep(steps, { tool: 'live', label: 'Live evidence error', detail: msg, ok: false }, opts.onStep);
       }
       continue;
     }
@@ -1089,9 +1153,48 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
     if (action.tool === 'done') {
       const answer = String(action.answer || modelReply || 'Done.').trim();
 
+      // Verify-before-success: refuse done when Ready/Live verify failed this loop.
+      if (verifyOk === false) {
+        observations.push('done blocked: last verify/Live failed — fix then TOOL: live (or ready) again');
+        pushStep(steps, {
+          tool: 'done',
+          label: 'Done blocked — verify failed',
+          detail: 'Fix issues, then TOOL: live before done',
+          ok: false,
+        }, opts.onStep);
+        continue;
+      }
+      if (opts.createCraftMode && updated.size > 0 && verifyOk !== true) {
+        // Greenfield craft must clear static Ready + prefer Live evidence before done.
+        try {
+          const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
+          const gate = previewReadyForBrief(files, { brief: opts.brief, productName: opts.projectName });
+          if (!gate.ok) {
+            observations.push(`done blocked: Preview Ready fail — ${(gate.reasons || []).slice(0, 4).join('; ')}`);
+            pushStep(steps, {
+              tool: 'done',
+              label: 'Done blocked — not Preview Ready',
+              detail: (gate.reasons || [])[0] || 'Ready fail',
+              ok: false,
+            }, opts.onStep);
+            continue;
+          }
+          if (opts.diskRoot) {
+            observations.push('done blocked: run TOOL: live to prove mount/console before done');
+            pushStep(steps, {
+              tool: 'done',
+              label: 'Done blocked — need Live evidence',
+              detail: 'Emit TOOL: live, then done only if PASS',
+              ok: false,
+            }, opts.onStep);
+            continue;
+          }
+        } catch { /* best-effort */ }
+      }
+
       // Optional git commit after green verify
       const wantCommit = opts.commitOnSuccess ?? agentLoopCommitOnSuccess();
-      if (wantCommit && updated.size && opts.diskRoot && verifyOk !== false) {
+      if (wantCommit && updated.size && opts.diskRoot && verifyOk) {
         const msg = (opts.commitMessage || `NOVA Agent: ${opts.brief.slice(0, 72)}`).replace(/"/g, '\\"');
         const status = await runShellCommand({
           command: 'git status --porcelain',

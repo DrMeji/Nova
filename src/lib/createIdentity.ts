@@ -4,7 +4,7 @@
  */
 
 import { premiumWebCraftRules } from '@/lib/createEnsemble';
-import { detectLayoutReference, layoutReferencePromptLines } from '@/lib/layoutReference';
+import { detectLayoutReference } from '@/lib/layoutReference';
 
 function premiumWebCraftRulesSafe(brief: string): string[] {
   try {
@@ -187,7 +187,15 @@ export function extractMustHaveFromBrief(brief: string): string[] {
   if (/\bemail\b|confirmation/i.test(t) && !lendingBrief) {
     push('email or on-screen confirmation path from the brief');
   }
-  if (/\bcart\b|\bcheckout\b|\bpurchase\b|\bbuy\b/i.test(t) && !lendingBrief) {
+  // Cart/checkout only when the brief is clearly commerce — not todo "Add" buttons,
+  // and not accidental "buy" substrings in research fluff.
+  const utilityBrief = /\b(?:todo|task\s*list|tip\s*(?:calc|calculator|wise)|calculator|checklist|counter|timer|notepad)\b/i.test(t);
+  if (
+    !lendingBrief
+    && !utilityBrief
+    && (/\b(?:cart|checkout|add\s+to\s+cart)\b/i.test(t)
+      || (/\b(?:purchase|buy)\b/i.test(t) && /\b(?:shop|store|product|merch|checkout)\b/i.test(t)))
+  ) {
     push('cart or purchase actions from the brief');
   }
   if (/\bchat\b|\bmessag/i.test(t)) push('messaging UI that matches the brief (original — not a clone shell)');
@@ -213,14 +221,15 @@ export function createBriefSpecFromAsk(name: string, brief = ''): CreateBriefSpe
   const product = String(name || 'Brand').trim() || 'Brand';
   const slug = slugify(product);
   const text = String(brief || '').trim();
-  const ref = explicitReferenceAsk(text);
+  // layoutReference recipes (apple.com / Linear / cafe) are retired — brief invents the look.
+  void explicitReferenceAsk(text);
   return {
     name: product,
     slug,
     brief: text,
     mustHave: extractMustHaveFromBrief(text),
-    referenceSite: ref.wantsInspiration ? (ref.url || null) : null,
-    referenceMode: ref.wantsInspiration ? 'layout-inspiration' : 'none',
+    referenceSite: null,
+    referenceMode: 'none',
     heroHref: `/heroes/${slug}-hero.jpg`,
   };
 }
@@ -262,12 +271,14 @@ export function polishPromptLinesFromBrief(
     ? spec.mustHave.map((m, i) => `${i + 1}. ${m}`).join('\n')
     : '1. Implement the product the user described — invent a unique IA and visual language for THIS brief only.';
 
-  const refLines = spec.referenceMode === 'layout-inspiration'
-    ? layoutReferencePromptLines(String(brief || spec.brief || ''))
-    : [
-        '',
-        'No external lookbook. Do not imitate Discord, Slack, Apple.com, Veopx, bakery shop templates, or any prior Nova demo — unless this brief explicitly asks for that reference.',
-      ];
+  const refLines = [
+    '',
+    'No external lookbook / layoutReference recipes. Invent original layout, type, and palette for THIS brief — do not imitate Apple.com, Linear, cafe word-lists, Discord, Slack, Veopx, bakery templates, or any prior Nova demo.',
+  ];
+
+  const briefText = String(brief || '');
+  const looksGame = /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino)\b/i.test(briefText);
+  const looks3d = /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor)\b/i.test(briefText);
 
   return [
     'Build the FIRST real product UI for this new project from the user brief alone.',
@@ -275,25 +286,25 @@ export function polishPromptLinesFromBrief(
     `Write ALL UI in @@@FILE ${appPath} and @@@FILE src/App.css only.`,
     'Do NOT create ./components/* — one App file with the full UI inline.',
     `MUST import './App.css' at the top of ${appPath}.`,
-    'Invent a unique visual language for THIS brand (palette, type, layout). Never reuse a prior shell.',
-    'QUALITY OVER SPEED: take your time. Prefer a complete, polished App over a fast stub. Multi-section, working interactions, real copy.',
+    'ORIGINAL ONE-OF-ONE: invent a unique professional layout, type, palette, and copy for THIS brief — never fill Design Spine slots, never keep a prior shell, never copy another Nova project.',
+    'Ship a complete working App in one pass — real UI and interactions, not a stub. Be thorough but finish.',
     'If public/logo.svg or public/icons/*.svg exist (or will), put them IN the sticky nav as <img> tags — never leave icon files unused on disk.',
     ...(
-      /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino)\b/i.test(String(brief || ''))
+      looksGame
         ? [
             'This is a PLAYABLE GAME — not a marketing landing page.',
             'Ship a real <canvas> (or WebGL) with requestAnimationFrame, keyboard/pointer controls, score/HUD, and a game loop.',
             'Do NOT ship a centered brand splash, feature cards, or static CSS mock of a game.',
             'Take the time to implement movement, collision, and win/lose — not a thin stub.',
           ]
-        : /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor)\b/i.test(String(brief || ''))
+        : looks3d
           ? [
               'This is a 3D / viewport app — import three (or WebGL) and show a real interactive scene.',
               'Include orbit/pan controls and at least one editable mesh or tool. Not a marketing hero.',
               'Add three to package.json dependencies if missing.',
             ]
           : [
-              'PREMIUM depth required: layered background (gradient/atmosphere), strong type hierarchy, generous spacing, polished cards — not a flat title + two buttons on charcoal.',
+              'PREMIUM depth required: layered background (gradient/atmosphere), strong type hierarchy, generous spacing — invent the composition for this brand.',
               'Implement the REAL flows from the brief (borrow/return, browse, booking, cart, etc.). Do not invent a generic time-slot booking flow unless the brief asks for appointments/reservations.',
               'Images: NEVER use via.placeholder.com, placehold.co, picsum, or other remote placeholder hosts (they break offline). Prefer inline SVG, data-URI icons, or /heroes/*.jpg /logo.svg paths that will be filled locally.',
               'Item / product rows: each row is a horizontal flex with a fixed-size image (no overlapping alt text), title, short blurb, and action button. Do not stack broken <img> on top of the label.',
@@ -304,8 +315,8 @@ export function polishPromptLinesFromBrief(
     ),
     'Do NOT ship a centered brand-name splash, Vite title shell, or filler placeholder text.',
     'Do NOT use filler labels like "Book Title 1" or "A brief description of the book" — invent real product names from the brief.',
-    'Never reuse stock Nova demo copy ("Light, distilled.", "Quiet by design", "Presence without the noise", "Meet … One") unless the brief literally asks for that wording — invent fresh copy for THIS brand.',
-    'Take as long as needed — thorough and correct beats a fast stub. There is no rush.',
+    'Never reuse stock Nova demo copy ("Light, distilled.", "Quiet by design", "Presence without the noise", "Meet … One", "A singular ritual…") unless the brief literally asks for that wording — invent fresh copy for THIS brand.',
+    'Finish the App in this reply — do not trail off or ask to continue.',
     ...premiumWebCraftRulesSafe(String(brief || '')),
     'Nova is free forever — never add paywalls, upgrade CTAs, license gates, or "Pro unlock" screens in the generated UI.',
     '',
@@ -469,15 +480,28 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** No category nouns — accept Openverse results unless clearly junk. */
+/** Reject obvious wrong-media dumps for the brief category (food ≠ radio, etc.). */
 export function heroResultMatchesCategory(
-  _identity: CreateIdentity | CreateBriefSpec,
+  identity: CreateIdentity | CreateBriefSpec,
   titleOrTags: string,
 ): boolean {
   const hay = String(titleOrTags || '').toLowerCase();
   if (!hay.trim()) return true;
-  // Soft reject obvious wrong-media dumps when the brief clearly isn't about them —
-  // callers that care can still use the photo; we no longer force bakery≠radio.
+  const brief = String(
+    (identity as CreateBriefSpec)?.brief
+    || (identity as CreateIdentity)?.brief
+    || (identity as CreateIdentity)?.name
+    || '',
+  ).toLowerCase();
+  const foodBrief = /\b(?:date|dates|medjool|deglet|fruit|bakery|pastry|bread|cafe|coffee|chocolate|honey|olive|food|restaurant)\b/.test(brief);
+  const hardwareBrief = /\b(?:mouse|keyboard|headset|pc\s*case|chassis|gpu|laptop|gaming)\b/.test(brief)
+    && !foodBrief;
+  if (foodBrief && /\b(?:radio|electronics|transistor|cassette|vacuum\s*tube|oscilloscope|circuit|motherboard|dial\s*gauge)\b/.test(hay)) {
+    return false;
+  }
+  if (hardwareBrief && /\b(?:croissant|bakery|pastry|bouquet|tulip|kitten|puppy)\b/.test(hay)) {
+    return false;
+  }
   return true;
 }
 

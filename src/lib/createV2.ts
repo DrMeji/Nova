@@ -1,14 +1,13 @@
 /**
- * createV2 — single-coder create spine (redesign A–E).
+ * createV2 — craft stage only (stream App write).
+ * Success is owned by Create Runtime Loop + pass spine, not by craft alone.
  *
  * Rules:
- * - No agent tool loop on create (unless Settings opts back into agentLoopOnCreate).
- * - No micro / prebuilt App templates.
- * - No Design→Copy ensemble unless multiModelCreate is on.
- * - Mid-craft: status labels only — do not paint full studio / Code every token.
- * - Scaffold must ship a complete Vite package.json before craft.
- * - Craft = whole-file App write; at most one stall retry; then stop (no polish handoff thrash).
- * - Stall abort uses idle OR hard path wall — trickle tokens must not hang for minutes.
+ * - Craft stays staged single-coder write (avoids tool-loop thrash on create).
+ * - After craft: createRuntimeLoop runs gather→fix→verify (plan repair, commander, judge).
+ * - Quality Ready requires createPassSpine (plan + design + host judge) — floors never alone.
+ * - Mid-craft: status labels; optional stream paint.
+ * - Stall abort uses idle OR App-family wall — thrash must not hang forever.
  */
 
 import { getLocalPrefs } from '@/lib/localPrefs';
@@ -23,8 +22,11 @@ export function isCreateV2Active(): boolean {
   }
 }
 
-/** Soft-bind / React paint interval during create (ms). Higher = less freeze. */
-export const CREATE_V2_SOFT_BIND_MS = 4_200;
+/**
+ * Soft-bind / React paint interval during create (ms).
+ * Keep low so Code can typewriter-reveal toward the latest buffer (not multi-second dumps).
+ */
+export const CREATE_V2_SOFT_BIND_MS = 36;
 
 /** Do not auto-open the Code overlay while crafting (avoids tree+editor freezes). */
 export const CREATE_V2_AUTO_OPEN_CODE = false;
@@ -35,30 +37,51 @@ export const CREATE_V2_AUTO_OPEN_CODE = false;
  */
 export const CREATE_V2_STREAM_PAINT_FILES = true;
 
-/** Craft attempts: initial write + one stall/empty retry. No enrich thrash. */
+/**
+ * Craft attempts: initial write + one short repair if truncated/stalled.
+ * Avoids endless rewrite thrash while still recovering one bad dump.
+ */
 export const CREATE_V2_MAX_CRAFT_ATTEMPTS = 2;
 
 /** Max wait for the first @@@FILE token after craft starts (GGUF load). */
-export const CREATE_V2_FIRST_TOKEN_MS = 40_000;
+export const CREATE_V2_FIRST_TOKEN_MS = 120_000;
 
 /** Idle (no App byte growth) before cancelling the GGUF turn on App / App.css. */
-export const CREATE_V2_APP_IDLE_MS = 14_000;
+export const CREATE_V2_APP_IDLE_MS = 45_000;
 
 /** Idle before cancelling on other paths. */
-export const CREATE_V2_OTHER_IDLE_MS = 8_000;
+export const CREATE_V2_OTHER_IDLE_MS = 14_000;
 
 /**
  * Hard wall on one focus path regardless of trickle growth.
- * Fixes: index.css streaming 1 token / few seconds for 2+ minutes.
+ * Keep below the old 8m thrash — fail forward to heal/Live instead.
  */
-export const CREATE_V2_APP_PATH_WALL_MS = 75_000;
-export const CREATE_V2_SCAFFOLD_PATH_WALL_MS = 18_000;
+export const CREATE_V2_APP_PATH_WALL_MS = 180_000;
+/**
+ * Combined wall for App.jsx + App.css as one craft family.
+ * Prevents infinite wall reset when the model thrash-switches between the two.
+ */
+export const CREATE_V2_APP_FAMILY_WALL_MS = 150_000;
+export const CREATE_V2_SCAFFOLD_PATH_WALL_MS = 10_000;
 
 /** Total wall for one craft attempt (stream must end or abort). */
 export function createV2AttemptWallMs(profile: CreateBudgetProfile): number {
-  if (profile === 'simple') return 75_000;
-  if (profile === 'complex') return 180_000;
-  return 120_000;
+  // Brief-sized budgets — simple apps must finish, not thrash for 5–7m.
+  if (profile === 'simple') return 150_000; // 2.5m
+  if (profile === 'complex') return 360_000; // 6m
+  return 240_000; // 4m
+}
+
+/** Staged-write instructions so models emit shell → fill → CSS instead of one novel. */
+export function createV2StagedWriteInstructions(preferTs: boolean): string {
+  const app = preferTs ? 'src/App.tsx' : 'src/App.jsx';
+  return [
+    'STAGE THE WRITE (smaller dumps survive better than one giant file):',
+    `1) Emit @@@FILE ${app} with a complete working shell first (imports, export default, layout, brand h1).`,
+    '2) Continue the same @@@FILE (or rewrite it once) to fill interactions / list / form — finish every tag and brace.',
+    '3) Emit @@@FILE src/App.css with real styles (not empty).',
+    'Do NOT linger on index.html, main, package.json, or index.css during craft.',
+  ].join('\n');
 }
 
 /** Scaffold / chrome files the coder must not linger on during craft. */
@@ -90,11 +113,16 @@ export function createV2IdleStallMs(path: string): number {
 }
 
 export function createV2StatusCraft(coderName: string): string {
-  return `Craft · **${coderName}** (createV2 · single write)…`;
+  return `Craft · **${coderName}** (createV2 · staged write)…`;
+}
+
+export function createV2StatusRepair(path: string): string {
+  const base = String(path || 'App').split('/').pop() || 'App';
+  return `Repair pass · finishing ${base}…`;
 }
 
 export function createV2StatusVerify(): string {
-  return 'Verify · Preview Ready…';
+  return 'Verify · Live evidence…';
 }
 
 export function createV2StatusDone(): string {

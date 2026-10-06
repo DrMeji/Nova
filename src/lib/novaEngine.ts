@@ -105,6 +105,46 @@ export async function importGgufPick() {
   throw new Error('Import needs the desktop app');
 }
 
+export async function importGgufPath(filePath: string) {
+  if (window.novaDesktop?.engineImportGguf) {
+    const result = await window.novaDesktop.engineImportGguf(filePath);
+    window.dispatchEvent(new Event('NOVA:engine-models-changed'));
+    return result;
+  }
+  throw new Error('Import needs the desktop app');
+}
+
+export type ExternalGgufHit = {
+  path: string;
+  fileName: string;
+  sizeGb: number;
+  source: string;
+  catalogId: string | null;
+  mmproj?: boolean;
+};
+
+export async function scanExternalGgufs(): Promise<{
+  ok: boolean;
+  count: number;
+  models: ExternalGgufHit[];
+  scannedRoots?: string[];
+  note?: string;
+  error?: string;
+}> {
+  if (window.novaDesktop?.engineScanExternalGgufs) {
+    const r = await window.novaDesktop.engineScanExternalGgufs();
+    return {
+      ok: Boolean(r?.ok),
+      count: r?.count ?? 0,
+      models: r?.models || [],
+      scannedRoots: r?.scannedRoots,
+      note: r?.note,
+      error: r?.error,
+    };
+  }
+  return { ok: false, count: 0, models: [], error: 'Desktop only' };
+}
+
 export async function deleteEngineModel(id: string): Promise<ArkEngineStatus & { ok: boolean; error?: string; deleted?: string }> {
   if (!window.novaDesktop?.engineDeleteModel) {
     throw new Error('Deleting models needs the desktop app');

@@ -401,26 +401,33 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                   value={prefs.agentLoopEnabled !== false}
                   onChange={v => patchPrefs({ agentLoopEnabled: v })}
                 />
-                <ToggleRow
-                  label="Create with Nova tool loop"
-                  value={prefs.agentLoopOnCreate !== false}
-                  onChange={v => patchPrefs({ agentLoopOnCreate: v })}
-                />
+                <p className="text-[11px] text-content-tertiary mb-2 px-0.5 leading-snug">
+                  Create uses one locked brain (craft + Live evidence). Multimodal ensemble Auto is parked — code stays, seats stay off. The multi-step create tool loop is not offered here.
+                </p>
                 <ToggleRow
                   label="Edit with Nova tool loop"
-                  value={prefs.agentLoopOnEdit !== false}
+                  value={prefs.agentLoopOnEdit === true}
                   onChange={v => patchPrefs({ agentLoopOnEdit: v })}
                 />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  Off by default for reliability. Turn on for multi-file / “fix all” edits that need the tool loop.
+                </p>
                 <ToggleRow
                   label="Approve plan before create"
                   value={Boolean(prefs.planApproveGate)}
                   onChange={v => patchPrefs({ planApproveGate: v })}
                 />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  Soft Plan stays read-only until you confirm. Hard asks (“build it”, “on disk now”) still skip Plan and go straight to craft → Live verify.
+                </p>
                 <ToggleRow
                   label="Commit after green verify"
                   value={Boolean(prefs.agentLoopCommitOnSuccess)}
                   onChange={v => patchPrefs({ agentLoopCommitOnSuccess: v })}
                 />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  When Live evidence passes, optionally git-commit the project folder (paper trail / easy undo).
+                </p>
 
                 <ToggleRow
                   label="Allow Desktop folder access"

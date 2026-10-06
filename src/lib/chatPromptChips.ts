@@ -23,7 +23,7 @@ export function parsePromptChipsMessage(content: string): {
   const m = raw.match(CHIPS_MARKER_RE);
   if (!m?.[1]) return { body: raw, chips: [] };
   try {
-    const payload = JSON.parse(m[1]) as PromptChipsPayload;
+    const payload = JSON.parse(m[1].replace(/__ARROW__/g, '-->')) as PromptChipsPayload;
     const body = raw.replace(CHIPS_MARKER_RE, '').trim();
     return { body, chips: payload.chips || [] };
   } catch {
@@ -34,7 +34,9 @@ export function parsePromptChipsMessage(content: string): {
 export function encodePromptChipsMessage(body: string, chips: PromptChip[]): string {
   const trimmed = String(body || '').trim();
   if (!chips.length) return trimmed;
-  return `<!--nova-prompt-chips:${JSON.stringify({ chips })}-->\n${trimmed}`;
+  // Never let "-->" inside chip JSON close the HTML comment early (breaks tip + chip UI).
+  const payload = JSON.stringify({ chips }).replace(/-->/g, '__ARROW__');
+  return `<!--nova-prompt-chips:${payload}-->\n${trimmed}`;
 }
 
 export function promptChipsToPlainText(chips: PromptChip[]): string {

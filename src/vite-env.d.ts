@@ -29,6 +29,18 @@ declare global {
       getPathForFile?: (file: File) => string;
       openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
       openPath?: (targetPath: string) => Promise<boolean | { ok: boolean; error?: string }>;
+      /** Write bytes into the OS Downloads folder and return the path. */
+      saveToDownloads?: (payload: {
+        fileName: string;
+        bytes: number[];
+        mime?: string;
+      }) => Promise<{
+        ok: boolean;
+        path?: string;
+        folderPath?: string;
+        fileName?: string;
+        error?: string;
+      }>;
       windowControls?: boolean;
       windowMinimize?: () => Promise<boolean>;
       windowMaximizeToggle?: () => Promise<boolean>;
@@ -293,12 +305,32 @@ declare global {
       engineDownloadProgress?: (id: string) => Promise<number>;
       engineDownloadError?: (id: string) => Promise<string | null>;
       engineDownloadCancel?: (id: string) => Promise<{ ok: boolean; canceled?: boolean; canceling?: boolean; error?: string }>;
-      engineImportGguf?: (filePath: string) => Promise<import('@/lib/novaEngine').ArkEngineStatus>;
+      engineImportGguf?: (filePath: string) => Promise<import('@/lib/novaEngine').ArkEngineStatus & {
+        ok?: boolean;
+        importedId?: string;
+        importMode?: string;
+        sourcePath?: string;
+      }>;
       engineImportGgufPick?: () => Promise<{
         ok: boolean;
         canceled?: boolean;
         count?: number;
         status?: import('@/lib/novaEngine').ArkEngineStatus;
+      }>;
+      engineScanExternalGgufs?: () => Promise<{
+        ok: boolean;
+        count?: number;
+        models?: Array<{
+          path: string;
+          fileName: string;
+          sizeGb: number;
+          source: string;
+          catalogId: string | null;
+          mmproj?: boolean;
+        }>;
+        scannedRoots?: string[];
+        note?: string;
+        error?: string;
       }>;
       engineDeleteModel?: (id: string) => Promise<
         import('@/lib/novaEngine').ArkEngineStatus & { ok: boolean; error?: string; deleted?: string; removed?: number }
@@ -386,6 +418,25 @@ declare global {
       previewReload?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
       /** Capture the Live preview window as a data URL for the Critic hop. */
       previewCaptureLive?: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+      /** Open/attach Live and report whether #root actually painted UI. */
+      previewProbeMounted?: (payload: {
+        url?: string;
+        title?: string;
+        waitMs?: number;
+      }) => Promise<{
+        ok: boolean;
+        mounted?: boolean;
+        fail?: boolean;
+        viteErr?: boolean;
+        kids?: number;
+        htmlLen?: number;
+        textLen?: number;
+        title?: string;
+        sample?: string;
+        error?: string;
+        /** Recent preview console errors (create evidence / fix loop). */
+        consoleErrors?: string[];
+      }>;
       /** Attach to an already-running Vite/dev preview for this cwd (no second server). */
       previewSession?: (cwd: string) => Promise<{
         ok: boolean;

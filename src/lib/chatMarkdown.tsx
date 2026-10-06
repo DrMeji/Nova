@@ -279,7 +279,7 @@ function splitBlocks(text: string): Block[] {
   return promoteUnfencedCode(blocks);
 }
 
-/** Detect unfenced source dumps (Python/JS) and wrap them in CodeCopyBox blocks.
+/** Detect unfenced source dumps (Python/JS/CSS) and wrap them in CodeCopyBox blocks.
  *  Never promote plain English planning lines into CODE boxes. */
 function looksLikeCodeLine(line: string): boolean {
   const t = line.trim();
@@ -288,6 +288,10 @@ function looksLikeCodeLine(line: string): boolean {
   if (/^(?:for\s+a\s+first\s+version|here(?:'s| is)|let'?s\s+focus|must-?haves?|nice-?to-?haves?|overall\s+approach|clarifying)\b/i.test(t)) {
     return false;
   }
+  if (/\b(?:want to go into|switch to plan|press\s+\+|under the chat box|map this out step by step)\b/i.test(t)) {
+    return false;
+  }
+  if (/^\*\*(?:HTML|CSS|JavaScript|JS|TypeScript|TS)\*\*\s*$/i.test(t)) return false;
   if (/^[A-Z][a-z]+(?:\s+[a-z]+){3,}/.test(t) && !/[{};=<>]/.test(t)) return false;
   if (/^(import |from |def |class |const |let |var |function |export |package |using |#include|<!DOCTYPE|<\?php)/i.test(t)) {
     // Require a code-ish tail so "const trust" style English does not match.
@@ -304,6 +308,16 @@ function looksLikeCodeLine(line: string): boolean {
   if (/^(if\s*\(|for\s*\(|while\s*\(|return\s+[\[{'"0-9]|print\(|console\.|await\s+\w|async\s+function)/i.test(t)) {
     return true;
   }
+  // CSS selectors / rules / property dumps (margin-bottom: 20px; etc.)
+  if (/^(?:html|body|header|nav|footer|main|h[1-6]|p|a|ul|li|button|input|textarea|img|div|span|section|article)(?:\s*[.#:][\w-]+)*\s*\{?\s*$/i.test(t)) {
+    return true;
+  }
+  if (/^[.#][\w-]+(?:\s+[.#:][\w-]+)*(?:\s*:[\w-]+)?\s*\{?\s*$/i.test(t)) return true;
+  if (/^[.#\w:*-]+\s*\{[^{}]*\}\s*$/i.test(t)) return true;
+  if (/^(?:margin|padding|border|background|color|font|width|height|display|flex|grid|gap|opacity|outline|box-shadow|border-radius|letter-spacing|line-height|text-|min-|max-|overflow|position|top|left|right|bottom|z-index|cursor|transition|transform|align|justify|object-|box-sizing)[\w-]*\s*:\s*[^;{]+;?\s*$/i.test(t)) {
+    return true;
+  }
+  if (/^\}?\s*$/.test(t) && t.includes('}')) return true;
   return false;
 }
 
@@ -311,9 +325,13 @@ function inferLang(code: string): string {
   if (/\bdef\s+\w+\s*\(|\bprint\s*\(|^\s*from\s+\w+\s+import/m.test(code)) return 'python';
   if (/\b(const|let|function|export|import)\b/.test(code) && /[{;]/.test(code)) return 'javascript';
   if (/^\s*</.test(code.trim())) return 'html';
+  if (/(?:margin|padding|border|background|color|font-size|border-radius)\s*:/i.test(code)
+    || /^[.#][\w-]+\s*\{/m.test(code)
+    || /^(?:html|body|h1|button|input)\b/m.test(code)) {
+    return 'css';
+  }
   return 'code';
 }
-
 function promoteUnfencedCode(blocks: Block[]): Block[] {
   const out: Block[] = [];
   for (const block of blocks) {
@@ -339,6 +357,19 @@ function promoteUnfencedCode(blocks: Block[]): Block[] {
       codeBuf = [];
     };
     for (const line of lines) {
+      const trimmed = line.trim();
+      // Hard break: plan nudges / section labels must never stay inside a CODE run.
+      if (
+        codeBuf.length > 0
+        && (
+          /\b(?:want to go into|switch to plan|press\s+\+|under the chat box|map this out step by step)\b/i.test(trimmed)
+          || /^\*\*(?:HTML|CSS|JavaScript|JS|TypeScript|TS)\*\*\s*$/i.test(trimmed)
+        )
+      ) {
+        flushCodeRun();
+        buf.push(line);
+        continue;
+      }
       if (looksLikeCodeLine(line) || (codeBuf.length > 0 && (/^\s{2,}\S/.test(line) || /^[{}\[\],]/.test(line.trim())))) {
         if (buf.length) flushText();
         codeBuf.push(line);
@@ -582,10 +613,32 @@ function HexColorChip({ hex }: { hex: string }) {
   );
 }
 
+/** Keep hex / file chips inside code boxes so CSS dumps stay professional. */
+function renderCodeWithChips(code: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const re = /(#[0-9A-Fa-f]{3,8}\b)|(\b[\w.-]+\.(?:html|css|js|jsx|ts|tsx|json|mjs|cjs)\b)/g;
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    if (m.index > last) {
+      parts.push(<span key={key++}>{code.slice(last, m.index)}</span>);
+    }
+    if (m[1]) {
+      parts.push(<HexColorChip key={key++} hex={m[1]} />);
+    } else if (m[2]) {
+      parts.push(<FilePathChip key={key++} path={m[2]} />);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < code.length) parts.push(<span key={key++}>{code.slice(last)}</span>);
+  return parts.length ? parts : [<span key={0}>{code}</span>];
+}
+
 function CodeCopyBox({ lang, code }: { lang: string; code: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="relative rounded-xl border border-surface-border bg-nova-navy-950/90 overflow-hidden">
+    <div className="relative rounded-xl border border-surface-border bg-nova-navy-950/90 overflow-hidden my-1.5">
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-surface-border/80 bg-surface-hover/30">
         <span className="text-[10px] uppercase tracking-wide text-content-tertiary font-medium">
           {lang || 'code'}
@@ -606,18 +659,18 @@ function CodeCopyBox({ lang, code }: { lang: string; code: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="m-0 max-h-[min(28rem,50vh)] overflow-auto px-3 py-2.5 text-[12px] leading-relaxed font-mono text-content-primary whitespace-pre">
-        {code}
+      <pre className="m-0 max-h-[min(28rem,50vh)] overflow-auto px-3 py-2.5 text-[0.75rem] leading-relaxed font-mono text-content-primary whitespace-pre">
+        {renderCodeWithChips(code)}
       </pre>
     </div>
   );
 }
 
 const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
-  1: 'text-base font-semibold text-content-primary mt-1',
-  2: 'text-[15px] font-semibold text-content-primary mt-1',
-  3: 'text-sm font-semibold text-content-primary mt-0.5',
-  4: 'text-sm font-medium text-content-primary mt-0.5',
+  1: 'text-[1.05rem] font-semibold text-content-primary mt-1',
+  2: 'text-[0.9375rem] font-semibold text-content-primary mt-1',
+  3: 'text-[0.875rem] font-semibold text-content-primary mt-0.5',
+  4: 'text-[0.8125rem] font-medium text-content-primary mt-0.5',
 };
 
 export function ChatMarkdown({ text, tone = 'assistant' }: { text: string; tone?: 'user' | 'assistant' }) {
@@ -627,7 +680,7 @@ export function ChatMarkdown({ text, tone = 'assistant' }: { text: string; tone?
   const inline = (s: string) => renderInline(s, { splitTone });
   const blocks = splitBlocks(cleaned);
   return (
-    <div className="space-y-2 leading-relaxed">
+    <div className="space-y-1.5 leading-[1.55] text-[0.9375rem]">
       {blocks.map((block, i) => {
         if (block.type === 'researchImages') {
           return <ResearchImageGallery key={i} items={block.items} />;

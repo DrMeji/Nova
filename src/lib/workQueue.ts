@@ -70,13 +70,18 @@ export function looksLikeClinicFixAsk(text: string): boolean {
   ) {
     return true;
   }
-  // “go ahead and fix …” with a number/word nearby
+  // “go ahead and fix …” with an explicit clinic target nearby.
+  // Do NOT treat product copy like “AUREL ONE” / “Meet Aurel One” as DBG-001.
   if (
     /\b(?:go\s+ahead\s+and\s+)?fix\b/i.test(t)
-    && (/\bdbg[- ]?\d+\b/i.test(t)
-      || /\b(?:number\s+)?(?:#?\d+|one|two|three|four|five|six|seven|eight|nine|ten|second|third)\b/i.test(t)
+    && (
+      /\bdbg[- ]?\d+\b/i.test(t)
+      || /\b(?:issue|finding|item|number)\s+(?:#?\d+|one|two|three|four|five|six|seven|eight|nine|ten|second|third)\b/i.test(t)
+      || /\bfix\s+(?:issue\s+)?#?\d+\b/i.test(t)
       || /\breadme\b/i.test(t)
-      || /\b(?:critical|high|medium|low)\b/i.test(t))
+      || /\b(?:critical|high|medium|low)\s+(?:ones?|issues?|findings?|items?)\b/i.test(t)
+      || /\b(?:work\s+on|fix)\s+(?:the\s+)?(?:critical|high|medium|low)\b/i.test(t)
+    )
   ) {
     return true;
   }

@@ -118,7 +118,11 @@ const reply = formatCreateProjectReply(
   { ok: true, written: ['package.json'], files: { 'package.json': '{}' } },
   pendingCreateBootstrap('installing'),
 );
-check('npmPending copy not Ready', /not Ready/i.test(reply), reply.slice(0, 160));
+check(
+  'npmPending copy not Ready',
+  /finishing setup|Live unlocks when Ready|not Ready/i.test(reply) && !/\*\*Ready\*\*/i.test(reply),
+  reply.slice(0, 160),
+);
 
 check('localPrefs vault-only desktop', /Secure key vault unavailable/.test(
   fs.readFileSync(path.join(root, 'src/lib/localPrefs.ts'), 'utf8'),

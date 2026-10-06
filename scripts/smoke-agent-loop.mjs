@@ -37,7 +37,7 @@ const {
   shouldRunAgentLoop,
   agentLoopMaxSteps,
   runNovaAgentLoop,
-} = await import('../src/lib/arkAgentLoop.ts');
+} = await import('../src/lib/novaAgentLoop.ts');
 const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
 // Pref defaults off (S008); enable for gate + loop assertions in this smoke.
 setLocalPrefs({ agentLoopEnabled: true });
@@ -46,7 +46,7 @@ const {
   listAgentTree,
   readAgentFile,
   isAgentIgnoredPath,
-} = await import('../src/lib/arkAgentRepo.ts');
+} = await import('../src/lib/novaAgentRepo.ts');
 
 // --- repo helpers ---
 assert.equal(isAgentIgnoredPath('node_modules/x/index.js'), true);

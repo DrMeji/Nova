@@ -1,11 +1,12 @@
 /**
  * Explicit turn kind from composer chips — wins over regex classify.
  * Example: <!--nova-kind:create-->Build a site
+ * (also accepts legacy <!--ark-kind:…-->)
  */
 
 import type { TurnKind } from '@/lib/classifyTurn';
 
-const KIND_RE = /<!--\s*ark-kind:\s*(create|edit|plan|keep_building|chat|delete|open_folder|run_cmd)\s*-->/i;
+const KIND_RE = /<!--\s*(?:nova|ark)-kind:\s*(create|edit|plan|keep_building|chat|delete|open_folder|run_cmd)\s*-->/i;
 
 export function parseExplicitTurnKind(message: string): TurnKind | null {
   const m = String(message || '').match(KIND_RE);

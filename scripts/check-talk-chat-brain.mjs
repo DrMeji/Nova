@@ -68,24 +68,22 @@ assert.deepEqual(codingNoCoder, [], 'no coder ready → empty coding list (hones
 const codingMulti = rankedReadyEngineIds(
   [
     { id: 'qwen25-coder-7b', status: 'ready' },
-    { id: 'qwen25-coder-32b', status: 'ready' },
     { id: 'qwen25-coder-14b', status: 'ready' },
     { id: 'qwen25-7b', status: 'ready' },
   ],
   'coding',
   64,
-  32,
+  14,
 );
 assert.deepEqual(
   codingMulti,
-  ['qwen25-coder-32b', 'qwen25-coder-14b', 'qwen25-coder-7b'],
-  'strong PC: largest coder first, Instruct excluded',
+  ['qwen25-coder-14b', 'qwen25-coder-7b'],
+  'strong PC: largest create-safe coder first, Instruct excluded',
 );
 
 const codingCapped = rankedReadyEngineIds(
   [
     { id: 'qwen25-coder-7b', status: 'ready' },
-    { id: 'qwen25-coder-32b', status: 'ready' },
     { id: 'qwen25-coder-14b', status: 'ready' },
   ],
   'coding',

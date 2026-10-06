@@ -29,7 +29,11 @@ function check(name, ok, detail = '') {
 }
 {
   const r = classifyTurn('Help me build a coffee shop site');
-  check('Help me build coffee shop → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+  check(
+    'Help me build coffee shop → talk-before (not instant create)',
+    r.kind === 'chat' && r.reason === 'talk-before-create',
+    `${r.kind} ${r.reason}`,
+  );
 }
 {
   const r = classifyTurn('Add Nightglass After Hours in the center', { diskRoot: 'X', files: { 'src/App.jsx': 'x' } });
@@ -93,7 +97,7 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
 {
   const r = classifyTurn('Start building Nightcord first slice.');
   check('Start building after requirements → create', r.kind === 'create', `${r.kind} ${r.reason}`);
-  check('greenfield-create-go reason', r.reason === 'greenfield-create-go', r.reason);
+  check('create-go reason', r.reason === 'greenfield-create-go' || r.reason === 'hard-create-go', r.reason);
 }
 {
   const r = classifyTurn('ok start building', {
@@ -113,6 +117,19 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   // Bound folder: "start building" without brand-new stays polish, not a second project.
   const r = classifyTurn('start building', { diskRoot: 'C:\\Ovenfold', files: { 'src/App.jsx': 'x' } });
   check('start building on bound → edit/keep (not create)', r.kind !== 'create', `${r.kind} ${r.reason}`);
+}
+
+{
+  const ask =
+    `hey i'm trying to put a little plant shop together — nothing fancy yet. can we just start with a creamy cream-white background for the page? call the project Garden Bed. skip the plan, just put it on disk and get Live going`;
+  const r = classifyTurn(ask);
+  check('Garden Bed hard-go first ask → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+  check('Garden Bed name', /garden\s*bed/i.test(String(r.createName || '')), r.createName);
+}
+{
+  // Soft explore without disk/Live stays talk-first.
+  const r = classifyTurn('Help me put a little plant shop together — what should it include?');
+  check('plant shop explore → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
 }
 
 if (failed) {

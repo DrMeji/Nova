@@ -8,14 +8,50 @@ import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/ch
 
 export type ChatIntent = 'chat' | 'coding' | 'media';
 
+const SIMPLE_BUILD_TOY =
+  /\b(?:calculator|todo(?:s)?|to-?dos?|checklist|timer|stopwatch|pomodoro|counter|click\s+count|name\s+danc|tic-?tac-?toe|hangman|quiz|flash\s*card|dice(?:\s*roll(?:er)?)?|coin\s*flip|color\s+chang|background\s+color|random\s+color)\b/i;
+
+const SIMPLE_COLOR_BUTTON_TOY =
+  /\b(?:button|click)\b[\s\S]{0,80}\b(?:background|color)\b/i;
+
+/**
+ * Small demos in plain chat (calculator, todo, timer) — chat/instruct brain with code in the bubble.
+ * Not disk create and not a heavy coder GGUF hop.
+ */
+export function looksLikeSimpleBuildToyChatAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const toyHit = SIMPLE_BUILD_TOY.test(t) || SIMPLE_COLOR_BUTTON_TOY.test(t);
+  if (!toyHit) return false;
+  if (/\b(?:on\s+disk|scaffold|create\s+(?:the\s+)?(?:files|project)|lets?\s+build\s+this|build\s+it\s+now|open\s+preview|@@@FILE)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:add|fix|change|update)\b[\s\S]{0,40}\b(?:this|the\s+)(?:app|site|project|folder)\b/i.test(t)) {
+    return false;
+  }
+  // Soft follow-ups after a toy ask (“just a simple calculator for one user”).
+  if (
+    /\b(?:simple|basic|just|one\s+user|tiny|for\s+(?:myself|me)|not\s+(?:for|made\s+for)\s+anyone)\b/i.test(t)
+    && t.length < 420
+  ) {
+    return true;
+  }
+  if (!/\b(?:build|create|make|write|show|give|help)\b/i.test(t)) return false;
+  return true;
+}
+
 const BUILD_ASK =
-  /\b(build|create|make|scaffold|implement|refactor|debug|fix|add|upgrade)\b[\s\S]{0,80}\b(app|website|site|component|function|api|project|calculator|tool|page|ui|chat\s*gpt)\b/i;
+  /\b(build|create|make|scaffold|implement|refactor|debug|fix|add|upgrade)\b[\s\S]{0,80}\b(app|website|site|component|function|api|project|tool|page|ui|chat\s*gpt)\b/i;
 const CODE_FILE =
   /\b(look (at|into)|review|open|edit|read)\b[\s\S]{0,40}\b(file|code|repo|project|source)\b/i;
 
 export function looksLikeCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Calculator / todo / timer demos — answer in chat with snippets, not coder brain.
+  if (looksLikeSimpleBuildToyChatAsk(t) && !looksLikeCopyPasteCodeAsk(t) && !/```[\w]*\n/.test(t)) {
+    return false;
+  }
   // Planning / exploratory talk must stay on the chat brain — never spin up a coder GGUF.
   if (looksLikeTalkBeforeCreateAsk(t) || looksLikeRequirementsAsk(t)) return false;
   // Planning / “how do I get started” is chat, not a coding/scaffold turn.
@@ -134,4 +170,73 @@ export function classifyChatIntent(message: string, kind?: string): ChatIntent {
   if (looksLikeImageAsk(message)) return 'media';
   if (looksLikeCodeAsk(message)) return 'coding';
   return 'chat';
+}
+
+/**
+ * Mini demo reply that promised code but delivered a plan outline or broken fence.
+ */
+export function looksLikeBrokenToyDemoReply(reply: string, ask: string): boolean {
+  if (!looksLikeSimpleBuildToyChatAsk(ask)) return false;
+  const t = String(reply || '').trim();
+  if (!t) return true;
+  if (/```[\s\S]{40,}```/.test(t) || /<html[\s\S]{40,}<\/html>/i.test(t)) {
+    return false;
+  }
+  // Bare DOCTYPE crumb glued into prose (no closing html / no fence) is still a miss.
+  if (/<!DOCTYPE\s+html/i.test(t) && !/<\/html>/i.test(t) && !/```/.test(t)) {
+    return true;
+  }
+  if (/javascript\s*[}][\s\S]{0,40}[}]/i.test(t)) return true;
+  if (/Overall:\s*keep\s+(?:the\s+first\s+version\s+tiny|v1)/i.test(t)) return true;
+  if (/would you like to proceed with this plan/i.test(t)) return true;
+  if (/\b(?:here'?s a basic example|start with the html)\b/i.test(t) && !/```/.test(t)) return true;
+  // “Here's a simple HTML page…” / “here's an example…” with zero code = miss.
+  if (
+    /\b(?:here'?s|here is)\b[\s\S]{0,40}\b(?:simple|tiny|basic|html|example|page|demo)\b/i.test(t)
+    && !/```/.test(t)
+    && !/<[a-z][\s\S]{10,}>/i.test(t)
+  ) {
+    return true;
+  }
+  // Soft toys require a real demo fence — long prose about JS/CSS with no markup is a miss.
+  if (
+    t.length > 120
+    && !/```/.test(t)
+    && !/<[a-z][\s\S]{10,}>/i.test(t)
+    && /\b(?:javascript|html|css|button|background|click)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function simpleToyDemoHonestGap(_ask?: string): string {
+  return [
+    'I could not finish a working mini demo in that turn (the local brain stalled mid-code).',
+    'Open the model menu next to Auto and pick a Cloud model (Groq, OpenRouter, Google, or Hugging Face), then ask again — or say **retry** and I will try once more.',
+  ].join(' ');
+}
+
+/**
+ * Wrap unfenced HTML/CSS/JS toy dumps in a markdown fence so the bubble is readable.
+ * Fixes “wall of text” replies where the model forgot ``` fences (or mashed CSS+JS onto one line).
+ */
+export function ensureToyDemoFenced(reply: string, ask: string): string {
+  if (!looksLikeSimpleBuildToyChatAsk(ask)) return reply;
+  const t = String(reply || '').trim();
+  if (!t) return t;
+  if (/```[\s\S]{40,}```/.test(t)) return t;
+  const codeish =
+    /<!DOCTYPE\s+html|<html\b|<\/html>|function\s+\w+\s*\(|document\.getElementById|querySelector|body\s*\{|\.buttons\b|\.display\b|appendNumber|addEventListener/i.test(t);
+  if (!codeish) return t;
+  // Split short intro prose from the code dump when possible.
+  const split = t.match(/^([\s\S]{0,400}?(?:[.!?]|:))\s+(?=<!DOCTYPE|<html\b|body\s*\{|function\s+\w+|const\s+\w+|let\s+\w+)/i);
+  if (split) {
+    const intro = split[1].trim();
+    const rest = t.slice(split[0].length).trim();
+    if (intro.length >= 12 && rest.length >= 40) {
+      return `${intro}\n\n\`\`\`html\n${rest}\n\`\`\``;
+    }
+  }
+  return `Here is a complete mini demo you can save and open in a browser:\n\n\`\`\`html\n${t}\n\`\`\``;
 }
