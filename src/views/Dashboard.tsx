@@ -71,12 +71,17 @@ export function Dashboard() {
   const deleteItem = (item: HistoryItem) => {
     if (item.chatId) {
       if (window.confirm('Delete this forever? It will leave Recent and History.')) {
-        deleteChatForever(item.chatId);
+        const chatId = item.chatId;
         setSelectedIds(prev => {
           const next = new Set(prev);
           next.delete(item.id);
           return next;
         });
+        // Yield a frame so confirm dismisses before any wipe work (composer stay usable).
+        window.setTimeout(() => {
+          deleteChatForever(chatId);
+          navigate({ name: 'chat' });
+        }, 0);
       }
     }
   };

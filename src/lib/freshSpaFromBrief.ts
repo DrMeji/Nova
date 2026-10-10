@@ -128,6 +128,50 @@ export function jsxSourceHasTypeScriptOnlySyntax(source: string | undefined | nu
   return false;
 }
 
+/** Strip balanced `<…>` generics after a hook call site (handles nested `{ id: string }`). */
+function stripBalancedGenericsAfter(s: string, hookRe: RegExp): string {
+  let out = '';
+  let i = 0;
+  const src = String(s || '');
+  while (i < src.length) {
+    hookRe.lastIndex = i;
+    const m = hookRe.exec(src);
+    if (!m) {
+      out += src.slice(i);
+      break;
+    }
+    const start = m.index;
+    const afterName = start + m[0].length;
+    out += src.slice(i, start) + m[0];
+    let j = afterName;
+    while (j < src.length && /\s/.test(src[j])) j += 1;
+    if (src[j] === '<') {
+      let depth = 0;
+      let k = j;
+      for (; k < src.length; k += 1) {
+        const ch = src[k];
+        if (ch === '<') depth += 1;
+        else if (ch === '>') {
+          depth -= 1;
+          if (depth === 0) {
+            k += 1;
+            break;
+          }
+        }
+      }
+      let p = k;
+      while (p < src.length && /\s/.test(src[p])) p += 1;
+      if (depth === 0 && src[p] === '(') {
+        out += src.slice(k, p); // whitespace between > and (
+        i = p;
+        continue;
+      }
+    }
+    i = afterName;
+  }
+  return out;
+}
+
 /** Strip the common TS-in-JSX crashers so Live can boot (heal before Preview Ready). */
 export function stripIllegalTsFromJsx(source: string | undefined | null): string {
   let s = String(source || '');
@@ -136,8 +180,31 @@ export function stripIllegalTsFromJsx(source: string | undefined | null): string
   s = s.replace(/\bReact\.FC(?:\s*<[^>]*>)?\s*=/g, '=');
   s = s.replace(/\bas\s+const\b/g, '');
   s = s.replace(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$.<>|\s]*(?=\s*=)/g, '$1 $2');
-  s = s.replace(/\buse(State|Ref|Memo|Callback|Reducer)\s*<[^>]*>\s*\(/g, 'use$1(');
+  // Nested generics: useState<Array<{ id: string }>>(…)
+  s = stripBalancedGenericsAfter(s, /\buse(?:State|Ref|Memo|Callback|Reducer)/g);
+  // Simple leftover: useState<Foo>(
+  s = s.replace(/\buse(State|Ref|Memo|Callback|Reducer)\s*<[^<>]*>\s*\(/g, 'use$1(');
   return s;
+}
+
+const VOID_JSX_TAGS = /^(?:img|input|br|hr|meta|link|source|area|base|col|embed|track|wbr)$/i;
+
+/**
+ * Open/close JSX tag counts for truncation heuristics.
+ * Arrow `=>` inside attributes must not end the open tag early, and void elements
+ * (`<input … />`, `<img>`) never have a closing tag — otherwise Tipjar-class inputs
+ * with `onChange={(e) => …}` look like unclosed tags.
+ */
+export function countJsxTagBalance(source: string | undefined | null): { open: number; close: number } {
+  const t = String(source || '').replace(/=>/g, '=_');
+  let open = 0;
+  const re = /<([A-Za-z][\w.-]*)\b[^>]*(?<!\/)\s*>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t))) {
+    if (!VOID_JSX_TAGS.test(m[1])) open += 1;
+  }
+  const close = (t.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;
+  return { open, close };
 }
 
 /** True when App/CSS source was cut off mid-write (common local-model failure). */
@@ -162,14 +229,13 @@ export function looksLikeTruncatedUiSource(source: string | undefined | null): b
   if (/<\/[A-Za-z][\w.-]*\s*$/.test(s)) return true;
   // Incomplete close then another close on next line: `</footer\n    </footer>`
   if (/<\/[A-Za-z][\w.-]*\s*\n\s*<\//.test(s)) return true;
-  // Extra paren junk near EOF: `</div>))` — not a normal `return ( … )\n}` close.
-  if (/<\/[A-Za-z][\w.-]*>\s*\){2,}/.test(s.slice(-120))) return true;
+  // Extra paren junk at EOF only: `</div>))` — not mid-tree `.map(p => (</li>))}` .
+  if (/<\/[A-Za-z][\w.-]*>\s*\){2,}\s*;?\s*\}*\s*$/.test(s)) return true;
   // Accidental over-close from a bad heal / model cut: `)))}}` / `}}}}`
   if (/\){3,}\s*\}+\s*$/.test(s) || /\}{3,}\s*$/.test(s)) return true;
-  // Far more open JSX tags than closes (truncated return tree)
-  const openTags = (s.match(/<[A-Za-z][\w.-]*\b[^>]*(?<!\/)\s*>/g) || []).length;
-  const closeTags = (s.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;
-  if (openTags >= 6 && openTags - closeTags >= 4) return true;
+  // More open JSX tags than closes (truncated return tree)
+  const { open: openTags, close: closeTags } = countJsxTagBalance(s);
+  if (openTags >= 4 && openTags - closeTags >= 2) return true;
   // CSS cut mid-rule / unbalanced braces (e.g. `color: #3333` with no `}`)
   if (/[{;]\s*[\w-]+\s*:\s*[^;{}]*$/i.test(s) || /:\s*#[0-9a-fA-F]{1,5}\s*$/.test(s)) return true;
   const openBrace = (s.match(/\{/g) || []).length;
@@ -190,7 +256,10 @@ export function healNearCompleteTruncatedSource(
   const rel = String(path || '').replace(/\\/g, '/');
   let s = String(source || '').replace(/\s+$/g, '');
   if (!s || s.length < 200) return String(source || '');
-  if (!looksLikeTruncatedUiSource(s)) return s;
+  const { open: openTagCount, close: closeTagCount } = countJsxTagBalance(s);
+  const tagImbalance = openTagCount > closeTagCount;
+  // Also heal mild missing closings that don't trip the trunc heuristic.
+  if (!looksLikeTruncatedUiSource(s) && !tagImbalance) return s;
 
   if (/\.css$/i.test(rel)) {
     // Drop incomplete trailing declaration, then close open braces.
@@ -242,8 +311,16 @@ export function healNearCompleteTruncatedSource(
       stack.push(name);
     }
   }
-  while (stack.length) {
-    s += `\n    </${stack.pop()}>`;
+  if (stack.length) {
+    const closings = stack.reverse().map((name) => `    </${name}>`).join('\n');
+    // Prefer inserting before an existing return close — never after export default.
+    if (/\n\s*\);\s*\n/.test(s)) {
+      s = s.replace(/\n(\s*)\);(\s*\n)/, `\n${closings}\n$1);$2`);
+    } else if (/export\s+default\b/i.test(s)) {
+      s = s.replace(/\n((?:export\s+default[\s\S]*))$/i, `\n${closings}\n$1`);
+    } else {
+      s += `\n${closings}`;
+    }
   }
 
   const openParen = (s.match(/\(/g) || []).length;
@@ -258,7 +335,14 @@ export function healNearCompleteTruncatedSource(
     s += ')'.repeat(Math.min(8, openParen - closeParen));
   }
   if (openBrace > closeBrace) s += `\n${'}'.repeat(Math.min(12, openBrace - closeBrace))}`;
-  if (/export\s+default/i.test(s) && !/\}\s*;?\s*$/.test(s)) s += '\n}\n';
+  // Do not append `}` after a clean `export default App;` name export.
+  if (
+    /export\s+default/i.test(s)
+    && !/\}\s*;?\s*$/.test(s)
+    && !/export\s+default\s+[A-Za-z_$][\w$]*\s*;?\s*$/.test(s)
+  ) {
+    s += '\n}\n';
+  }
   // Normalize `</div>)\n}` → `</div>\n  );\n}`
   s = s.replace(/\n\s*<\/([A-Za-z][\w.-]*)>\s*\)+\s*\n\s*\}+\s*$/g, '\n    </$1>\n  );\n}\n');
   s = s.replace(/<\/([A-Za-z][\w.-]*)>\s*\)+\s*;?\s*\n\s*\}+\s*$/g, '</$1>\n  );\n}\n');

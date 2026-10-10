@@ -3,7 +3,7 @@
  * Models fill slots; Nova owns structure. Keywords/site names are optional overlays only.
  */
 import type { BuildGenre, CopyPack, LayoutContract, LayoutSection } from '@/lib/createLayoutContract';
-import { scoreStorefrontContract } from '@/lib/createLayoutContract';
+import { FLOOR_CLONE_FINGERPRINT_RE, scoreStorefrontContract } from '@/lib/createLayoutContract';
 import { scoreStorefrontDesignQuality } from '@/lib/createStorefrontRepair';
 import {
   buildProductPlan,
@@ -12,6 +12,8 @@ import {
   scorePlanContract,
   scoreStartingDesignQuality,
 } from '@/lib/createProductPlan';
+import { formatThinCreateCraftRules, isThinCreatePath, thinBriefWantsDepth } from '@/lib/createThinPath';
+import { createIdentityFromBrief, svgHeroDataUrl } from '@/lib/createIdentity';
 
 export type CompositionFamily =
   | 'marketing-bands'
@@ -595,12 +597,19 @@ export function formatDesignCraftRules(plan: DesignPlan): string[] {
 /**
  * Brief-first craft law — invent whatever THIS ask needs.
  * No tip/todo/notes/shop recipe menus. Family is a soft hint against wrong-shape sabotage only.
+ * When thin create is on (default), uses the short Temp-Nova-shaped prompt instead.
  */
 export function formatOriginalCraftRules(opts: {
   brief: string;
   productName?: string;
   freshnessKey?: string;
 }): string[] {
+  if (isThinCreatePath()) {
+    return formatThinCreateCraftRules({
+      brief: opts.brief,
+      productName: opts.productName,
+    });
+  }
   const name = String(opts.productName || '').trim();
   const brief = String(opts.brief || '').trim().slice(0, 800);
   const salt = String(opts.freshnessKey || '').slice(0, 16);
@@ -639,6 +648,161 @@ export function formatOriginalCraftRules(opts: {
   ].filter(Boolean);
 }
 
+const THIN_TOKENS_CSS_PATH = 'src/styles/tokens.css';
+
+/** Minimal palette tokens for marketing/brand thin create — no floor page paste. */
+export function ensureThinDeterministicTokensCss(
+  files: Record<string, string>,
+  brief: string,
+  productName = '',
+): Record<string, string> {
+  if (!isThinCreatePath() || !thinBriefWantsDepth(brief)) return files;
+  const family = inferCreateCompositionFamily(brief, productName);
+  if (family !== 'marketing-bands' && !/\b(?:brand|matcha|boutique|skincare|restaurant)\b/i.test(brief)) {
+    return files;
+  }
+  if (String(files[THIN_TOKENS_CSS_PATH] || '').trim()) return files;
+  const id = createIdentityFromBrief(productName, brief);
+  const p = id.palette;
+  const tokensCss = `:root {
+  --bg: ${p.bg};
+  --ink: ${p.text};
+  --accent: ${p.accent};
+  --muted: ${p.muted};
+  --panel: ${p.panel};
+  --line: ${p.line};
+}
+`.trim();
+  const next: Record<string, string> = { ...files, [THIN_TOKENS_CSS_PATH]: tokensCss };
+  const appCss = String(files['src/App.css'] || '');
+  if (!/tokens\.css/i.test(appCss)) {
+    next['src/App.css'] = `@import './styles/tokens.css';\n${appCss}`.trim();
+  }
+  return next;
+}
+
+/**
+ * True when the page already paints a designed hero stage without Pollinations/photo files:
+ * inline SVG / data-URL art, a hero orb/atmosphere layer, or a gradient-backed .hero.
+ * `extra` may be compositional section bodies (App shell alone often has no hero).
+ */
+export function heroVisualRendered(app: string, css: string, extra = ''): boolean {
+  const a = `${String(app || '')}\n${String(extra || '')}`;
+  const c = String(css || '');
+  if (/(?:src|href)=\{?\s*['"]data:image\/svg\+xml/i.test(a)) return true;
+  if (/\bHERO_VISUAL\b/.test(a) && /data:image\/svg\+xml/i.test(a)) return true;
+  if (/className=["'][^"']*\bhero-art\b/i.test(a) && /\bHERO_VISUAL\b|data:image\/svg\+xml/i.test(a)) return true;
+  if (/<svg\b[\s\S]{0,4000}<\/svg>/i.test(a) && /className=["'][^"']*\bhero\b/i.test(a)) return true;
+  if (/className=["'][^"']*\bhero\b[^"']*["'][\s\S]{0,600}className=["'][^"']*\b(?:orb|hero-visual|hero__visual|hero-art|stage)\b/i.test(a)) return true;
+  if (/\.hero\b[^{]*\{[^}]*(?:radial-gradient|linear-gradient|conic-gradient)/i.test(c)
+    && /className=["'][^"']*\bhero\b/i.test(a)) return true;
+  return false;
+}
+
+function compositionalSectionBlob(files: Record<string, string>): string {
+  return Object.entries(files)
+    .filter(([k]) => /^src\/sections\/.+\.jsx$/i.test(k.replace(/\\/g, '/')))
+    .map(([, v]) => String(v || ''))
+    .join('\n');
+}
+
+/**
+ * Marketing / brand creates: when no hero visual exists, add a designed SVG stage
+ * (createIdentity.svgHeroDataUrl) inside the hero — never Pollinations or a missing /heroes file.
+ * Compositional shells: inject into HeroSection.jsx, never the thin App shell.
+ */
+export function ensureDesignedHeroVisual(
+  files: Record<string, string>,
+  opts: { brief?: string; productName?: string },
+): { files: Record<string, string>; changed: boolean } {
+  const appKey = files['src/App.jsx'] ? 'src/App.jsx' : (files['src/App.tsx'] ? 'src/App.tsx' : '');
+  if (!appKey) return { files, changed: false };
+  const app = String(files[appKey] || '');
+  const css = String(files['src/App.css'] || '');
+  const sections = compositionalSectionBlob(files);
+  if (!app.trim() || heroVisualRendered(app, css, sections)) return { files, changed: false };
+  if (/<(?:img|video)\b[^>]*(?:className=["'][^"']*hero|alt=["'][^"']*(?:hero|product))/i.test(`${app}\n${sections}`)) {
+    return { files, changed: false };
+  }
+
+  const name = String(opts.productName || '').trim() || 'Brand';
+  let dataUrl = '';
+  try {
+    const ident = createIdentityFromBrief(name, String(opts.brief || ''));
+    dataUrl = svgHeroDataUrl(ident, name);
+  } catch {
+    dataUrl = svgHeroDataUrl({ name }, name);
+  }
+  if (!dataUrl) return { files, changed: false };
+
+  const heroSectionKey = Object.keys(files).find((k) => /src\/sections\/.*Hero.*\.jsx$/i.test(k.replace(/\\/g, '/')))
+    || Object.keys(files).find((k) => {
+      const body = String(files[k] || '');
+      return /src\/sections\//i.test(k) && /className=["'][^"']*\bhero\b/i.test(body);
+    });
+
+  const decl = `const HERO_VISUAL = ${JSON.stringify(dataUrl)};\n`;
+  const artCss = `
+
+/* NOVA designed hero stage (no remote image) */
+.hero-stage {
+  margin-top: 2.5rem; min-height: min(48vh, 420px); border-radius: 1.25rem;
+  overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.12);
+}
+.hero-art, .hero-visual {
+  display: block; width: 100%; height: 100%; min-height: inherit;
+  object-fit: cover; object-position: center 40%;
+}
+.hero { position: relative; overflow: hidden; }
+.hero > .hero-visual { position: absolute; inset: 0; opacity: 0.55; pointer-events: none; z-index: 0; }
+.hero > *:not(.hero-visual) { position: relative; z-index: 1; }
+`;
+
+  // Prefer compositional Hero section — never poison a thin App shell with inject-hero.
+  if (heroSectionKey) {
+    let body = String(files[heroSectionKey] || '');
+    if (!body.trim()) return { files, changed: false };
+    if (!/\bHERO_VISUAL\b/.test(body)) {
+      body = /^export\s+default/m.test(body)
+        ? body.replace(/^(export\s+default)/m, `${decl}$1`)
+        : `${decl}${body}`;
+    }
+    const artImg = `<img className="hero-art" src={HERO_VISUAL} alt="" aria-hidden="true" />`;
+    if (/<div className="hero-stage-inner"\s*\/>/i.test(body)) {
+      body = body.replace(/<div className="hero-stage-inner"\s*\/>/i, artImg);
+    } else if (/className=["'][^"']*\bhero-stage\b[^"']*["'][^>]*>/i.test(body)
+      && !/hero-art|<svg\b/i.test(body)) {
+      body = body.replace(
+        /(className=["'][^"']*\bhero-stage\b[^"']*["'][^>]*>)/i,
+        `$1\n        ${artImg}`,
+      );
+    } else {
+      const heroOpen = /<(header|section|div)\b[^>]*className=["'][^"']*\bhero\b[^"']*["'][^>]*>/i.exec(body);
+      if (!heroOpen) return { files, changed: false };
+      const insertAt = heroOpen.index + heroOpen[0].length;
+      body = `${body.slice(0, insertAt)}\n      <div className="hero-stage" aria-hidden="true">${artImg}</div>${body.slice(insertAt)}`;
+    }
+    return {
+      files: { ...files, [heroSectionKey]: body, 'src/App.css': `${css.trimEnd()}${artCss}` },
+      changed: true,
+    };
+  }
+
+  const heroOpen = /<(header|section|div)\b[^>]*className=["'][^"']*\bhero\b[^"']*["'][^>]*>/i.exec(app);
+  if (!heroOpen) return { files, changed: false };
+  const insertAt = heroOpen.index + heroOpen[0].length;
+  const img = `\n        <img className="hero-visual" src={HERO_VISUAL} alt="" aria-hidden="true" />`;
+  let nextApp = `${app.slice(0, insertAt)}${img}${app.slice(insertAt)}`;
+  const importEnd = [...nextApp.matchAll(/^import[^\n]*\n/gm)].pop();
+  nextApp = importEnd
+    ? `${nextApp.slice(0, importEnd.index! + importEnd[0].length)}${decl}${nextApp.slice(importEnd.index! + importEnd[0].length)}`
+    : `${decl}${nextApp}`;
+  return {
+    files: { ...files, [appKey]: nextApp, 'src/App.css': `${css.trimEnd()}${artCss}` },
+    changed: true,
+  };
+}
+
 /** Reject unprofessional / stock-clone create output (no template heal — caller retries craft). */
 export function lintOriginalCreateQuality(
   files: Record<string, string>,
@@ -646,7 +810,8 @@ export function lintOriginalCreateQuality(
 ): { ok: boolean; reasons: string[] } {
   const app = String(files['src/App.tsx'] || files['src/App.jsx'] || '');
   const css = String(files['src/App.css'] || '');
-  const blob = `${app}\n${css}`;
+  const sectionBlob = compositionalSectionBlob(files);
+  const blob = `${app}\n${css}\n${sectionBlob}`;
   const reasons: string[] = [];
   if (app.trim().length < 400) reasons.push('App source too thin for a professional page');
   if (css.trim().length < 400) reasons.push('CSS too thin — missing type/atmosphere depth');
@@ -655,6 +820,10 @@ export function lintOriginalCreateQuality(
   }
   if (/\bA singular ritual for how you actually live\b|\bForm that earns its keep\b|\bMade for real rooms\b|\bEveryday ease\b|\bThe \w+ ritual\b/i.test(blob)) {
     reasons.push('Stock Spine clone phrases forbidden');
+  }
+  // Prior Nova floor / SoftPalm / Pond / apple-band pastes — brand landings must invent.
+  if (FLOOR_CLONE_FINGERPRINT_RE.test(blob)) {
+    reasons.push('Canned floor / prior-brand clone fingerprint forbidden');
   }
   if (!/@font-face|fonts\.googleapis|font-family\s*:/i.test(css)) {
     reasons.push('Missing intentional font pairing');
@@ -715,16 +884,34 @@ export function lintOriginalCreateQuality(
     const heroFiles = Object.keys(files).filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)/i.test(p.replace(/\\/g, '/')));
     const coverDecls = /COVER_HREFS|heroes\/[\w.-]+\.(?:jpe?g|png|webp|svg)/i.test(app);
     // Require real hero-stage media — CSS url on .app alone is not enough (often overwritten by solid bg).
-    const heroRendered = /(?:src|href)=['"][^'"]*\/heroes\//i.test(app)
-      || /className=["'][^"']*\bhero\b[^"']*["'][\s\S]{0,400}\/heroes\//i.test(app)
+    // Compositional shells keep hero art in section files — include them.
+    const uiBlob = `${app}\n${sectionBlob}`;
+    const heroRendered = heroVisualRendered(app, css, sectionBlob)
+      || /(?:src|href)=['"][^'"]*\/heroes\//i.test(uiBlob)
+      || /className=["'][^"']*\bhero\b[^"']*["'][\s\S]{0,400}\/heroes\//i.test(uiBlob)
       || /\.hero\b[\s\S]{0,220}(?:url\(\s*['"]?[^)'"]*\/heroes\/|background(?:-image)?\s*:\s*[^;]*\/heroes\/)/i.test(css)
-      || /<(?:img|video)\b[^>]*(?:className=["'][^"']*hero|alt=["'][^"']*(?:hero|product))/i.test(app)
-        && /(?:src|href)=['"][^'"]+/i.test(app);
+      || /<(?:img|video)\b[^>]*(?:className=["'][^"']*hero|alt=["'][^"']*(?:hero|product))/i.test(uiBlob)
+        && /(?:src|href)=['"][^'"]+/i.test(uiBlob);
     if ((heroFiles.length > 0 || coverDecls) && !heroRendered) {
       reasons.push('Hero/product imagery exists (or COVER_HREFS) but is never rendered in the page');
     }
-    if (!heroRendered && /\b(?:mouse|keyboard|headset|vacuum|product|shop|store|gaming|dates?|fruit)\b/i.test(brief)) {
+    if (!heroRendered && /\b(?:mouse|keyboard|headset|vacuum|product|shop|store|gaming|dates?|fruit|matcha|tea|tin|brand|lotion|coffee)\b/i.test(brief)) {
       reasons.push('Product marketing page missing a real hero/product visual stage');
+    }
+    // Old luggage fallback painted brand text fill="#1a1f1c" on a dark plate (invisible).
+    try {
+      const dataUri = (app.match(/data:image\/svg\+xml,([^"']+)/) || [])[1] || '';
+      const decoded = decodeURIComponent(dataUri.slice(0, 6000));
+      if (/fill=["']#1a1f1c["'][^>]*>\s*[A-Z0-9 ]{2,24}\s*</i.test(decoded)
+        && /stroke=["']url\(#metal\)["']/i.test(decoded)) {
+        reasons.push('Hero fallback uses invisible dark-on-dark brand text (luggage stub)');
+      }
+    } catch { /* ignore bad URI */ }
+    // Bare decorative Lucide as the only nav brand mark (music/star/notebook without /logo.svg).
+    if (!/\/logo\.svg/i.test(app)
+      && /src=["']\/icons\/(?:music|star|sparkles|notebook-pen|heart)\.svg["']/i.test(app)
+      && !/nav-brand|brand-wordmark|className=["'][^"']*\blogo\b/i.test(app)) {
+      reasons.push('Brand mark is a bare decorative icon — use /logo.svg or a wordmark');
     }
     if (!/<footer\b/i.test(app) && !/className=["'][^"']*\bfooter\b/i.test(app) && !/className=["'][^"']*\bfoot\b/i.test(app)) {
       reasons.push('Product website missing a footer');

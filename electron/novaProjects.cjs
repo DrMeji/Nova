@@ -929,7 +929,7 @@ function searchProjectFiles(projectId, query, limit = 50) {
   return { ok: true, hits, total };
 }
 
-function deleteProjectFiles(projectId) {
+async function deleteProjectFiles(projectId) {
   const root = path.resolve(projectsRoot());
   const dir = path.resolve(resolveProjectDir(projectId));
   const rel = path.relative(root, dir);
@@ -937,7 +937,17 @@ function deleteProjectFiles(projectId) {
     return { ok: false, error: 'Refusing to delete a path outside NOVA Projects' };
   }
   if (!fs.existsSync(dir)) return { ok: true };
-  fs.rmSync(dir, { recursive: true, force: true });
+  // Async rm — sync recursive delete of node_modules froze the whole Electron UI.
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+  } catch (err) {
+    if (fs.existsSync(dir) && process.platform === 'win32') {
+      const fallback = await deleteGrantedFolderWindowsAsync(dir);
+      if (!fallback.ok) return fallback;
+    } else if (fs.existsSync(dir)) {
+      return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+    }
+  }
   return { ok: true };
 }
 
@@ -947,7 +957,7 @@ function getProjectPath(projectId) {
   return { ok: true, root, inPlace: Boolean(meta?.inPlace), kind: meta?.kind || 'nova-project' };
 }
 
-function deleteGrantedFolder(targetPath) {
+async function deleteGrantedFolder(targetPath) {
   const full = path.resolve(String(targetPath || ''));
   if (!full || !fs.existsSync(full)) return { ok: true, path: full, missing: true };
   const pr = path.resolve(projectsRoot());
@@ -967,14 +977,14 @@ function deleteGrantedFolder(targetPath) {
     return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   try {
-    const st = fs.statSync(full);
+    const st = await fs.promises.stat(full);
     if (st.isDirectory()) {
-      fs.rmSync(full, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+      await fs.promises.rm(full, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
     } else {
-      fs.unlinkSync(full);
+      await fs.promises.unlink(full);
     }
     if (fs.existsSync(full) && process.platform === 'win32') {
-      const fallback = deleteGrantedFolderWindows(full);
+      const fallback = await deleteGrantedFolderWindowsAsync(full);
       if (!fallback.ok) return fallback;
     }
     return {
@@ -984,7 +994,7 @@ function deleteGrantedFolder(targetPath) {
     };
   } catch (err) {
     if (process.platform === 'win32') {
-      const fallback = deleteGrantedFolderWindows(full);
+      const fallback = await deleteGrantedFolderWindowsAsync(full);
       if (fallback.ok) return fallback;
     }
     return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
@@ -1194,6 +1204,7 @@ function renameGrantedPath(fromPath, toPath) {
   }
 }
 
+/** Sync Windows fallback — only for rare sync callers; prefer async below. */
 function deleteGrantedFolderWindows(full) {
   const { execFileSync } = require('child_process');
   try {
@@ -1215,7 +1226,6 @@ function deleteGrantedFolderWindows(full) {
       { windowsHide: true, timeout: 120_000 },
     );
     if (!fs.existsSync(full)) return { ok: true, path: full };
-    // Last resort: cmd rmdir (handles some locked trees better after attrs cleared).
     try {
       execFileSync('cmd.exe', ['/c', 'rmdir', '/s', '/q', full], {
         windowsHide: true,
@@ -1229,6 +1239,44 @@ function deleteGrantedFolderWindows(full) {
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
   }
+}
+
+/** Async Windows fallback — does not freeze Electron UI during long deletes. */
+function deleteGrantedFolderWindowsAsync(full) {
+  const { execFile } = require('child_process');
+  const run = (cmd, args) => new Promise((resolve, reject) => {
+    execFile(cmd, args, { windowsHide: true, timeout: 120_000 }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+  return (async () => {
+    try {
+      const escaped = String(full).replace(/'/g, "''");
+      await run('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        [
+          `$p = '${escaped}'`,
+          'if (Test-Path -LiteralPath $p) {',
+          '  Get-ChildItem -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Attributes = \"Normal\" } catch {} }',
+          '  Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop',
+          '}',
+        ].join('; '),
+      ]);
+      if (!fs.existsSync(full)) return { ok: true, path: full };
+      try {
+        await run('cmd.exe', ['/c', 'rmdir', '/s', '/q', full]);
+      } catch {
+        /* fall through */
+      }
+      if (!fs.existsSync(full)) return { ok: true, path: full };
+      return { ok: false, error: 'Folder still exists after delete (file may be in use). Close Live preview / Node and try again.' };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
+    }
+  })();
 }
 
 function deleteWorkspaceRoot(projectId) {

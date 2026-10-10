@@ -531,12 +531,14 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         (r) => ({ ok: true as const, routed: r }),
         (err) => ({ ok: false as const, error: err }),
       );
+      let stepTimer: ReturnType<typeof setTimeout> | undefined;
       const timed = await Promise.race([
         routePromise,
         new Promise<{ ok: false; timedOut: true }>((resolve) => {
-          window.setTimeout(() => resolve({ ok: false, timedOut: true }), STEP_MS);
+          stepTimer = setTimeout(() => resolve({ ok: false, timedOut: true }), STEP_MS);
         }),
       ]);
+      if (stepTimer !== undefined) clearTimeout(stepTimer);
       if ('timedOut' in timed && timed.timedOut) {
         try {
           const { engineGenerateCancel } = await import('@/lib/novaEngine');

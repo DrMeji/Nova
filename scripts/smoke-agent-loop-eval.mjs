@@ -38,18 +38,18 @@ globalThis.window.novaDesktop = {
   },
 };
 
-const { parseAgentToolReply, runNovaAgentLoop, shouldRunAgentLoop } = await import('../src/lib/arkAgentLoop.ts');
+const { parseAgentToolReply, runNovaAgentLoop, shouldRunAgentLoop } = await import('../src/lib/novaAgentLoop.ts');
 const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
 setLocalPrefs({ agentLoopEnabled: true });
-const { applyAgentPatches, parseAgentPatches } = await import('../src/lib/arkAgentPatch.ts');
-const { buildAgentRepoIndex, searchAgentIndex } = await import('../src/lib/arkAgentIndex.ts');
-const { detectKindFromFiles, agentKindGuidance } = await import('../src/lib/arkAgentPrompts.ts');
+const { applyAgentPatches, parseAgentPatches } = await import('../src/lib/novaAgentPatch.ts');
+const { buildAgentRepoIndex, searchAgentIndex } = await import('../src/lib/novaAgentIndex.ts');
+const { detectKindFromFiles, agentKindGuidance } = await import('../src/lib/novaAgentPrompts.ts');
 const {
   saveAgentContinue,
   loadAgentContinue,
   clearAgentContinue,
   looksLikeAgentContinueAsk,
-} = await import('../src/lib/arkAgentContinue.ts');
+} = await import('../src/lib/novaAgentContinue.ts');
 
 let passed = 0;
 async function task(name, fn) {
@@ -220,4 +220,4 @@ await task('10. step-cap sets hitStepCap + observations', async () => {
   assert.ok(/Continue/i.test(loop.reply));
 });
 
-console.log(`\nark-agent-loop eval: ${passed}/10 ok`);
+console.log(`\nnova-agent-loop eval: ${passed}/10 ok`);

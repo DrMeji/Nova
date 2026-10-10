@@ -813,18 +813,24 @@ export function ProjectWorkspace() {
   }, [diskRoot, workspace.diskRoot]);
 
   // Prefer createJob URL when bootstrap finishes after Workspace opened.
+  // Never auto-attach a craft-blocked / failed job as "Preview ready".
   useEffect(() => {
     const jobUrl = createJob?.previewUrl;
     if (!jobUrl || isPlaceholderPreviewUrl(jobUrl)) return;
+    if (createJob?.craftBlocked || createJob?.status === 'failed') return;
     setLivePreviewUrl(jobUrl);
     setPreviewUrl(jobUrl);
     setPreviewReady(true);
-  }, [createJob?.previewUrl]);
+  }, [createJob?.previewUrl, createJob?.craftBlocked, createJob?.status]);
 
   /** iframe src SSOT: createJob → session → live — never :0 as ready src. */
   const resolvedPreviewSrc = useMemo(() => {
+    // Craft-blocked jobs must not feed the iframe as if Live verified.
+    const jobUrl = (createJob?.craftBlocked || createJob?.status === 'failed')
+      ? null
+      : createJob?.previewUrl;
     const candidates = [
-      createJob?.previewUrl,
+      jobUrl,
       sessionPreviewUrl,
       livePreviewUrl,
       previewUrl,
@@ -834,7 +840,7 @@ export function ProjectWorkspace() {
       if (u && !isPlaceholderPreviewUrl(u)) return u;
     }
     return null;
-  }, [createJob?.previewUrl, sessionPreviewUrl, livePreviewUrl, previewUrl]);
+  }, [createJob?.previewUrl, createJob?.craftBlocked, createJob?.status, sessionPreviewUrl, livePreviewUrl, previewUrl]);
 
   useEffect(() => {
     if (!projectId) {
@@ -3334,9 +3340,11 @@ export function ProjectWorkspace() {
 
   const buildLabel = buildRunning
     ? `Preparing preview ${buildProgress}%`
-    : previewReady || buildProgress >= 100
-      ? 'Preview ready (static HTML)'
-      : null;
+    : (createJob?.craftBlocked || createJob?.status === 'failed')
+      ? null
+      : previewReady || buildProgress >= 100
+        ? 'Preview ready (static HTML)'
+        : null;
 
   return (
     <div className="h-full min-w-0 flex flex-col min-h-0 relative overflow-hidden">

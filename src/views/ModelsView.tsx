@@ -1,7 +1,4 @@
-/**
- * Models catalog (For your PC / Local / Cloud). Sidebar → Models.
- * CLOUD_MODELS stays exported for SearchPanel.
- */
+/** Models catalog (For your PC / Local / Cloud). Sidebar → Models. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
@@ -73,6 +70,8 @@ import { assessEnsembleReadiness, type EnsembleReadiness } from '@/lib/ensembleR
 import { hardwareCoderRecommendation } from '@/lib/brainRoles';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { providerKeyUrl } from '@/lib/providerKeyUrls';
+import { CLOUD_MODELS, type CloudModel } from '@/lib/cloudModelCatalog';
+export { type CloudModel } from '@/lib/cloudModelCatalog';
 
 type TabId = 'for-pc' | 'local' | 'cloud' | 'build-team';
 type Tier = 'free' | 'pro';
@@ -101,18 +100,6 @@ type CloudProvider = {
   health: 'available' | 'limited' | 'offline';
   /** Live in NOVA Router / media today vs catalog only */
   availability: 'live' | 'coming_soon' | 'retired';
-};
-
-export type CloudModel = {
-  id: string;
-  name: string;
-  description: string;
-  provider: string;
-  category: 'chat' | 'coding' | 'reasoning' | 'vision' | 'image' | 'video' | 'fast';
-  tiers: Tier[];
-  recommended?: boolean;
-  tone: string;
-  initial: string;
 };
 
 const LOCAL_MODELS: LocalModel[] = [
@@ -206,76 +193,6 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'perplexity', name: 'Perplexity', description: 'Sonar chat with live search. add your API key.', tiers: ['pro'], tone: 'from-teal-400 to-cyan-800', initial: 'Px', health: 'available', availability: 'live' },
   { id: 'xai', name: 'xAI', description: 'Grok models. add your xAI API key.', tiers: ['pro'], tone: 'from-zinc-400 to-black', initial: 'xA', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
-];
-
-export const CLOUD_MODELS: CloudModel[] = [
-  // Chat
-  { id: 'gpt-4o', name: 'GPT-4o', description: 'Flagship multimodal chat and coding.', provider: 'OpenAI', category: 'chat', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: '4o' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'Fast, affordable everyday chat.', provider: 'OpenAI', category: 'chat', tiers: ['pro'], tone: 'from-green-400 to-emerald-700', initial: '4m' },
-  { id: 'claude-sonnet', name: 'Claude Sonnet', description: 'Strong general assistant with long context.', provider: 'Anthropic', category: 'chat', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'CS' },
-  { id: 'claude-haiku', name: 'Claude Haiku', description: 'Quick replies for lighter tasks.', provider: 'Anthropic', category: 'chat', tiers: ['pro'], tone: 'from-orange-400 to-amber-700', initial: 'CH' },
-  { id: 'gemini-2-flash', name: 'Gemini 2.0 Flash', description: 'Fast Google model with strong multimodal support.', provider: 'Google', category: 'chat', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G2' },
-  { id: 'gemini-15-pro', name: 'Gemini 1.5 Pro', description: 'Long context Google model.', provider: 'Google', category: 'chat', tiers: ['free', 'pro'], tone: 'from-sky-500 to-blue-800', initial: 'G1' },
-  { id: 'llama31-405b', name: 'Llama 3.1 405B', description: 'Large open chat model via cloud hosts.', provider: 'OpenRouter', category: 'chat', tiers: ['free', 'pro'], tone: 'from-violet-500 to-indigo-800', initial: '405' },
-  { id: 'mistral-large', name: 'Mistral Large', description: 'High quality Mistral chat model.', provider: 'Mistral', category: 'chat', tiers: ['pro'], tone: 'from-orange-500 to-red-700', initial: 'ML' },
-  { id: 'command-r-plus', name: 'Command R+', description: 'Cohere chat model with strong tools support.', provider: 'Cohere', category: 'chat', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'CR' },
-  { id: 'xai-chat-2', name: 'xAI Chat 2', description: 'xAI chat model for general work.', provider: 'xAI', category: 'chat', tiers: ['free', 'pro'], tone: 'from-zinc-400 to-black', initial: 'xA' },
-  { id: 'hf-llama-31', name: 'Llama 3.1 8B (HF)', description: 'Open chat via Hugging Face Inference.', provider: 'Hugging Face', category: 'chat', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF' },
-  { id: 'nvidia-llama-31', name: 'Llama 3.1 8B (NIM)', description: 'NVIDIA NIM hosted Llama for coding and chat.', provider: 'NVIDIA', category: 'chat', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV' },
-
-  // Coding
-  { id: 'claude-sonnet-code', name: 'Claude Sonnet (Coding)', description: 'Excellent for code edits and agent work.', provider: 'Anthropic', category: 'coding', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'CC' },
-  { id: 'gpt-4o-code', name: 'GPT-4o (Coding)', description: 'Strong coding and tool use.', provider: 'OpenAI', category: 'coding', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: '4C' },
-  { id: 'deepseek-v3', name: 'DeepSeek V3', description: 'High value coding and general cloud model.', provider: 'DeepSeek', category: 'coding', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DV' },
-  { id: 'deepseek-coder', name: 'DeepSeek Coder', description: 'Specialized coding via DeepSeek API.', provider: 'DeepSeek', category: 'coding', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-blue-800', initial: 'DC' },
-  { id: 'codestral', name: 'Codestral', description: 'Mistral coding model in the cloud.', provider: 'Mistral', category: 'coding', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Cs' },
-  { id: 'qwen-coder-plus', name: 'Qwen2.5-Coder Plus', description: 'Cloud coding model via OpenRouter hosts.', provider: 'OpenRouter', category: 'coding', tiers: ['free', 'pro'], tone: 'from-sky-500 to-blue-700', initial: 'QC' },
-  { id: 'groq-llama33', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding/chat via Groq. NOVA Router.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
-  { id: 'openrouter-llama-free', name: 'Llama 3.3 Free (OpenRouter)', description: 'OpenRouter free route. NOVA Router.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-indigo-800', initial: 'OR' },
-  { id: 'github-gpt4o', name: 'GPT-4o (GitHub Models)', description: 'GitHub Models retired July 2026. Not available in NOVA.', provider: 'GitHub Models', category: 'coding', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH' },
-
-  // Reasoning
-  { id: 'o3-mini', name: 'o3-mini', description: 'OpenAI reasoning model for harder tasks.', provider: 'OpenAI', category: 'reasoning', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'o3' },
-  { id: 'o1-mini', name: 'o1-mini', description: 'Compact reasoning for math and planning.', provider: 'OpenAI', category: 'reasoning', tiers: ['pro'], tone: 'from-green-500 to-emerald-800', initial: 'o1' },
-  { id: 'deepseek-r1', name: 'DeepSeek-R1', description: 'Strong open reasoning model in the cloud.', provider: 'DeepSeek', category: 'reasoning', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'R1' },
-  { id: 'claude-opus', name: 'Claude Opus', description: 'Deep analysis and complex multi step work.', provider: 'Anthropic', category: 'reasoning', tiers: ['pro'], tone: 'from-amber-600 to-orange-900', initial: 'CO' },
-  { id: 'qwq-cloud', name: 'QwQ', description: 'Qwen reasoning model via cloud hosts.', provider: 'OpenRouter', category: 'reasoning', tiers: ['free', 'pro'], tone: 'from-rose-500 to-pink-800', initial: 'Qw' },
-
-  // Vision
-  { id: 'gpt-4o-vision', name: 'GPT-4o Vision', description: 'Image understanding and screenshot analysis.', provider: 'OpenAI', category: 'vision', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: '4V' },
-  { id: 'claude-vision', name: 'Claude Vision', description: 'Read images, PDFs, and UI screenshots.', provider: 'Anthropic', category: 'vision', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'CV' },
-  { id: 'gemini-vision', name: 'Gemini Vision', description: 'Multimodal Google vision workflows.', provider: 'Google', category: 'vision', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'GV' },
-  { id: 'llama-vision-cloud', name: 'Llama 3.2 Vision', description: 'Open vision model via cloud hosts.', provider: 'Together AI', category: 'vision', tiers: ['free', 'pro'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
-
-  // Image generation
-  { id: 'NOVA-pollinations', name: 'NOVA Image (Pollinations)', description: 'Retired. Disabled in NOVA — use Hugging Face FLUX or a local image model.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-zinc-500 to-zinc-800', initial: 'Po' },
-  { id: 'dall-e-3', name: 'DALL·E 3', description: 'Image generation from OpenAI.', provider: 'OpenAI', category: 'image', tiers: ['pro'], tone: 'from-pink-500 to-rose-800', initial: 'D3' },
-  { id: 'imagen-3', name: 'Imagen 3', description: 'Google image generation.', provider: 'Google', category: 'image', tiers: ['pro'], tone: 'from-sky-400 to-blue-700', initial: 'Im' },
-  { id: 'flux-pro', name: 'FLUX Pro', description: 'High quality image generation.', provider: 'Together AI', category: 'image', tiers: ['pro'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
-  { id: 'flux-schnell', name: 'FLUX Schnell', description: 'Fast image drafts and iterations.', provider: 'Fireworks AI', category: 'image', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-pink-700', initial: 'FS' },
-  { id: 'sdxl', name: 'Stable Diffusion XL', description: 'Open image model via cloud hosts.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
-  { id: 'hf-flux-free', name: 'FLUX (HF Inference)', description: 'Primary free-key image path via your Hugging Face token.', provider: 'Hugging Face', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-400 to-orange-700', initial: 'HF' },
-  { id: 'hf-flux-schnell', name: 'FLUX.1 schnell (HF)', description: 'Fast free-key images via Hugging Face.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], recommended: true, tone: 'from-yellow-400 to-orange-700', initial: 'FX' },
-
-  // Coding free extras
-  { id: 'or-llama-free', name: 'Llama 3.3 70B (OpenRouter Free)', description: 'Free OpenRouter coding/chat route when available.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-400 to-indigo-700', initial: 'OR' },
-  { id: 'groq-llama', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding chat via Groq key.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-400 to-red-700', initial: 'Gq' },
-  { id: 'gemini-flash-code', name: 'Gemini 2.0 Flash (Coding)', description: 'Free-tier Google coding assistant.', provider: 'Google', category: 'coding', tiers: ['free'], tone: 'from-blue-400 to-sky-700', initial: 'Gc' },
-
-  // Video generation
-  { id: 'NOVA-pollinations-video', name: 'NOVA Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still. labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
-  { id: 'runway-gen3', name: 'Runway Gen-3', description: 'Cloud video generation and editing.', provider: 'Runway', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-teal-800', initial: 'Rw' },
-  { id: 'luma-ray2', name: 'Luma Ray2', description: 'Text and image to video.', provider: 'Luma', category: 'video', tiers: ['pro'], tone: 'from-sky-400 to-indigo-800', initial: 'Lu' },
-  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips. Not wired in NOVA yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
-  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts. Not wired in NOVA yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
-  { id: 'sora', name: 'Sora', description: 'OpenAI video generation. Not wired in NOVA yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
-
-  // Fast
-  { id: 'groq-llama-fast', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
-  { id: 'groq-mixtral', name: 'Mixtral (Groq)', description: 'Quick Mixtral inference.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-amber-500 to-orange-700', initial: 'Mx' },
-  { id: 'gemini-flash-lite', name: 'Gemini Flash-Lite', description: 'Ultra fast Google responses.', provider: 'Google', category: 'fast', tiers: ['free', 'pro'], tone: 'from-sky-400 to-cyan-700', initial: 'FL' },
-  { id: 'cerebras-llama', name: 'Llama 3.1 8B (Cerebras)', description: 'High speed Cerebras inference.', provider: 'Cerebras', category: 'fast', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce' },
-  { id: 'fireworks-llama', name: 'Llama 3.3 70B (Fireworks)', description: 'Fast serverless Llama hosting.', provider: 'Fireworks AI', category: 'fast', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw' },
 ];
 
 const CLOUD_MODEL_CATEGORIES: { id: CloudModel['category']; title: string; icon: typeof Boxes }[] = [

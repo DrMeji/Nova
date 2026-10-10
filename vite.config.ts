@@ -27,6 +27,9 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   server: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
     watch: {
       // Installer binaries in release/ are often locked during publish and crash Vite's watcher.
       ignored: ['**/release/**', '**/.tmp*/**'],

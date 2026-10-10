@@ -143,7 +143,25 @@ export function looksLikeRequirementsAsk(text: string): boolean {
 }
 
 /**
+ * Soft collaborative opener: "help (me) build X", "can you help me make X".
+ * Not a go-command — explicit hard-go phrases ("on disk", "build it now", "start building",
+ * "scaffold now", "right now") are excluded and stay with classifyTurn's create path.
+ */
+export function looksLikeSoftHelpBuildAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (!/\bhelp\b(?:\s+me)?[\s\S]{0,40}?\b(?:build|create|make|develop)\b/i.test(t)) return false;
+  return !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now|open\s+preview)\b/i.test(t);
+}
+
+/**
  * Exploratory product talk — discuss first, never scaffold.
+ *
+ * Ownership: classifyTurn() is the single owner of greenfield create vs chat. This helper only
+ * answers "is this a soft/exploratory opener?" for callers that need a boolean (brain choice,
+ * planning framing). Mini toys (calculator/todo/timer) are never talk-before-create here —
+ * classifyTurn decides: imperative "build me a calculator" → create, soft "help build a
+ * calculator" → chat (code in the bubble).
  * Familiarity / requirements questions stay chat.
  * Clear build asks ("ok start building", "I want you to build…") create.
  * Soft explores ("build me…", "help me create…", "I want to build…") stay chat.
@@ -196,10 +214,26 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
     if (!exploratory && shortConcrete) return false;
     return true;
   }
+  // "Can you please build me a coffee shop website" with a concrete product → create.
+  // Keep exploratory soft help ("can you help me think through…") as talk-first.
+  const politeConcreteBuild = (
+    /\b(?:can\s+you\s+please|could\s+you\s+please|please)\s+(?:build|create|make)\b/i.test(t)
+    || /\bi'?d\s+like\s+(?:you\s+to\s+)?(?:build|create|make)\b/i.test(t)
+  )
+    && /\b(?:website|web\s*site|site|app|landing|shop|store|cafe|café|coffee|brand|portfolio)\b/i.test(t)
+    && !/\?/.test(t)
+    && !/\b(?:help\s+me\s+(?:think|plan|design)|ideas?|advice|recommend|should\s+i|what\s+features|requirements?)\b/i.test(t);
+
+  if (politeConcreteBuild) {
+    return false;
+  }
   if (
-    /\b(?:can\s+you\s+(?:help(?:\s+me)?|please)|could\s+you\s+(?:help(?:\s+me)?|please)|help\s+me)\b/i.test(t)
-    && /\b(?:build|create|make|develop)\b/i.test(t)
-    && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+    looksLikeSoftHelpBuildAsk(t)
+    || (
+      /\b(?:can\s+you\s+please|could\s+you\s+please)\b/i.test(t)
+      && /\b(?:build|create|make|develop)\b/i.test(t)
+      && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+    )
   ) {
     return true;
   }
@@ -394,10 +428,18 @@ export function inferGreenfieldName(text: string): string | null {
     if (cleaned) return titleCaseWords(cleaned);
   }
 
-  const buildA = t.match(/\bbuild\s+(?:a\s+)?([a-z][a-z0-9 _-]{2,32})\s+(?:website|site|app|platform)\b/i);
-  if (buildA?.[1]) {
-    const cleaned = cleanIdeaName(buildA[1]);
-    if (cleaned) return titleCaseWords(cleaned);
+  // "build me a website" must never become product name "Me A".
+  if (/\bbuild\s+me\s+a\s+(?:website|site|app|platform)\b/i.test(t)) {
+    // fall through — fallbackCreateProjectName / Site
+  } else {
+    const buildA = t.match(/\bbuild\s+(?:a\s+)?([a-z][a-z0-9 _-]{2,32})\s+(?:website|site|app|platform)\b/i);
+    if (buildA?.[1]) {
+      const raw = String(buildA[1] || '').trim();
+      if (!/^(?:me|my|a|an|the|me\s+a|my\s+a)$/i.test(raw)) {
+        const cleaned = cleanIdeaName(raw);
+        if (cleaned) return titleCaseWords(cleaned);
+      }
+    }
   }
 
   // Only for short product pitches — long design/ops briefs often mention booking/schedule/website

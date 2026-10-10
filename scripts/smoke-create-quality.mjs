@@ -179,3 +179,74 @@ console.log({
   ready: isPreviewReady(fixed.files),
   repaired: fixed.repaired,
 });
+
+// Brand-landing clone fingerprint — SoftPalm / Pond / canned-floor paste must fail Ready.
+{
+  const { lintOriginalCreateQuality } = await import('../src/lib/createDesignSystem.ts');
+  const clone = {
+    'src/App.jsx': `export default function App() {
+  return (
+    <div className="app">
+      <h1>SoftPalm</h1>
+      <p>Experience the future of technology</p>
+      <section className="hero"><h2>Band-1</h2></section>
+      <section><h2>Pond's</h2></section>
+      <footer>© SoftPalm</footer>
+    </div>
+  );
+}`,
+    'src/App.css': `.app{min-height:100vh;font-family:"Fraunces",serif;background:radial-gradient(circle,#123,#000)}
+@keyframes rise{from{opacity:0}to{opacity:1}}
+.hero{min-height:60vh}`,
+  };
+  const lint = lintOriginalCreateQuality(clone, {
+    brief: 'Build a jasmine matcha brand website with origin story and tin hero',
+    productName: 'Verdigris Matcha Co.',
+  });
+  if (lint.ok || !lint.reasons.some((r) => /clone fingerprint|Stock Spine|Placeholder/i.test(r))) {
+    console.error('FAIL: SoftPalm/Pond floor paste must fail lintOriginalCreateQuality', lint);
+    process.exit(2);
+  }
+  console.log('cloneFingerprintReject', true);
+
+  // Legitimate shop variable name must NOT trip the clone fingerprint.
+  const legitShop = {
+    'src/App.jsx': `import { useMemo, useState } from 'react';
+import './App.css';
+import { PRODUCTS } from './data/products';
+export default function App() {
+  const [filter, setFilter] = useState('All');
+  const filteredProducts = useMemo(
+    () => (filter === 'All' ? PRODUCTS : PRODUCTS.filter((p) => p.type === filter)),
+    [filter],
+  );
+  return (
+    <div className="app">
+      <header><nav><a href="#shop">Shop</a></nav></header>
+      <section className="hero"><h1>Forge & Bit</h1><p>Tools for makers.</p></section>
+      <section id="shop" className="band">
+        <h2>Catalog</h2>
+        <ul>{filteredProducts.map((p) => <li key={p.id}>{p.name}</li>)}</ul>
+      </section>
+      <footer>© Forge & Bit</footer>
+    </div>
+  );
+}`,
+    'src/App.css': `.app{min-height:100vh;font-family:"Fraunces",serif;background:radial-gradient(circle at 20% 10%,#3a2,#0a1a12)}
+@keyframes rise{from{opacity:0}to{opacity:1}}
+.hero{min-height:60vh}.band{padding:2rem}`,
+    'src/data/products.ts': `export const PRODUCTS = [
+  { id: '1', name: 'Bit Set', type: 'Kit', notes: 'Daily driver', price: 42 },
+  { id: '2', name: 'Forge Clamp', type: 'Tool', notes: 'Shop staple', price: 28 },
+];`,
+  };
+  const shopLint = lintOriginalCreateQuality(legitShop, {
+    brief: 'Build an online boutique hardware shop with cart checkout and purchase',
+    productName: 'Forge & Bit',
+  });
+  if (shopLint.reasons.some((r) => /clone fingerprint/i.test(r))) {
+    console.error('FAIL: filteredProducts variable must not trip clone fingerprint', shopLint.reasons);
+    process.exit(2);
+  }
+  console.log('filteredProductsNotClone', true);
+}

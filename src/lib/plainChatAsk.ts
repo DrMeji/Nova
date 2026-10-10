@@ -3,11 +3,8 @@
  */
 
 import { looksLikeSideQuestAsk } from '@/lib/webSearch';
-import {
-  looksLikeTalkBeforeCreateAsk,
-  looksLikeRequirementsAsk,
-  looksLikeGreenfieldKeepPlanning,
-} from '@/lib/chatIdeaIntent';
+import { looksLikeGreenfieldKeepPlanning } from '@/lib/chatIdeaIntent';
+import { isTalkFirstChatTurn } from '@/lib/classifyTurn';
 
 /** True when files map has real source content (not empty studio sticky). */
 export function hasRealStudioFiles(files: Record<string, string> | null | undefined): boolean {
@@ -92,7 +89,7 @@ export function looksLikePlainChatAsk(message: string): boolean {
   if (looksLikePureGreeting(t)) return true;
   if (looksLikeSoftCheckInAsk(t)) return true;
   if (looksLikeCapabilityOverviewAsk(t)) return true;
-  if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) return true;
+  if (isTalkFirstChatTurn(t)) return true;
 
   // Continue-planning / fold extras into the plan — never studio Local scan.
   if (looksLikeGreenfieldKeepPlanning(t)) return true;

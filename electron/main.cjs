@@ -25,6 +25,48 @@ const novaSelfGuard = require('./novaSelfGuard.cjs');
 const novaEdgeTts = require('./novaEdgeTts.cjs');
 const novaCloudEnv = require('./novaCloudEnv.cjs');
 
+// Keep the process alive on unexpected faults; log for freeze reports.
+process.on('uncaughtException', (err) => {
+  try {
+    console.error('[NOVA] uncaughtException', err);
+    novaCrashLog.appendReport('uncaughtException', {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+  } catch { /* ignore */ }
+});
+process.on('unhandledRejection', (reason) => {
+  try {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error('[NOVA] unhandledRejection', message);
+    novaCrashLog.appendReport('unhandledRejection', {
+      error: message,
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  } catch { /* ignore */ }
+});
+
+// Convert thrown IPC handler errors into stable { ok:false } payloads so the
+// renderer is never left awaiting a forever-rejected invoke.
+{
+  const rawHandle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, listener) => rawHandle(channel, async (event, ...args) => {
+    try {
+      return await listener(event, ...args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      try {
+        novaCrashLog.appendReport('ipc-handler-error', {
+          channel: String(channel),
+          error: message,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      } catch { /* ignore */ }
+      return { ok: false, error: message, code: 'IPC_HANDLER_ERROR' };
+    }
+  });
+}
+
 function refreshArkSelfGuard() {
   novaSelfGuard.init({
     appPath: app.getAppPath(),
@@ -437,6 +479,43 @@ function createWindow() {
   });
 
   mainWindow = win;
+
+  // D4: one automatic reload on renderer crash / hang; second within 60s → recovery message.
+  let lastRendererCrashAt = 0;
+  win.webContents.on('render-process-gone', (_e, details) => {
+    try {
+      novaCrashLog.appendReport('render-process-gone', {
+        reason: details?.reason,
+        exitCode: details?.exitCode,
+      });
+    } catch { /* ignore */ }
+    if (quitting || win.isDestroyed()) return;
+    const now = Date.now();
+    if (now - lastRendererCrashAt < 60_000) {
+      try {
+        void win.webContents.executeJavaScript(`(() => {
+          const root = document.getElementById('root') || document.body;
+          if (!root) return;
+          root.innerHTML = '<div style="padding:32px;font-family:Segoe UI,sans-serif;color:#f5f5f5;background:#0a0a0b;min-height:100vh"><p style="font-weight:600">NOVA had to stop recovering</p><p style="opacity:.75;font-size:13px">Quit from the tray and reopen. Use Copy freeze / build report if it keeps happening.</p></div>';
+        })()`);
+      } catch { /* ignore */ }
+      return;
+    }
+    lastRendererCrashAt = now;
+    try { win.webContents.reloadIgnoringCache(); } catch { /* ignore */ }
+  });
+  win.on('unresponsive', () => {
+    try {
+      novaCrashLog.appendReport('window-unresponsive', { at: new Date().toISOString() });
+    } catch { /* ignore */ }
+    if (quitting || win.isDestroyed()) return;
+    const now = Date.now();
+    if (now - lastRendererCrashAt < 60_000) return;
+    lastRendererCrashAt = now;
+    try { win.webContents.forcefullyCrashRenderer(); } catch {
+      try { win.webContents.reloadIgnoringCache(); } catch { /* ignore */ }
+    }
+  });
 
   // Chrome zoom permanently locked at 1 (no Ctrl+/- / pinch / wheel drift).
   try {
@@ -1324,8 +1403,11 @@ ipcMain.handle('NOVA:preview-stop', async (_e, projectId) =>
 ipcMain.handle('NOVA:preview-open-window', async (_e, payload) =>
   novaPreview.openPreviewWindow(payload || {}),
 );
-ipcMain.handle('NOVA:preview-close-live', async () =>
-  novaPreview.closeLivePreviewWindow(),
+ipcMain.handle('NOVA:preview-close-live', async (_e, payload) =>
+  novaPreview.closeLivePreviewWindow(payload || {}),
+);
+ipcMain.handle('NOVA:preview-set-active-chat', async (_e, payload) =>
+  novaPreview.setActiveLiveChat(payload || {}),
 );
 ipcMain.handle('NOVA:preview-update', async (_e, payload) =>
   novaPreview.updatePreview(payload || {}),
@@ -1666,7 +1748,7 @@ ipcMain.handle('NOVA:workspace-delete-root', async (_e, payload) => {
 
 ipcMain.handle('NOVA:workspace-delete-folder', async (_e, payload) => {
   try {
-    return novaProjects.deleteGrantedFolder(payload?.targetPath);
+    return await novaProjects.deleteGrantedFolder(payload?.targetPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
@@ -1900,7 +1982,7 @@ ipcMain.handle('NOVA:project-search', async (_e, payload) => {
 
 ipcMain.handle('NOVA:project-delete-files', async (_e, projectId) => {
   try {
-    return novaProjects.deleteProjectFiles(projectId);
+    return await novaProjects.deleteProjectFiles(projectId);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
   }
@@ -2171,8 +2253,9 @@ if (isUpdaterMode) {
       quitting = true;
       try { require('./novaMcpHost.cjs').stopAll(); } catch { /* ignore */ }
       try { require('./novaAgentExec.cjs').stopAllPreviews(); } catch { /* ignore */ }
+      try { novaPreview.stopAllPreviews?.(); } catch { /* ignore */ }
       try { novaEngine.stop(); } catch { /* ignore */ }
-      try { novaGguf.stopServer(); } catch { /* ignore */ }
+      try { novaGguf.stopAllGguf?.() || novaGguf.stopServer(); } catch { /* ignore */ }
       try { novaGguf.cancelGguf?.(); } catch { /* ignore */ }
       if (brainApi) {
         try { void brainApi.close(); } catch { /* ignore */ }

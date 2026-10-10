@@ -21,6 +21,7 @@ import {
   studioPathBasename,
 } from '@/lib/chatStudioStore';
 import type { ChatMessage } from '@/types';
+import { isCoderEngineId } from '@/lib/enginePick';
 
 /** Stacked live timer: minutes|seconds under 1h, hours|seconds at 1h+. */
 export function stackedLiveTurnParts(ms: number): { top: string; bottom: string; label: string } {
@@ -250,7 +251,13 @@ export function defaultModelForKind(kind: ModelKind): ChatModelOption {
   const prefs = getLocalPrefs();
 
   if (kind === 'chat') {
-    const prefId = String(prefs.lastChatModelId || prefs.defaultModelId || '').trim();
+    let prefId = [prefs.activeChatId, prefs.lastChatModelId]
+      .map((s) => String(s || '').trim())
+      .find((id) => id && id !== 'NOVA-auto') || '';
+    if (!prefId) {
+      const legacy = String(prefs.defaultModelId || '').trim();
+      if (legacy && legacy !== 'NOVA-auto' && !isCoderEngineId(legacy)) prefId = legacy;
+    }
     if (!prefId || prefId === 'NOVA-auto') return multimodal();
 
     const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId && m.kind === 'chat');

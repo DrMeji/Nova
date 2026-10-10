@@ -64,6 +64,30 @@ jobs:
       - run: npm run smoke:react-import-heal
       - run: npm run smoke:version-lock
       - run: npm run smoke:create-identity
+      - run: npm run smoke:fast-refresh-boundaries
+      # Freebuff 0.1.328: wire the green local-only gates that catch create/chat regressions.
+      - run: npm run smoke:chat-spine
+      - run: npm run smoke:classify-turn
+      - run: npm run smoke:chat-abort-boundaries
+      - run: npm run smoke:create-job-abort
+      - run: npm run smoke:create-job-hydrate
+      - run: npm run smoke:thin-create-path
+      - run: npm run smoke:app-jsx-harden
+      - run: npm run smoke:syntax-gate-tipjar
+      - run: npm run smoke:brand-assets-local
+      - run: npm run smoke:brand-logo-wire
+      - run: npm run smoke:live-ownership
+      - run: npm run smoke:permanent-create
+      - run: npm run smoke:bulk-chat-delete
+      - run: npm run smoke:create-pass-spine
+      - run: npm run smoke:design-spine
+      - run: npm run smoke:storefront
+      - run: npm run smoke:single-brain-create
+      - run: npm run smoke:ui-polish-floor
+      - run: npm run smoke:tool-craft-contract
+      - run: npm run smoke:answer-contract
+      - run: npm run smoke:create-evidence
+      - run: npm run smoke:product-plan
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:

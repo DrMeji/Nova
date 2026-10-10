@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isBypassEnabled } from '@/lib/authFlags';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   supabase,
@@ -86,10 +87,6 @@ function githubProfileFromSession(s: GitHubSession): Profile {
     created_at: s.at,
     updated_at: new Date().toISOString(),
   };
-}
-
-export function isBypassEnabled() {
-  return localStorage.getItem(BYPASS_KEY) === '1';
 }
 
 interface AuthContextValue {

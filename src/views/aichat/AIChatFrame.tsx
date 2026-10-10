@@ -36,11 +36,12 @@ import { setEngineModel } from '@/lib/novaEngine';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
 import {
   Loader2, ImageIcon, Video, Code2, Map,
-  Upload, Cpu, Cloud, ChevronDown, Check,
+  Upload, Laptop, Cloud, ChevronDown, Check,
   Folder, Square, X, ImagePlus, Download,
   Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
 } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
+import { canUnlockCreateLive } from '@/lib/createReady';
 import { pushDownloadCompleteToast } from '@/lib/sidebarToast';
 import {
   ChatModeTabs,
@@ -91,6 +92,14 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const composerMode = props.composerMode;
   const copiedMsgId = props.copiedMsgId;
   const createJobLive = props.createJobLive;
+  const createLiveUnlock = createJobLive
+    ? canUnlockCreateLive(
+      createJobLive,
+      createJobLive.files || {},
+      String(createJobLive.originalBrief || createJobLive.generationBrief || ''),
+    )
+    : { ok: true, reasons: [] };
+  const createLiveUnverified = Boolean(createJobLive?.craftBlocked) || !createLiveUnlock.ok;
   const creations = props.creations;
   const deleteFileBusy = props.deleteFileBusy;
   const deleteFilePrompt = props.deleteFilePrompt;
@@ -248,7 +257,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
     || voicePhase === 'thinking'
     || voicePhase === 'speaking';
   const showOpenThread = !loading && Boolean(viewingChatId);
-  const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Cpu;
+  const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Laptop;
   const kind = kindForMode(mode);
   const keyedCloud = CLOUD_CHAT_WHEN_KEYED.filter(
     m => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
@@ -348,14 +357,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-emerald-400">
-                  <Cpu className="w-3.5 h-3.5" />
-                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
+                <Laptop className="w-3.5 h-3.5 text-content-tertiary shrink-0" aria-hidden />
               </button>
             ))}
           </>
@@ -371,13 +378,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 key={model.id}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-80"
               >
-                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-amber-400">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" aria-hidden />
+                <Laptop className="w-3.5 h-3.5 text-content-tertiary shrink-0" aria-hidden />
               </div>
             ))}
           </>
@@ -402,9 +408,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   key={model.id}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-90"
                 >
-                  <span className="w-7 h-7 flex items-center justify-center shrink-0 text-content-tertiary">
-                    <Cpu className="w-3.5 h-3.5" />
-                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-content-primary truncate">{model.name}</span>
                     {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
@@ -419,6 +422,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   >
                     Install
                   </button>
+                  <Laptop className="w-3.5 h-3.5 text-content-tertiary shrink-0" aria-hidden />
                 </div>
               ))}
             </>
@@ -450,14 +454,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-sky-400">
-                  <Cloud className="w-3.5 h-3.5" />
-                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-nova-accent-green shrink-0" />}
+                <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden />
               </button>
             ))}
           </>
@@ -1054,28 +1056,33 @@ export function AIChatFrame(props: AIChatFrameProps) {
               && createJobLive?.status !== 'npm'
               && createJobLive?.status !== 'verifying'
               && (
+                // Readiness only — never light Live just because App.jsx exists after craft fail.
                 createJobLive?.status === 'ready'
                 || createJobLive?.status === 'failed'
-                || Boolean(previewUrl)
-                || Object.keys(chatStudioFiles).some((p) => /App\.(tsx|jsx)$/i.test(p) || /index\.html$/i.test(p))
               )
               ? (
               <button
                 type="button"
                 onClick={() => void openProjectPreview()}
-                className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
+                className={
+                  createLiveUnverified
+                    ? 'inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0'
+                    : 'inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0'
+                }
                 title={
-                  createJobLive?.status === 'failed' && createJobLive.error
-                    ? `Open Live — last check: ${createJobLive.error}`
-                    : createJobLive?.previewUrl
-                      ? `Open Live (${createJobLive.previewUrl})`
-                      : previewUrl
-                        ? `Open Live (${previewUrl})`
-                        : 'Open Live window'
+                  createLiveUnverified
+                    ? `Preview (unverified) — ${createLiveUnlock.reasons[0] || createJobLive.error || 'depth/syntax open'}`
+                    : createJobLive?.status === 'failed' && createJobLive.error
+                      ? `Open Live — last check: ${createJobLive.error}`
+                      : createJobLive?.previewUrl
+                        ? `Open Live (${createJobLive.previewUrl})`
+                        : previewUrl
+                          ? `Open Live (${previewUrl})`
+                          : 'Open Live window'
                 }
               >
-                <Globe className="w-3.5 h-3.5 text-sky-300" />
-                Live
+                <Globe className={`w-3.5 h-3.5 ${createLiveUnverified ? 'text-amber-300' : 'text-sky-300'}`} />
+                {createLiveUnverified ? 'Preview' : 'Live'}
               </button>
             ) : null}
             </div>
@@ -1121,7 +1128,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 ) : activeModel.source === 'cloud' ? (
                   <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 ) : activeModel.source === 'local' ? (
-                  <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <Laptop className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
                 ) : null}
                 <span className="font-medium truncate">
                   {/^(Craft|Style|Verify|Done)\s·/i.test(String(autoModelLabel || ''))

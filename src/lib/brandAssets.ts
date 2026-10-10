@@ -7,7 +7,13 @@
 
 import { extractVisionImages, getMemoryThumb } from '@/lib/recentStore';
 import { heroSeedForProject } from '@/lib/siteHeroImages';
-import { createIdentityFromBrief, heroResultMatchesCategory, svgHeroDataUrl } from '@/lib/createIdentity';
+import {
+  createIdentityFromBrief,
+  detectHeroProductKind,
+  heroResultMatchesCategory,
+  svgHeroDataUrl,
+} from '@/lib/createIdentity';
+import { localIconifySvg } from '@/lib/localLucideIcons';
 
 export type BrandAssetRole = 'logo' | 'icon' | 'hero';
 
@@ -37,11 +43,52 @@ const BANNED_PHOTO_IDS = [
   '1441974231531',
   '1500530855697',
   '1518837695005',
+  // Canned hardware stock that Freebuff flagged as always-the-same PC-case photos.
+  '1597872200969',
+  '1593640408182',
 ];
+
+/** Map non-lucide Iconify ids → nearest bundled Lucide mark (offline-first). */
+const ICONIFY_TO_LUCIDE: Record<string, string> = {
+  'tabler:search': 'lucide:search',
+  'tabler:shopping-cart': 'lucide:shopping-cart',
+  'tabler:heart': 'lucide:heart',
+  'tabler:user': 'lucide:user',
+  'tabler:menu-2': 'lucide:menu',
+  'tabler:menu': 'lucide:menu',
+  'tabler:home': 'lucide:home',
+  'tabler:settings': 'lucide:settings',
+  'heroicons:magnifying-glass': 'lucide:search',
+  'heroicons:shopping-bag': 'lucide:shopping-bag',
+  'heroicons:heart': 'lucide:heart',
+  'heroicons:user': 'lucide:user',
+  'heroicons:bars-3': 'lucide:menu',
+  'mdi:magnify': 'lucide:search',
+  'mdi:cart': 'lucide:shopping-cart',
+  'mdi:heart': 'lucide:heart',
+  'mdi:account': 'lucide:user',
+  'ph:magnifying-glass': 'lucide:search',
+  'ph:shopping-cart': 'lucide:shopping-cart',
+  'simple-icons:apple': 'lucide:sparkles',
+};
+
+/** Prefer bundled Lucide when a synonym exists. */
+export function resolveLocalIconifyId(iconify: string): string {
+  const raw = String(iconify || '').trim();
+  if (!raw) return 'lucide:sparkles';
+  if (/^lucide:/i.test(raw)) return raw.toLowerCase();
+  const hit = ICONIFY_TO_LUCIDE[raw.toLowerCase()];
+  return hit || raw;
+}
 
 const ICONIFY_COLLECTIONS = new Set([
   'lucide', 'simple-icons', 'mdi', 'tabler', 'ph', 'heroicons', 'ri', 'bi', 'carbon', 'ion',
 ]);
+
+/** Electron bridge when present — unit smokes run without a window. */
+function desktop(): Window['novaDesktop'] | undefined {
+  return typeof window !== 'undefined' ? window.novaDesktop : undefined;
+}
 
 function joinDisk(root: string, rel: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
@@ -213,14 +260,15 @@ export const BRAND_LOGO_CATALOG: Array<{ id: string; label: string; iconify: str
 /** UI / product icons via Lucide. */
 export const UI_ICON_CATALOG: Array<{ id: string; label: string; iconify: string; re: RegExp }> = [
   { id: 'menu', label: 'menu', iconify: 'lucide:menu', re: /\bmenu\b/i },
-  { id: 'search', label: 'search', iconify: 'lucide:search', re: /\bsearch\b/i },
+  { id: 'search', label: 'search', iconify: 'lucide:search', re: /\b(?:search|magnifier|magnifying\s*glass)\b/i },
   { id: 'user', label: 'profile', iconify: 'lucide:user', re: /\b(?:profile|user|account)\b/i },
   { id: 'settings', label: 'settings', iconify: 'lucide:settings', re: /\b(?:settings?|gear|cog)\b/i },
   { id: 'bell', label: 'bell', iconify: 'lucide:bell', re: /\b(?:bell|notif(?:ication)?s?)\b/i },
   // Avoid prose false hits: "like a …", bare "Edit the project", nav "Help" links.
-  { id: 'heart', label: 'heart', iconify: 'lucide:heart', re: /\b(?:heart|favorite|like\s+icon|likes?\s+button)\b/i },
+  { id: 'heart', label: 'heart', iconify: 'lucide:heart', re: /\b(?:heart|favorite|wishlist|like\s+icon|likes?\s+button)\b/i },
   { id: 'cart', label: 'cart', iconify: 'lucide:shopping-cart', re: /\b(?:cart|shopping)\b/i },
   { id: 'bag', label: 'bag', iconify: 'lucide:shopping-bag', re: /\bbag\b/i },
+  { id: 'play', label: 'play', iconify: 'lucide:play', re: /\b(?:play\s*button|play\s*icon)\b/i },
   { id: 'home', label: 'home', iconify: 'lucide:home', re: /\bhome\s+icon\b|\bicon[s]?\b[\s\S]{0,32}\bhome\b/i },
   { id: 'mail', label: 'mail', iconify: 'lucide:mail', re: /\b(?:mail|email|inbox)\b/i },
   { id: 'calendar', label: 'calendar', iconify: 'lucide:calendar', re: /\bcalendar\b/i },
@@ -264,42 +312,134 @@ export function parseNamedBrandLogos(brief: string): Array<{ id: string; label: 
 
 export function parseNamedUiIcons(brief: string): Array<{ id: string; label: string; iconify: string }> {
   const t = String(brief || '');
-  // "premium / professional" alone must not mean icons — those words appear in design briefs.
-  const iconCue = /\bicons?\b/i.test(t)
-    || /\b(?:toolbar|nav\s*icons?)\b/i.test(t)
-    || /\b(?:premium|professional)\s+icons?\b/i.test(t)
-    || /\b(?:profile|settings?)\s+icon\b/i.test(t);
-  if (!iconCue) return [];
-  // Brand-logo asks should not also dump every UI icon whose word appears in brand names.
-  if (/\b(?:logo|logos|wordmark)\b/i.test(t) && !/\bicons?\b/i.test(t)) return [];
+  // Brand-logo-only asks should not dump every UI icon whose word appears in brand names.
+  if (/\b(?:logo|logos|wordmark)\b/i.test(t) && !/\b(?:icons?|toolbar|nav|cart|search|bag|heart|menu|profile)\b/i.test(t)) {
+    return [];
+  }
+  // Intent→icon: match nouns/verbs in the brief (no required "icon" cue).
+  // "A nav with a magnifier and a cart" should still plan search + bag.
   const out: Array<{ id: string; label: string; iconify: string }> = [];
   const seen = new Set<string>();
   for (const ic of UI_ICON_CATALOG) {
     if (!ic.re.test(t) || seen.has(ic.id)) continue;
-    // Avoid treating "Apple" fruit asks etc. — catalog already scoped.
     seen.add(ic.id);
-    out.push({ id: ic.id, label: ic.label, iconify: ic.iconify });
+    out.push({ id: ic.id, label: ic.label, iconify: resolveLocalIconifyId(ic.iconify) });
   }
   return out;
 }
 
-function logoIconifyFor(name: string, brief: string): string {
-  const named = parseNamedBrandLogos(brief);
+/**
+ * Product-family mark for the default logo slot (same families planIconsFromBrief uses for nav icons).
+ * Ordered most-specific first so "doorbell camera shop" gets a shield, not a shopping bag.
+ * All ids are bundled in localLucideIcons — no network needed.
+ */
+const LOGO_FAMILY_ICONS: Array<{ re: RegExp; iconify: string }> = [
+  { re: /\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|reading\s+nook|checked\s*out)\b/i, iconify: 'lucide:library' },
+  { re: /\b(?:security|doorbell|smart\s*home)\b/i, iconify: 'lucide:shield-check' },
+  { re: /\b(?:air\s*purifier|hvac|clean\s*air)\b/i, iconify: 'lucide:wind' },
+  // Food / beverage BEFORE notes — "tasting notes" must not steal matcha/tea brands.
+  // Spirits before coffee so "gin · not coffee" never gets a mug mark.
+  { re: /\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac|wine)\b/i, iconify: 'lucide:wine' },
+  { re: /\b(?:matcha|green\s*tea|tea\s+brand|loose[- ]?leaf|steep|tin\s+hero|canister|brew(?:ing)?)\b/i, iconify: 'lucide:leaf' },
+  { re: /\b(?:coffee|cafe|espresso|roasters?|roast(?:ery)?)\b/i, iconify: 'lucide:coffee' },
+  { re: /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|dinnerware|clay)\b/i, iconify: 'lucide:utensils' },
+  { re: /\b(?:restaurant|dining|menu|food|fruit|grocery|supermarket|bakery|kitchen)\b/i, iconify: 'lucide:utensils' },
+  { re: /\b(?:lotion|skincare|serum|beauty|moisturizer|hand\s+cream|face\s+cream|body\s+cream)\b/i, iconify: 'lucide:sparkles' },
+  { re: /\b(?:finance|budget|ledger|invoice|expense|banking|wallet)\b/i, iconify: 'lucide:wallet' },
+  { re: /\b(?:gym|fitness|workout|hiit|yoga)\b/i, iconify: 'lucide:dumbbell' },
+  { re: /\b(?:music|playlist|podcast|album|band)\b/i, iconify: 'lucide:music' },
+  { re: /\b(?:photo(?:graphy|grapher)?|gallery|portfolio|camera)\b/i, iconify: 'lucide:camera' },
+  { re: /\b(?:chat|messag(?:e|ing)|inbox|community)\b/i, iconify: 'lucide:message-circle' },
+  { re: /\b(?:game|arcade|puzzle|playable)\b/i, iconify: 'lucide:gamepad-2' },
+  { re: /\b(?:weather|forecast)\b/i, iconify: 'lucide:cloud-sun' },
+  { re: /\b(?:travel|trip|flight|itinerary)\b/i, iconify: 'lucide:plane' },
+  { re: /\b(?:course|learn(?:ing)?|school|study|tutor|flash\s*cards?)\b/i, iconify: 'lucide:graduation-cap' },
+  { re: /\b(?:calculator)\b/i, iconify: 'lucide:calculator' },
+  { re: /\b(?:timer|stopwatch|pomodoro)\b/i, iconify: 'lucide:timer' },
+  { re: /\b(?:todo|to-?do|checklist|tasks?)\b/i, iconify: 'lucide:list-checks' },
+  { re: /\b(?:kanban|backlog|sprint)\b/i, iconify: 'lucide:kanban' },
+  { re: /\b(?:dashboard|analytics|metrics)\b/i, iconify: 'lucide:layout-dashboard' },
+  // Notes app only — not "tasting notes" / "steep guides".
+  { re: /\b(?:notes?\s+app|notebook|journal(?:ing)?|diary|note[- ]?taking)\b/i, iconify: 'lucide:notebook-pen' },
+  { re: /\b(?:booking|appointment|schedule|calendar|reservation)\b/i, iconify: 'lucide:calendar-days' },
+  { re: /\b(?:garden|plants?|nursery|florist)\b/i, iconify: 'lucide:sprout' },
+  { re: /\b(?:shop|store|cart|buy|ecommerce|e-commerce|product|catalog)\b/i, iconify: 'lucide:shopping-bag' },
+];
+
+/** Exported for smokes — product-family mark from brief (local Lucide only). */
+export function logoIconifyFor(name: string, brief: string): string {
+  const t = `${name}\n${brief}`;
+  // Scrub negations first — "do not copy … Apple" / "not coffee" must not pick marks.
+  const scrubbed = t
+    .replace(/\bnot\s+coffee\b/gi, ' ')
+    .replace(/\b(?:not|never|no|without|avoid)\s+(?:a\s+|an\s+)?(?:gin|coffee|tea|matcha)\b/gi, ' ')
+    .replace(/\b(?:do\s+not|don't|dont|never)\s+copy\b[^.!?\n]{0,80}\bapple\b/gi, ' ')
+    .replace(/\bor\s+apple\b/gi, ' ')
+    .replace(/\b(?:not|never|no|without|avoid)\s+apple\b/gi, ' ');
+  // Product family BEFORE named logos — "logo + wordmark" + "Apple" in a ceramic brief
+  // used to stamp lucide:sparkles via simple-icons:apple and skip utensils forever.
+  for (const fam of LOGO_FAMILY_ICONS) {
+    if (fam.re.test(scrubbed)) return fam.iconify;
+  }
+  const named = parseNamedBrandLogos(scrubbed);
   // Only use a known brand mark when the user explicitly asked for that logo — never
   // stamp Apple/Discord icons onto every brief that merely mentions the word.
-  if (named[0] && /\b(?:logo|logos|wordmark|brand\s+mark|simple-icons)\b/i.test(brief)) {
-    return named[0].iconify;
+  if (named[0] && /\b(?:logo|logos|wordmark|brand\s+mark|simple-icons)\b/i.test(scrubbed)) {
+    const id = resolveLocalIconifyId(named[0].iconify);
+    if (id !== 'lucide:sparkles') return named[0].iconify;
   }
-  if (/\b(?:logo|logos|wordmark)\b/i.test(brief) && named[0]) return named[0].iconify;
-  const t = `${name}\n${brief}`;
   // Lending / reading products — never the generic hexagon mark (reads as a broken logo).
-  if (/\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|reading\s+nook|checked\s*out)\b/i.test(t)) {
+  if (/\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|reading\s+nook|checked\s*out)\b/i.test(scrubbed)) {
     return 'lucide:library';
   }
-  if (/\b(?:book|journal|shelf|novel)\b/i.test(t) && /\b(?:app|phone|browse|tap)\b/i.test(t)) {
+  if (/\b(?:book|journal|shelf|novel)\b/i.test(scrubbed) && /\b(?:app|phone|browse|tap)\b/i.test(scrubbed)) {
     return 'lucide:book-marked';
   }
+  // Name-only fallbacks when brief was stripped/empty at a late wire pass —
+  // "Emberlot Roasters" / "Saltmere Gin" must not collapse to sparkles.
+  if (/\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill)\b/i.test(name)) {
+    return 'lucide:wine';
+  }
+  if (/\b(?:coffee|espresso|roaster|roast|cafe|café)\b/i.test(name)) {
+    return 'lucide:coffee';
+  }
+  if (/\b(?:matcha|tea)\b/i.test(name)) return 'lucide:leaf';
+  if (/\b(?:ceramic|pottery|kiln|tableware)\b/i.test(name)) return 'lucide:utensils';
+  // Last resort only — a brief with no recognisable product family.
   return 'lucide:sparkles';
+}
+
+/**
+ * Offline mark for public/logo.svg — what every marketing/brand create must ship.
+ * Pure: logoIconifyFor(brief) → bundled Lucide → standalone SVG. Never network,
+ * never a hero image standing in as the logo. Empty string only if nothing bundles.
+ */
+export function brandLogoSvgFor(opts: {
+  productName?: string;
+  brief?: string;
+  css?: string;
+}): string {
+  const name = String(opts.productName || '').trim() || 'Brand';
+  const brief = String(opts.brief || '');
+  const css = String(opts.css || '');
+  // Same ink rule as materializeBrandAssets — dark mark on cream, white mark on dark.
+  const lightCanvas = /background\s*:\s*(?:#fef3c7|#fff(?:fff)?|#f[5-9a-f]{5})/i.test(css)
+    || /\bcream\b|\bwhite\b|\bpaper\b|\bwalnut\b|\bbeige\b|\breading\s+nook\b|\bsoft\s+paper\b/i.test(brief);
+  const ink = lightCanvas ? '#1a1a1a' : '#ffffff';
+  const id = resolveLocalIconifyId(logoIconifyFor(name, brief));
+  let svg = localIconifySvg(id, ink) || '';
+  // F&B hard override — if family resolve somehow returns sparkles, still ship wine/mug/leaf.
+  // Live gin runs logged "Logo lock: skipped mark=sparkles" while name still said Gin.
+  if (!svg || /M9\.937 15\.5/i.test(svg)) {
+    const kind = detectHeroProductKind(name, brief);
+    const forcedId = kind === 'bottle' ? 'lucide:wine'
+      : kind === 'coffee' ? 'lucide:coffee'
+        : kind === 'tea' ? 'lucide:leaf'
+          : kind === 'ceramic' ? 'lucide:utensils'
+            : '';
+    if (forcedId) svg = localIconifySvg(forcedId, ink) || svg;
+  }
+  return svg || localIconifySvg('lucide:sparkles', ink) || '';
 }
 
 /** Expand professional icon packs from NL (no link required). */
@@ -553,19 +693,10 @@ async function resolveHeroSourceUrl(
     } catch { /* fall through */ }
   }
 
-  // 3) Hardware product sites: curated REAL PC-case photos only (verified subjects — never Pollinations).
-  if (hardware) {
-    const curatedHardware = [
-      // RGB interior (portrait-friendly for side media)
-      'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
-      // Gaming desk / tower exterior
-      'https://images.unsplash.com/photo-1593640408182-31c70c8268f5?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
-    ];
-    const idx = /\b(?:interior|tempered\s+glass|detail|story)\b/i.test(query) ? 1 : 0;
-    return curatedHardware[idx] || curatedHardware[0];
-  }
+  // 3) Hardware: never return canned Unsplash stock — designed SVG / Openverse only.
+  // (Previous hardcoded PC-case URLs made every hardware site look identical.)
 
-  // 4) Openverse / curated editorial for non-hardware
+  // 4) Openverse / editorial search (banned IDs stripped inside pickPhotoUrl)
   return pickPhotoUrl(query, `${projectName} ${brief}`, seed);
 }
 
@@ -598,10 +729,6 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
     : /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|food|kitchen|tulip|flower|logo|icon|infographic|x[- ]?ray|microscop|forensic|archaeolog|insect|bird|dog|cat|radio|electronics|cassette)\b/i;
   const hardware = /\b(?:pc\s*case|chassis|tower|gpu|keyboard|mouse|laptop|gaming)\b/i.test(ctx)
     && !edible;
-  const curatedHardware = [
-    'https://images.unsplash.com/photo-1593640408182-31c70c8268f5?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
-    'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?ixlib=rb-4.0.3&auto=format&fm=jpg&fit=crop&w=2400&q=90',
-  ];
   const seed = Math.abs(_seed || 0);
   const tries = hardware
     ? [query, 'gaming pc mid tower case', 'tempered glass pc case studio', 'computer chassis product photo']
@@ -656,10 +783,10 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
       /* try next */
     }
   }
-  // No shared forest/ocean stock. Image gen already ran. A miss stays empty so the caller draws a product stage.
-  if (edible || !hardware) return '';
-  const idx = seed % curatedHardware.length;
-  return curatedHardware[idx] || curatedHardware[0] || '';
+  // No canned Unsplash / forest / ocean stock. Miss → empty so caller uses designed SVG hero.
+  void hardware;
+  void edible;
+  return '';
 }
 
 export function wireBrandAssetsIntoSource(source: string, plan: BrandAssetPlan, filePath = ''): string {
@@ -902,13 +1029,60 @@ export async function materializeBrandAssets(opts: {
     return out;
   };
 
+  let localInstalled = 0;
+  /** Disk-first: bundled Lucide SVG (no network). Returns true when the slot file is written. */
+  const installLocalIcon = async (slot: BrandAssetPlan['slots'][number]): Promise<boolean> => {
+    if (!slot.iconify || slot.role === 'hero') return false;
+    // Brand mark: always prefer offline family SVG (gin→wine, coffee→mug) over a
+    // stale sparkles iconify id left in the plan from an earlier pass.
+    let svg = '';
+    if (slot.role === 'logo' && /(^|\/)public\/logo\.svg$/i.test(slot.rel.replace(/\\/g, '/'))) {
+      svg = brandLogoSvgFor({
+        productName: opts.projectName,
+        brief: opts.brief,
+        css: String(files['src/App.css'] || ''),
+      });
+    }
+    if (!svg) {
+      const localId = resolveLocalIconifyId(slot.iconify);
+      svg = localIconifySvg(localId, ink) || localIconifySvg(slot.iconify, ink) || '';
+    }
+    if (!svg) return false;
+    // Never materialize sparkles when the brief resolves to a family mark.
+    if (slot.role === 'logo' && /M9\.937 15\.5/i.test(svg)) {
+      const family = brandLogoSvgFor({
+        productName: opts.projectName,
+        brief: opts.brief,
+        css: String(files['src/App.css'] || ''),
+      });
+      if (family && !/M9\.937 15\.5/i.test(family)) svg = family;
+      else return false;
+    }
+    const bridge = desktop();
+    if (bridge?.workspaceWriteFile) {
+      const w = await bridge.workspaceWriteFile({
+        targetPath: joinDisk(opts.diskRoot, slot.rel),
+        content: svg,
+      });
+      if (w?.ok === false) return false;
+    }
+    files[slot.rel] = svg;
+    saved.push(slot.rel);
+    localInstalled += 1;
+    return true;
+  };
+
   const downloadSlot = async (slot: BrandAssetPlan['slots'][number]) => {
     const urls: string[] = [];
+    // User-pasted URL wins; otherwise bundled Lucide runs before any Iconify HTTP.
     if (slot.explicitUrl) urls.push(slot.explicitUrl);
+    const httpIconify: string[] = [];
     if (slot.iconify) {
-      urls.push(iconifySvgUrl(slot.iconify, slot.role === 'logo' ? 64 : 24));
-      urls.push(...iconifyFallbacks(slot.iconify));
+      httpIconify.push(iconifySvgUrl(slot.iconify, slot.role === 'logo' ? 64 : 24));
+      httpIconify.push(...iconifyFallbacks(slot.iconify));
+      urls.push(...httpIconify);
     }
+    let localTried = !slot.iconify;
     if (!urls.length && slot.role === 'hero' && slot.query) {
       const identity = createIdentityFromBrief(opts.projectName, opts.brief);
       let attempts = 0;
@@ -924,15 +1098,22 @@ export async function materializeBrandAssets(opts: {
         urls.push(generated);
         break;
       }
-      if (!urls.length) urls.push(svgHeroDataUrl(identity, slot.id || slot.query || ''));
+      // Pass product name — never the photo query ("… product photography …"),
+      // which used to trip the Apple phone stage via a "product" substring.
+      if (!urls.length) urls.push(svgHeroDataUrl(identity, opts.projectName || identity.name));
     } else if (!urls.length && slot.query) {
       const photo = await pickPhotoUrl(slot.query, `${opts.projectName} ${slot.query}`, seed + saved.length);
       if (photo && !usedHeroUrls.has(photo)) urls.push(photo);
       else if (slot.role === 'hero') {
-        urls.push(svgHeroDataUrl(createIdentityFromBrief(opts.projectName, opts.brief), slot.id || slot.query || ''));
+        const ident = createIdentityFromBrief(opts.projectName, opts.brief);
+        urls.push(svgHeroDataUrl(ident, opts.projectName || ident.name));
       }
     }
     for (const url of urls) {
+      if (!localTried && httpIconify.includes(url)) {
+        localTried = true;
+        if (await installLocalIcon(slot)) return;
+      }
       if (slot.role === 'hero' && usedHeroUrls.has(url) && !/^data:image\/svg\+xml/i.test(url)) continue;
       // SVG data-URL heroes → write .svg directly (saveUrl expects base64 images).
       if (/^data:image\/svg\+xml/i.test(url)) {
@@ -1043,10 +1224,11 @@ export async function materializeBrandAssets(opts: {
       .replace(/filter:\s*invert\(1\);?/gi, '');
   }
 
-  if (saved.length && window.novaDesktop?.workspaceWriteFile) {
+  const writeBridge = desktop();
+  if (saved.length && writeBridge?.workspaceWriteFile) {
     for (const rel of ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css']) {
       if (!files[rel]) continue;
-      await window.novaDesktop.workspaceWriteFile({
+      await writeBridge.workspaceWriteFile({
         targetPath: joinDisk(opts.diskRoot, rel),
         content: files[rel],
       });
@@ -1054,7 +1236,7 @@ export async function materializeBrandAssets(opts: {
   }
 
   const note = saved.length
-    ? `Fetched ${saved.length} brand asset(s) from Iconify / Simple Icons / Lucide (local copies in public/).`
+    ? `Installed ${saved.length} brand asset(s) in public/ (${localInstalled} from bundled Lucide, ${saved.length - localInstalled} fetched).`
     : 'Brand assets: search/download missed — kept layout, will retry on edit.';
   return { files, saved, note };
 }

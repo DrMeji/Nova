@@ -39,9 +39,16 @@ localStorageShim.key = (i) => {
 };
 
 globalThis.localStorage = localStorageShim;
+// recentStore calls window.setTimeout / clearTimeout — Node has them on globalThis only.
 globalThis.window = {
   dispatchEvent() {},
+  addEventListener() {},
+  removeEventListener() {},
   novaDesktop: undefined,
+  setTimeout: (...args) => globalThis.setTimeout(...args),
+  clearTimeout: (...args) => globalThis.clearTimeout(...args),
+  setInterval: (...args) => globalThis.setInterval(...args),
+  clearInterval: (...args) => globalThis.clearInterval(...args),
 };
 
 const CHATS_KEY = 'NOVA:recent-chats';

@@ -39,8 +39,9 @@ const tipRules = formatOriginalCraftRules({
   brief: 'Build a tip calculator called Tipjar. Cream page.',
   productName: 'Tipjar',
 }).join('\n');
-assert.match(tipRules, /build what the user asked for/i);
-assert.match(tipRules, /SOURCE OF TRUTH/i);
+// Thin create (default): short invent-from-ask prompt — no genre contracts.
+assert.match(tipRules, /THIN CREATE|@@@FILE/i);
+assert.match(tipRules, /Tipjar|tip calculator/i);
 assert.doesNotMatch(tipRules, /TIP \/ TOOL CONTRACT/i);
 assert.doesNotMatch(tipRules, /NOTES \/ APP CONTRACT/i);
 assert.doesNotMatch(tipRules, /HABIT \/ APP CONTRACT/i);
@@ -51,7 +52,7 @@ const notesRules = formatOriginalCraftRules({
   brief: 'Build a notes app called LeafNote',
   productName: 'LeafNote',
 }).join('\n');
-assert.match(notesRules, /invent the product they described/i);
+assert.match(notesRules, /THIN CREATE|@@@FILE|invent/i);
 assert.doesNotMatch(notesRules, /NOTES \/ APP CONTRACT/i);
 
 const tipPlan = buildProductPlan(

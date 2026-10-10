@@ -407,9 +407,16 @@ declare global {
         kind?: 'web' | 'device';
         device?: { label: string; width: number; height: number; family?: string };
         forceNavigate?: boolean;
-      }) => Promise<{ ok: boolean; error?: string; reused?: boolean }>;
+        /** false = evidence probe (hidden). Default true = user-visible Live. */
+        show?: boolean;
+      }) => Promise<{ ok: boolean; error?: string; reused?: boolean; navigated?: boolean }>;
       /** Close the shared Localhost/Preview window (disconnect on chat switch). */
-      previewCloseLive?: () => Promise<{ ok: boolean }>;
+      previewCloseLive?: (payload?: { projectId?: string }) => Promise<{ ok: boolean }>;
+      /** Pin which chat owns visible Live — other chats' probes stay hidden. */
+      previewSetActiveChat?: (payload?: { projectId?: string; chatId?: string }) => Promise<{
+        ok: boolean;
+        activeLiveOwnerId?: string | null;
+      }>;
       previewUpdate?: (payload: {
         projectId: string;
         files?: Record<string, string>;

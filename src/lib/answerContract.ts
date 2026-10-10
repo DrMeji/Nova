@@ -19,7 +19,7 @@ import {
   looksLikeProjectDebugAsk,
   looksLikeProjectOverviewAsk,
 } from '@/lib/chatProjectDebug';
-import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import { isTalkFirstChatTurn } from '@/lib/classifyTurn';
 import {
   looksLikeWebGroundedAsk,
   looksLikeBookFindOrBuyAsk,
@@ -225,7 +225,7 @@ export function resolveAnswerContract(opts: ResolveAnswerContractOpts): AnswerCo
     && !/\b(?:vite|react|scaffold|landing\s+page|on\s+disk|create\s+(?:the\s+)?(?:files|project))\b/i.test(t);
   if (
     !realWorldAdvice
-    && (looksLikeTalkBeforeCreateAsk(t) || looksLikeRequirementsAsk(t))
+    && isTalkFirstChatTurn(t)
     && !looksLikeWebGroundedAsk(t)
     && !looksLikeShoppingOrPartsLinksAsk(t)
     && !looksLikeHowToGuideAsk(t)

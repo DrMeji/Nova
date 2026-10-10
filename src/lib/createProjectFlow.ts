@@ -10,7 +10,7 @@ import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { runAgentCommand } from '@/lib/chatAgentExec';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 import { slugifyProjectName } from '@/lib/projectNames';
-import { attachPreviewIfExists, isPlaceholderPreviewUrl } from '@/lib/projectPreview';
+import { attachPreviewIfExists, isPlaceholderPreviewUrl, verifyLivePreviewUrl } from '@/lib/projectPreview';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
@@ -418,9 +418,15 @@ async function projectHasViteModules(projectPath: string): Promise<boolean> {
   try {
     const base = String(projectPath || '').replace(/[\\/]+$/, '');
     if (!base) return false;
-    const vitePath = `${base}/node_modules/vite`.replace(/\//g, '\\');
-    const st = await window.novaDesktop?.pathStat?.(vitePath);
-    return Boolean(st?.ok && (st.isDirectory || st.isFile));
+    const candidates = [
+      `${base}\\node_modules\\vite`,
+      `${base}/node_modules/vite`,
+    ];
+    for (const vitePath of candidates) {
+      const st = await window.novaDesktop?.pathStat?.(vitePath);
+      if (st?.ok && (st.isDirectory || st.isFile)) return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -458,6 +464,8 @@ export async function bootstrapProjectWorkspace(
     onStatus?: (label: string) => void;
     /** Hard wall for npm install (default 3 minutes). */
     npmTimeoutMs?: number;
+    /** Internal: set on the single automatic re-install so it never loops. */
+    autoRetried?: boolean;
   },
 ): Promise<ProjectBootstrapResult> {
   if (!projectPath) {
@@ -481,13 +489,17 @@ export async function bootstrapProjectWorkspace(
     opts?.onStatus?.('package.json found — installing deps even though kind looked static…');
   }
 
-  // If createJob already has a live URL, attach only — never start another Vite.
+  // If createJob already has a live URL, attach only when modules exist AND HTTP is healthy.
   const earlyAttach = await attachPreviewIfExists({
     cwd: projectPath,
     preferUrl: opts?.preferPreviewUrl,
   });
-  if (earlyAttach.ok) {
-    return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
+  if (earlyAttach.ok && earlyAttach.url) {
+    const hasModules = await projectHasViteModules(projectPath).catch(() => false);
+    const healthy = hasModules ? await verifyLivePreviewUrl(earlyAttach.url).catch(() => false) : false;
+    if (hasModules && healthy) {
+      return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
+    }
   }
 
   // Windows Defender + first Vite install often needs >5 min; keep a long wall.
@@ -584,11 +596,16 @@ export async function bootstrapProjectWorkspace(
       waitMs: 45_000,
     });
     if (!late) {
+      // Partial unpack / Defender race: auto-retry the install once instead of bouncing to the user.
+      if (!opts?.autoRetried) {
+        opts?.onStatus?.('npm finished without vite — retrying install once…');
+        return bootstrapProjectWorkspace(projectPath, kind, { ...opts, autoRetried: true });
+      }
       return {
         npmInstalled: false,
         previewLive: false,
         bootstrapNote:
-          'npm finished without a usable node_modules (vite missing). Say **install npm dependencies** to retry.',
+          'npm finished twice without a usable node_modules (vite missing). Say **install npm dependencies** to try again, or delete `node_modules` and retry.',
       };
     }
   }
@@ -612,7 +629,7 @@ export async function bootstrapProjectWorkspace(
     opts?.onStatus?.('Live port busy — clearing stale preview servers and retrying…');
     try {
       await window.novaDesktop?.agentRun?.({
-        command: 'powershell -NoProfile -Command "5200..5220 | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }"',
+        command: 'powershell -NoProfile -Command "5200..5350 | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }"',
         cwd: projectPath,
         skipConfirm: true,
         userConfirmed: true,
@@ -624,13 +641,21 @@ export async function bootstrapProjectWorkspace(
     if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
     }
+    // Last automatic attempt: start the dev server directly (deps already verified above).
+    opts?.onStatus?.('Preview did not attach — starting the dev server directly…');
+    try {
+      const direct = await window.novaDesktop?.agentStartDevServer?.({ cwd: projectPath, depsReady: true });
+      if (direct?.ok && direct.url && !isPlaceholderPreviewUrl(direct.url)) {
+        return { npmInstalled: true, devServerUrl: direct.url, previewLive: true };
+      }
+    } catch { /* fall through to the note */ }
     return {
       npmInstalled: true,
       previewLive: false,
       bootstrapNote: sanitizeBootstrapNote(
         live?.error
-          ? `Dependencies installed. Dev server did not start (${live.error}). Say **run Preview** or **run dev server**.`
-          : 'Dependencies installed, but the live Preview server did not respond yet. Say **run Preview** to retry.',
+          ? `Dependencies installed. I retried Preview and the dev server directly, but it still did not start (${live.error}). Click **Live** to try once more, or open the folder and run \`npm run dev\`.`
+          : 'Dependencies installed. I retried Preview twice but the server did not respond. Click **Live** to try once more, or open the folder and run `npm run dev`.',
       ),
     };
   }
@@ -686,17 +711,17 @@ export function formatCreateProjectReply(
     ].filter(Boolean).join('\n');
   } else if (livePreview) {
     body = [
-      `**${displayName}** is on disk. Live started, but quality is still open — the app may look unfinished.`,
+      `**${displayName}** is on disk. Live is open — tell me what to tighten if anything looks off.`,
       folderLine,
       '',
-      'Open **Live** under the chat to see it, or say what to fix.',
+      'Open **Live** under the chat, or say what to fix.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmPending) {
     body = [
-      `**${displayName}** is on disk — still installing packages.`,
+      `Created **${displayName}** — finishing setup (installing packages).`,
       folderLine,
       '',
-      'Live unlocks when that finishes. If it stalls, say **install npm dependencies**.',
+      'Live unlocks when Ready. If it stalls, say **install npm dependencies**.',
     ].filter(Boolean).join('\n');
   } else if (bootstrap?.npmInstalled === false) {
     body = [
@@ -725,7 +750,7 @@ export function formatCreateProjectReply(
       folderLine,
       '',
       bootstrap?.bootstrapNote
-        || 'Say **rebuild the UI** or **run Preview** to retry. I will not claim success until Live verifies.',
+        || 'Tell me what to fix, or open **Live** under the chat to retry. I will not claim success until Live verifies.',
     ].filter(Boolean).join('\n');
   } else if (isStatic) {
     body = [

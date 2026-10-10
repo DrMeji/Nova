@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { CLOUD_MODELS } from '@/views/ModelsView';
+import { CLOUD_MODELS } from '@/lib/cloudModelCatalog';
 import { isRevealed, isVoiceTabEnabled } from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/novaEngine';
 

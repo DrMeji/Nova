@@ -489,28 +489,48 @@ function removeLocalStorageKeysMatching(ids: Set<string>) {
 /**
  * Permanently wipe a chat and linked local data (thread, creation meta, thumbs, project folder).
  * Does not leave a recoverable copy on this PC.
+ * Heavy localStorage scan + disk wipes run after paint so History/Projects delete
+ * cannot freeze the UI / lock the composer for tens of seconds.
  */
 export function deleteRecentChatPermanently(chatId: string) {
   const existing = loadRecentChats().find(c => c.id === chatId);
   const mediaIds = collectChatMediaIds(chatId, existing?.creationId);
 
   markChatDeleted(chatId);
-  wipeLinkedChatProjects(chatId);
   removeKnownChatKeys(chatId);
 
   const nextChats = loadRecentChats().filter(c => c.id !== chatId);
   saveRecentChats(nextChats);
-
-  removeLocalStorageKeysMatching(new Set([chatId]));
-
-  for (const creationId of mediaIds) {
-    wipeCreationLocal(creationId);
-  }
-
   saveRecentCreations(loadRecentCreations().filter(c => c.chatId !== chatId));
 
   window.dispatchEvent(new Event('NOVA:chats-changed'));
   window.dispatchEvent(new Event('NOVA:creations-changed'));
+  try {
+    window.dispatchEvent(
+      new CustomEvent('NOVA:chats-bulk-deleted', { detail: { chatIds: [chatId] } }),
+    );
+  } catch {
+    /* ignore */
+  }
+
+  // Defer disk + leftover-key work so confirm OK returns immediately.
+  const mediaCopy = [...mediaIds];
+  window.setTimeout(() => {
+    try {
+      wipeLinkedChatProjects(chatId, { quiet: true });
+    } catch { /* ignore */ }
+    try {
+      removeLocalStorageKeysMatching(new Set([chatId]));
+    } catch { /* ignore */ }
+    for (const creationId of mediaCopy) {
+      try { wipeCreationLocal(creationId); } catch { /* ignore */ }
+    }
+    try {
+      window.dispatchEvent(new Event('NOVA:creations-changed'));
+      window.dispatchEvent(new Event('NOVA:projects-changed'));
+    } catch { /* ignore */ }
+  }, 0);
+
   return nextChats;
 }
 
@@ -538,9 +558,14 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
     removeKnownChatKeys(chatId);
   }
 
-  // One leftover key scan for the whole batch.
-  removeLocalStorageKeysMatching(idSet);
+  saveRecentChats(loadRecentChats().filter((c) => !idSet.has(c.id)));
+  saveRecentCreations(
+    loadRecentCreations().filter(
+      (c) => !mediaIds.has(c.id) && (!c.chatId || !idSet.has(c.chatId)),
+    ),
+  );
 
+  // Tombstone media ids quickly; disk/mediaRemove + full key scan after paint.
   for (const creationId of mediaIds) {
     markMediaDeleted(creationId);
     memoryThumbs.delete(creationId);
@@ -550,15 +575,7 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
     } catch {
       /* ignore */
     }
-    void window.novaDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
   }
-
-  saveRecentChats(loadRecentChats().filter((c) => !idSet.has(c.id)));
-  saveRecentCreations(
-    loadRecentCreations().filter(
-      (c) => !mediaIds.has(c.id) && (!c.chatId || !idSet.has(c.chatId)),
-    ),
-  );
 
   window.dispatchEvent(new Event('NOVA:chats-changed'));
   window.dispatchEvent(new Event('NOVA:creations-changed'));
@@ -570,6 +587,17 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
   } catch {
     /* ignore */
   }
+
+  const mediaList = [...mediaIds];
+  window.setTimeout(() => {
+    try {
+      removeLocalStorageKeysMatching(idSet);
+    } catch { /* ignore */ }
+    for (const creationId of mediaList) {
+      void window.novaDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+    }
+  }, 0);
+
   return ids.length;
 }
 

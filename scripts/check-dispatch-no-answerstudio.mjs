@@ -103,7 +103,7 @@ check(
   );
   check(
     'dispatchOwnedTurn delete without host finishes plain reply',
-    /can'?t do that yet/i.test(replied),
+    /from this window/i.test(replied) && !/can'?t do that yet/i.test(replied),
     replied.slice(0, 80),
   );
 }

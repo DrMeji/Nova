@@ -22,7 +22,7 @@ globalThis.window = {
   dispatchEvent: () => true,
 };
 
-const { honestNoLiveChatReply } = await import('../src/lib/arkCapacity.ts');
+const { honestNoLiveChatReply } = await import('../src/lib/novaCapacity.ts');
 const { resolvePreferredCloudProvider } = await import('../src/lib/cloudChat.ts');
 const { isEngineDownloadable } = await import('../src/lib/api.ts');
 

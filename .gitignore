@@ -42,6 +42,9 @@ ARK-Grok-*.txt
 supabase/.temp/
 
 
+# Overnight compare loop (temp creds, reference builds, shots)
+_overnight/
+
 # Local agent / live-test junk
 .tmp*
 .tmp-*/
@@ -51,6 +54,8 @@ tmp-*.jpeg
 tmp-*.webp
 tmp-media/
 scripts/_*.png
+scripts/_*.txt
+scripts/_*-shots/
 scripts/_*.jpg
 scripts/live-cdp*
 scripts/tmp-*

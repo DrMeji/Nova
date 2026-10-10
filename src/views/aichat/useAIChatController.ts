@@ -294,6 +294,7 @@ import {
 } from '@/lib/createBuildQuality';
 import { pickLocalCoderModel } from '@/lib/enginePick';
 import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
+import { liveOwnerKey } from '@/lib/liveOwnerKey';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
@@ -856,13 +857,8 @@ export function useAIChatController() {
   };
 
   /** Preview window id is always this chat — never another thread's localhost. */
-  const previewWindowIdForChat = (chatId?: string | null) => {
-    const id = String(chatId || persistChatIdRef.current || '').trim()
-      .replace(/[^a-zA-Z0-9._-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80);
-    return id ? `chat-${id}` : 'chat-preview';
-  };
+  const previewWindowIdForChat = (chatId?: string | null) =>
+    liveOwnerKey(chatId || persistChatIdRef.current);
 
   const clearWorkspaceBinding = useCallback((chatId: string) => {
     if (studioBoundChatIdRef.current === chatId) {
@@ -1526,12 +1522,13 @@ export function useAIChatController() {
           generatingRef.current && activeGenChatIdRef.current === route.chatId,
         );
         if (!liveGenSkip) {
-          const hadPreview = Boolean(previewUrlRef.current);
           const switchChatId = route.chatId;
           void (async () => {
-            if (hadPreview) {
-              void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
-            }
+            // Always close Live on chat switch (hidden probes may exist without previewUrl).
+            void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
+            void window.novaDesktop?.previewSetActiveChat?.({
+              projectId: previewWindowIdForChat(switchChatId),
+            }).catch(() => undefined);
             await rebindStudioForChat(switchChatId);
             const root = chatStudioDiskRootRef.current;
             if (root && window.novaDesktop?.readTextFile) {
@@ -1588,7 +1585,6 @@ export function useAIChatController() {
       setQueueTick(t => t + 1);
       setEditingQueueId(null);
       setEditingQueueText('');
-      const hadPreview = Boolean(previewUrlRef.current);
       messagesRef.current = nextMsgs;
       messagesChatIdRef.current = switchChatId;
       setMessages(nextMsgs);
@@ -1642,9 +1638,11 @@ export function useAIChatController() {
             /* ignore */
           }
         } else {
-          if (hadPreview) {
-            void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
-          }
+          // Always close prior chat Live — never leave Tidepot/Calculator visible on another thread.
+          void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
+          void window.novaDesktop?.previewSetActiveChat?.({
+            projectId: previewWindowIdForChat(switchChatId),
+          }).catch(() => undefined);
           await rebindStudioForChat(switchChatId);
           // Warm file binding from disk so Preview/Code are ready — do not open Localhost.
           const root = chatStudioDiskRootRef.current;
@@ -1811,7 +1809,9 @@ export function useAIChatController() {
     clearPendingStudioBind();
     lastStudioIntentRef.current = null;
     lastFindingsRef.current = [];
+    // New Chat: tear down every Live window so the prior project cannot bleed in.
     void window.novaDesktop?.previewCloseLive?.().catch(() => undefined);
+    void window.novaDesktop?.previewSetActiveChat?.({}).catch(() => undefined);
     // Drop any pending create brief so a new chat cannot inherit the previous idea.
     try {
       const staleId = persistChatIdRef.current || routeChatIdRef.current;
@@ -2563,6 +2563,9 @@ export function useAIChatController() {
       setDropHint('Open or send a message in this chat first, then try Preview.');
       return null;
     }
+    // Pin ownership before any open — blocks another chat's hidden probe from showing.
+    const liveOwner = previewWindowIdForChat(chatId);
+    void window.novaDesktop?.previewSetActiveChat?.({ projectId: liveOwner }).catch(() => undefined);
 
     // Trust the in-memory bind for this chat. Only re-resolve when unbound.
     let root = String(
@@ -2591,87 +2594,78 @@ export function useAIChatController() {
       return null;
     }
 
-    // Never open a black Live window while create is still installing / verifying.
+    // Never open a black Live window while create is still installing / writing.
+    // Verifying with a known URL may open — blocking here made Live feel dead, then
+    // auto-open later when verify finished (open/close thrash with probes).
     const createJob = getCreateJobForChat(chatId);
-    if (createJob?.status === 'npm' || createJob?.status === 'writing' || createJob?.status === 'verifying') {
+    if (createJob?.status === 'npm' || createJob?.status === 'writing') {
+      setDropHint(
+        createJob.status === 'npm'
+          ? 'Still installing dependencies — Live unlocks when verified.'
+          : 'Still writing project files — Live unlocks when verified.',
+      );
+      window.setTimeout(() => {
+        setDropHint((prev) => (
+          prev && /Still (installing|writing)/i.test(prev) ? null : prev
+        ));
+      }, 4500);
+      return null;
+    }
+    if (createJob?.status === 'verifying') {
       const age = Date.now() - (Number(createJob.updatedAt) || 0);
+      const urlReady = Boolean(
+        String(createJob.previewUrl || previewUrlRef.current || '').trim()
+        && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(String(createJob.previewUrl || previewUrlRef.current || '')),
+      );
       // Stale verifying (crash mid-CRL) — unlock recovery path instead of infinite wait.
-      if (createJob.status === 'verifying' && age > 8 * 60_000) {
+      if (age > 8 * 60_000) {
         try {
           const { markCreateJobFailed } = await import('@/lib/createJobStore');
-          markCreateJobFailed(createJob.id, 'Verify stalled — say rebuild the UI or run Preview again');
+          markCreateJobFailed(createJob.id, 'Verify stalled — tell me what to fix, or open Live again');
         } catch { /* ignore */ }
-      } else {
-        setDropHint(
-          createJob.status === 'npm'
-            ? 'Still installing dependencies — Live unlocks when verified.'
-            : createJob.status === 'verifying'
-              ? 'Still verifying Live evidence — wait for Verified.'
-              : 'Still writing project files — Live unlocks when verified.',
-        );
+      } else if (!urlReady) {
+        setDropHint('Still verifying Live evidence — wait for Verified.');
         window.setTimeout(() => {
           setDropHint((prev) => (
-            prev && /Still (installing|writing|verifying)/i.test(prev) ? null : prev
+            prev && /Still verifying/i.test(prev) ? null : prev
           ));
         }, 4500);
         return null;
       }
+      // else: verifying but URL exists — fall through and open Live for the user.
     }
 
     if (createJob?.status === 'failed') {
       const why = String(createJob.error || 'Live evidence failed').slice(0, 160);
-      setDropHint(`Live had a problem — ${why}. Opening anyway so you can see it.`);
+      setDropHint(
+        createJob.craftBlocked
+          ? `Preview (unverified) — craft blocked: ${why}`
+          : `Live had a problem — ${why}. Opening anyway so you can see it.`,
+      );
       window.setTimeout(() => {
-        setDropHint((prev) => (prev && /Live had a problem/i.test(prev) ? null : prev));
+        setDropHint((prev) => (prev && /(Live had a problem|Preview \(unverified\))/i.test(prev || '') ? null : prev));
       }, 6000);
-      // Still attach from disk — hiding Live after a failed verify leaves a dead chip.
+      // Still attach from disk — craft-blocked opens as unverified Preview, not evidence-ready Live.
     }
 
-    // Sprint B: attach to create-job preview only when Ready (never during npm install).
-    if (createJob?.previewUrl && createJob.status === 'ready') {
+    // Attach to create-job preview when Ready or verifying-with-URL (never during npm install).
+    // User Live click: open immediately — skip hidden re-probe (that raced show/hide).
+    if (
+      createJob?.previewUrl
+      && (createJob.status === 'ready' || createJob.status === 'verifying' || createJob.status === 'failed')
+    ) {
       const existing = String(createJob.previewUrl).trim();
       if (existing && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(existing)) {
-        // Re-check mount briefly so stale Ready can't open a blank window.
+        setPreviewUrl(existing);
         try {
-          const { collectLiveEvidence, finalizeCreateEvidence, emptyCreateEvidence } = await import('@/lib/createEvidence');
-          const snap = loadChatStudio(chatId);
-          const live = await collectLiveEvidence({
-            liveUrl: existing,
-            productName: createJob.name,
-            files: snap?.files || {},
-            brief: createJob.name || '',
-            requireSmoke: false,
+          await window.novaDesktop?.previewOpenWindow?.({
+            url: existing,
+            title: studioPathBasename(root) || createJob.name || 'Preview',
+            projectId: previewWindowIdForChat(chatId),
+            show: true,
           });
-          const ev = finalizeCreateEvidence(emptyCreateEvidence({
-            staticReady: true,
-            npmInstalled: true,
-            ...live,
-            smokeOk: null,
-          }));
-          if (!ev.mounted || !ev.httpOk) {
-            setDropHint('Saved Live URL is stale — re-attaching with evidence…');
-          } else {
-            setPreviewUrl(existing);
-            try {
-              await window.novaDesktop?.previewOpenWindow?.({
-                url: existing,
-                title: studioPathBasename(root) || createJob.name || 'Preview',
-                projectId: previewWindowIdForChat(chatId),
-              });
-            } catch { /* best-effort */ }
-            return existing;
-          }
-        } catch {
-          setPreviewUrl(existing);
-          try {
-            await window.novaDesktop?.previewOpenWindow?.({
-              url: existing,
-              title: studioPathBasename(root) || createJob.name || 'Preview',
-              projectId: previewWindowIdForChat(chatId),
-            });
-          } catch { /* best-effort */ }
-          return existing;
-        }
+        } catch { /* best-effort */ }
+        return existing;
       }
     }
 
@@ -2689,17 +2683,36 @@ export function useAIChatController() {
             url: attached.url,
             title: studioPathBasename(root) || createJob?.name || 'Preview',
             waitMs: 2400,
+            projectId: previewWindowIdForChat(chatId),
+            show: false,
           }).catch(() => null);
           const mounted = Boolean(probe?.ok && probe?.mounted);
+          // Only Vite/module compile failures block Live — not in-app runtime errors (e.g. calc).
           const consoleBad = Array.isArray(probe?.consoleErrors)
-            && probe!.consoleErrors!.some((e: string) => /error|exception|failed|vite|overlay/i.test(String(e || '')));
+            && probe!.consoleErrors!.some((e: string) =>
+              /plugin:vite|Transform failed|Failed to fetch dynamically imported module|does not provide an export named|Expected corresponding JSX|Failed to resolve import/i.test(String(e || '')));
           if (mounted && !consoleBad) {
             setPreviewUrl(attached.url);
             previewUrlRef.current = attached.url;
-            if (createJob?.status === 'failed' && createJob.id) {
+            // Never promote craft-blocked / failed jobs to evidence-ready via a click.
+            // Record the URL only as an unverified open (status stays failed).
+            if (createJob?.status === 'failed' && createJob.id && !createJob.craftBlocked) {
               try {
-                const { markCreateJobReady } = await import('@/lib/createJobStore');
-                markCreateJobReady(createJob.id, attached.url, 'Live opened — mount ok');
+                const { updateCreateJob } = await import('@/lib/createJobStore');
+                updateCreateJob(createJob.id, {
+                  previewUrl: attached.url,
+                  lastObservation: 'Preview opened (verify previously failed)',
+                  evidencePass: false,
+                });
+              } catch { /* ignore */ }
+            } else if (createJob?.craftBlocked && createJob.id) {
+              try {
+                const { updateCreateJob } = await import('@/lib/createJobStore');
+                updateCreateJob(createJob.id, {
+                  previewUrl: attached.url,
+                  lastObservation: 'Preview opened (unverified — craft blocked)',
+                  evidencePass: false,
+                });
               } catch { /* ignore */ }
             }
             try {
@@ -2707,12 +2720,13 @@ export function useAIChatController() {
                 url: attached.url,
                 title: studioPathBasename(root) || createJob?.name || 'Preview',
                 projectId: previewWindowIdForChat(chatId),
+                show: true,
               });
             } catch { /* best-effort */ }
             return attached.url;
           }
           if (consoleBad) {
-            setDropHint('Live has console errors — say rebuild the UI or fix the errors in chat.');
+            setDropHint('Live has console errors — tell me what to fix, or describe the errors in chat.');
           }
           // Dead / unmounted session — fall through and start a fresh preview.
         }
@@ -2807,10 +2821,18 @@ export function useAIChatController() {
         diskRoot: root,
         previewUrl: result.url,
       });
+      // Do not call markCreateJobReady from the click path — that lied Tidepot into "Live"
+      // after craft preflight failed. Keep failed/craftBlocked; store URL as unverified only.
       if (createJob?.status === 'failed' && createJob.id) {
         try {
-          const { markCreateJobReady } = await import('@/lib/createJobStore');
-          markCreateJobReady(createJob.id, result.url, 'Live opened — mount ok');
+          const { updateCreateJob } = await import('@/lib/createJobStore');
+          updateCreateJob(createJob.id, {
+            previewUrl: result.url,
+            evidencePass: false,
+            lastObservation: createJob.craftBlocked
+              ? 'Preview opened (unverified — craft blocked)'
+              : 'Preview opened (verify previously failed)',
+          });
         } catch { /* ignore */ }
       }
       setDropHint(null);
@@ -3529,9 +3551,8 @@ export function useAIChatController() {
     }
 
     if (looksLikeVoiceBuildOrEditAsk(typed)) {
-      // Voice is Chat with a mic — same classify + create/edit path.
-      setVoicePhase('idle');
-      tryStartTurn(typed);
+      // Voice stays conversation-only — refuse builds/edits (avoid re-entry loop into Voice).
+      await finishVoice('idle', voiceBuildEditRefuseReply());
       return;
     }
 

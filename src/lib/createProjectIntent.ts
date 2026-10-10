@@ -118,6 +118,8 @@ export function fallbackCreateProjectName(text: string): string {
   if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
   if (/\b(?:todo(?:s)?|to-?dos?|checklist)\b/i.test(t)) return 'Todo List';
   if (/\b(?:tip\s*(?:calc|calculator)|tipwise)\b/i.test(t)) return 'Tip Calculator';
+  // Plain calculator — never fall through to static-web → "Site".
+  if (/\bcalculator\b/i.test(t)) return 'Calculator';
   if (/\b(?:timer|stopwatch|pomodoro)\b/i.test(t)) return 'Timer';
   if (/\b(?:counter|click\s+count)\b/i.test(t)) return 'Click Counter';
   if (/\b(?:game|arcade|fps|shooter)\b/i.test(t)) return 'Game';
@@ -129,7 +131,12 @@ export function fallbackCreateProjectName(text: string): string {
     return 'Coffee Shop';
   }
   if (/\b(?:bot|cli|script)\b/i.test(t) && kind === 'python') return 'Tool';
-  if (kind === 'static-web' || /\b(?:website|site|landing|page|homepage)\b/i.test(t)) return 'Site';
+  // Calculator/todo toys classified static-web still get a real product name, not "Site".
+  if (/\b(?:website|site|landing|page|homepage)\b/i.test(t)
+    && !/\b(?:app|application|calculator|todo|timer|counter)\b/i.test(t)) {
+    return 'Site';
+  }
+  if (kind === 'static-web' && /\b(?:website|site|landing|homepage)\b/i.test(t)) return 'Site';
   if (kind === 'vite-react' || /\b(?:app|application|spa|react)\b/i.test(t)) return 'App';
   return 'My App';
 }
@@ -186,9 +193,11 @@ export function extractProjectName(text: string): string | null {
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
       // Reject ultra-generic leftovers from older chats / "create the project on disk".
-      if (/^(my|me|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website|nova|projects)$/i.test(raw)) continue;
-      // "Build me a website" — "me" is the pronoun, not a product name.
-      if (/^(?:build|make|create)\s+me\b/i.test(t) && /^me$/i.test(raw)) continue;
+      // "build it" / "go ahead and build it" must never name the product "it".
+      if (/^(my|me|new|app|project|the|this|that|it|its|them|one|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website|nova|projects)$/i.test(raw)) continue;
+      // "Build me a website" — "me" / "me a" are pronouns, not a product name.
+      if (/^(?:build|make|create)\s+me\b/i.test(t) && /^(?:me|me\s+a)$/i.test(raw)) continue;
+      if (/^(?:me\s+a|my\s+a)$/i.test(raw)) continue;
       // Adverbs / filler after "create the project …" — never a product name.
       if (/^(immediately|now|here|today|please|asap|quickly|again|once|first|next|soon|properly|correctly)$/i.test(raw)) continue;
       if (/^on\s+disk\b/i.test(raw)) continue;
@@ -226,7 +235,7 @@ export function recoverOriginalUserBrief(
 
 /** Best product brief from recent user turns (for "lets build this" after planning). */
 export function findBestProductBrief(recentUserLines: string[]): string | null {
-  const CHIP_RE = /^(?:keep planning|create project|add more features|let'?s build|lets build|build this|build it|lets?\s+start\s+building|go implement|go build|ok\s+lets?\s+start\s+building)\b/i;
+  const CHIP_RE = /^(?:keep planning|create project|add more features|let'?s build|lets build|build this|build it|go ahead and build(?:\s+it)?|can you go ahead and build(?:\s+it)?|lets?\s+start\s+building|go implement|go build|ok\s+lets?\s+start\s+building)\b/i;
   const scored = recentUserLines
     .map(t => String(t || '').trim())
     .filter(t => t && !CHIP_RE.test(t) && !t.startsWith('__generating__:'))
@@ -236,11 +245,13 @@ export function findBestProductBrief(recentUserLines: string[]): string | null {
       if (/\b(?:landing|festival|lineup|ticket|restaurant|dashboard|kanban|tracker)\b/i.test(t)) score += 120;
       if (/\b(?:fps|first[\s-]?person|shooter|arena|hitscan|crosshair|enemy|crate|muzzle)\b/i.test(t)) score += 180;
       if (/\b(?:game|playable|arcade)\b/i.test(t) && t.length > 120) score += 100;
+      // Prior “simple calculator / todo” asks must win over empty “build it”.
+      if (/\b(?:calculator|todo|timer|counter|checklist)\b/i.test(t)) score += 220;
       if (/\b(?:plan|planning|mvp|week one)\b/i.test(t)) score += 40;
-      if (t.length < 40) score -= 200;
+      if (t.length < 40) score -= 80;
       return { t, score };
     })
-    .filter(x => x.score > 80)
+    .filter(x => x.score > 40)
     .sort((a, b) => b.score - a.score);
   return scored[0]?.t || null;
 }
@@ -394,7 +405,12 @@ export function resolveCreateIntentFromThread(
     recentUserLines,
     opts?.pendingGreenfield || null,
   );
-  if (greenfield && (looksLikeGreenfieldCreateGo(message) || looksLikeImplementGo(message) || /\b(?:create|build)\s+it\b/i.test(message))) {
+  if (greenfield && (
+    looksLikeGreenfieldCreateGo(message)
+    || looksLikeImplementGo(message)
+    || /\b(?:create|build)\s+it\b/i.test(message)
+    || /\bgo\s+ahead\s+and\s+build(?:\s+it)?\b/i.test(message)
+  )) {
     const payload = greenfieldToCreateIntent(greenfield);
     const bestBrief = findBestProductBrief(recentUserLines);
     const summary = bestBrief && bestBrief.length > (payload.summary?.length || 0)
@@ -417,6 +433,7 @@ export function resolveCreateIntentFromThread(
 
   if (!looksLikeImplementGo(message)
     && !/\b(?:create|build)\s+it\b/i.test(message)
+    && !/\bgo\s+ahead\s+and\s+build(?:\s+it)?\b/i.test(message)
     && !/^create\s+project\s+/i.test(message.trim())
     && !(looksLikeProjectBuildAsk(message) && /\bon\s+disk\b/i.test(message))
   ) {

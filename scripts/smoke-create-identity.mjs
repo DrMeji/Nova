@@ -12,7 +12,9 @@ import {
   stylesAreLinked,
   polishPromptLinesFromBrief,
   briefCreateMisses,
+  detectHeroProductKind,
 } from '../src/lib/createIdentity.ts';
+import { logoIconifyFor } from '../src/lib/brandAssets.ts';
 
 const bakeryBrief = 'warm cream bakery croissant sourdough pastry shop with online ordering';
 const bakery = createBriefSpecFromAsk('Ovenfold', bakeryBrief);
@@ -28,6 +30,28 @@ assert.equal(bakeryId.mood, 'brief');
 assert.equal(bakeryId.layout, 'brief');
 assert.ok(bakeryId.heroQueries.some((h) => /Ovenfold|bakery|croissant|pastry|sourdough/i.test(h.q)));
 assert.ok(!bakeryId.heroQueries.some((h) => /premium product photography editorial unique$/i.test(h.q)));
+
+const ceramicBrief = 'Lumenforge Studio ceramics in cream glaze and charcoal stoneware; brand mark inspired by Apple, not skincare.';
+assert.equal(detectHeroProductKind('Lumenforge Studio', ceramicBrief), 'ceramic');
+const ceramicIdentity = createIdentityFromBrief('Lumenforge Studio', ceramicBrief);
+assert.notEqual(ceramicIdentity.palette.bg, '#f3eee4', 'ceramics should not take the skincare/bakery cream fallback');
+assert.equal(
+  logoIconifyFor('Lumenforge Studio', ceramicBrief),
+  'lucide:utensils',
+  'ceramics must use utensils/tableware mark, never sparkles/lotion',
+);
+const noAppleCopyBrief = 'handmade ceramic dinnerware, cream-and-charcoal, do not copy any Apple design language';
+assert.equal(logoIconifyFor('Kiln & Clay', noAppleCopyBrief), 'lucide:utensils');
+assert.equal(
+  detectHeroProductKind('Kiln & Clay', noAppleCopyBrief),
+  'ceramic',
+  'Apple negation must not force phone/device hero on ceramic briefs',
+);
+assert.notEqual(
+  detectHeroProductKind('Studio', 'do not copy Apple; build a pottery kiln brand site'),
+  'phone',
+  'scrubbed Apple must not pick phone silhouette',
+);
 
 const veopx = createBriefSpecFromAsk('Veopx', 'quiet luxury sculptural lamp Light distilled soft mint orbs');
 assert.equal(veopx.name, 'Veopx');

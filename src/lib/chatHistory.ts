@@ -242,9 +242,41 @@ export function looksLikeThreadMemoryAsk(text: string): boolean {
 }
 
 function looksLikeExplicitTopicSwitch(text: string): boolean {
-  return /\b(?:switching\s+topics?|switch(?:ing)?\s+(?:topics?|gears?)|change\s+(?:of\s+)?(?:subject|topic)|new\s+topic|unrelated\s+question)\b/i.test(
-    String(text || ''),
-  );
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (
+    /\b(?:new\s+topic|change\s+(?:the\s+)?subject|change\s+(?:of\s+)?(?:subject|topic)|different\s+question|unrelated\s+question|switching\s+topics?)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Clearly named new entity after an explicit pivot cue (not casual “switch to X” follow-ups).
+  if (
+    /\b(?:let'?s\s+(?:talk|discuss|switch)\s+(?:about\s+)?|moving\s+on\s+to\s+|totally\s+different\s+(?:topic|subject)\s*:\s*)\S/i.test(t)
+    && /\b(?:about|to|:)\s+[A-Z0-9@][\w.-]{2,}/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** One-paint law: a quiet retry may only extend what was already painted. */
+export function quietRetryExtendsPainted(painted: string, retry: string): boolean {
+  const p = String(painted || '').trim();
+  const r = String(retry || '').trim();
+  if (!r) return false;
+  if (!p) return true;
+  if (r.startsWith(p)) return true;
+  const pl = p.toLowerCase();
+  const rl = r.toLowerCase();
+  if (rl.startsWith(pl)) return true;
+  const pTokens = pl.split(/\s+/).filter(Boolean);
+  if (!pTokens.length) return true;
+  const rSet = new Set(rl.split(/\s+/).filter(Boolean));
+  let hits = 0;
+  for (const tok of pTokens) {
+    if (rSet.has(tok)) hits += 1;
+  }
+  return hits / pTokens.length >= 0.95;
 }
 
 export { looksLikeExplicitTopicSwitch };
@@ -1290,7 +1322,7 @@ export function sanitizeAssistantReply(
       // Never invent “I applied that…” — only apply handlers may claim disk writes.
       if (!text || text.length < 12 || /here'?s how you can do it/i.test(text)) {
         text = user && /\b(?:rebuild|edit|fix|apply)\b/i.test(user)
-          ? 'I could not apply that change yet. Say **rebuild the UI** again with a coder pinned in **Models**, or open **Code** to edit.'
+          ? 'I could not apply that change yet. Pin a coder in **Models**, tell me what to fix, or open **Code** to edit.'
           : (text || 'Got it — happy to keep going in plain language.');
       }
     } else if (hadCodeDump && opts?.stream) {

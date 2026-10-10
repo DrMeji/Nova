@@ -7,7 +7,7 @@ Private **source** repository for the NOVA desktop app.
 | **[DrMeji/Nova](https://github.com/DrMeji/Nova)** | **Public** | README + Windows installers / Releases only |
 | **DrMeji/Nova-Source** (this repo) | **Private** | Full application source |
 
-Current source: **v0.1.317** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [NOVA Releases](https://github.com/DrMeji/Nova/releases)
+Current source: **v0.1.319** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [NOVA Releases](https://github.com/DrMeji/Nova/releases)
 
 ## Public install (closed beta)
 

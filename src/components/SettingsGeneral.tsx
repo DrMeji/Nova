@@ -1,6 +1,5 @@
 import {
   SettingsSection,
-  Field,
   InfoCard,
   ToggleRow,
   ThemeCard,
@@ -42,7 +41,7 @@ import {
 
 export function SettingsGeneral({ ctx }: { ctx: any }) {
   const {
-    activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
+    activeSection, user, profile, setArkCopied, arkCopied,
     setSavedFlash,
     signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
     engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
@@ -77,12 +76,13 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
-                    <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
-                      <Github className="w-3 h-3" />
+                    <p className="text-sm font-mono font-medium text-content-primary truncate flex items-center gap-1.5">
+                      <Github className="w-3.5 h-3.5 shrink-0" />
                       {user?.id === 'guest-local'
                         ? 'guest@NOVA.local'
-                        : (profile?.nova_id ? formatNovaId(profile.nova_id) : 'GitHub')}
+                        : isNovaDevEmail(user?.email)
+                          ? 'DEV'
+                          : (profile?.nova_id ? formatNovaId(profile.nova_id) : 'GitHub')}
                     </p>
                     <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
                       <BadgeCheck className="w-3 h-3 text-sky-400" />
@@ -91,12 +91,6 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                   </div>
                 </div>
 
-                <Field
-                  label="Display Name"
-                  value={displayName}
-                  onChange={setDisplayName}
-                  onBlur={saveDisplayName}
-                />
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
                     <label className="block text-xs font-medium text-content-secondary">GitHub</label>

@@ -452,6 +452,21 @@ export function stripToolMarketingBleed(app: string): string {
   return next;
 }
 
+/** Tool/app CSS must not paint marketing hero mockups as the page background. */
+export function stripToolMarketingCssBleed(css: string): string {
+  let next = String(css || '');
+  const before = next;
+  next = next.replace(
+    /background-image\s*:\s*[^;]*url\(\s*['"]?\/heroes\/[^)]+\)[^;]*;?/gi,
+    '/* tool: no marketing hero background */',
+  );
+  next = next.replace(
+    /background\s*:\s*[^;]*url\(\s*['"]?\/heroes\/[^)]+\)[^;]*;?/gi,
+    'background: transparent;',
+  );
+  return next === before ? String(css || '') : next;
+}
+
 /**
  * Edit/create anti-bleed: strip wrong-family junk without inventing a new product UI.
  * Safe after surgical edits — never injects starters.
@@ -483,6 +498,14 @@ export function antiBleedForFamily(
       app = cleaned;
       next[appKey] = app;
       actions.push('strip-tool-marketing-hero');
+    }
+    const cssKey = next['src/App.css'] ? 'src/App.css' : '';
+    if (cssKey) {
+      const cssClean = stripToolMarketingCssBleed(String(next[cssKey] || ''));
+      if (cssClean !== next[cssKey]) {
+        next[cssKey] = cssClean;
+        actions.push('strip-tool-marketing-hero-css');
+      }
     }
   }
 
@@ -538,6 +561,14 @@ export function repairToContract(
     if (app !== beforeBleed) {
       next[appKey] = app;
       actions.push('strip-tool-marketing-hero');
+    }
+    const cssKey = next['src/App.css'] ? 'src/App.css' : '';
+    if (cssKey) {
+      const cssClean = stripToolMarketingCssBleed(String(next[cssKey] || ''));
+      if (cssClean !== next[cssKey]) {
+        next[cssKey] = cssClean;
+        actions.push('strip-tool-marketing-hero-css');
+      }
     }
   }
 

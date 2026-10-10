@@ -13,6 +13,7 @@ import {
 } from '@/lib/createProductPlan';
 import type { CreateEvidence } from '@/lib/createEvidence';
 import { judgeCreateEvidence, type HostJudgeVerdict } from '@/lib/createHostJudge';
+import { scoreAskMatch } from '@/lib/createAskContract';
 
 export const CREATE_PASS_ORDER = [
   'plan',
@@ -105,6 +106,7 @@ export function gateDesignPass(
 /**
  * Hard Ready definition for create quality (not Live unlock alone).
  * Floors may unlock Live but cannot force qualityReady.
+ * Thin create: floorFallback / repairOwned product shells never unlock quality Ready.
  */
 export function judgeCreateVerified(opts: {
   evidence: CreateEvidence;
@@ -112,9 +114,15 @@ export function judgeCreateVerified(opts: {
   brief: string;
   productName?: string;
   floorFallback?: boolean;
+  /** When true (thin create), repairOwnedProduct also blocks quality Ready. */
+  repairOwnedProduct?: boolean;
 }): CreateVerifiedVerdict {
   const planGate = gatePlanPass(opts.files, opts.brief, opts.productName);
   const designGate = gateDesignPass(opts.files, planGate.plan);
+  const asksForVisualArt = /\b(?:website|site|homepage|landing|brand|shop|store|hero|product|visual|image|art|photo|render|illustration|app|application|dashboard|tool|calculator|todo|notes|game|chat)\b/i.test(opts.brief);
+  const askMatch = asksForVisualArt
+    ? scoreAskMatch(opts.files, opts.brief, opts.productName || '')
+    : { ok: true, score: 10, reasons: [] };
   const judge = judgeCreateEvidence({
     evidence: opts.evidence,
     files: opts.files,
@@ -124,20 +132,25 @@ export function judgeCreateVerified(opts: {
 
   const liveUnlock = Boolean(opts.evidence.pass || (opts.evidence.httpOk && opts.evidence.mounted));
   const floorFallback = Boolean(opts.floorFallback);
+  const repairOwned = Boolean(opts.repairOwnedProduct);
 
   const reasons: string[] = [];
   if (!judge.ok) reasons.push(...judge.reasons.slice(0, 6));
   if (!planGate.ok) reasons.push(...planGate.reasons.slice(0, 4).map((r) => `plan: ${r}`));
   if (!designGate.ok) reasons.push(...designGate.reasons.slice(0, 3).map((r) => `design: ${r}`));
+  if (!askMatch.ok) reasons.push(...askMatch.reasons.slice(0, 6).map((r) => `ask: ${r}`));
   if (floorFallback) reasons.push('floor fallback used — original craft incomplete');
+  if (repairOwned) reasons.push('repair owned product shell — not original craft');
 
-  // Floor can unlock Live but never qualityReady.
+  // Floor / repair-owned can unlock Live but never qualityReady.
   const qualityReady = Boolean(
     liveUnlock
     && judge.ok
     && planGate.ok
     && designGate.ok
+    && askMatch.ok
     && !floorFallback
+    && !repairOwned
     && opts.evidence.smokeOk !== false
   );
 

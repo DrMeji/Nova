@@ -35,9 +35,15 @@ export function detectProjectKind(text: string): ProjectKind {
   ) {
     return 'static-web';
   }
-  // Static tool UIs that ship without npm (must beat prefersReactAppScaffold / vite default).
+  // Calculator apps → Vite React (thin create / Live). Static HTML paste path is retired.
+  if (
+    (/\bcalculator\b/.test(lower) || (/\bcalc\b/.test(lower) && /\b(scientific|professional|pro)\b/.test(lower)))
+    && /\b(?:app|application|project|react|vite|on\s+disk|live)\b/.test(lower)
+  ) {
+    return 'vite-react';
+  }
   if (/\bcalculator\b/.test(lower) || (/\bcalc\b/.test(lower) && /\b(scientific|professional|pro)\b/.test(lower))) {
-    return 'static-web';
+    return 'vite-react';
   }
   if (/\b(watchlist|trading\s+cockpit|trade\s*rail)\b/.test(lower) && /\b(tab|orders|settings)\b/.test(lower)) {
     return 'static-web';
@@ -96,13 +102,14 @@ export function resolveProjectKindForCreate(
   const s = String(summary || '');
   // Micro single-page toys never need Vite/npm — keep Live instant.
   const micro = detectProjectKind(s);
+  // Calculator always Vite under create (never static HTML → product name "Site").
+  if (/\bcalculator\b/i.test(s) || (/\bcalc\b/i.test(s) && /\b(scientific|professional|pro)\b/i.test(s))) {
+    return 'vite-react';
+  }
   if (micro === 'static-web' && (
-    /\b(?:notedot|sticky|notepad|todo|timer|stopwatch|pomodoro|countdown|click\s+counter|calculator)\b/i.test(s)
+    /\b(?:notedot|sticky|notepad|todo|timer|stopwatch|pomodoro|countdown|click\s+counter)\b/i.test(s)
     || (/\b(?:note|notes)\b/i.test(s) && /\b(?:title|text\s*box|textarea)\b/i.test(s))
   )) {
-    return 'static-web';
-  }
-  if (/\bcalculator\b/i.test(s) || (/\bcalc\b/i.test(s) && /\b(scientific|professional|pro)\b/i.test(s))) {
     return 'static-web';
   }
   if (/\b(watchlist|trading\s+cockpit|trade\s*rail)\b/i.test(s) && /\b(tab|orders|settings)\b/i.test(s)) {

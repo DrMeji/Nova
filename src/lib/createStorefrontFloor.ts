@@ -26,17 +26,64 @@ export function liquorCatalog(): StorefrontProduct[] {
   ];
 }
 
-export function genericCatalog(title: string): StorefrontProduct[] {
+/** Tea / matcha / tisane — never spirits copy. */
+export function teaCatalog(title: string): StorefrontProduct[] {
+  const brand = title.replace(/\s+/g, ' ').trim() || 'House';
   return [
-    { id: 'core', name: `${title} Core`, type: 'Signature', origin: 'House', notes: 'Everyday pick with a clean profile.', price: 48 },
-    { id: 'plus', name: `${title} Plus`, type: 'Premium', origin: 'House', notes: 'Richer finish, limited run.', price: 64 },
-    { id: 'reserve', name: `${title} Reserve`, type: 'Reserve', origin: 'Cellar', age: 'Aged', notes: 'Deep character for special nights.', price: 88 },
-    { id: 'gift', name: `${title} Gift Set`, type: 'Gift', origin: 'House', notes: 'Ready to wrap — three tasting pours.', price: 96 },
-    { id: 'travel', name: `${title} Travel`, type: 'Travel', origin: 'House', notes: 'Compact bottle for the road.', price: 32 },
-    { id: 'cask', name: `${title} Cask Strength`, type: 'Reserve', origin: 'Cellar', age: 'Cask', notes: 'Bold proof, oak-forward.', price: 110 },
-    { id: 'seasonal', name: `${title} Seasonal`, type: 'Limited', origin: 'House', notes: 'Rotating batch — ask what’s open.', price: 52 },
-    { id: 'library', name: `${title} Library`, type: 'Collection', origin: 'Archive', notes: 'Small allocation from the library shelf.', price: 124 },
+    { id: 'tin-40', name: `${brand} Tin 40g`, type: 'Tin', notes: 'Whole-leaf tin for daily steeping.', price: 28 },
+    { id: 'tin-100', name: `${brand} Tin 100g`, type: 'Tin', notes: 'Larger tin — same lot, fresher longer.', price: 58 },
+    { id: 'pouch-10', name: `${brand} Pouch 10g`, type: 'Pouch', notes: 'Travel pouch for one week of cups.', price: 12 },
+    { id: 'sampler', name: `${brand} Sampler`, type: 'Gift', notes: 'Three small tins to taste the range.', price: 36 },
+    { id: 'ceremony', name: `${brand} Ceremony Set`, type: 'Gift', notes: 'Tin + steep guide card + strainer.', price: 64 },
+    { id: 'seasonal', name: `${brand} Seasonal Flush`, type: 'Limited', notes: 'Single-harvest limited flush.', price: 42 },
+    { id: 'loose-refill', name: `${brand} Loose Refill`, type: 'Loose', notes: 'Refill bag for the house tin.', price: 22 },
+    { id: 'gift-box', name: `${brand} Gift Box`, type: 'Gift', notes: 'Wrapped box with steep notes.', price: 48 },
   ];
+}
+
+/** Coffee / roast — bean bags, not bottles. */
+export function coffeeCatalog(title: string): StorefrontProduct[] {
+  const brand = title.replace(/\s+/g, ' ').trim() || 'House';
+  return [
+    { id: 'bag-12', name: `${brand} 12oz Bag`, type: 'Bag', notes: 'Whole bean, roasted weekly.', price: 18 },
+    { id: 'bag-2lb', name: `${brand} 2lb Bag`, type: 'Bag', notes: 'Larger bag for daily brew.', price: 42 },
+    { id: 'espresso', name: `${brand} Espresso`, type: 'Espresso', notes: 'Darker roast for milk drinks.', price: 20 },
+    { id: 'filter', name: `${brand} Filter Roast`, type: 'Filter', notes: 'Bright cup for pour-over.', price: 19 },
+    { id: 'sampler', name: `${brand} Sampler`, type: 'Gift', notes: 'Three 4oz bags to compare.', price: 28 },
+    { id: 'decaf', name: `${brand} Decaf`, type: 'Decaf', notes: 'Swiss-water style evening cup.', price: 18 },
+    { id: 'cold-brew', name: `${brand} Cold Brew Kit`, type: 'Kit', notes: 'Coarse grind + brew pouch.', price: 24 },
+    { id: 'gift', name: `${brand} Gift Set`, type: 'Gift', notes: 'Bag + dripper notes card.', price: 46 },
+  ];
+}
+
+/** Generic goods — no liquor metaphors (pours, proof, cask, bottle). */
+export function genericCatalog(title: string): StorefrontProduct[] {
+  const brand = title.replace(/\s+/g, ' ').trim() || 'House';
+  return [
+    { id: 'core', name: `${brand} Essentials`, type: 'Signature', notes: 'Everyday pick with a clean finish.', price: 48 },
+    { id: 'plus', name: `${brand} Plus`, type: 'Premium', notes: 'Richer finish, limited run.', price: 64 },
+    { id: 'reserve', name: `${brand} Reserve`, type: 'Reserve', notes: 'Small batch for special occasions.', price: 88 },
+    { id: 'gift', name: `${brand} Gift Set`, type: 'Gift', notes: 'Ready to wrap — three sample sizes.', price: 96 },
+    { id: 'travel', name: `${brand} Travel Pack`, type: 'Travel', notes: 'Compact pack for the road.', price: 32 },
+    { id: 'studio', name: `${brand} Studio`, type: 'Premium', notes: 'Workshop-grade daily driver.', price: 72 },
+    { id: 'seasonal', name: `${brand} Seasonal`, type: 'Limited', notes: 'Rotating batch — ask what’s open.', price: 52 },
+    { id: 'collection', name: `${brand} Collection`, type: 'Collection', notes: 'Curated set from the latest drop.', price: 124 },
+  ];
+}
+
+/** Pick catalog by brief category — tea never gets whiskey fields. */
+export function catalogForStorefrontBrief(title: string, brief: string): StorefrontProduct[] {
+  const t = `${brief}\n${title}`;
+  if (/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch|wine)\b/i.test(t)) {
+    return liquorCatalog();
+  }
+  if (/\b(?:matcha|tea|jasmine|oolong|sencha|tisane|steep)\b/i.test(t)) {
+    return teaCatalog(title);
+  }
+  if (/\b(?:coffee|espresso|roast|pour[- ]?over|cold\s+brew|barista)\b/i.test(t)) {
+    return coffeeCatalog(title);
+  }
+  return genericCatalog(title);
 }
 
 /** Deterministic high-quality storefront floor (last-resort + acceptance shape). */
@@ -45,10 +92,29 @@ export function buildStorefrontCommerceFloor(
   brief: string,
   p: CreatePalette,
 ): StorefrontFloorFiles {
-  const liquor = /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch)\b/i.test(brief);
+  const liquor = /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch|wine)\b/i.test(brief);
+  const tea = !liquor && /\b(?:matcha|tea|jasmine|oolong|sencha|tisane|steep)\b/i.test(`${brief}\n${title}`);
+  const coffee = !liquor && !tea && /\b(?:coffee|espresso|roast|pour[- ]?over|cold\s+brew|barista)\b/i.test(`${brief}\n${title}`);
+  const shopCta = liquor ? 'Browse bottles' : tea ? 'Browse tins' : coffee ? 'Browse bags' : 'Browse catalog';
+  const shopDetail = liquor
+    ? 'Filter the catalog, open a bottle for details, then add what you want.'
+    : tea
+      ? 'Filter by type, open a tin for details, then add what you want.'
+      : coffee
+        ? 'Filter by roast, open a bag for details, then add what you want.'
+        : 'Filter the catalog, open an item for details, then add what you want.';
+  const eyebrow = liquor ? 'Specialty bottle shop' : tea ? 'Small-batch tea' : coffee ? 'Fresh roast' : 'Online store';
+  const heroLine = liquor ? 'Spirits with a story.' : `${title}.`;
+  const heroSub = liquor
+    ? 'Browse by type, read origin and tasting notes, add quantities to cart, and check out in one flow.'
+    : tea
+      ? 'Browse tins and pouches, read steep notes, add quantities, and complete a demo purchase.'
+      : coffee
+        ? 'Browse bags and kits, read roast notes, add quantities, and complete a demo purchase.'
+        : 'Browse the catalog, filter by type, add quantities, and complete a demo purchase.';
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'shop';
   const hero = `/heroes/${slug}-hero.jpg`;
-  const products = liquor ? liquorCatalog() : genericCatalog(title);
+  const products = catalogForStorefrontBrief(title, brief);
   const productsTs = `export type Product = {
   id: string;
   name: string;
@@ -129,13 +195,11 @@ export default function App() {
           <section className="hero full-bleed" id="top">
             <img className="hero-photo" src={HERO} alt="${title} hero" />
             <div className="hero-copy">
-              <p className="eyebrow">${liquor ? 'Specialty bottle shop' : 'Online store'}</p>
-              <h1>${liquor ? 'Spirits with a story.' : `${title}.`}</h1>
-              <p className="sub">${liquor
-                ? 'Browse by type, read origin and tasting notes, add quantities to cart, and check out in one flow.'
-                : 'Browse the catalog, filter by type, add quantities, and complete a demo purchase.'}</p>
+              <p className="eyebrow">${eyebrow}</p>
+              <h1>${heroLine}</h1>
+              <p className="sub">${heroSub}</p>
               <div className="cta-row">
-                <a className="pill pill-primary" href="#shop">Browse bottles</a>
+                <a className="pill pill-primary" href="#shop">${shopCta}</a>
                 <button type="button" className="pill pill-ghost" onClick={() => setOpen(true)}>View cart</button>
               </div>
             </div>
@@ -144,7 +208,7 @@ export default function App() {
           <section className="band shop" id="shop">
             <div className="band-copy">
               <h2>Shop</h2>
-              <p>Filter the catalog, open a bottle for details, then add what you want.</p>
+              <p>${shopDetail}</p>
             </div>
             <div className="filter-bar" role="toolbar" aria-label="Filter by type">
               {PRODUCT_TYPES.map((type) => (
@@ -270,14 +334,24 @@ export default function App() {
 }
 `;
 
+  // Surface tokens — liquor keeps whiskey browns; tea/coffee/goods use palette (never liquor hexes).
+  const mediaA = liquor ? '#2c1b14' : (tea ? '#1a2e24' : coffee ? '#2a2118' : p.panel);
+  const mediaB = liquor ? '#100b09' : (tea ? '#0c1612' : coffee ? '#14100c' : p.bg);
+  const detailA = liquor ? '#322018' : (tea ? '#243d32' : coffee ? '#3a2e22' : p.panel);
+  const detailB = liquor ? '#120c0a' : (tea ? '#0e1a15' : coffee ? '#16110c' : p.bg);
+  const qtyBg = liquor ? '#2a1b15' : (tea ? '#1e332a' : coffee ? '#2c241c' : p.panel);
+  const inputBg = liquor ? '#18100d' : (tea ? '#121f1a' : coffee ? '#1a1510' : p.bg);
+  const btnInk = liquor ? '#1a100c' : (p.btnInk || '#0a0a0a');
+
   const css = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;700&family=Source+Sans+3:wght@400;600;700&display=swap');
 :root {
-  --bg: ${liquor ? '#120c0a' : p.bg};
-  --ink: ${liquor ? '#f4ebe2' : p.text};
-  --mute: ${liquor ? '#b7a597' : p.muted};
-  --accent: ${liquor ? '#c9853a' : p.accent};
-  --panel: ${liquor ? '#1d1410' : p.panel};
+  --bg: ${liquor ? '#120c0a' : tea ? '#0f1a15' : coffee ? '#14110e' : p.bg};
+  --ink: ${liquor ? '#f4ebe2' : tea ? '#e8f2ec' : coffee ? '#f3ebe3' : p.text};
+  --mute: ${liquor ? '#b7a597' : tea ? '#9bb5a8' : coffee ? '#b5a898' : p.muted};
+  --accent: ${liquor ? '#c9853a' : tea ? '#7dba8c' : coffee ? '#c4a574' : p.accent};
+  --panel: ${liquor ? '#1d1410' : tea ? '#15241d' : coffee ? '#1c1712' : p.panel};
   --line: rgba(244, 235, 226, 0.14);
+  --btn-ink: ${btnInk};
   --display: Fraunces, Georgia, serif;
   --body: "Source Sans 3", system-ui, sans-serif;
 }
@@ -295,7 +369,7 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .cart-btn, .pill, .add-to-cart, .purchase, .qty button, .ghost, .chip, .linkish, .product-media, .back {
   appearance: none; border: 0; cursor: pointer; font: inherit; background: none; color: inherit;
 }
-.cart-btn { margin-left: auto; background: var(--accent); color: #1a100c; font-weight: 700; border-radius: 999px; padding: 0.5rem 1rem; }
+.cart-btn { margin-left: auto; background: var(--accent); color: var(--btn-ink); font-weight: 700; border-radius: 999px; padding: 0.5rem 1rem; }
 .hero { min-height: 72vh; display: grid; place-items: center; text-align: center; padding: 4.5rem 1.25rem 3rem; position: relative; overflow: hidden; }
 .hero-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.38; }
 .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 20%, transparent), var(--bg)); }
@@ -305,7 +379,7 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .sub { margin: 0.9rem auto 0; max-width: 36rem; color: var(--mute); font-size: 1.12rem; line-height: 1.55; }
 .cta-row { display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap; margin-top: 1.4rem; }
 .pill { display: inline-flex; align-items: center; justify-content: center; padding: 0.65rem 1.2rem; border-radius: 999px; text-decoration: none; }
-.pill-primary { background: var(--accent); color: #1a100c; font-weight: 700; }
+.pill-primary { background: var(--accent); color: var(--btn-ink); font-weight: 700; }
 .pill-ghost { border: 1px solid var(--accent); color: var(--accent); }
 .band { padding: 3.75rem 1.25rem; }
 .band-copy { text-align: center; max-width: 40rem; margin: 0 auto 1.75rem; }
@@ -313,27 +387,27 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .band-copy p { color: var(--mute); }
 .filter-bar { max-width: 1120px; margin: 0 auto 1.5rem; display: flex; flex-wrap: wrap; gap: 0.55rem; justify-content: center; }
 .chip { border: 1px solid var(--line); color: var(--mute); border-radius: 999px; padding: 0.4rem 0.85rem; font-size: 0.88rem; }
-.chip-on { background: var(--accent); color: #1a100c; border-color: var(--accent); font-weight: 700; }
+.chip-on { background: var(--accent); color: var(--btn-ink); border-color: var(--accent); font-weight: 700; }
 .product-grid { max-width: 1120px; margin: 0 auto; display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .product-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 1rem; display: flex; flex-direction: column; gap: 0.4rem; text-align: left; transition: transform 0.2s ease, border-color 0.2s ease; }
 .product-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .product-media { height: 150px; border-radius: 14px; background:
   radial-gradient(130px 90px at 30% 28%, color-mix(in srgb, var(--accent) 50%, transparent), transparent),
-  linear-gradient(155deg, #2c1b14, #100b09); }
+  linear-gradient(155deg, ${mediaA}, ${mediaB}); }
 .linkish { text-align: left; font-weight: 700; font-size: 1.08rem; color: var(--ink); }
 .meta, .notes, .attrs, .dim, .fine, .total { color: var(--mute); font-size: 0.9rem; }
 .notes { line-height: 1.45; min-height: 2.6em; }
 .attrs { display: flex; flex-wrap: wrap; gap: 0.55rem; }
 .attrs span { border: 1px solid var(--line); border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.78rem; }
 .price { color: var(--ink) !important; font-weight: 700; font-size: 1.05rem; margin: 0.15rem 0 0; }
-.add-to-cart, .purchase { background: var(--accent); color: #1a100c; font-weight: 700; border-radius: 11px; padding: 0.72rem 1rem; margin-top: auto; }
+.add-to-cart, .purchase { background: var(--accent); color: var(--btn-ink); font-weight: 700; border-radius: 11px; padding: 0.72rem 1rem; margin-top: auto; }
 .story { background: color-mix(in srgb, var(--panel) 78%, #000); }
 .detail { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
 .back { color: var(--mute); margin-bottom: 1rem; }
 .detail-card { display: grid; gap: 1.5rem; grid-template-columns: 1.1fr 1fr; background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 1.25rem; }
 .detail-media { min-height: 280px; border-radius: 16px; background:
   radial-gradient(180px 120px at 35% 30%, color-mix(in srgb, var(--accent) 55%, transparent), transparent),
-  linear-gradient(160deg, #322018, #120c0a); }
+  linear-gradient(160deg, ${detailA}, ${detailB}); }
 .detail-copy h1 { margin: 0.25rem 0 0.75rem; font-size: clamp(1.8rem, 4vw, 2.6rem); }
 .cart-drawer { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50; display: grid; justify-items: end; }
 .cart-panel { width: min(440px, 100%); height: 100%; background: var(--panel); border-left: 1px solid var(--line); padding: 1.25rem; overflow: auto; display: flex; flex-direction: column; gap: 0.85rem; }
@@ -344,10 +418,10 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .cart-lines li { display: flex; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--line); padding-bottom: 0.85rem; }
 .cart-lines strong { display: block; }
 .qty { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.qty button { min-width: 28px; height: 28px; border-radius: 8px; background: #2a1b15; color: var(--ink); padding: 0 0.45rem; }
+.qty button { min-width: 28px; height: 28px; border-radius: 8px; background: ${qtyBg}; color: var(--ink); padding: 0 0.45rem; }
 .checkout { display: flex; flex-direction: column; gap: 0.7rem; }
 .checkout label { display: flex; flex-direction: column; gap: 0.3rem; color: var(--mute); font-size: 0.9rem; }
-.checkout input { background: #18100d; border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 0.65rem 0.8rem; }
+.checkout input { background: ${inputBg}; border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 0.65rem 0.8rem; }
 .confirm { color: var(--accent); font-weight: 600; }
 .foot { display: flex; flex-wrap: wrap; gap: 1.2rem; justify-content: center; padding: 2.5rem 1rem 3rem; color: var(--mute); font-size: 0.85rem; }
 .foot a { color: var(--mute); text-decoration: none; }

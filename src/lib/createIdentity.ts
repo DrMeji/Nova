@@ -83,7 +83,8 @@ function paletteFromBrief(brief: string): CreatePalette {
   const t = String(brief || '').toLowerCase();
   // Maritime / dark vibes FIRST — ensemble plans often say "avoid cream" and the
   // word "cream" alone used to steal the palette from navy/seafoam briefs.
-  if (/\b(?:navy|harbor|seafoam|ocean|maritime|dock|boat|clipper)\b/.test(t)) {
+  if (/\b(?:navy|harbor|seafoam|ocean|maritime|dock|boat|clipper|coast|cove|brine)\b/.test(t)
+    || /\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill)\b/.test(t)) {
     return {
       bg: '#0a1628',
       panel: '#12233a',
@@ -92,8 +93,47 @@ function paletteFromBrief(brief: string): CreatePalette {
       accent: '#6ec8b8',
       glow: 'rgba(110, 200, 184, 0.32)',
       btnInk: '#0a1628',
-      font: '"Segoe UI", "Helvetica Neue", system-ui, sans-serif',
+      font: '"Fraunces", Georgia, "Iowan Old Style", serif',
       line: 'rgba(244, 248, 252, 0.14)',
+    };
+  }
+  if (/\b(?:matcha|green\s+tea|ceremonial\s+tea)\b/.test(t)) {
+    return {
+      bg: '#0e1612',
+      panel: '#18241c',
+      text: '#eef6ef',
+      muted: '#8fa898',
+      accent: '#7d9b78',
+      glow: 'rgba(125, 155, 120, 0.34)',
+      btnInk: '#0e1612',
+      font: '"Fraunces", Georgia, "Iowan Old Style", serif',
+      line: 'rgba(238, 246, 239, 0.14)',
+    };
+  }
+  if (/\b(?:coffee|espresso|roaster|roast)\b/.test(t) && !/\bnot\s+coffee\b/.test(t)) {
+    return {
+      bg: '#140e0a',
+      panel: '#221810',
+      text: '#f6efe6',
+      muted: '#a89884',
+      accent: '#c9853a',
+      glow: 'rgba(201, 133, 58, 0.32)',
+      btnInk: '#140e0a',
+      font: '"Fraunces", Georgia, "Iowan Old Style", serif',
+      line: 'rgba(246, 239, 230, 0.14)',
+    };
+  }
+  if (/\b(?:chocolate|cacao|cocoa)\b/.test(t)) {
+    return {
+      bg: '#120c0a',
+      panel: '#1e1410',
+      text: '#f4ebe3',
+      muted: '#a89080',
+      accent: '#b07a4a',
+      glow: 'rgba(176, 122, 74, 0.3)',
+      btnInk: '#120c0a',
+      font: '"Fraunces", Georgia, "Iowan Old Style", serif',
+      line: 'rgba(244, 235, 227, 0.14)',
     };
   }
   if (/\b(?:charcoal|amber|workshop|makerspace|forge|metal)\b/.test(t)) {
@@ -109,9 +149,12 @@ function paletteFromBrief(brief: string): CreatePalette {
       line: 'rgba(240, 235, 227, 0.12)',
     };
   }
-  const wantsCream = (
+  const beautyBrief = /\b(?:lotion|skincare|serum|beauty|moisturizer|hand\s+cream|face\s+cream|body\s+cream)\b/.test(t);
+  const ceramicsBrief = /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|plateware|dinnerware|clay)\b/.test(t);
+  const explicitNoCream = /\b(?:not\s+cream|no\s+cream|avoid\s+cream|never\s+cream|don'?t\s+.*?cream)\b/.test(t);
+  const wantsCream = !ceramicsBrief && !beautyBrief && (
     (/\b(?:cream|parchment|bakery|terracotta)\b/.test(t)
-      && !/\b(?:not\s+cream|no\s+cream|avoid\s+cream|never\s+cream|don'?t\s+.*?cream)\b/.test(t))
+      && !explicitNoCream)
     || (/\bsage\b/.test(t)
       && /\b(?:bakery|cafe|pastry|bread)\b/.test(t)
       && !/\b(?:not\s+(?:cafe\s+)?sage|avoid\s+sage)\b/.test(t))
@@ -130,6 +173,50 @@ function paletteFromBrief(brief: string): CreatePalette {
     };
   }
   return { ...NEUTRAL };
+}
+
+/** Product silhouette kind for designed hero stages — model-agnostic. */
+export type HeroProductKind =
+  | 'tea' | 'coffee' | 'bottle' | 'lotion' | 'chocolate' | 'ceramic' | 'device' | 'generic';
+
+/**
+ * Pick a product silhouette from brief + name.
+ * Spirits win over coffee so "gin · not coffee" never draws a mug.
+ */
+export function detectHeroProductKind(name: string, brief = '', label = ''): HeroProductKind {
+  // Scrub negations first — "do not copy Apple" / "not coffee" must not pick silhouettes.
+  const scrubbed = `${name} ${brief} ${label}`
+    .replace(/\b(?:do\s+not|don't|dont|never|not|avoid|without)\s+copy\b[^.!?\n]{0,80}\b(?:apple(?:\.com)?|iphone)\b/gi, ' ')
+    .replace(/\b(?:not|never|no|without|avoid)\s+(?:a\s+|an\s+)?(?:apple(?:\.com)?|iphone|ipad|mac)\b/gi, ' ')
+    .replace(/\bor\s+apple(?:\.com)?\b/gi, ' ')
+    .replace(/\bnot\s+coffee\b/gi, ' ');
+  const blob = scrubbed;
+  const ceramics = /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|plateware|dinnerware|clay)\b/i.test(blob);
+  // Ceramics before spirits/tea — "ceramic wine tumblers" / "biscuit tin" must not become bottle/tea.
+  if (ceramics) return 'ceramic';
+  // F&B silhouettes always beat device/phone.
+  if (/\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac)\b/i.test(blob)
+    || /\b(?:wine|bottle)\b/i.test(blob)) {
+    return 'bottle';
+  }
+  // Bare "tin" alone is too broad — require tea framing.
+  if (/\b(?:matcha|tea|steep)\b/i.test(blob) && !/\bcoffee\b/i.test(blob)) {
+    return 'tea';
+  }
+  if (/\b(?:coffee|espresso|roaster|roast)\b/i.test(blob) && !/\bnot\s+coffee\b/i.test(brief)) {
+    return 'coffee';
+  }
+  if (/\b(?:chocolate|cacao|cocoa)\b/i.test(blob)) return 'chocolate';
+  // Bare "cream" is too broad. Require skincare framing.
+  if (/\b(?:lotion|skincare|serum|beauty|moisturizer)\b/i.test(blob)
+    || /\b(?:hand|face|body|night|day)\s+creams?\b/i.test(blob)) {
+    return 'lotion';
+  }
+  if (/\b(?:apple|iphone|ipad|mac|watch|airpods|product[- ]?home)\b/i.test(blob)
+    || /\b(?:device|phone|laptop|earbuds)\b/i.test(blob)) {
+    return 'device';
+  }
+  return 'generic';
 }
 
 /** Local URL scan — avoid importing brandAssets (circular). */
@@ -279,6 +366,36 @@ export function polishPromptLinesFromBrief(
   const briefText = String(brief || '');
   const looksGame = /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino)\b/i.test(briefText);
   const looks3d = /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor)\b/i.test(briefText);
+  // Compositional brand/marketing asks — shell + sections (never monolith App instructions).
+  // Keep logic local to avoid circular import with createThinPath.
+  const compositionalAsk = (
+    /\b(?:website|web\s*site|landing|homepage|marketing|brand(?:ed)?|storefront|product\s+page)\b/i.test(briefText)
+    || /\b(?:lotion|skincare|restaurant|cafe|café|portfolio|matcha|tea\s+brand|coffee\s+brand|ceramic|pottery|kiln|stoneware|tableware|chocolate|cacao)\b/i.test(briefText)
+  ) && !(
+    /\b(?:tip\s*calc|todo(?:s)?|calculator|counter|timer)\b/i.test(briefText)
+    && !/\b(?:website|landing|marketing|brand)\b/i.test(briefText)
+  );
+  if (compositionalAsk) {
+    return [
+      'Build the FIRST real product UI for this new project from the user brief alone.',
+      'Output ONLY @@@FILE blocks — no preface, no plan.',
+      'COMPOSITIONAL SHELL: thin App.jsx imports src/sections/*Section.jsx — do NOT put the full page UI inline in App.',
+      `Write @@@FILE ${appPath} as a thin shell (imports + layout) and @@@FILE src/App.css.`,
+      'Put real sections in src/sections/*Section.jsx (Nav, Hero, story bands, notes/shop as the brief needs).',
+      'Plain JavaScript JSX only — no TypeScript generics or .tsx.',
+      'Do NOT invent a phone-column Apple stage unless the brief explicitly asks for a device product.',
+      'ORIGINAL ONE-OF-ONE: invent layout, type, palette, and copy for THIS brief.',
+      'ASCII-safe copy only. Nova is free forever — never add paywalls.',
+      '',
+      `Product: ${spec.name}`,
+      'Must-haves from the brief:',
+      must,
+      ...refLines,
+      '',
+      'Brief:',
+      briefText.slice(0, 4000),
+    ];
+  }
 
   return [
     'Build the FIRST real product UI for this new project from the user brief alone.',
@@ -377,23 +494,138 @@ export function stylesAreLinked(files: Record<string, string>): boolean {
   return /import\s+['"]\.\/App\.css['"]/.test(app) || /import\s+['"]\.\/App\.css['"]/.test(main);
 }
 
+/** Deterministic per-brand plate hash — offline, model-agnostic (Patch H). */
+function plateHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** 1–2 concrete brief words as a plate prop — strips negations + template jargon. */
+function plateBriefChip(brief: string): string {
+  const stop = new Set([
+    'website', 'homepage', 'landing', 'page', 'brand', 'called', 'build', 'create', 'make',
+    'with', 'that', 'this', 'from', 'into', 'look', 'feel', 'looks', 'feels', 'their', 'they',
+    'have', 'real', 'nice', 'best', 'great', 'some', 'very', 'just', 'like', 'using', 'users',
+    'product', 'official', 'simple', 'clean', 'modern', 'beautiful', 'easy', 'your', 'bout',
+  ]);
+  const words = String(brief || '')
+    .replace(/\b(?:not|never|no|without|avoid)\s+[a-z0-9-]+/gi, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .split(/[^a-zA-Z0-9-]+/)
+    .filter((w) => w.length >= 4 && w.length <= 14 && !stop.has(w.toLowerCase()) && !/^\d+$/.test(w));
+  return [...new Set(words)].slice(0, 2).join(' · ');
+}
+
+/**
+ * Patch H — name-hashed framing behind the product: 6 offline variants so two
+ * brands in the same genre are never identical plates. Palette-derived only.
+ */
+function svgPlateFrame(name: string, p: CreatePalette): string {
+  const id = plateHash(name) % 6;
+  const a = p.accent;
+  const frames: Record<number, string> = {
+    0: `<circle cx="800" cy="470" r="310" fill="none" stroke="${a}" stroke-opacity="0.16" stroke-width="2"/>
+<circle cx="1240" cy="220" r="46" fill="none" stroke="${a}" stroke-opacity="0.3" stroke-width="2"/>`,
+    1: `<line x1="80" y1="706" x2="1520" y2="706" stroke="${a}" stroke-opacity="0.22" stroke-width="2"/>
+<g fill="${a}" fill-opacity="0.4"><circle cx="160" cy="706" r="5"/><circle cx="440" cy="706" r="5"/><circle cx="800" cy="706" r="5"/><circle cx="1160" cy="706" r="5"/><circle cx="1440" cy="706" r="5"/></g>`,
+    2: `<g stroke="${a}" stroke-opacity="0.2" stroke-width="2"><line x1="120" y1="140" x2="120" y2="760"/><line x1="1480" y1="140" x2="1480" y2="760"/></g>
+<g stroke="${a}" stroke-opacity="0.45" stroke-width="3"><line x1="120" y1="140" x2="170" y2="140"/><line x1="1430" y1="760" x2="1480" y2="760"/></g>`,
+    3: `<path d="M0 190 L520 70 L566 146 L46 266 Z" fill="${a}" fill-opacity="0.1"/>
+<path d="M1600 710 L1080 830 L1034 754 L1554 634 Z" fill="${a}" fill-opacity="0.1"/>`,
+    4: `<g fill="${a}" fill-opacity="0.35">${[0, 1, 2].map((r) => [0, 1, 2].map((c) => `<circle cx="${1330 + c * 70}" cy="${140 + r * 70}" r="6"/>`).join('')).join('')}</g>
+<line x1="80" y1="760" x2="360" y2="760" stroke="${a}" stroke-opacity="0.3" stroke-width="3"/>`,
+    5: `<g fill="none" stroke="${a}" stroke-opacity="0.24" stroke-width="2"><path d="M1540 560 a170 170 0 0 0 -170 170"/><path d="M1540 480 a250 250 0 0 0 -250 250"/><path d="M60 340 a130 130 0 0 1 130 -130"/></g>`,
+  };
+  return `<g data-frame="${id}">${frames[id]}</g>`;
+}
+
 /** Product stage when photo search and image models both miss. Not a reused landscape photo.
  *  Never draws a toy tablet / home-button bezel — that shipped as “Apple Live” and looked like a stub.
  */
 export function svgHeroDataUrl(
-  identity: { name: string; palette?: CreatePalette; category?: string },
+  identity: { name: string; palette?: CreatePalette; category?: string; brief?: string },
   label = '',
 ): string {
   const p = identity.palette || NEUTRAL;
   const name = identity.name || 'Brand';
   const tag = String(label || name).replace(/[-_]+/g, ' ').slice(0, 28);
-  const cat = String(identity.category || tag || '').toLowerCase();
-  const appleish = /\b(?:apple|iphone|ipad|mac|watch|airpods|product[- ]?home)\b/i.test(`${name} ${tag} ${cat}`);
-  if (appleish || /product|device|phone|laptop|watch|earbuds/i.test(cat)) {
-    return svgPremiumProductStageDataUrl({ name, tag, palette: p });
+  const cat = String(identity.category || '').toLowerCase();
+  const brief = String(identity.brief || '');
+  // Soft abstract stage — gradient + glow rim + product silhouette (never an empty black plate).
+  const hue = [...(tag || name)].reduce((n, c) => n + c.charCodeAt(0), 40) % 360;
+  const kind = detectHeroProductKind(name, brief || `${tag} ${cat}`, tag);
+  // F&B / product silhouettes always win. "hero with product visual" / photo-query labels
+  // used to trip the Apple phone stage because `product` appeared in the label/category.
+  const fnbKind = kind === 'bottle' || kind === 'coffee' || kind === 'tea'
+    || kind === 'lotion' || kind === 'chocolate' || kind === 'ceramic';
+  const appleAsk = /\b(?:apple\.com|iphone|ipad|macbook|airpods|product[- ]?home)\b/i.test(`${name} ${brief}`)
+    || (/\b(?:apple|mac)\b/i.test(`${name} ${brief}`) && /\b(?:iphone|ipad|watch|airpods|laptop|phone)\b/i.test(brief));
+  const deviceCat = /^(?:product|device|phone|laptop|watch|earbuds)$/i.test(cat);
+  if (!fnbKind && (appleAsk || deviceCat)) {
+    return svgPremiumProductStageDataUrl({ name, tag: name.slice(0, 28), palette: p });
   }
-  // Soft abstract stage — gradient field + brand type. No fake device chrome.
-  const hue = [...tag].reduce((n, c) => n + c.charCodeAt(0), 40) % 360;
+  const mark = escapeXml(name.slice(0, 14));
+  let product = '';
+  if (kind === 'tea') {
+    product = `<ellipse cx="800" cy="560" rx="170" ry="32" fill="#1a2220" opacity="0.55"/>
+<rect x="640" y="280" width="320" height="260" rx="36" fill="#e8eef4"/>
+<rect x="670" y="248" width="260" height="52" rx="16" fill="#cfd8e0"/>
+<rect x="690" y="310" width="220" height="8" rx="4" fill="${p.accent}" opacity="0.55"/>
+<text x="800" y="410" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="34" font-weight="700">${mark}</text>
+<text x="800" y="460" text-anchor="middle" fill="#4a5560" font-family="Helvetica Neue,sans-serif" font-size="20">ceremonial tin</text>`;
+  } else if (kind === 'coffee') {
+    // Roast bag — fold top + label plate (not a mug).
+    product = `<ellipse cx="800" cy="640" rx="190" ry="36" fill="#1a1612" opacity="0.5"/>
+<path d="M610 250 L680 210 L920 210 L990 250 L970 600 Q800 660 630 600 Z" fill="#e8eef4"/>
+<path d="M680 210 L700 185 L900 185 L920 210" fill="#cfd8e0"/>
+<rect x="700" y="320" width="200" height="160" rx="12" fill="#1a1612" opacity="0.12"/>
+<text x="800" y="390" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="28" font-weight="700">${mark}</text>
+<text x="800" y="430" text-anchor="middle" fill="#4a5560" font-family="Helvetica Neue,sans-serif" font-size="18">whole bean</text>`;
+  } else if (kind === 'lotion') {
+    product = `<ellipse cx="800" cy="620" rx="90" ry="22" fill="#1a1612" opacity="0.4"/>
+<rect x="720" y="220" width="160" height="380" rx="72" fill="#e8eef4"/>
+<rect x="750" y="190" width="100" height="48" rx="12" fill="#cfd8e0"/>
+<rect x="760" y="300" width="80" height="6" rx="3" fill="${p.accent}" opacity="0.5"/>
+<text x="800" y="420" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="24">${escapeXml(name.slice(0, 12))}</text>`;
+  } else if (kind === 'bottle') {
+    // Tall spirits bottle — neck, shoulder, label.
+    product = `<ellipse cx="800" cy="680" rx="110" ry="28" fill="#0a1018" opacity="0.45"/>
+<rect x="762" y="160" width="76" height="70" rx="10" fill="#cfd8e0"/>
+<rect x="748" y="145" width="104" height="28" rx="6" fill="#e8eef4"/>
+<path d="M730 230 C730 210 870 210 870 230 L900 360 L880 640 C880 670 720 670 720 640 L700 360 Z" fill="#e8eef4"/>
+<rect x="745" y="400" width="110" height="140" rx="8" fill="#1a222c" opacity="0.14"/>
+<text x="800" y="460" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="22" font-weight="700">${escapeXml(name.slice(0, 10))}</text>
+<text x="800" y="495" text-anchor="middle" fill="#4a5560" font-family="Helvetica Neue,sans-serif" font-size="16">small batch</text>`;
+  } else if (kind === 'chocolate') {
+    product = `<ellipse cx="800" cy="620" rx="200" ry="34" fill="#1a120e" opacity="0.45"/>
+<rect x="620" y="300" width="360" height="260" rx="18" fill="#e8eef4"/>
+<rect x="640" y="320" width="320" height="80" rx="8" fill="#1a120e" opacity="0.1"/>
+<line x1="740" y1="300" x2="740" y2="560" stroke="#1a120e" stroke-opacity="0.12" stroke-width="3"/>
+<line x1="860" y1="300" x2="860" y2="560" stroke="#1a120e" stroke-opacity="0.12" stroke-width="3"/>
+<text x="800" y="430" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="28" font-weight="700">${mark}</text>
+<text x="800" y="470" text-anchor="middle" fill="#4a5560" font-family="Helvetica Neue,sans-serif" font-size="18">origin bar</text>`;
+  } else if (kind === 'ceramic') {
+    // Plate + bowl stack — kiln tableware (not a phone / generic box).
+    product = `<ellipse cx="800" cy="680" rx="260" ry="36" fill="#1a1612" opacity="0.35"/>
+<ellipse cx="800" cy="520" rx="220" ry="48" fill="#f7f0e6" stroke="#2a2118" stroke-width="3"/>
+<ellipse cx="800" cy="500" rx="190" ry="36" fill="#efe2d2"/>
+<path d="M560 360 C560 300 1040 300 1040 360 L1000 500 Q800 560 600 500 Z" fill="#f0e4d4" stroke="#2a2118" stroke-width="3"/>
+<ellipse cx="800" cy="360" rx="240" ry="42" fill="#faf4eb" stroke="#2a2118" stroke-width="2.5"/>
+<text x="800" y="375" text-anchor="middle" fill="#2a2118" font-family="Georgia,serif" font-size="26" font-weight="700">${escapeXml(name.slice(0, 14))}</text>
+<text x="800" y="620" text-anchor="middle" fill="#5a4636" font-family="Helvetica Neue,sans-serif" font-size="18">kiln-fired tableware</text>`;
+  } else {
+    product = `<ellipse cx="800" cy="600" rx="200" ry="36" fill="#0a1018" opacity="0.4"/>
+<rect x="640" y="260" width="320" height="320" rx="28" fill="#e8eef4"/>
+<rect x="680" y="300" width="240" height="10" rx="5" fill="${p.accent}" opacity="0.45"/>
+<text x="800" y="430" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="32">${escapeXml(name.slice(0, 16))}</text>`;
+  }
+  // Patch H — name-hashed framing + 1–2 brief words as an offline prop chip.
+  const frame = svgPlateFrame(name, p);
+  const chip = plateBriefChip(brief);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
 <defs>
 <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -406,8 +638,9 @@ export function svgHeroDataUrl(
 </defs>
 <rect width="1600" height="900" fill="url(#g)"/>
 <rect width="1600" height="900" fill="url(#glow)"/>
-<rect x="560" y="220" width="480" height="420" rx="36" fill="${p.panel}" opacity="0.55"/>
-<rect x="600" y="260" width="400" height="300" rx="20" fill="#0a0a0c" opacity="0.85"/>
+${frame}
+${product}
+${chip ? `<text x="800" y="118" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="18" letter-spacing="6" opacity="0.55">${escapeXml(chip.toUpperCase())}</text>` : ''}
 <text x="800" y="780" text-anchor="middle" fill="${p.text}" font-family="SF Pro Display, Helvetica Neue, system-ui, sans-serif" font-size="42" font-weight="650">${escapeXml(name)}</text>
 <text x="800" y="830" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="20" opacity="0.65">${escapeXml(tag)}</text>
 </svg>`;

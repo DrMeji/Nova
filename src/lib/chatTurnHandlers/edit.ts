@@ -4,6 +4,7 @@
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { finalizeCodingChatBubble } from '@/lib/chatCodeReply';
+import { getCreateJobForChat, getCreateJobForPath } from '@/lib/createJobStore';
 import { editMiss } from '@/lib/productContract';
 
 export function shouldSkipWeakModelCodingHop(opts: {
@@ -165,6 +166,14 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
         ? 'Removing from project files…'
         : 'Updating project files…',
   );
+  const createBrief = (() => {
+    try {
+      const job = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      return String(job?.originalBrief || job?.generationBrief || '').trim();
+    } catch {
+      return '';
+    }
+  })();
   const applied = await applyChatReplyEdits({
     reply: '',
     projectId: host.projectId,
@@ -172,6 +181,7 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
     files: host.files,
     userMessage: host.editUserMessage,
     diskRoot: host.diskRoot,
+    originalBrief: createBrief || undefined,
   });
   const elapsedMs = Date.now() - host.replyStartedAt;
 
@@ -483,6 +493,18 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         });
         return { status: 'failed' };
       }
+      // Auto re-attach Live after restore (safe, idempotent) instead of telling the user to say "run Preview".
+      let liveAfterRestore = false;
+      if (host.diskRoot && typeof window !== 'undefined' && window.novaDesktop?.getOrAttachPreview) {
+        host.pushStatus('Restored — re-attaching Live…');
+        try {
+          const attach = await Promise.race([
+            window.novaDesktop.getOrAttachPreview(host.diskRoot),
+            new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 45_000); }),
+          ]);
+          liveAfterRestore = Boolean(attach?.ok && attach.url);
+        } catch { /* best-effort */ }
+      }
       host.onApplied({
         files: applied.files,
         updated: applied.updated,
@@ -490,7 +512,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
           startedAt: host.replyStartedAt,
           elapsedMs,
           userMessage: host.content,
-          answer: `Restored checkpoint **${cp.label}** (${rolled.restored.length} files). Say **rebuild the UI** or **run Preview** to re-verify Live.`,
+          answer: liveAfterRestore
+            ? `Restored checkpoint **${cp.label}** (${rolled.restored.length} files). Live is re-attached — open **Live** to check it.`
+            : `Restored checkpoint **${cp.label}** (${rolled.restored.length} files). Live didn’t re-attach on its own — click **Live** under the chat, or tell me what looks off and I will fix it.`,
           wrotePaths: applied.updated,
           projectName: host.projectLabel,
         }),
@@ -794,7 +818,7 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         elapsedMs,
         userMessage: host.content,
         answer: isUiRebuild
-          ? 'That UI rebuild timed out before files were written. Say rebuild the UI again and I will continue from this folder.'
+          ? 'That UI rebuild timed out before any files were written, so your project is untouched. Send the ask again (or a smaller UI change) and I’ll continue from this folder.'
           : 'That edit timed out before I could write files. Try a shorter one-line change, or name the exact file to patch.',
         wrotePaths: [],
         projectName: host.projectLabel,
@@ -804,15 +828,29 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     return { status: 'miss' };
   }
 
-  const applied = await applyChatReplyEdits({
+  const editCreateBrief = (() => {
+    try {
+      const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      if (byChat) return String(byChat.originalBrief || byChat.generationBrief || '').trim();
+      if (host.diskRoot) {
+        const byPath = getCreateJobForPath(host.diskRoot);
+        return String(byPath?.originalBrief || byPath?.generationBrief || '').trim();
+      }
+    } catch { /* ignore */ }
+    return '';
+  })();
+  let applied = await applyChatReplyEdits({
     reply: modelReply,
     projectId: host.projectId,
     projectName: host.projectLabel,
     files: host.files,
     userMessage: host.editUserMessage,
     diskRoot: host.diskRoot,
+    originalBrief: editCreateBrief || undefined,
   });
   const elapsedMs = Date.now() - host.replyStartedAt;
+  /** Appended to the final success bubble when verifyAsk still misses after one retry but files are intact. */
+  let partialAskNote = '';
 
   if (!applied.ok || !applied.updated.length) {
     const failAnswer = finalizeCodingChatBubble({
@@ -914,12 +952,14 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
   host.onSnapshot?.({ files: snapshot, updatedPaths: applied.updated });
 
   const { verifyAsk } = await import('@/lib/verifyAsk');
-  let askCheck = verifyAsk(host.editUserMessage, applied.files);
+  // verifyAsk + brand guard, re-runnable so one retry round can be checked the same way.
+  const runAskCheck = (files: Record<string, string>) => {
+    let check = verifyAsk(host.editUserMessage, files);
   // Fail closed if the model wiped an existing short centered brand on a non-wipe ask.
   // Long hero lines ("Fresh vegetable plants") are headings, not brand marks — don't block shop polish.
   {
     const before = `${snapshot['src/App.jsx'] || ''}\n${snapshot['src/App.tsx'] || ''}`;
-    const after = `${applied.files?.['src/App.jsx'] || ''}\n${applied.files?.['src/App.tsx'] || ''}`;
+    const after = `${files?.['src/App.jsx'] || ''}\n${files?.['src/App.tsx'] || ''}`;
     const navBrand = before.match(/className=["'](?:brand|logo-text|nav-brand|site-name)["'][^>]*>([^<]{1,48})</i)?.[1]?.trim() || '';
     const centerBrand = before.match(/className=["']center-word["'][^>]*>([^<]{1,48})</i)?.[1]?.trim() || '';
     const brand = navBrand || (
@@ -939,19 +979,22 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     if (brand && !wipeOk && !additiveAsk) {
       const esc = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       if (!new RegExp(esc, 'i').test(after)) {
-        askCheck = {
+        check = {
           ok: false,
-          missing: [...askCheck.missing, `kept brand “${brand}”`],
-          checked: Math.max(1, askCheck.checked || 0),
+          missing: [...check.missing, `kept brand “${brand}”`],
+          checked: Math.max(1, check.checked || 0),
         };
       }
     }
   }
-  // Soft keep rewrite/landing/rebuild work — don't undo a real layout over a loose miss.
-  if (!askCheck.ok && (softKeep || rebuildKeep)) {
-    askCheck = { ok: true, missing: [], checked: askCheck.checked };
-  }
-  if (!askCheck.ok) {
+    // Soft keep rewrite/landing/rebuild work — don't undo a real layout over a loose miss.
+    if (!check.ok && (softKeep || rebuildKeep)) {
+      check = { ok: true, missing: [], checked: check.checked };
+    }
+    return check;
+  };
+  let askCheck = runAskCheck(applied.files);
+  const revertToSnapshot = async () => {
     const revertBlocks = applied.updated
       .filter((p) => snapshot[p] != null)
       .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
@@ -966,10 +1009,81 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         diskRoot: host.diskRoot,
       });
     }
+  };
+
+  // verifyAsk missed: one retry round feeding the gaps back to the model (mirrors create's repair loop).
+  // Do NOT revert up front — the first write may be mostly right.
+  let askRetried = false;
+  if (!askCheck.ok && askCheck.missing.length && host.generate) {
+    askRetried = true;
+    host.pushStatus('Close — fixing what’s still missing…');
+    const retryBudgetMs = Math.min(editBudgetMs, 120_000);
+    const retryController = new AbortController();
+    const retryTimer = setTimeout(() => retryController.abort(), retryBudgetMs);
+    let retryReply = '';
+    try {
+      const retryAsk = [
+        host.editUserMessage,
+        '',
+        '## Retry — your last edit missed part of the ask',
+        `Still missing: ${askCheck.missing.join('; ')}.`,
+        'Fix ONLY those gaps on top of the current files. Keep everything else, including the brand/name. Return full @@@FILE blocks for any file you change.',
+        mapBlock || '',
+      ].filter((l) => l !== '').join('\n');
+      const raced = await Promise.race([
+        host.generate({ signal: retryController.signal, userMessage: retryAsk, files: applied.files }),
+        new Promise<null>((resolve) => {
+          retryController.signal.addEventListener('abort', () => resolve(null), { once: true });
+        }),
+      ]);
+      retryReply = String(raced || '').trim();
+    } catch {
+      retryReply = '';
+    } finally {
+      clearTimeout(retryTimer);
+    }
+    if (retryReply) {
+      const retryApplied = await applyChatReplyEdits({
+        reply: retryReply,
+        projectId: host.projectId,
+        projectName: host.projectLabel,
+        files: applied.files,
+        userMessage: host.editUserMessage,
+        diskRoot: host.diskRoot,
+      });
+      if (retryApplied.ok && retryApplied.updated.length) {
+        const retryBroken = Boolean((retryApplied as { syntaxFailed?: boolean }).syntaxFailed);
+        const firstBroken = Boolean((applied as { syntaxFailed?: boolean }).syntaxFailed);
+        const retryCheck = runAskCheck(retryApplied.files);
+        // Accept the retry unless it broke files that were intact before it.
+        if (!retryBroken || firstBroken) {
+          applied = {
+            ...retryApplied,
+            updated: [...new Set([...applied.updated, ...retryApplied.updated])],
+          };
+          askCheck = retryCheck;
+          host.onSnapshot?.({ files: snapshot, updatedPaths: applied.updated });
+        }
+      }
+    }
+  }
+
+  if (!askCheck.ok) {
+    // Only revert when the files are actually broken (syntax gate failed, or the model wiped the brand).
+    // Otherwise keep the intact edit and say plainly what is still missing.
+    const filesBroken = Boolean((applied as { syntaxFailed?: boolean }).syntaxFailed)
+      || askCheck.missing.some((m) => /^kept brand/i.test(m));
+    const keepIntact = askRetried && !filesBroken && applied.ok && applied.updated.length > 0;
+    if (keepIntact) {
+      partialAskNote = `Applied what I could, but still missing: ${askCheck.missing.join(', ') || 'part of that ask'}. Say that piece on its own and I'll add it.`;
+    } else {
+    await revertToSnapshot();
     const miss = editMiss(
       'verify_failed',
       [
-        'That edit didn’t match what you asked for, so I left the project unchanged.',
+        askRetried
+          ? 'I tried that edit twice and the result wasn’t safe to keep (it broke the code or dropped your brand), so I restored your previous files.'
+          : 'That edit didn’t match what you asked for, so I restored your previous files.',
         askCheck.missing.length ? `Still missing: ${askCheck.missing.join(', ')}.` : '',
         'Try one clearer change.',
       ].filter(Boolean).join(' '),
@@ -986,6 +1100,7 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       elapsedMs,
     });
     return { status: 'failed' };
+    }
   }
 
   let finalFiles = applied.files;
@@ -1114,12 +1229,13 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     });
     return { status: 'failed' };
   }
-  const answer = finalizeCodingChatBubble({
+  const answerBase = finalizeCodingChatBubble({
     userMessage: host.content,
     rawReply: modelReply,
     changedPaths: applied.updated,
     applied: true,
   });
+  const answer = partialAskNote ? `${answerBase}\n\n${partialAskNote}` : answerBase;
   const reply = host.buildStudioTraceMessage({
     startedAt: host.replyStartedAt,
     elapsedMs: modelElapsed,

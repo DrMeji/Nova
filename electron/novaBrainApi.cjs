@@ -17,8 +17,11 @@ const novaModelRank = require('./novaModelRank.cjs');
 const { MODEL_ALIASES } = require('./novaCatalog.cjs');
 
 const CONTRACT_VERSION = '0.4.0';
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+// OpenWork / agent clients send large tool schemas + long histories.
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_CONCURRENT = 4;
+/** SSE comment interval so idle clients don't treat slow GGUF TTFT as a dropped socket. */
+const SSE_HEARTBEAT_MS = 8_000;
 
 function timingSafeEqualToken(presented, expected) {
   const a = Buffer.from(String(presented || ''), 'utf8');
@@ -35,18 +38,38 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
+    let oversized = false;
     req.on('data', (c) => {
+      if (oversized) return;
       total += c.length;
       if (total > MAX_BODY_BYTES) {
-        reject(new Error('Request body too large'));
-        req.destroy();
+        oversized = true;
+        const err = new Error('Request body too large');
+        err.code = 'BODY_TOO_LARGE';
+        reject(err);
+        try { req.resume(); } catch { /* ignore */ }
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => {
+      if (oversized) return;
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
     req.on('error', reject);
   });
+}
+
+function startSseHeartbeat(res) {
+  const timer = setInterval(() => {
+    try {
+      if (!res.writableEnded) res.write(': nova-brain-keepalive\n\n');
+    } catch {
+      /* ignore */
+    }
+  }, SSE_HEARTBEAT_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  return () => clearInterval(timer);
 }
 
 function json(res, status, payload) {
@@ -54,19 +77,24 @@ function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** Soft cap so OpenWork/agent histories cannot explode GGUF context (~32k tokens). */
+const MAX_PACKED_CHARS = 48_000;
+
 /** Flatten Ollama/OpenAI-style messages[] into one prompt for Engine. */
 function packMessages(parsed) {
   if (typeof parsed.message === 'string' && parsed.message.trim()) {
-    return parsed.message.trim();
+    return truncatePacked(parsed.message.trim());
   }
   const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
   if (messages.length === 0) {
-    if (typeof parsed.prompt === 'string') return parsed.prompt.trim();
+    if (typeof parsed.prompt === 'string') return truncatePacked(parsed.prompt.trim());
     return '';
   }
   const lines = [];
   for (const m of messages) {
     const role = String(m?.role || 'user').toLowerCase();
+    // Skip tool/function payloads — they bloat agent transcripts and are unused by GGUF chat.
+    if (role === 'tool' || role === 'function') continue;
     const content = typeof m?.content === 'string'
       ? m.content
       : Array.isArray(m?.content)
@@ -77,7 +105,16 @@ function packMessages(parsed) {
     else if (role === 'assistant') lines.push(`[Assistant]\n${content.trim()}`);
     else lines.push(`[User]\n${content.trim()}`);
   }
-  return lines.join('\n\n');
+  return truncatePacked(lines.join('\n\n'));
+}
+
+function truncatePacked(text) {
+  const s = String(text || '');
+  if (s.length <= MAX_PACKED_CHARS) return s;
+  const keep = MAX_PACKED_CHARS - 120;
+  const head = Math.min(8_000, Math.floor(keep * 0.2));
+  const tail = keep - head;
+  return `${s.slice(0, head)}\n\n[…truncated for local GGUF context…]\n\n${s.slice(-tail)}`;
 }
 
 function resolveModelId(raw, novaEngine) {
@@ -315,9 +352,18 @@ function createBrainServer(opts) {
 
       if (url === '/v1/models' && req.method === 'GET') {
         const engine = novaEngine.getStatus();
+        const ready = engine.models.filter((m) => m.status === 'ready');
+        // Include OpenAI `data` shape so AI-SDK / OpenWork clients can enumerate models.
         return json(res, 200, {
           ok: true,
-          models: engine.models.filter((m) => m.status === 'ready'),
+          object: 'list',
+          data: ready.map((m) => ({
+            id: m.id,
+            object: 'model',
+            created: Math.floor(Date.now() / 1000),
+            owned_by: 'nova-brain',
+          })),
+          models: ready,
           activeModelId: engine.activeModelId,
           port: activePort,
         });
@@ -416,10 +462,24 @@ function createBrainServer(opts) {
 
           if (stream) {
             res.writeHead(200, sseHeaders(corsOrigin));
+            const stopHeartbeat = startSseHeartbeat(res);
             try {
+              // OpenAI-compatible clients (OpenWork / AI SDK) expect an initial role chunk.
+              // Without it the socket often looks "dropped" mid-handshake.
+              const streamId = `NOVA-${Date.now()}`;
+              const created = Math.floor(Date.now() / 1000);
+              res.write(`data: ${JSON.stringify({
+                id: streamId,
+                object: 'chat.completion.chunk',
+                created,
+                model: modelLabel,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+              })}\n\n`);
+              let wroteContent = false;
               const result = await runGenerateStream(parsed, (text) => {
+                wroteContent = true;
                 const chunk = {
-                  id: `NOVA-${Date.now()}`,
+                  id: streamId,
                   object: 'chat.completion.chunk',
                   created: Math.floor(Date.now() / 1000),
                   model: modelLabel,
@@ -444,11 +504,15 @@ function createBrainServer(opts) {
               res.write('data: [DONE]\n\n');
               res.end();
             } catch (err) {
-              res.write(`data: ${JSON.stringify({
-                error: { message: err instanceof Error ? err.message : 'Generation failed', type: 'nova_error' },
-              })}\n\n`);
-              res.write('data: [DONE]\n\n');
-              res.end();
+              try {
+                res.write(`data: ${JSON.stringify({
+                  error: { message: err instanceof Error ? err.message : 'Generation failed', type: 'nova_error' },
+                })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+              } catch { /* ignore */ }
+            } finally {
+              stopHeartbeat();
             }
             return;
           }
@@ -590,7 +654,8 @@ function createBrainServer(opts) {
 
       return json(res, 404, { ok: false, error: 'Not found' });
     } catch (err) {
-      return json(res, 400, {
+      const status = err && err.code === 'BODY_TOO_LARGE' ? 413 : 400;
+      return json(res, status, {
         ok: false,
         error: err instanceof Error ? err.message : 'Bad request',
       });

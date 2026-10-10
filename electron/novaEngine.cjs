@@ -244,9 +244,18 @@ function setActiveModel(id) {
   const models = listModels();
   const found = models.find((m) => m.id === id && m.status === 'ready');
   if (!found) throw new Error('Model not installed in NOVA Engine');
+  // Same id already active — skip warmServer reload (tens of seconds on cold disk).
+  if (String(activeModelId) === String(id)) {
+    return getStatus();
+  }
   activeModelId = id;
   const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
-  void novaGguf.warmServer(ggufId);
+  // Defer warmup off this tick so engine-set-model IPC can reply immediately.
+  // warmServer's sync prelude (findLlamaServer recursive walk + copyFileSync)
+  // otherwise blocks the main event loop and freezes the renderer's await.
+  setImmediate(() => {
+    void novaGguf.warmServer(ggufId);
+  });
   return getStatus();
 }
 
@@ -364,6 +373,14 @@ function startDownloadJob(id, meta) {
 
   void (async () => {
     try {
+      // C6: wait out an active craft/chat generation before heavy download IO.
+      for (let i = 0; i < 120; i += 1) {
+        try {
+          if (!novaGguf.isGenerateBusy?.()) break;
+        } catch { break; }
+        await new Promise((r) => setTimeout(r, 1000));
+        if (downloads[id]?.cancel) throw new Error('Download canceled');
+      }
       if (meta.runtime === 'sd' || meta.runtime === 'flux') {
         await novaSd.ensureSdBinary((pct) => {
           if (downloads[id]?.cancel) throw new Error('Download canceled');
@@ -850,14 +867,23 @@ async function generate(message, opts = {}) {
       const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
         : nPredictMin;
-      // Keep enough of the RAM-scaled context for chat history so long builds don't get prompt-truncated.
+      // Cap output to what the real window can hold — never floor at 16k when ctx cannot fit it.
+      // Old Math.max(nPredictMin, ctx - reserve) forced coding n_predict=16384 on 8–27 GB machines.
       const ctx = typeof novaGguf.getGgufCtx === 'function'
         ? novaGguf.getGgufCtx()
         : (Number(novaGguf.GGUF_CTX) || 16384);
-      const promptReserve = Math.max(6144, Math.floor(ctx * 0.45));
-      const nPredictCap = Math.max(nPredictMin, ctx - promptReserve);
-      const nPredict = Math.min(Math.max(requested, nPredictMin), nPredictCap);
-      const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.55;
+      const promptStr = String(message || '');
+      const promptTokens = Math.ceil(promptStr.length / 3.6);
+      const nPredictCap = Math.max(512, ctx - promptTokens - 256);
+      const nPredict = Math.max(512, Math.min(Math.max(requested, 1024), nPredictCap));
+      try {
+        console.log(
+          `[NOVA-engine] nPredict kind=${kind} ctx=${ctx} promptTokens≈${promptTokens} nPredict=${nPredict} (cap=${nPredictCap} req=${requested} min=${nPredictMin})`,
+        );
+      } catch { /* ignore */ }
+      // Per-kind defaults: coding stays precise; chat a bit freer. Caller opts still win.
+      const kindTemp = kind === 'coding' ? 0.2 : kind === 'chat' ? 0.6 : 0.55;
+      const temperature = typeof opts.temperature === 'number' ? opts.temperature : kindTemp;
       const gguf = await novaGguf.runGgufStream(
         ggufId,
         message,

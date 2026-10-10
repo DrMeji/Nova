@@ -213,9 +213,18 @@ function findLlamaVlBinary() {
   return findNamedBinary(vlCliNames()) || findLlamaBinary();
 }
 
+/** Cache resolved llama-server path so cold create doesn't re-walk + copyFileSync every bind. */
+let _llamaServerPathCache = '';
+
 function findLlamaServer() {
+  if (_llamaServerPathCache && fs.existsSync(_llamaServerPathCache)) {
+    return _llamaServerPathCache;
+  }
   const existing = findNamedBinary(serverNames());
-  if (existing) return existing;
+  if (existing) {
+    _llamaServerPathCache = existing;
+    return existing;
+  }
   try {
     const leftover = path.join(binDir(), `_extract_${LLAMA_TAG}`);
     const found = findFileRecursive(leftover, serverNames())
@@ -224,6 +233,7 @@ function findLlamaServer() {
       const dest = path.join(binDir(), process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
       if (path.resolve(found) !== path.resolve(dest)) fs.copyFileSync(found, dest);
       try { fs.chmodSync(dest, 0o755); } catch { /* ignore */ }
+      _llamaServerPathCache = dest;
       return dest;
     }
   } catch {
@@ -669,6 +679,10 @@ function getServerPort() {
   return serverPort;
 }
 
+function isGenerateBusy() {
+  return Boolean(generateBusy || activeChild || activeAbort);
+}
+
 function getServerStatus() {
   return {
     ok: !lastServerError,
@@ -713,7 +727,19 @@ function cancelGguf(jobIdOrOpts) {
     }
   }
 
+  // Chat-scoped Stop before job registered: still kill active generation if busy.
   if (scopedChatMiss) {
+    if (generateBusy || activeChild || activeAbort) {
+      cancelRequested = true;
+      try { activeAbort?.abort(); } catch { /* ignore */ }
+      activeAbort = null;
+      if (activeChild) {
+        killLlamaChild(activeChild);
+        activeChild = null;
+      }
+      generateBusy = false;
+      return { ok: true, cancelled: true };
+    }
     return { ok: true, cancelled: false };
   }
 
@@ -774,6 +800,24 @@ function stopServer() {
     serverMmproj = null;
     serverCtx = 0;
   }
+}
+
+/** Kill every GGUF child (CLI + server) — app quit / reload. */
+function stopAllGguf() {
+  cancelRequested = true;
+  try { activeAbort?.abort(); } catch { /* ignore */ }
+  activeAbort = null;
+  if (activeChild) {
+    killLlamaChild(activeChild);
+    activeChild = null;
+  }
+  for (const [id, entry] of [...jobsById.entries()]) {
+    try { entry.abort?.abort(); } catch { /* ignore */ }
+    if (entry.child) killLlamaChild(entry.child);
+    clearGgufJob(id);
+  }
+  generateBusy = false;
+  stopServer();
 }
 
 function wait(ms) {
@@ -901,8 +945,10 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
       temperature,
       stream: true,
       cache_prompt: true,
+      // Coding / @@@FILE: marker-only stops. English phrase stops ("If you want to", "Notes:")
+      // cut legitimate landing-page copy mid-file — never use them for coding turns.
       stop: (kind === 'coding' || /\b@@@FILE\b/i.test(String(prompt || '')))
-        ? ['// STRESS_END_MARKER_OK', '\nNo changes needed', '\nThe file src/', '\nIf you want to', '\nNotes:', '\n- This keeps', '\nMatch this EXAMPLE']
+        ? ['// STRESS_END_MARKER_OK']
         : [stopToken(modelId)],
     };
     if (images.length) {
@@ -937,11 +983,12 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
           /* ignore partial json */
         }
       }
+      // Stream raw content pieces — clean once at close (not per chunk on main).
       if (typeof onChunk === 'function') {
-        const cleaned = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
-        if (cleaned && cleaned.length > emitted.length) {
-          const delta = cleaned.slice(emitted.length);
-          emitted = cleaned;
+        const rawLen = out.length;
+        if (rawLen > emitted.length) {
+          const delta = out.slice(emitted.length);
+          emitted = out;
           if (delta) {
             try { onChunk(delta); } catch { /* ignore */ }
           }
@@ -1262,6 +1309,12 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
   const visionImages = normalizeVisionImages(extra?.images);
   const kind = extra?.kind;
   if (generateBusy || activeChild) {
+    try {
+      const { BrowserWindow } = require('electron');
+      for (const w of BrowserWindow.getAllWindows()) {
+        w.webContents.send('NOVA:engine-queue', { queued: true, running: true, position: 1 });
+      }
+    } catch { /* ignore */ }
     const err = new Error(
       'Local brain is busy (loading a model or finishing another reply). Press Stop, wait a few seconds, then send again — do not start a second create while one is running.',
     );
@@ -1269,6 +1322,12 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
     return Promise.reject(err);
   }
   generateBusy = true;
+  try {
+    const { BrowserWindow } = require('electron');
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('NOVA:engine-queue', { queued: false, running: true, position: 0 });
+    }
+  } catch { /* ignore */ }
   cancelRequested = false;
   const { jobId, entry } = registerGgufJob({
     jobId: extra?.jobId,
@@ -1373,7 +1432,6 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     if (jobEntry) jobEntry.child = child;
     let out = '';
     let err = '';
-    let emitted = '';
     const cleanupPrompt = () => {
       try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
       for (const p of tempImages) {
@@ -1388,15 +1446,10 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     child.stdout.on('data', (d) => {
       const piece = d.toString();
       out += piece;
-      if (typeof onChunk !== 'function') return;
-      const cleaned = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
-      if (!cleaned) return;
-      if (cleaned.length > emitted.length) {
-        const delta = cleaned.slice(emitted.length);
-        emitted = cleaned;
-        if (delta) {
-          try { onChunk(delta); } catch { /* ignore */ }
-        }
+      // Stream raw deltas — full-buffer cleanGgufReply on every chunk is quadratic on main.
+      // Final clean runs once on close below.
+      if (typeof onChunk === 'function' && piece) {
+        try { onChunk(piece); } catch { /* ignore */ }
       }
     });
     child.stderr.on('data', (d) => { err += d.toString(); });
@@ -1470,6 +1523,8 @@ module.exports = {
   findLlamaServer,
   warmServer,
   stopServer,
+  stopAllGguf,
+  isGenerateBusy,
   getServerPort,
   getServerStatus,
   modelsDir,

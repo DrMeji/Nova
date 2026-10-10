@@ -131,6 +131,12 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   const r = classifyTurn('Help me put a little plant shop together — what should it include?');
   check('plant shop explore → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
 }
+{
+  const ask =
+    'Build a website for a small-batch matcha brand called Verdigris Matcha Co. Include origin story, tin hero, tasting notes, and Shop + Steep guides CTAs. Skip the plan — put it on disk and open Live.';
+  const r = classifyTurn(ask);
+  check('Verdigris skip-plan on-disk Live → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
 
 if (failed) {
   console.error(`\n${failed} failed`);

@@ -5,8 +5,14 @@
  * "Live Preview could not render" card.
  */
 
-import { isBrokenReactAppSource, jsxSourceHasTypeScriptOnlySyntax, looksLikeTruncatedUiSource } from '@/lib/freshSpaFromBrief';
-import { healBrokenJsxOpenTags } from '@/lib/createBuildQuality';
+import {
+  isBrokenReactAppSource,
+  jsxSourceHasTypeScriptOnlySyntax,
+  looksLikeTruncatedUiSource,
+  healNearCompleteTruncatedSource,
+  countJsxTagBalance,
+} from '@/lib/freshSpaFromBrief';
+import { ensureJsxHasNoTypeScript, healBrokenJsxOpenTags } from '@/lib/createBuildQuality';
 
 export type SyntaxGateResult = {
   ok: boolean;
@@ -19,7 +25,10 @@ export type SyntaxGateResult = {
 export function hasAdjacentJsxOutsideRoot(app: string): boolean {
   const body = String(app || '').match(/return\s*\(([\s\S]*?)\)\s*;/);
   if (!body) return false;
-  return /<\/div>\s*\n\s*<(?:section|footer|main|header|aside|nav|div)\b/.test(body[1]);
+  // Nested logo `</div>` then `<nav>` inside a header is normal — never treat nav
+  // as an orphan sibling (that re-broke SoftPalm after mangled-JSX heal).
+  // Only tipjar-class landmarks that usually sit outside the page root.
+  return /<\/div>\s*\n\s*<(?:section|footer|main|aside)\b/.test(body[1]);
 }
 
 /** Pull orphan siblings back inside the return root before its closing </div>. */
@@ -27,7 +36,7 @@ export function healAdjacentJsxOutsideRoot(app: string): string {
   const src = String(app || '');
   if (!hasAdjacentJsxOutsideRoot(src)) return src;
   return src.replace(
-    /(return\s*\(\s*)([\s\S]*?)(<\/div>)(\s*)((?:<(?:section|footer|main|header|aside|nav)\b[\s\S]*?))(\s*\))/m,
+    /(return\s*\(\s*)([\s\S]*?)(<\/div>)(\s*)((?:<(?:section|footer|main|aside)\b[\s\S]*?))(\s*\))/m,
     (_m, ret, before, close, _ws, orphans, end) => {
       if (!String(orphans || '').trim() || /export\s+default/.test(orphans)) {
         return `${ret}${before}${close}${orphans}${end}`;
@@ -35,6 +44,62 @@ export function healAdjacentJsxOutsideRoot(app: string): string {
       return `${ret}${before}${orphans}\n    ${close}${end}`;
     },
   );
+}
+
+/**
+ * Depth-continue smash: logo/nav/button fused into invalid JSX
+ * (`<nav>\n</div>) => setX(!x)}>Label</button>`). Vite fails → black Live.
+ */
+export function hasMangledJsxControlFlow(app: string): boolean {
+  const s = String(app || '');
+  if (/<\/div>\)\s*=>/.test(s)) return true;
+  if (/<nav>\s*<\/div>\)\s*=>/.test(s)) return true;
+  // Lone fused arrow-button — NOT valid onClick={() => setX(...)}>
+  if (/(?:^|\n)\s*\)\s*=>\s*set[A-Z]\w*\s*\([^)]*\)\s*\}>[^<]*<\/button>/m.test(s)) return true;
+  // Closing button with no opening <button in the nearby nav.
+  if (/<nav>[\s\S]{0,180}<\/button>/.test(s) && !/<nav>[\s\S]{0,180}<button\b/.test(s)) return true;
+  return false;
+}
+
+/** Repair logo/nav button smash from thin depth continues. */
+export function healMangledJsxControlFlow(app: string): string {
+  let s = String(app || '');
+  if (!hasMangledJsxControlFlow(s)) return s;
+  // SoftPalm smash: logo <img> then <nav> then `</div>) => setX(!x)}>Label</button>`
+  // Do NOT use [^)]+ for the handler — nested (!showX) breaks the match.
+  s = s.replace(
+    /(<div\b[^>]*className=["'][^"']*\blogo\b[^"']*["'][^>]*>\s*<img\b[^>]*\/?>)\s*<nav>\s*<\/div>\)\s*=>\s*([\s\S]*?)\}>([^<\n]*)<\/button>\s*<\/nav>/gi,
+    (_m, logoOpen: string, expr: string, label: string) => (
+      `${logoOpen}\n        </div>\n        <nav>\n          <button type="button" onClick={() => ${String(expr).trim()}}>${String(label).trim()}</button>\n        </nav>`
+    ),
+  );
+  // Generic: <nav> </div>) => expr}>Label</button> </nav>
+  s = s.replace(
+    /<nav>\s*<\/div>\)\s*=>\s*([\s\S]*?)\}>([^<\n]*)<\/button>\s*<\/nav>/gi,
+    (_m, expr: string, label: string) => (
+      `</div>\n        <nav>\n          <button type="button" onClick={() => ${String(expr).trim()}}>${String(label).trim()}</button>\n        </nav>`
+    ),
+  );
+  // Any indented `</div>) => …}>Label</button>` line (depth-continue fuse).
+  s = s.replace(
+    /^([ \t]*)<\/div>\)\s*=>\s*([\s\S]*?)\}>([^<\n]*)<\/button>/gm,
+    (_m, indent: string, expr: string, label: string) => (
+      `${indent}<button type="button" onClick={() => ${String(expr).trim()}}>${String(label).trim()}</button>`
+    ),
+  );
+  // Lone `) => setX(!x)}>Label</button>` after a cut open tag.
+  s = s.replace(
+    /^\s*\)\s*=>\s*(set[A-Z]\w*\s*\([^)]*\))\}>([^<\n]*)<\/button>/gm,
+    (_m, expr: string, label: string) => (
+      `<button type="button" onClick={() => ${String(expr).trim()}}>${String(label).trim()}</button>`
+    ),
+  );
+  // Logo still open before <nav> (img never closed the div).
+  s = s.replace(
+    /(<div\b[^>]*className=["'][^"']*\blogo\b[^"']*["'][^>]*>\s*<img\b[^>]*\/?>)\s*\n(\s*)<nav>/gi,
+    '$1\n        </div>\n$2<nav>',
+  );
+  return s;
 }
 
 /** CSS leaked into App.jsx after the component (Vite Transform failed). */
@@ -67,9 +132,10 @@ export function healCssDumpedFromAppJsx(app: string): { app: string; cssExtract:
  */
 export function hasOrphanJsxAfterRootClose(app: string): boolean {
   const s = String(app || '');
-  return /<\/main>\s*(?:<\/div>\s*)+(?:\)\s*:\s*null\s*\})?/i.test(s)
+  // Normal shells are `<div><main>…</main></div>` — only flag Tipjar-style junk.
+  return /<\/main>\s*(?:<\/div>\s*){2,}\s*(?:\)\s*:\s*null\s*\})?/i.test(s)
     || /<\/main>\s*\)\s*:\s*null\s*\}/i.test(s)
-    || /<\/(?:main|div)>\s*(?:<\/div>\s*){2,}\s*(?:\)\s*:\s*null)?/i.test(s);
+    || /<\/(?:main|div)>\s*(?:<\/div>\s*){2,}\s*\)\s*:\s*null/i.test(s);
 }
 
 /** Cut orphan closings after the real root (`</main>` / primary `</div>`) before `);`. */
@@ -175,6 +241,15 @@ export function runCreateSyntaxGate(
   let app = String(next[appKey] || '');
   const beforeHeal = app;
 
+  // 0) .jsx with TypeScript — strip generics/annotations so Vite can compile.
+  if (appKey.endsWith('.jsx')) {
+    const stripped = ensureJsxHasNoTypeScript(app);
+    if (stripped !== app) {
+      app = stripped;
+      healed = true;
+    }
+  }
+
   // 1) Strip CSS dumped into JSX → App.css
   if (hasCssDumpedInAppJsx(app)) {
     const split = healCssDumpedFromAppJsx(app);
@@ -210,11 +285,46 @@ export function runCreateSyntaxGate(
     app = afterAdjacent;
     healed = true;
   }
+  // Close near-complete tag/brace cuts before declaring truncated / broken.
+  {
+    const { open: openN, close: closeN } = countJsxTagBalance(app);
+    if (
+      looksLikeTruncatedUiSource(app)
+      || isBrokenReactAppSource(app)
+      || openN > closeN
+    ) {
+      const near = healNearCompleteTruncatedSource(appKey, app);
+      if (near && near !== app) {
+        app = near;
+        healed = true;
+      }
+    }
+  }
+  // Mangle heal LAST — adjacent/trunc heals must not re-fuse nav/button JSX.
+  {
+    const afterMangle = healMangledJsxControlFlow(app);
+    if (afterMangle !== app) {
+      app = afterMangle;
+      healed = true;
+    }
+  }
   if (app !== beforeHeal) {
     next[appKey] = app;
     healed = true;
   } else if (healed) {
     next[appKey] = app;
+  }
+
+  // Strip TypeScript from section .jsx files (depth invent often emits useState<T>).
+  for (const [rel, body] of Object.entries(next)) {
+    const norm = rel.replace(/\\/g, '/');
+    if (!/^src\/.+\.jsx$/i.test(norm) || norm === appKey) continue;
+    if (typeof body !== 'string' || !body.trim()) continue;
+    const stripped = ensureJsxHasNoTypeScript(body);
+    if (stripped !== body) {
+      next[rel] = stripped;
+      healed = true;
+    }
   }
 
   if (looksLikeTruncatedUiSource(app)) {
@@ -226,13 +336,25 @@ export function runCreateSyntaxGate(
   if (hasAdjacentJsxOutsideRoot(app)) {
     reasons.push('Adjacent JSX outside return root (will not compile)');
   }
+  if (hasMangledJsxControlFlow(app)) {
+    reasons.push('Mangled JSX nav/button (will blank Live)');
+  }
   if (hasCssDumpedInAppJsx(app)) {
     reasons.push('CSS dumped into App.jsx (will not compile)');
   }
   if (hasOrphanJsxAfterRootClose(app)) {
     reasons.push('Orphan JSX after root close (will not compile)');
   }
+  // Compositional splice corruption: tag injected inside an attribute expression.
+  if (/=\{[^{}]*<[A-Za-z][\w.]*\s*\/?>/.test(app)) {
+    reasons.push('JSX element inside an attribute expression (mangled splice)');
+  }
+  // Orphan markup after a premature component close (sits before export default).
+  if (/^\s*\}\s*[<>]/m.test(app)) {
+    reasons.push('Orphan JSX after component close (will not compile)');
+  }
   for (const r of unboundStateReasons(app)) reasons.push(r);
+  // After strip heal — only fail if TS still remains.
   if (appKey.endsWith('.jsx') && jsxSourceHasTypeScriptOnlySyntax(app)) {
     reasons.push('src/App.jsx contains TypeScript syntax');
   }
@@ -265,7 +387,15 @@ export function runCreateSyntaxGate(
     reasons.push('Severe brace imbalance in App');
   }
 
-  const css = String(next['src/App.css'] || '');
+  let css = String(next['src/App.css'] || '');
+  if (css && looksLikeTruncatedUiSource(css)) {
+    const cssHeal = healNearCompleteTruncatedSource('src/App.css', css);
+    if (cssHeal && cssHeal !== css) {
+      css = cssHeal;
+      next['src/App.css'] = css;
+      healed = true;
+    }
+  }
   if (css && looksLikeTruncatedUiSource(css)) {
     reasons.push('App.css looks truncated');
   }

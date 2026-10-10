@@ -159,7 +159,14 @@ export function ensembleMember(
   team: CreateEnsembleTeam,
   role: EnsembleRole,
 ): EnsembleMember | null {
-  return team.members.find((m) => m.role === role) || null;
+  const hit = team.members.find((m) => m.role === role);
+  if (hit) return hit;
+  // Verify has no seat of its own — the craft coder verifies/heals its own output.
+  if (role === 'verify') {
+    const craft = team.members.find((m) => m.role === 'craft');
+    return craft ? { ...craft, role: 'verify' } : null;
+  }
+  return null;
 }
 
 async function routeWithTimeout(

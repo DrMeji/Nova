@@ -42,11 +42,20 @@ export const CREATE_V2_STREAM_PAINT_FILES = true;
  * Avoids endless rewrite thrash while still recovering one bad dump.
  */
 export const CREATE_V2_MAX_CRAFT_ATTEMPTS = 2;
+/** Hard upper bound across both craft writes; do not keep retraining the same stalled turn. */
+export const CREATE_V2_CRAFT_TOTAL_WALL_MS = 5 * 60_000;
 
 /** Max wait for the first @@@FILE token after craft starts (GGUF load). */
-export const CREATE_V2_FIRST_TOKEN_MS = 120_000;
+export const CREATE_V2_FIRST_TOKEN_MS = 90_000;
 
-/** Idle (no App byte growth) before cancelling the GGUF turn on App / App.css. */
+/**
+ * Cap for every await setEngineModel during create.
+ * setActiveModel itself is sync, but a cold warmServer prelude can block the
+ * main-thread IPC reply — never await unbound on any craft bind site.
+ */
+export const MODEL_LOAD_CAP_MS = 45_000;
+
+/** Idle (no streamed tokens at all) before cancelling the GGUF turn on App / App.css. */
 export const CREATE_V2_APP_IDLE_MS = 45_000;
 
 /** Idle before cancelling on other paths. */
@@ -72,13 +81,18 @@ export function createV2AttemptWallMs(profile: CreateBudgetProfile): number {
   return 240_000; // 4m
 }
 
+export function createV2CraftTotalWallMs(profile: CreateBudgetProfile): number {
+  return profile === 'simple' ? 3 * 60_000 : CREATE_V2_CRAFT_TOTAL_WALL_MS;
+}
+
 /** Staged-write instructions so models emit shell → fill → CSS instead of one novel. */
 export function createV2StagedWriteInstructions(preferTs: boolean): string {
   const app = preferTs ? 'src/App.tsx' : 'src/App.jsx';
   return [
     'STAGE THE WRITE (smaller dumps survive better than one giant file):',
-    `1) Emit @@@FILE ${app} with a complete working shell first (imports, export default, layout, brand h1).`,
-    '2) Continue the same @@@FILE (or rewrite it once) to fill interactions / list / form — finish every tag and brace.',
+    `1) Emit @@@FILE ${app} as a compositional shell: imports, export default, brand h1, and empty section landmarks`,
+    '   (<section> / <header> / <footer> / <main> placeholders the depth pass will fill). Do not claim the page is finished.',
+    '2) Continue the same @@@FILE to fill real copy + interactions into those sections — finish every tag and brace.',
     '3) Emit @@@FILE src/App.css with real styles (not empty).',
     'Do NOT linger on index.html, main, package.json, or index.css during craft.',
   ].join('\n');

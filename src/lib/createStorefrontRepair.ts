@@ -7,7 +7,7 @@ import {
   scoreStorefrontContract,
   type StorefrontProduct,
 } from '@/lib/createLayoutContract';
-import { liquorCatalog, genericCatalog } from '@/lib/createStorefrontFloor';
+import { catalogForStorefrontBrief } from '@/lib/createStorefrontFloor';
 
 export type StorefrontPlan = {
   genre: 'storefront';
@@ -67,8 +67,7 @@ export const PRODUCT_TYPES = ['All', ...Array.from(new Set(PRODUCTS.map((p) => p
 }
 
 function catalogForBrief(title: string, brief: string): StorefrontProduct[] {
-  const liquor = /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch|wine)\b/i.test(brief);
-  return liquor ? liquorCatalog() : genericCatalog(title);
+  return catalogForStorefrontBrief(title, brief);
 }
 
 function priceCount(blob: string): number {
@@ -220,38 +219,69 @@ export function repairStorefrontToContract(
   }
 
   if (!/\buseState\b/.test(app) || !/\buseMemo\b/.test(app)) {
-    if (/from\s+['"]react['"]/.test(app)) {
+    const needState = !/\buseState\b/.test(app);
+    const needMemo = !/\buseMemo\b/.test(app);
+    let hooksPatched = false;
+    // import React, { useState } from 'react'
+    if (/import\s+React\s*,\s*\{[^}]*\}\s*from\s*['"]react['"]/.test(app)) {
+      app = app.replace(/import\s+React\s*,\s*\{([^}]*)\}\s*from\s*['"]react['"]/, (_m, inner) => {
+        const parts = String(inner).split(',').map((s) => s.trim()).filter(Boolean);
+        if (needState && !parts.includes('useState')) parts.push('useState');
+        if (needMemo && !parts.includes('useMemo')) parts.push('useMemo');
+        return `import React, { ${parts.join(', ')} } from 'react'`;
+      });
+      hooksPatched = true;
+    } else if (/import\s*\{([^}]*)\}\s*from\s*['"]react['"]/.test(app)) {
       app = app.replace(/import\s*\{([^}]*)\}\s*from\s*['"]react['"]/, (_m, inner) => {
         const parts = String(inner).split(',').map((s) => s.trim()).filter(Boolean);
-        if (!parts.includes('useState')) parts.push('useState');
-        if (!parts.includes('useMemo')) parts.push('useMemo');
+        if (needState && !parts.includes('useState')) parts.push('useState');
+        if (needMemo && !parts.includes('useMemo')) parts.push('useMemo');
         return `import { ${parts.join(', ')} } from 'react'`;
       });
+      hooksPatched = true;
+    } else if (/from\s+['"]react['"]/.test(app)) {
+      app = `import { useMemo, useState } from 'react';\n${app}`;
+      hooksPatched = true;
     } else {
       app = `import { useMemo, useState } from 'react';\n${app}`;
+      hooksPatched = true;
     }
-    actions.push('import-hooks');
+    if (hooksPatched) actions.push('import-hooks');
   }
 
+  // Broken island: JSX references filter/cart but state block never landed (common with `const App = () =>`).
+  // Collapse duplicates first so re-runs don't stack islands → ReferenceError → blank Live.
+  {
+    const collapsed = collapseDuplicateStorefrontIslands(app);
+    if (collapsed !== app) {
+      app = collapsed;
+      actions.push('dedupe-storefront-island');
+    }
+  }
+
+  const hasIslandJsx = /data-nova=["']storefront-island["']/.test(app);
+  const hasIslandState = /NOVA_STOREFRONT_ISLAND/.test(app);
   const hasCart = /\b(?:setCart|addToCart)\b/i.test(app) && /Add to cart/i.test(app);
   const hasQty = /\bsetQty\b|\bqty\b/i.test(app);
   const hasFilters = /\bsetFilter\b|\bPRODUCT_TYPES\b/.test(app);
   const hasCheckout = /\b(?:Purchase|checkout|Order placed|placeOrder)\b/i.test(app);
   const hasGrid = /product-grid|product-card/i.test(`${app}\n${css}`);
+  const needsIsland = !hasCart || !hasQty || !hasFilters || !hasCheckout || !hasGrid;
+  // Broken island: JSX present without state (arrow App missed inject) — always heal state.
+  const brokenIsland = hasIslandJsx && !hasIslandState;
 
-  if (!hasCart || !hasQty || !hasFilters || !hasCheckout || !hasGrid) {
+  if (needsIsland || brokenIsland) {
     const island = storefrontCommerceIsland();
-    if (!/NOVA_STOREFRONT_ISLAND/.test(app)) {
-      if (/export\s+default\s+function\s+App\s*\([^)]*\)\s*\{/.test(app)) {
-        app = app.replace(
-          /(export\s+default\s+function\s+App\s*\([^)]*\)\s*\{)/,
-          `$1\n  ${island.state}`,
-        );
-      } else if (/function\s+App\s*\([^)]*\)\s*\{/.test(app)) {
-        app = app.replace(/(function\s+App\s*\([^)]*\)\s*\{)/, `$1\n  ${island.state}`);
+    if (!hasIslandState) {
+      const withState = injectAppComponentState(app, island.state);
+      if (withState) {
+        app = withState;
+        actions.push('inject-commerce-state');
       }
-      // Always inject INSIDE the return root — never after </div>) or as a sibling
-      // (adjacent JSX outside the root is a Vite compile crash → blank Live screen).
+    }
+    // Only inject JSX once. Re-injecting on every evidence pass stacked 4 islands on Mistveil
+    // while state never attached to `const App = () =>` — blank Live ReferenceError.
+    if (needsIsland && !hasIslandJsx) {
       const injected = injectJsxInsideReturnRoot(app, island.jsx);
       if (injected) {
         app = injected;
@@ -290,6 +320,51 @@ export function repairStorefrontToContract(
   };
 }
 
+
+/**
+ * Inject commerce state at the top of the App component body.
+ * Must cover arrow/const forms — craft usually emits `const App = () => {`, not `function App()`.
+ */
+export function injectAppComponentState(app: string, state: string): string | null {
+  const src = String(app || '');
+  const block = String(state || '').trim();
+  if (!src || !block) return null;
+  const patterns: RegExp[] = [
+    /(export\s+default\s+function\s+App\s*\([^)]*\)\s*\{)/,
+    /(function\s+App\s*\([^)]*\)\s*\{)/,
+    // `const App: React.FC = () => {` / `const App = (props: Props) => {`
+    /(const\s+App\s*(?::\s*[^=]+)?\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{)/,
+    /(const\s+App\s*(?::\s*[^=]+)?\s*=\s*(?:async\s*)?function\s*(?:App)?\s*\([^)]*\)\s*\{)/,
+    /(export\s+default\s+(?:async\s*)?\([^)]*\)\s*=>\s*\{)/,
+  ];
+  for (const re of patterns) {
+    if (re.test(src)) {
+      const next = src.replace(re, `$1\n  ${block}`);
+      if (next !== src) return next;
+    }
+  }
+  return null;
+}
+
+/**
+ * Keep a single storefront island + cart drawer. Evidence retries used to prepend
+ * another island every pass when state injection missed arrow components.
+ */
+export function collapseDuplicateStorefrontIslands(app: string): string {
+  const src = String(app || '');
+  if ((src.match(/data-nova=["']storefront-island["']/g) || []).length <= 1) return src;
+  // Remove every island section + immediately following cart-drawer block, then we rely on
+  // a later inject to add one clean copy if needed — but prefer keeping the first.
+  let kept = false;
+  return src.replace(
+    /\s*<section\b[^>]*data-nova=["']storefront-island["'][\s\S]*?<\/section>(?:\s*\{open\s*\?[\s\S]*?\}\s*:\s*null\})?/gi,
+    (chunk) => {
+      if (kept) return '';
+      kept = true;
+      return chunk;
+    },
+  );
+}
 
 /**
  * Insert JSX before the return-root's closing tag so we never create adjacent

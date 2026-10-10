@@ -18,9 +18,19 @@ import {
   type LayoutContract,
   type ProductSpec,
 } from '@/lib/createLayoutContract';
-import { lintOriginalCreateQuality } from '@/lib/createDesignSystem';
+import { ensureDesignedHeroVisual, lintOriginalCreateQuality } from '@/lib/createDesignSystem';
 import { inferCreateCompositionFamily } from '@/lib/createProductPlan';
 import { buildStorefrontCommerceFloor } from '@/lib/createStorefrontFloor';
+import {
+  thinBriefWantsDepth,
+  thinBlocksLivePreview,
+  thinLiveVisualDeficits,
+  thinQualityRubricHints,
+  thinWantsCompositionalShell,
+  appLooksLikeCompositionalShell,
+} from '@/lib/createThinPath';
+import { CREATE_QUALITY_RUBRIC_PREFIX } from '@/lib/createQualityRubric';
+import { brandLogoSvgFor, logoIconifyFor } from '@/lib/brandAssets';
 
 const PROSE_MARKERS = [
   /the updated file should/i,
@@ -134,8 +144,28 @@ export function countUnclosedCssBlocks(css: string): number {
  * Free models invent `src={logo}` / `src={heroImage}` without declaring them → ReferenceError blank Live.
  * Rewrite bare identifiers to on-disk hero paths (or a safe empty string when none exist).
  */
+/** Inject `const COVER_HREFS = […]` when App uses it without a declaration (blank Live / ReferenceError). */
+export function healUndeclaredCoverHrefs(app: string, heroes: string[] = []): string {
+  let s = String(app || '');
+  if (!s || !/\bCOVER_HREFS\b/.test(s)) return s;
+  if (/\b(?:const|let|var)\s+COVER_HREFS\b/.test(s)) return s;
+  const list = heroes.length
+    ? heroes
+    : ['/logo.svg'];
+  const decl = `const COVER_HREFS = ${JSON.stringify(list)};\n`;
+  if (/^import\s.+$/m.test(s)) {
+    return s.replace(/(^import\s.+\n)+/m, (block) => `${block}${decl}`);
+  }
+  if (/import\s+['"]\.\/App\.css['"];?\s*/i.test(s)) {
+    return s.replace(/(import\s+['"]\.\/App\.css['"];?\s*)/i, `$1\n${decl}`);
+  }
+  return `${decl}${s}`;
+}
+
 export function healUndefinedImgSrcBindings(app: string, heroes: string[] = []): string {
   let s = String(app || '');
+  // Always declare COVER_HREFS before other src heals — usage without const blanks Live.
+  s = healUndeclaredCoverHrefs(s, heroes);
   if (!s || !/\bsrc=\{[A-Za-z_$]/.test(s)) return s;
   const declared = new Set<string>();
   for (const m of s.matchAll(/\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)) {
@@ -408,7 +438,8 @@ export function stripModelProseFromSource(path: string, content: string): string
               tail.trim()
               && (
                 isTrailingAssistantProse(tail)
-                || /^(?:\s*)(?:This |The |Here |Note |Please |You |I |To |Added |Done)/m.test(tail)
+                || /^(?:\s*)(?:This |The |Here |Note |Please |You |I |To |Added |Done|#{1,6}\s|How to fix)/m.test(tail)
+                || /How to fix it|###\s|Verification:|Ensure that the path/i.test(tail)
                 || looksLikeModelProseLeak(tail)
               )
             ) {
@@ -2018,6 +2049,9 @@ export function isPreviewReady(
       reasons.push(`App imports missing modules (${miss.slice(0, 3).join(', ')}) — would blank Live`);
     }
   }
+  if (/\bCOVER_HREFS\b/.test(app) && !/\b(?:const|let|var)\s+COVER_HREFS\b/.test(app)) {
+    reasons.push('App uses COVER_HREFS without declaring it (would blank Live)');
+  }
   if (/\bsrc=\{([A-Za-z_$][\w$]*)\}/.test(app)) {
     const undeclared = [...app.matchAll(/\bsrc=\{([A-Za-z_$][\w$]*)\}/g)]
       .map((m) => m[1])
@@ -2374,6 +2408,14 @@ export function ensureProductBrandInApp(
 ): Record<string, string> {
   const name = String(productName || '').trim();
   if (!name || name.length < 2) return files;
+  // Section shells already carry the brand in NavHeader — don't stamp App.jsx.
+  const appProbe = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  if (
+    appLooksLikeCompositionalShell(appProbe)
+    || Object.keys(files).some((p) => /^src\/sections\/[^/]+\.jsx$/i.test(p.replace(/\\/g, '/')))
+  ) {
+    return files;
+  }
   const safe = name.replace(/[`$]/g, '');
   const token = name.split(/\s+/).find((w) => w.length >= 3) || name;
   const tokenRe = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -2494,6 +2536,8 @@ button:hover, .cta-button:hover { filter: brightness(1.06); }
 export function healBrokenJsxOpenTags(source: string): string {
   let s = String(source || '');
   if (!s || s.length < 40) return s;
+  // Craft typo: `onClick={() => handleClick('6')}}">6` — extra } " before label.
+  s = s.replace(/(\{\(\)\s*=>\s*[^}]+\})\}\s*["']\s*>/g, '$1>');
   // Craft typo: `required / value={…}` breaks Vite transform and freezes Live evidence.
   s = s.replace(/\brequired\s*\/\s*(value|onChange|onClick|placeholder|type|className)=/gi, 'required $1=');
   // Absolute public paths — `./public/…` or `/public/…` 404 in Vite Live (root is already public/).
@@ -2598,6 +2642,17 @@ export function healProductMarketingStructure(
   const next = { ...files };
   const appKey = next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : '');
   if (!appKey || !next[appKey]) return { files: next, changed: false, actions };
+  // Compositional shells own landmarks in src/sections — never inject COVER_HREFS / full-bleed
+  // hero into App.jsx (that pushes nav below a broken missing-image stage).
+  const keysNorm = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
+  const hasSections = keysNorm.some((p) => /^src\/sections\/[^/]+\.jsx$/i.test(p));
+  if (
+    thinWantsCompositionalShell(brief)
+    || hasSections
+    || appLooksLikeCompositionalShell(String(next[appKey] || ''))
+  ) {
+    return { files: next, changed: false, actions };
+  }
   let app = String(next[appKey] || '');
   let css = String(next['src/App.css'] || '');
   const title = String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48) || 'Brand';
@@ -2763,6 +2818,16 @@ export function healNearReadyCreateUi(
     }
     if (cssNow !== beforeAtmos) next['src/App.css'] = cssNow;
   }
+  // Marketing / brand: designed hero visual so hero preflight passes without Pollinations or /heroes files.
+  if (briefLooksLikeMarketingLanding(brief) && appKey && next[appKey]) {
+    try {
+      const hv = ensureDesignedHeroVisual(next, { brief, productName });
+      if (hv.changed) {
+        next = { ...hv.files };
+        actions.push('designed-hero-visual');
+      }
+    } catch { /* optional */ }
+  }
   if (appKey && next[appKey] && next['src/App.css'] && !/import\s+['"]\.\/App\.css['"]/.test(next[appKey])) {
     next[appKey] = `import './App.css';\n${next[appKey]}`;
     actions.push('css-import');
@@ -2849,9 +2914,17 @@ export function healNearReadyCreateUi(
   }
   // Marketing thin shells: strip phone-column / wire heroes / footer while keeping model App when possible.
   // NEVER run on tool-panel / app-chrome / game — that injected Tipjar’s broken COVER hero.
+  // NEVER run on compositional section shells — inject-hero poisons the App shell.
   const family = inferCreateCompositionFamily(brief, productName);
   const allowMarketingStruct = family === 'marketing-bands' || family === 'catalog-store';
-  if (allowMarketingStruct && (marketing || isThinProductMarketingShell(next, brief))) {
+  const compositionalNow = thinWantsCompositionalShell(brief)
+    || Object.keys(next).some((p) => /^src\/sections\/[^/]+\.jsx$/i.test(p.replace(/\\/g, '/')))
+    || appLooksLikeCompositionalShell(String(next['src/App.jsx'] || next['src/App.tsx'] || ''));
+  if (
+    allowMarketingStruct
+    && !compositionalNow
+    && (marketing || isThinProductMarketingShell(next, brief))
+  ) {
     const struct = healProductMarketingStructure(next, productName, brief);
     if (struct.changed) {
       next = struct.files;
@@ -2985,17 +3058,27 @@ export function previewReadyForBrief(
       });
       for (const r of orig.reasons) reasons.push(r);
     }
-    return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+    // Live/Ready uses visual floor (seed-reachable) — invent 9k floor is soft.
+    if (thinBriefWantsDepth(rawBrief) && thinBlocksLivePreview(files, rawBrief)) {
+      for (const d of thinLiveVisualDeficits(files, rawBrief).slice(0, 6)) {
+        reasons.push(`thin visual floor open: ${d}`);
+      }
+    }
+    for (const r of thinQualityRubricHints(files, rawBrief)) {
+      reasons.push(r);
+    }
+    const hard = reasons.filter((r) => !r.startsWith(CREATE_QUALITY_RUBRIC_PREFIX));
+    return { ok: hard.length === 0, reasons: [...new Set(reasons)] };
   }
   // Side-by-side / everyday creates: base Ready only — no layout/marketing score walls.
   const simpleLadderAsk = briefWantsUtilityFloorKind(brief, 'todo')
     || briefWantsUtilityFloorKind(brief, 'tip')
     || briefWantsUtilityFloorKind(brief, 'coffee')
     || briefWantsUtilityFloorKind(brief, 'kiln')
-    || /\b(?:tasknest|checklist|counter|timer|notepad|simple\s+coffee|coffee\s+shop\s+page|kilnbook|kiln\s*book|pottery|firing\s+journal)\b/i.test(brief)
+    || /\b(?:tasknest|checklist|counter|timer|notepad|calculator|simple\s+coffee|coffee\s+shop\s+page|kilnbook|kiln\s*book|pottery|firing\s+journal)\b/i.test(brief)
     || briefLooksLikeFiringJournal(brief)
     || (brief.length < 280 && /\b(?:simple|basic|small|quick)\b/i.test(brief)
-      && /\b(?:coffee|todo|tip|page|app|site|kiln|firing)\b/i.test(brief));
+      && /\b(?:coffee|todo|tip|page|app|site|kiln|firing|calculator)\b/i.test(brief));
   if (simpleLadderAsk) {
     return isPreviewReady(files, {
       ...opts,
@@ -3003,7 +3086,7 @@ export function previewReadyForBrief(
       requireInteractive: briefWantsUtilityFloorKind(brief, 'todo')
         || briefWantsUtilityFloorKind(brief, 'tip')
         || briefWantsUtilityFloorKind(brief, 'kiln')
-        || /\b(?:task|counter|timer|kiln|firing|pottery|clay|glaze)\b/i.test(brief)
+        || /\b(?:task|counter|timer|kiln|firing|pottery|clay|glaze|calculator)\b/i.test(brief)
         || briefLooksLikeFiringJournal(brief),
     });
   }
@@ -3012,7 +3095,7 @@ export function previewReadyForBrief(
   const utilityAsk = briefWantsUtilityFloorKind(brief, 'todo')
     || briefWantsUtilityFloorKind(brief, 'tip')
     || briefWantsUtilityFloorKind(brief, 'kiln')
-    || /\b(?:checklist|counter|timer|notepad|kilnbook|pottery|firing)\b/i.test(brief)
+    || /\b(?:checklist|counter|timer|notepad|kilnbook|pottery|firing|calculator)\b/i.test(brief)
     || briefLooksLikeFiringJournal(brief);
   if (utilityAsk) {
     return isPreviewReady(files, { ...opts, brief: rawBrief, requireInteractive: true });
@@ -3274,6 +3357,68 @@ export default function App() {
   return { files: next, changed };
 }
 
+/** Brief-aware product hero fallback — glow rim + product silhouette (not luggage). */
+export function productHeroDataUrl(brief: string, brand: string): string {
+  const label = String(brand || 'Brand').replace(/[<>&'"]/g, '').slice(0, 28) || 'Brand';
+  const ctx = String(brief || '').toLowerCase();
+  const tea = /\b(?:matcha|tea|steep|tin|canister|leaf|brew)\b/i.test(ctx);
+  const coffee = /\b(?:coffee|espresso|roast|cafe)\b/i.test(ctx);
+  const bottle = /\b(?:liquor|spirits?|whiskey|wine|bottle)\b/i.test(ctx);
+  const lotion = /\b(?:lotion|skincare|cream|serum|beauty)\b/i.test(ctx);
+  const accent = tea ? '#7d9b78' : coffee ? '#c9853a' : bottle ? '#c4a45a' : lotion ? '#d4a5a5' : '#6b8cae';
+  let product = '';
+  if (tea) {
+    product = [
+      '<ellipse cx="480" cy="520" rx="150" ry="28" fill="#2a322c"/>',
+      '<rect x="330" y="320" width="300" height="220" rx="28" fill="#e8eef4"/>',
+      '<rect x="355" y="290" width="250" height="48" rx="14" fill="#cfd8e0"/>',
+      `<text x="480" y="440" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="28" font-weight="700">${label.slice(0, 14)}</text>`,
+      '<text x="480" y="480" text-anchor="middle" fill="#4a5560" font-family="Helvetica Neue,sans-serif" font-size="18">tin · ceremonial</text>',
+    ].join('');
+  } else if (coffee) {
+    product = [
+      '<ellipse cx="480" cy="620" rx="160" ry="30" fill="#2a2218"/>',
+      '<path d="M340 300 h240 a40 40 0 0 1 40 40 v220 a40 40 0 0 1 -40 40 h-240 a40 40 0 0 1 -40 -40 v-220 a40 40 0 0 1 40 -40 z" fill="#e8eef4"/>',
+      '<path d="M620 380 h70 a50 50 0 0 1 0 140 h-70" fill="none" stroke="#e8eef4" stroke-width="28"/>',
+      `<text x="460" y="470" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="26">${label.slice(0, 12)}</text>`,
+    ].join('');
+  } else if (bottle) {
+    product = [
+      '<rect x="420" y="240" width="120" height="40" rx="8" fill="#cfd8e0"/>',
+      '<path d="M400 280 h160 l30 360 h-220 z" fill="#e8eef4"/>',
+      `<text x="480" y="480" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="22">${label.slice(0, 10)}</text>`,
+    ].join('');
+  } else if (lotion) {
+    product = [
+      '<rect x="400" y="260" width="160" height="360" rx="70" fill="#e8eef4"/>',
+      '<rect x="430" y="230" width="100" height="50" rx="12" fill="#cfd8e0"/>',
+      `<text x="480" y="460" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="24">${label.slice(0, 12)}</text>`,
+    ].join('');
+  } else {
+    product = [
+      '<rect x="360" y="300" width="240" height="300" rx="24" fill="#e8eef4"/>',
+      `<text x="480" y="460" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="28">${label.slice(0, 14)}</text>`,
+    ].join('');
+  }
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1100" viewBox="0 0 960 1100">',
+    '<defs>',
+    '<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0%" stop-color="#0f1419"/><stop offset="55%" stop-color="#1a222c"/><stop offset="100%" stop-color="#122033"/>',
+    '</linearGradient>',
+    '<radialGradient id="glow" cx="50%" cy="42%" r="45%">',
+    `<stop offset="0%" stop-color="${accent}" stop-opacity="0.45"/><stop offset="100%" stop-color="#0f1419" stop-opacity="0"/>`,
+    '</radialGradient>',
+    '</defs>',
+    '<rect width="960" height="1100" fill="url(#bg)"/>',
+    '<rect width="960" height="1100" fill="url(#glow)"/>',
+    product,
+    `<text x="480" y="980" text-anchor="middle" fill="#e8eef4" font-family="Helvetica Neue,sans-serif" font-size="34" font-weight="650">${label}</text>`,
+    '</svg>',
+  ].join('');
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+
 /**
  * After Brand Assets land in public/, wire them into App + CSS and strip the
  * common failure mode where /logo.svg is stretched as a full-bleed background
@@ -3284,7 +3429,18 @@ export function wireCreatePublicAssets(
   productName = 'App',
   brief = '',
 ): { files: Record<string, string>; changed: string[] } {
-  const assembled = assembleCreateAppFromParts(files, productName);
+  const briefText = String(brief || '');
+  const keysEarly = Object.keys(files).map((p) => p.replace(/\\/g, '/'));
+  const hasSectionFiles = keysEarly.some((p) => /^src\/sections\/[^/]+\.jsx$/i.test(p));
+  const appEarly = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  // Compositional depth owns App as a <Section /> shell — do not flatten via
+  // assembleCreateAppFromParts or inject sticky-nav (that re-poisons landmarks).
+  const compositionalShell = thinWantsCompositionalShell(briefText)
+    || hasSectionFiles
+    || appLooksLikeCompositionalShell(appEarly);
+  const assembled = compositionalShell
+    ? { files: { ...files }, changed: [] as string[] }
+    : assembleCreateAppFromParts(files, productName);
   const importHeal = healMissingLocalImports(assembled.files, productName);
   const next = { ...importHeal.files };
   const changed: string[] = [...assembled.changed];
@@ -3295,7 +3451,13 @@ export function wireCreatePublicAssets(
     if (healedAppKey) changed.push(healedAppKey);
   }
   const keys = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
-  const hasLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
+  const logoKey = keys.find((p) => /(^|\/)public\/logo\.svg$/i.test(p)) || 'public/logo.svg';
+  // Presence means a REAL SVG body — prose leaks ("No changes needed.") must not count.
+  const logoLooksReal = (body: string) => {
+    const t = String(body || '').trim();
+    return t.length >= 40 && /<svg[\s>]/i.test(t);
+  };
+  let hasLogo = logoLooksReal(String(next[logoKey] || ''));
   const hasSearch = keys.some((p) => /(^|\/)public\/icons\/search\.svg$/i.test(p));
   const hasBag = keys.some((p) => /(^|\/)public\/icons\/bag\.svg$/i.test(p));
   const family = inferCreateCompositionFamily(brief || productName, productName);
@@ -3310,6 +3472,43 @@ export function wireCreatePublicAssets(
     ? 'src/App.tsx'
     : (next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : ''));
   const cssKey = next['src/App.css'] ? 'src/App.css' : '';
+
+  // Every marketing/brand create ships a real mark: synthesize public/logo.svg offline
+  // from logoIconifyFor(brief) whenever it is missing/empty. Network materialize can miss
+  // (no iconify, bridge write refused) — this is the guarantee, and it never uses a hero.
+  const wantsBrandLogo = family === 'marketing-bands'
+    || family === 'catalog-store'
+    || briefLooksLikeMarketingLanding(String(brief || ''))
+    || thinBriefWantsDepth(String(brief || ''));
+  // Rewrite sparkles last-resort marks when the brief now resolves to a family icon
+  // (gin→wine, coffee→coffee). Otherwise prior Live runs keep the identical star.
+  const existingLogo = hasLogo ? String(next[logoKey] || '') : '';
+  const logoIsSparkles = /M9\.937 15\.5/i.test(existingLogo);
+  const wantFamily = logoIconifyFor(String(productName || ''), String(brief || ''));
+  const logoMatchesFamily = wantFamily === 'lucide:wine' ? /M8 22h8/i.test(existingLogo)
+    : wantFamily === 'lucide:coffee' ? /M10 2v2|M16 8a1 1 0 0 1 1 1v8/i.test(existingLogo)
+      : wantFamily === 'lucide:leaf' ? /M11 20A7 7 0 0 1 9\.8/i.test(existingLogo) || /leaf/i.test(existingLogo)
+        : wantFamily === 'lucide:utensils' ? /M3 2v7c0 1\.1/i.test(existingLogo)
+          : !logoIsSparkles;
+  // Always stomp sparkles (and mismatched family marks) for F&B / brand creates.
+  const shouldWriteLogo = wantsBrandLogo && (
+    !hasLogo
+    || (logoIsSparkles && wantFamily !== 'lucide:sparkles')
+    || (wantFamily !== 'lucide:sparkles' && !logoMatchesFamily)
+  );
+  if (shouldWriteLogo) {
+    const mark = brandLogoSvgFor({
+      productName,
+      brief,
+      css: cssKey ? String(next[cssKey] || '') : '',
+    });
+    if (mark) {
+      next[logoKey] = mark;
+      changed.push(logoKey);
+      if (!keys.includes(logoKey)) keys.push(logoKey);
+      hasLogo = true;
+    }
+  }
 
   if (cssKey) {
     let css = String(next[cssKey] || '');
@@ -3363,12 +3562,32 @@ export function wireCreatePublicAssets(
     const before = app;
     app = ensureReactImportForNamespace(app);
     app = stripEntrypointBleedFromApp(app);
+    // Never let a hero image stand in as the brand mark: nav/logo <img> points at /logo.svg.
+    if (hasLogo) {
+      app = app.replace(/<img\b[^>]*>/gi, (tag) => {
+        if (/\/logo\.svg/i.test(tag)) return tag;
+        if (!/\/heroes\/|\/hero\.jpg/i.test(tag)) return tag;
+        const brandClass = /className=(["'])[^"']*(?:\blogo\b|\bbrand\b)[^"']*\1/i.test(tag);
+        if (!brandClass) return tag;
+        return tag.replace(/src=(["'])[^"']*\1/i, 'src=$1/logo.svg$1');
+      });
+      // Models also drop the mark in <nav> with no class at all — first <img> wins.
+      app = app.replace(/<nav\b[^>]*>[\s\S]{0,900}?<\/nav>/gi, (block) => {
+        if (/\/logo\.svg/i.test(block) || !/\/heroes\/|\/hero\.jpg/i.test(block)) return block;
+        return block.replace(
+          /<img\b[^>]*src=(["'])[^"']*\1[^>]*>/i,
+          (m) => m.replace(/src=(["'])[^"']*\1/i, 'src=$1/logo.svg$1'),
+        );
+      });
+    }
     app = healUndefinedImgSrcBindings(app, heroes);
+    app = healUndeclaredCoverHrefs(app, heroes);
     app = healUndeclaredItemsList(app, heroes);
     app = healHiddenProductBands(app);
     // Prefer on-disk heroes over empty/broken/data-uri tiles for browse cards.
-    if (heroes.length) {
-      if (!/\bCOVER_HREFS\b/.test(app)) {
+    // Compositional shells must not get COVER_HREFS stuffed into App.jsx.
+    if (heroes.length && !compositionalShell) {
+      if (!/\b(?:const|let|var)\s+COVER_HREFS\b/.test(app)) {
         const decl = `const COVER_HREFS = ${JSON.stringify(heroes)};\n`;
         if (/^import\s.+$/m.test(app)) {
           app = app.replace(/(^import\s.+\n)+/m, (block) => `${block}${decl}`);
@@ -3442,6 +3661,7 @@ export function wireCreatePublicAssets(
 
     // Inject sticky-nav icons from public/ when files exist but UI never references them.
     // Prefer inline nav icons over absolute icon-rails (marketing layouts forbid rails).
+    // Compositional shells: logo lives in NavHeaderSection — never inject sticky-nav into App.
     const iconFiles = keys
       .filter((p) => /(?:^|\/)public\/icons\/([a-z0-9_-]+)\.svg$/i.test(p))
       .map((p) => {
@@ -3450,8 +3670,34 @@ export function wireCreatePublicAssets(
       })
       .filter(Boolean);
     const unusedIcons = iconFiles.filter((id) => !new RegExp(`/icons/${id}\\.svg`, 'i').test(app));
-    const needsLogoWire = hasLogo && !/\/logo\.svg/i.test(app);
-    const needsIconWire = unusedIcons.length > 0;
+    const navSectionKey = keys.find((p) => /^src\/sections\/NavHeaderSection\.jsx$/i.test(p));
+    const logoInNavSection = navSectionKey
+      ? /\/logo\.svg/i.test(String(next[navSectionKey] || ''))
+      : false;
+    // Compositional + NavHeader: wire there. Compositional without a nav file yet: still
+    // inject into App so /logo.svg is never orphaned (smoke + thin pre-section trees).
+    const needsLogoWire = hasLogo && !/\/logo\.svg/i.test(app) && !logoInNavSection
+      && (!compositionalShell || !navSectionKey);
+    const needsIconWire = !compositionalShell && unusedIcons.length > 0;
+    if (compositionalShell && hasLogo && navSectionKey && !logoInNavSection) {
+      // Prefer wiring /logo.svg into the nav section file, not App.jsx.
+      let nav = String(next[navSectionKey] || '');
+      if (/<nav\b/i.test(nav) || /nav-brand|nav-header|role=["']banner["']/i.test(nav)) {
+        if (/<nav\b/i.test(nav)) {
+          nav = nav.replace(
+            /(<nav\b[^>]*>)/i,
+            `$1\n      <img className="nav-logo" src="/logo.svg" alt="${String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48)}" width="36" height="36" />`,
+          );
+        } else if (/nav-brand/i.test(nav)) {
+          nav = nav.replace(
+            /(className=["'][^"']*\bnav-brand\b[^"']*["'][^>]*>)/i,
+            `$1\n        <img className="nav-logo" src="/logo.svg" alt="${String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48)}" width="36" height="36" />`,
+          );
+        }
+        next[navSectionKey] = nav;
+        if (!changed.includes(navSectionKey)) changed.push(navSectionKey);
+      }
+    }
     if (needsLogoWire || needsIconWire) {
       const prefer = ['search', 'bag', 'user', 'settings', 'mail', 'grid', 'clock', 'more'];
       const ordered = [
@@ -3467,13 +3713,19 @@ export function wireCreatePublicAssets(
       // Strip absolute icon-rails — they hide the product and leave icons unused in the real nav.
       app = app.replace(/<div className=["'][^"']*\bicon-rail\b[^"']*["'][^>]*>[\s\S]*?<\/div>\s*/gi, '');
       if (/className=["'][^"']*\bsticky-nav\b[^"']*["']/i.test(app)) {
-        if (needsLogoWire && /nav-left|brand-wordmark/i.test(app)) {
+        // Inject /logo.svg into any sticky-nav — do not require nav-left / brand-wordmark class names.
+        if (needsLogoWire) {
           if (/className=["'][^"']*\bnav-left\b[^"']*["'][^>]*>/i.test(app)) {
             app = app.replace(/(className=["'][^"']*\bnav-left\b[^"']*["'][^>]*>)/i, `$1${logo}`);
           } else if (/className=["'][^"']*\bbrand-wordmark\b[^"']*["'][^>]*>/i.test(app)) {
             app = app.replace(
               /(<[^>]*className=["'][^"']*\bbrand-wordmark\b[^"']*["'][^>]*>)/i,
               `${logo}$1`,
+            );
+          } else {
+            app = app.replace(
+              /(className=["'][^"']*\bsticky-nav\b[^"']*["'][^>]*>)/i,
+              `$1${logo}`,
             );
           }
         }
@@ -3512,36 +3764,32 @@ export function wireCreatePublicAssets(
       }
     }
 
+    // Final brand law: hasLogo ⇒ UI must reference /logo.svg.
+    // Compositional: already wired into NavHeaderSection above — do not inject into App shell.
+    if (!compositionalShell && hasLogo && !/\/logo\.svg/i.test(app)) {
+      const logo = `<img className="nav-logo" src="/logo.svg" alt="${brand}" width="36" height="36" />`;
+      if (/className=["'][^"']*\bsticky-nav\b[^"']*["']/i.test(app)) {
+        app = app.replace(
+          /(className=["'][^"']*\bsticky-nav\b[^"']*["'][^>]*>)/i,
+          `$1${logo}`,
+        );
+      } else if (/className=["'][^"']*\bapp\b[^"']*["'][^>]*>/i.test(app)) {
+        app = app.replace(
+          /(className=["'][^"']*\bapp\b[^"']*["'][^>]*>)/i,
+          `$1\n      <header className="sticky-nav" role="banner"><div className="nav-left">${logo}</div></header>`,
+        );
+      } else {
+        app = `${logo}\n${app}`;
+      }
+    }
+
     // Bare /hero.jpg, /logo.svg, /icons/*.svg, or missing /heroes/*.jpg → offline-safe fallbacks.
-    const hasPublicLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
+    const hasPublicLogo = hasLogo;
     const publicHeroSet = new Set(
       keys.filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
         .map((p) => '/' + p.replace(/^public\//i, '').toLowerCase()),
     );
-    const svgHero = 'data:image/svg+xml,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1100" viewBox="0 0 960 1100">`
-      + `<defs>`
-      + `<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">`
-      + `<stop offset="0%" stop-color="#0f1419"/><stop offset="45%" stop-color="#1a222c"/><stop offset="100%" stop-color="#122033"/>`
-      + `</linearGradient>`
-      + `<linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">`
-      + `<stop offset="0%" stop-color="#2a2e2c"/><stop offset="55%" stop-color="#5a625c"/><stop offset="100%" stop-color="#1a1f1c"/>`
-      + `</linearGradient>`
-      + `<linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">`
-      + `<stop offset="0%" stop-color="#c4a45a"/><stop offset="100%" stop-color="#8a6b2f"/>`
-      + `</linearGradient>`
-      + `</defs>`
-      + `<rect width="960" height="1100" fill="url(#bg)"/>`
-      + `<polygon points="0,0 280,0 0,320" fill="#c6e6c0" opacity="0.55"/>`
-      + `<polygon points="960,0 680,0 960,360" fill="#ffd478" opacity="0.28"/>`
-      + `<path d="M250 420 C250 260 710 260 710 420" fill="none" stroke="url(#metal)" stroke-width="42" stroke-linecap="round"/>`
-      + `<rect x="198" y="400" width="110" height="220" rx="48" fill="url(#metal)"/>`
-      + `<rect x="652" y="400" width="110" height="220" rx="48" fill="url(#metal)"/>`
-      + `<circle cx="253" cy="510" r="34" fill="url(#gold)" opacity="0.9"/>`
-      + `<circle cx="707" cy="510" r="34" fill="url(#gold)" opacity="0.9"/>`
-      + `<text x="480" y="980" text-anchor="middle" fill="#1a1f1c" font-family="Georgia,serif" font-size="40" letter-spacing="4">${brand.replace(/[<>&]/g, '').toUpperCase().slice(0, 18)}</text>`
-      + `</svg>`,
-    );
+    const svgHero = productHeroDataUrl(String(brief || ''), brand);
     if (!publicHeroSet.size) {
       app = app.replace(/src=["']\/hero\.jpg["']/gi, `src="${svgHero}"`);
       app = app.replace(/src=["']\/heroes\/[^"']+["']/gi, `src="${svgHero}"`);

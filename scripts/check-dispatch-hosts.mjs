@@ -1,5 +1,6 @@
 /**
- * Dispatch hosts: delete/open/cmd without host → handled (can't do that yet), not generate.
+ * Dispatch hosts: delete/open/cmd without host → handled with a helpful next step
+ * (never a flat "I can't do that yet", never generate).
  */
 import assert from 'node:assert/strict';
 import { dispatchOwnedTurn } from '../src/lib/chatTurnHandlers/dispatch.ts';
@@ -15,7 +16,9 @@ const finishPlainReply = async (text) => { replies.push(String(text || '')); };
     // no deleteHost
   });
   assert.equal(r.status, 'handled');
-  assert.match(replies.at(-1) || '', /can.?t do that yet/i);
+  const out = replies.at(-1) || '';
+  assert.doesNotMatch(out, /can.?t do that yet/i);
+  assert.match(out, /Open folder|tell me which file/i);
 }
 
 {
@@ -26,7 +29,9 @@ const finishPlainReply = async (text) => { replies.push(String(text || '')); };
     finishPlainReply,
   });
   assert.equal(r.status, 'handled');
-  assert.match(replies.at(-1) || '', /can.?t do that yet/i);
+  const out = replies.at(-1) || '';
+  assert.doesNotMatch(out, /can.?t do that yet/i);
+  assert.match(out, /Open folder/i);
 }
 
 {
@@ -36,8 +41,14 @@ const finishPlainReply = async (text) => { replies.push(String(text || '')); };
     mode: 'code',
     finishPlainReply,
   });
-  // run_cmd may miss classify as chat — either handled can't-yet or continue/chat
+  // run_cmd may miss classify as chat — either handled next-step or continue/chat
   assert.ok(r.status === 'handled' || r.status === 'continue' || r.status === 'edit');
+}
+
+{
+  // No finishPlainReply → fall through to the caller instead of swallowing the turn.
+  const r = await dispatchOwnedTurn({ content: 'delete the file foo.txt', mode: 'general' });
+  assert.ok(r.status === 'continue' || r.status === 'handled');
 }
 
 console.log('PASS  check-dispatch-hosts');

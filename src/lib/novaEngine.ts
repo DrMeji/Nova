@@ -68,8 +68,25 @@ export async function stopEngine() {
 }
 
 export async function setEngineModel(id: string) {
-  if (window.novaDesktop?.engineSetModel) return window.novaDesktop.engineSetModel(id);
+  const want = String(id || '').trim();
+  if (!want) throw new Error('NOVA Engine model id required');
+  // Skip reload when the engine already has this model active (create phase hops).
+  try {
+    const st = await getEngineStatus();
+    if (st && String(st.activeModelId || '') === want) return st;
+  } catch { /* fall through to set */ }
+  if (window.novaDesktop?.engineSetModel) return window.novaDesktop.engineSetModel(want);
   throw new Error('NOVA Engine model switching needs the desktop app');
+}
+
+/** Currently loaded engine model id, or '' if unknown. */
+export async function engineLoadedModel(): Promise<string> {
+  try {
+    const st = await getEngineStatus();
+    return String(st?.activeModelId || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 export async function downloadEngineModel(id: string) {
@@ -204,10 +221,18 @@ export async function engineGenerate(
   };
   if (window.novaDesktop?.engineGenerate) {
     // Let Thinking… dots paint before a heavy local GGUF turn can stall the UI thread.
+    // Hidden/minimized windows never fire rAF — race a timer so generation always starts.
     await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
       requestAnimationFrame(() => {
-        window.setTimeout(resolve, 0);
+        window.setTimeout(finish, 0);
       });
+      window.setTimeout(finish, 32);
     });
     return window.novaDesktop.engineGenerate(message, modelId, kind, sampling);
   }

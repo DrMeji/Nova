@@ -6,6 +6,7 @@ import { AuthScreen } from '@/components/auth/AuthScreen';
 import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
 import { AppShell } from '@/components/AppShell';
 import { TitleBar } from '@/components/TitleBar';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Dashboard } from '@/views/Dashboard';
 import { ProjectsView } from '@/views/ProjectsView';
 import { ProjectWorkspace } from '@/views/ProjectWorkspace';
@@ -142,12 +143,19 @@ function AppRoutes() {
       {showChat && (
         <div className={chatVisible ? 'h-full min-h-0' : 'hidden'} aria-hidden={!chatVisible}>
           {/* Stable mount: Chat ↔ Image and Settings hops must not kill in-flight gens */}
-          <AIChat />
+          <ErrorBoundary boundaryId="chat" fallbackTitle="Chat pane hit an error">
+            <AIChat />
+          </ErrorBoundary>
         </div>
       )}
       {!chatVisible && (
         <div className="h-full min-h-0 flex flex-col overflow-hidden">
-          {other}
+          <ErrorBoundary
+            boundaryId={route.name === 'code' || route.name === 'project' ? 'workspace' : 'route'}
+            fallbackTitle="This view hit an error"
+          >
+            {other}
+          </ErrorBoundary>
         </div>
       )}
     </>
@@ -268,14 +276,16 @@ function App() {
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}
       <div className="h-screen min-w-0 relative overflow-hidden bg-nova-navy-950">
-        <AuthProvider>
-          <RouterProvider>
-            <TitleBar />
-            <div className="h-full overflow-hidden">
-              <AppContent />
-            </div>
-          </RouterProvider>
-        </AuthProvider>
+        <ErrorBoundary boundaryId="shell" fallbackTitle="NOVA hit an error">
+          <AuthProvider>
+            <RouterProvider>
+              <TitleBar />
+              <div className="h-full overflow-hidden">
+                <AppContent />
+              </div>
+            </RouterProvider>
+          </AuthProvider>
+        </ErrorBoundary>
       </div>
     </ThemeProvider>
   );

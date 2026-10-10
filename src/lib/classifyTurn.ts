@@ -11,6 +11,8 @@ import {
   looksLikeRequirementsAsk,
   looksLikeTalkBeforeCreateAsk,
   looksLikeGreenfieldCreateGo,
+  looksLikeGreenfieldKeepPlanning,
+  looksLikeSoftHelpBuildAsk,
   resolveGreenfieldFromThread,
 } from '@/lib/chatIdeaIntent';
 import { looksLikeHardCreateGo } from '@/lib/chatPlanMode';
@@ -36,6 +38,21 @@ import { classifyDiskIntent } from '@/lib/chatDiskIntent';
 import { looksLikeConversationalEditShorthand } from '@/lib/editAskResolve';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 import { looksLikeSimpleBuildToyChatAsk } from '@/lib/chatIntent';
+
+/**
+ * Create-vs-chat SSOT surface. Other modules must import these from here (not chatIdeaIntent /
+ * chatPlanMode directly) so one file owns “does this turn create, or is it talk-first?”.
+ */
+export {
+  looksLikeTalkBeforeCreateAsk,
+  looksLikeRequirementsAsk,
+  looksLikeSoftHelpBuildAsk,
+  looksLikeGreenfieldCreateGo,
+  resolveGreenfieldFromThread,
+  looksLikeHardCreateGo,
+  looksLikeSimpleBuildToyChatAsk,
+  wantsPlanningOnly,
+};
 
 export type TurnKind =
   | 'chat'
@@ -95,6 +112,15 @@ export function classifyTurn(
   const t0 = String(message || '').trim();
   if (!t0) return { kind: 'chat', reason: 'empty' };
 
+  // Estimation/explanation questions about building are conversation, not a create command.
+  // An explicit on-disk/ship/build-now instruction below still wins.
+  if (/\b(?:how\s+long|how\s+much\s+time|what\s+does\s+it\s+take|is\s+it\s+possible|can\s+it\s+be\s+built)\b/i.test(t0)
+    && /\b(?:build|create|make|website|site|app|project)\b/i.test(t0)
+    && !looksLikeHardCreateGo(t0)
+    && !/\b(?:on\s+disk|put\s+it\s+on\s+disk|create\s+the\s+files)\b/i.test(t0)) {
+    return { kind: 'chat', reason: 'build-feasibility-question' };
+  }
+
   // Chip / composer explicit kind wins over regex (nova-kind or legacy ark-kind).
   const explicit = (() => {
     const m = t0.match(/<!--\s*(?:nova|ark)-kind:\s*(create|edit|plan|keep_building|chat|delete|open_folder|run_cmd)\s*-->/i);
@@ -134,20 +160,23 @@ export function classifyTurn(
     }
   }
 
-  // Simple build toys (todo / timer / counter / calculator) — chat demos by default.
-  // CREATE only on a clear hard command (no “help me / can you / show me”, no “?”).
-  // Soft “help me make a click counter page” must NEVER fall through to create-verb-noun.
+  // Simple build toys (todo / timer / counter / calculator).
+  // classifyTurn owns create-vs-chat for these (chatIdeaIntent only reports soft openers):
+  //   imperative "build me a calculator"        → create (on disk, Nova Live — HTML paste in chat looks broken)
+  //   soft "(can you) help (me) build a calc…"  → chat (talk + code in the bubble; no hard-go)
   if (looksLikeSimpleBuildToyChatAsk(t)) {
-    const toyHardCreate = /\b(?:build|create|make|scaffold)\b/i.test(t)
+    const toyCreateApp = /\b(?:build|create|make|scaffold)\b/i.test(t)
+      && !looksLikeSoftHelpBuildAsk(t)
       && !/\b(?:do\s+not|don't|dont)\s+(?:create|build)\b/i.test(t)
       && !wantsPlanningOnly(t)
-      && !/\b(?:help\s+me|can\s+you|could\s+you|show\s+me|write\s+me|give\s+me|i'?d\s+like|i\s+want\s+to|what\s+if|thinking\s+about)\b/i.test(t)
+      && !/\b(?:show\s+me|write\s+me|give\s+me|how\s+(?:do|would|can)|explain|what\s+if|thinking\s+about)\b/i.test(t)
       && !/\?/.test(t)
       && (
-        /\b(?:on\s+disk|scaffold|create\s+(?:the\s+)?(?:files|project)|lets?\s+build\s+this|build\s+it\s+now|open\s+preview)\b/i.test(t)
+        // "build me a simple calculator" (no "app") still means on-disk create.
+        /\b(?:app|application|project|calculator|todo|timer|counter|checklist|on\s+disk|scaffold|open\s+preview|get\s+it\s+live)\b/i.test(t)
         || /^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
       );
-    if (toyHardCreate) {
+    if (toyCreateApp) {
       return {
         kind: 'create',
         reason: 'simple-toy-create',
@@ -363,4 +392,40 @@ export function classifyTurn(
   }
 
   return { kind: 'chat', reason: 'fallback-chat' };
+}
+
+type ClassifyTurnOpts = Parameters<typeof classifyTurn>[1];
+
+/** Raw talk-first signal (soft “help me create…” or exploratory requirements). Not a final verdict. */
+export function looksLikeTalkFirstProductAsk(message: string): boolean {
+  const t = String(message || '');
+  return looksLikeTalkBeforeCreateAsk(t) || looksLikeRequirementsAsk(t);
+}
+
+/** True when classifyTurn decides this turn creates a project. */
+export function isCreateTurn(message: string, opts?: ClassifyTurnOpts): boolean {
+  return classifyTurn(message, opts).kind === 'create';
+}
+
+/**
+ * SSOT for preamble planning-hold: never hold when this turn is create.
+ * Call sites must use this instead of raw wantsPlanningOnly / keep-planning alone.
+ */
+export function planningHoldAllowed(message: string, opts?: ClassifyTurnOpts): boolean {
+  if (isCreateTurn(message, opts)) return false;
+  const t = String(message || '');
+  return wantsPlanningOnly(t) || looksLikeGreenfieldKeepPlanning(t);
+}
+
+/**
+ * Talk-first product chat: exploratory / requirements wording AND classifyTurn did not pick create.
+ * Use instead of re-deciding greenfield heuristics at call sites.
+ */
+export function isTalkFirstChatTurn(message: string, opts?: ClassifyTurnOpts): boolean {
+  return looksLikeTalkFirstProductAsk(message) && !isCreateTurn(message, opts);
+}
+
+/** Soft “talk before create” opener that classifyTurn keeps as chat (never create). */
+export function isTalkBeforeCreateChatTurn(message: string, opts?: ClassifyTurnOpts): boolean {
+  return looksLikeTalkBeforeCreateAsk(String(message || '')) && !isCreateTurn(message, opts);
 }

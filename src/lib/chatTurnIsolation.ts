@@ -29,4 +29,26 @@ export function shouldKeepBackgroundTurn(
   if (!origin) return false;
   return !shouldPaintStudioLive(routeChatId, origin);
 }
-
+
+/** Cooperative cancellation for a turn: stopped, superseded, or detached by route change. */
+export function isChatTurnDead(opts: {
+  originChatId: string | null | undefined;
+  routeChatId: string | null | undefined;
+  sequence: number;
+  currentSequence: number;
+  stopped?: boolean;
+  /** Route-change snapshot taken when turn started; distinguishes switching away from starting elsewhere. */
+  routeAtStartChatId?: string | null;
+  /** Allow background continuation only when caller explicitly opts in. */
+  keepBackground?: boolean;
+}): boolean {
+  if (opts.stopped || opts.sequence !== opts.currentSequence) return true;
+  const origin = String(opts.originChatId || '').trim();
+  const route = String(opts.routeChatId || '').trim();
+  const startedOn = String(opts.routeAtStartChatId || '').trim();
+  if (!origin) return true;
+  if (!route) return !opts.keepBackground;
+  if (route !== origin && startedOn === origin) return !opts.keepBackground;
+  return false;
+}
+

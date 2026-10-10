@@ -38,11 +38,45 @@ export function planTurnDispatch(
   };
 }
 
-const CANT_YET = "I can't do that yet.";
+/** Next-step reply for when no host AND no model path exists — never a flat refusal. */
+function missingHostReply(kind: 'delete' | 'open_folder' | 'run_cmd'): string {
+  switch (kind) {
+    case 'delete':
+      return 'I can’t reach the file tools from this window, so nothing was deleted. Open the project folder (**+ → Open folder**) and say it again, or tell me which file and I’ll show the exact change.';
+    case 'open_folder':
+      return 'I can’t open folders from this window. Use **+ → Open folder** to pick it, or tell me the path and I’ll work from that.';
+    default:
+      return 'I can’t run commands from this window. Open the project in the desktop app and say it again, or ask and I’ll walk you through the exact command to run yourself.';
+  }
+}
+
+/**
+ * Missing owned host: prefer a real attempt over a canned refusal.
+ * Order: chatHost (model answers helpfully) → next-step plain reply → continue (caller falls through).
+ */
+async function recoverMissingHost(
+  host: DispatchHost,
+  classified: ClassifyTurnResult,
+  kind: 'delete' | 'open_folder' | 'run_cmd',
+): Promise<DispatchOwnedResult> {
+  if (host.chatHost && host.finishPlainReply) {
+    const chatOutcome = await runChatTurn({
+      ...host.chatHost,
+      content: host.chatHost.content || host.content,
+    });
+    await host.finishPlainReply(chatOutcome.text, chatOutcome.provider || 'NOVA');
+    return { status: 'handled', classified, chatOutcome };
+  }
+  if (host.finishPlainReply) {
+    await host.finishPlainReply(missingHostReply(kind));
+    return { status: 'handled', classified };
+  }
+  return { status: 'continue', classified };
+}
 
 /**
  * Host bag for owned kinds. Optional nested hosts mirror what AIChat passes today.
- * Missing delete/open/cmd host → plain reply + handled (never fall through to generate).
+ * Missing delete/open/cmd host → chatHost attempt, else a next-step plain reply (never a flat refusal, never generate).
  * Missing create host → continue (scaffold still optional at call site).
  * editHost present → runEditTurn inside dispatch and return handled.
  */
@@ -122,10 +156,7 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'delete': {
-      if (!host.deleteHost) {
-        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
-        return { status: 'handled', classified };
-      }
+      if (!host.deleteHost) return recoverMissingHost(host, classified, 'delete');
       const outcome = await runDeleteTurn({
         ...host.deleteHost,
         content: host.deleteHost.content || host.content,
@@ -135,10 +166,7 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'open_folder': {
-      if (!host.openFolderHost) {
-        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
-        return { status: 'handled', classified };
-      }
+      if (!host.openFolderHost) return recoverMissingHost(host, classified, 'open_folder');
       const outcome = await runOpenFolderTurn({
         ...host.openFolderHost,
         content: host.openFolderHost.content || host.content,
@@ -148,10 +176,7 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'run_cmd': {
-      if (!host.runCmdHost) {
-        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
-        return { status: 'handled', classified };
-      }
+      if (!host.runCmdHost) return recoverMissingHost(host, classified, 'run_cmd');
       const outcome = await runCmdTurn({
         ...host.runCmdHost,
         content: host.runCmdHost.content || host.content,

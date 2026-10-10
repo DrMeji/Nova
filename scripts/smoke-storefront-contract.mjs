@@ -4,11 +4,17 @@
  */
 import { inferBuildGenre, scoreStorefrontContract, briefLooksLikeStorefront } from '../src/lib/createLayoutContract.ts';
 import { formatOriginalCraftRules, lintOriginalCreateQuality, inferCompositionFamily } from '../src/lib/createDesignSystem.ts';
-import { buildStorefrontCommerceFloor } from '../src/lib/createStorefrontFloor.ts';
+import {
+  buildStorefrontCommerceFloor,
+  catalogForStorefrontBrief,
+  teaCatalog,
+} from '../src/lib/createStorefrontFloor.ts';
 import {
   buildStorefrontPlan,
   repairStorefrontToContract,
   scoreStorefrontDesignQuality,
+  injectAppComponentState,
+  collapseDuplicateStorefrontIslands,
 } from '../src/lib/createStorefrontRepair.ts';
 import { buildBriefInteractiveFloor, briefLooksLikeCommerceStore, appHasCommerceCart, previewReadyForBrief, ensureViteReactProjectFiles } from '../src/lib/createBuildQuality.ts';
 
@@ -46,9 +52,10 @@ assert(plan.requireProductsFile && plan.minProducts >= 8, 'storefront plan requi
 assert(plan.interactions.includes('qty-stepper'), 'plan includes qty-stepper');
 
 const rules = formatOriginalCraftRules({ brief, productName: name, freshnessKey: 'smoke1' }).join('\n');
-assert(/STOREFRONT CONTRACT/i.test(rules), 'craft rules include STOREFRONT CONTRACT');
-assert(/REQUIRED @@@FILE[\s\S]*products\.ts/i.test(rules), 'craft rules REQUIRE products.ts');
-assert(/structural plan/i.test(rules), 'craft rules include structural plan');
+// Thin create: short invent-from-ask prompt (no STOREFRONT CONTRACT block).
+assert(/THIN CREATE|@@@FILE/i.test(rules), 'thin craft rules present');
+assert(new RegExp(name, 'i').test(rules) || /shop|liquor|cart/i.test(rules), 'craft rules mention shop ask');
+assert(!/STOREFRONT CONTRACT/i.test(rules), 'thin craft must not paste STOREFRONT CONTRACT');
 
 const floor = buildStorefrontCommerceFloor(name, brief, palette);
 assert(Boolean(floor.files['src/data/products.ts']), 'floor emits src/data/products.ts');
@@ -107,6 +114,80 @@ assert(ready.ok || ready.reasons.filter((r) => /storefront|cart|purchase|priced 
 // Non-liquor specialty retail still classifies storefront
 const hwBrief = 'Build an online boutique hardware shop where people browse tools, filter by type, add quantities to cart, and purchase.';
 assert(inferBuildGenre(hwBrief, 'Forge & Bit').genre === 'storefront', 'non-liquor shop → storefront');
+
+// Mistveil regression: `const App = () =>` + island JSX without state → blank Live ReferenceError.
+const arrowBroken = {
+  'src/App.jsx': `import React, { useState } from 'react';
+import './App.css';
+import { PRODUCTS, PRODUCT_TYPES } from './data/products';
+const App = () => {
+  const [showHero, setShowHero] = useState(true);
+  return (
+    <div className="app">
+      <header><nav>Mistveil</nav></header>
+      <section className="hero"><h1>Mistveil Leaves</h1></section>
+      <section className="band" id="shop" data-nova="storefront-island">
+        <div className="filter-bar">{(PRODUCT_TYPES || ['All']).map((t) => (
+          <button key={t} type="button" className={filter === t ? 'chip chip-on' : 'chip'} onClick={() => setFilter(t)}>{t}</button>
+        ))}</div>
+        <div className="product-grid">{visible.map((p) => (
+          <article key={p.id} className="product-card"><h3>{p.name}</h3><p className="price">\${p.price}</p>
+          <button type="button" className="add-to-cart" onClick={() => add(p)}>Add to cart</button></article>
+        ))}</div>
+      </section>
+      {open ? (<div className="cart-drawer"><button onClick={() => setOpen(false)}>Close</button></div>) : null}
+      <section className="band" id="shop" data-nova="storefront-island">
+        <div className="product-grid"><article className="product-card">dup</article></div>
+      </section>
+      {open ? (<div className="cart-drawer">dup cart</div>) : null}
+      <footer>© Mistveil</footer>
+    </div>
+  );
+};
+export default App;
+`,
+  'src/App.css': `.app{min-height:100vh}.product-grid{display:grid}.product-card{padding:1rem}`,
+};
+const arrowFixed = repairStorefrontToContract(arrowBroken, { productName: 'Mistveil Leaves', brief: 'jasmine green tea shop cart purchase' });
+const arrowApp = arrowFixed.files['src/App.jsx'] || '';
+assert(/NOVA_STOREFRONT_ISLAND/.test(arrowApp), 'arrow App gets commerce state');
+assert(/useMemo/.test(arrowApp), 'arrow App import gains useMemo');
+assert((arrowApp.match(/data-nova=["']storefront-island["']/g) || []).length === 1, 'duplicate storefront islands collapsed to 1');
+assert(/\bconst \[filter, setFilter\]/.test(arrowApp), 'filter state present for island JSX');
+const stateOnly = injectAppComponentState('const App = () => {\n  return null;\n};', '/* MARK */\n  const x = 1;');
+assert(stateOnly && stateOnly.includes('/* MARK */'), 'injectAppComponentState supports const App = () =>');
+assert(collapseDuplicateStorefrontIslands(arrowBroken['src/App.jsx']).match(/storefront-island/g).length === 1, 'collapse helper keeps one island');
+
+// Tea brand must never get whiskey/abv/proof/bottle catalog copy.
+const teaBrief = 'Build a jasmine green tea brand shop with cart, checkout, and purchase.';
+const teaProducts = catalogForStorefrontBrief('Mistveil Leaves', teaBrief);
+assert(teaProducts.length >= 8, 'tea catalog ≥8');
+const teaBlob = JSON.stringify(teaProducts);
+assert(!/abv|whiskey|bourbon|proof|cask|tasting pours|bottle for the road/i.test(teaBlob), 'tea catalog has no spirits copy');
+assert(/Tin|Pouch|Steep|tea|Sampler/i.test(teaBlob), 'tea catalog uses tea SKUs');
+assert(teaCatalog('X').every((p) => !p.abv), 'teaCatalog products omit abv');
+const teaFloor = buildStorefrontCommerceFloor('Mistveil Leaves', teaBrief, palette);
+const teaProductsSrc = teaFloor.files['src/data/products.ts'] || '';
+assert(!/whiskey|bourbon|Cask Strength|tasting pours|"abv"\s*:/i.test(teaProductsSrc), 'tea floor products.ts clean');
+assert(!/Browse bottles|open a bottle/i.test(teaFloor.app || ''), 'tea floor App has no bottle CTA copy');
+assert(/Browse tins|open a tin/i.test(teaFloor.app || ''), 'tea floor App uses tin CTAs');
+assert(
+  !/#2c1b14|#100b09|#322018|#2a1b15|#18100d/i.test(teaFloor.css || ''),
+  'tea floor CSS has no liquor-brown hex surfaces',
+);
+assert(/#0f1a15|#15241d|#7dba8c|#1a2e24/i.test(teaFloor.css || ''), 'tea floor CSS uses matcha/green surfaces');
+// Brand landing with Shop CTA alone is NOT storefront (no cart/checkout).
+assert(!briefLooksLikeStorefront(
+  'Build a jasmine tea brand page with origin story, tasting notes, and Shop + Steep guides CTAs.',
+  'Mistveil Leaves',
+), 'Shop CTA brand page ≠ storefront');
+assert(briefLooksLikeStorefront(teaBrief, 'Mistveil Leaves'), 'explicit cart/checkout still storefront');
+// TS-annotated arrow App still gets state.
+const tsArrow = injectAppComponentState(
+  'const App: React.FC = () => {\n  return <div />;\n};',
+  '/* NOVA_STOREFRONT_ISLAND */\n  const x = 1;',
+);
+assert(tsArrow && /NOVA_STOREFRONT_ISLAND/.test(tsArrow), 'injectAppComponentState supports const App: React.FC');
 
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);

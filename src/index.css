@@ -183,9 +183,9 @@
     font-size: 0.875rem; /* 14px — tighter labels on the slim rail */
     line-height: 1.25;
     /* Lock row height so hover/active paint never reflows icons */
-    min-height: 2.2rem;
-    height: 2.2rem;
-    max-height: 2.2rem;
+    min-height: 2.4rem;
+    height: 2.4rem;
+    max-height: 2.4rem;
     padding-top: 0;
     padding-bottom: 0;
     box-sizing: border-box;
@@ -230,6 +230,20 @@
   .nova-nav-item.active:hover::before {
     background-color: rgb(var(--color-surface-active));
   }
+  /* Collapsed pill: circular icon hit — never a stretching stadium during expand. */
+  .nova-sidebar-panel.is-collapsed .nova-nav-item:not(.active):hover::before,
+  .nova-sidebar-panel.is-collapsed .nova-nav-item.active::before,
+  .nova-sidebar-panel.is-collapsed .nova-nav-item.active:hover::before,
+  .nova-sidebar-panel.is-collapsed .nova-nav-item.nova-nav-working-away::after {
+    left: 50%;
+    right: auto;
+    top: 50%;
+    bottom: auto;
+    width: 2.15rem;
+    height: 2.15rem;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+  }
   /*
    * Purple heartbeat ONLY when a chat is still working AND you are not on that chat.
    * Active/current tab stays gray (above). Done work clears this class.
@@ -270,25 +284,29 @@
     color: rgb(56 189 248);
   }
   /*
-   * Icon plate matches collapsed rail width (3.5rem). Glyph is centered in that plate
+   * Icon plate matches collapsed rail width (3.25rem). Glyph is centered in that plate
    * open or closed, so icons never shift horizontally when the sidebar stretches.
    * Row height is locked above so hover expand/collapse does not move icons up/down.
    */
   .nova-nav-icon {
-    @apply w-14 flex items-center justify-center shrink-0;
-    height: 2.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 3.25rem;
+    height: 2.4rem;
   }
   .nova-nav-icon svg {
-    width: 1.05rem;
-    height: 1.05rem;
+    width: 1.15rem;
+    height: 1.15rem;
     @apply shrink-0;
   }
   .nova-nav-item-rail {
     /* Same height as .nova-nav-item — only alignment changes */
     @apply !justify-start !px-0 !py-0 !gap-0 !pr-0;
-    min-height: 2.2rem !important;
-    height: 2.2rem !important;
-    max-height: 2.2rem !important;
+    min-height: 2.4rem !important;
+    height: 2.4rem !important;
+    max-height: 2.4rem !important;
   }
   .nova-nav-label {
     @apply truncate transition-opacity duration-200 ease-out min-w-0;
@@ -318,34 +336,54 @@
     font-size: 0.6875rem; /* 11px */
     letter-spacing: 0.06em;
   }
-  /* Comfortable vertical rhythm in the expanded rail */
+  /* Same rhythm open or closed — icons must not jump on hover expand */
   .nova-sidebar-panel nav {
-    gap: 0.2rem;
-    padding-top: 0.55rem;
+    gap: 0.35rem;
+    padding-top: 0.35rem;
+    scrollbar-width: none;
   }
-  .nova-sidebar-panel .nova-nav-group {
+  .nova-sidebar-panel nav::-webkit-scrollbar {
+    display: none;
+  }
+  .nova-sidebar-panel .nova-nav-group,
+  .nova-sidebar-panel .nova-nav-stack > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     margin-top: 0.55rem;
   }
-  .nova-sidebar-panel .nova-nav-group:first-child {
+  .nova-sidebar-panel .nova-nav-group:first-child,
+  .nova-sidebar-panel .nova-nav-stack > div:first-child {
     margin-top: 0;
   }
   .nova-sidebar-panel .nova-nav-stack {
-    gap: 0.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
   }
   .nova-sidebar-panel {
-    width: 15rem;
-    min-width: 15rem;
-    max-width: 15rem;
+    width: 13.5rem;
+    min-width: 13.5rem;
+    max-width: 13.5rem;
+    /* Width only — never animate border-radius (that caused the cylinder glitch). */
     transition:
       width 280ms cubic-bezier(0.22, 1, 0.36, 1),
       min-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
       max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .nova-sidebar-panel.is-collapsed {
-    /* Slim locked rail — icon plate is w-14 (3.5rem); leave a hair of chrome padding. */
-    width: 3.5rem;
-    min-width: 3.5rem;
-    max-width: 3.5rem;
+    /* Slim edge tab; height set in AppShell (70%). */
+    width: 3.25rem;
+    min-width: 3.25rem;
+    max-width: 3.25rem;
+  }
+  /* Flush to the left screen edge; round only the open (right) side — expands like Siri-from-edge. */
+  .nova-sidebar-edge {
+    border-left: none;
+    border-top: 1px solid rgb(var(--color-surface-border));
+    border-right: 1px solid rgb(var(--color-surface-border));
+    border-bottom: 1px solid rgb(var(--color-surface-border));
+    border-radius: 0 0.75rem 0.75rem 0;
   }
 
   /*

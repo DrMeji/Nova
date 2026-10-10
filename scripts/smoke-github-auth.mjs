@@ -58,6 +58,8 @@ mustInclude('src/context/AuthContext.tsx', [
   'clearGitHubSession',
   "Email sign-in is retired",
 ]);
+mustNotInclude('src/context/AuthContext.tsx', ['export function isBypassEnabled']);
+mustInclude('src/lib/authFlags.ts', ['export function isBypassEnabled']);
 
 // App boots without supabase hard-fail
 mustNotInclude('src/App.tsx', ['supabaseConfigError']);

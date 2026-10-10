@@ -179,7 +179,7 @@ async function healCreateFiles(
   {
     const { wireCreatePublicAssets, cssBlobIsThin, buildMarketingCompanionCss } = await import('@/lib/createBuildQuality');
     const { createIdentityFromBrief } = await import('@/lib/createIdentity');
-    const wired = wireCreatePublicAssets(next, opts.productName);
+    const wired = wireCreatePublicAssets(next, opts.productName, opts.brief);
     if (wired.changed.length) {
       opts.pushStatus(modeStatusLabel('fix', 'Wiring assets + atmosphere'));
       next = wired.files;

@@ -31,6 +31,86 @@ export type CreateEvidenceProbe = {
   error?: string;
 };
 
+import { scoreAskMatch as scoreCreateAskMatch } from '@/lib/createAskContract';
+
+export type CreateRenderedQuality = {
+  ok: boolean;
+  reasons: string[];
+  askScore: number;
+  askReasons: string[];
+};
+
+/** Final deterministic surface check used after the same files have mounted in Live. */
+export function verifyCreateRenderedQuality(
+  files: Record<string, string>,
+  brief: string,
+  productName = '',
+): CreateRenderedQuality {
+  const app = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  const sections = Object.entries(files || {})
+    .filter(([path]) => /^src\/sections\/.*\.jsx?$/i.test(path.replace(/\\/g, '/')))
+    .map(([, body]) => String(body || ''));
+  const rendered = `${app}\n${sections.join('\n')}`;
+  const reasons: string[] = [];
+  if (!app.trim()) reasons.push('final App source missing');
+  const css = String(files['src/App.css'] || files['src/index.css'] || '');
+  if (!css.trim() || css.replace(/\s+/g, '').length < 80) reasons.push('final styling missing or too thin');
+  const importsCss = /import\s+['"]\.\/(?:App|index)\.css['"]/.test(app)
+    || /import\s+['"]\.\/(?:App|index)\.css['"]/.test(String(files['src/main.jsx'] || files['src/main.tsx'] || ''));
+  if (css.trim() && !importsCss) reasons.push('styles are not linked from App or entrypoint');
+
+  const linkTargets = [...rendered.matchAll(/(?:href|to)=\{?['"]#([^'"}]+)['"]\}?/gi)].map((m) => m[1]);
+  const ids = new Set([...rendered.matchAll(/\bid=\{?['"]([^'"}]+)['"]\}?/gi)].map((m) => m[1]));
+  const missingTargets = [...new Set(linkTargets.filter((id) => !ids.has(id)))];
+  if (missingTargets.length) reasons.push(`navigation targets missing: ${missingTargets.slice(0, 4).join(', ')}`);
+
+  const copy = [...rendered.matchAll(/<(?:p|h2|h3)\b[^>]*>([\s\S]*?)<\/(?:p|h2|h3)>/gi)]
+    .map((m) => m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase())
+    .filter((s) => s.length >= 28);
+  const counts = new Map<string, number>();
+  for (const s of copy) counts.set(s, (counts.get(s) || 0) + 1);
+  if ([...counts.values()].some((n) => n >= 3)) reasons.push('repeated section copy detected');
+  if (/lorem ipsum|sample text|band-\d+|placeholder copy/i.test(rendered)) reasons.push('placeholder copy detected');
+  const navTags = [...rendered.matchAll(/<nav\b[^>]*>([\s\S]*?)<\/nav>/gi)].map((m) => m[1]);
+  for (const nav of navTags) {
+    const labels = [...nav.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)]
+      .map((m) => m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    if (labels.length >= 3 && new Set(labels.map((x) => x.toLowerCase())).size < labels.length) {
+      reasons.push('navigation labels are duplicated');
+    }
+    const cssBlob = `${files['src/App.css'] || ''}\n${files['src/index.css'] || ''}`;
+    const navClass = String(rendered.match(/<nav\b[^>]*className=["']([^"']+)/i)?.[1] || '').split(/\s+/)[0];
+    if (navClass && new RegExp(`\\.${navClass.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\{`, 'i').test(cssBlob)) {
+      const rule = cssBlob.match(new RegExp(`\\.${navClass.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\{([^}]+)\\}`, 'i'))?.[1] || '';
+      if (!/(?:display\s*:\s*(?:flex|grid)|gap\s*:|justify-content\s*:)/i.test(rule)) reasons.push('navigation has no layout spacing rule');
+    }
+  }
+
+  const briefText = String(brief || '').trim();
+  let askScore = 10;
+  let askReasons: string[] = [];
+  if (briefText && /\b(?:website|site|homepage|landing|brand|shop|store|marketing|product\s+page)\b/i.test(briefText)) {
+    try {
+      // Import is local and deterministic; keep this boundary independent from the runtime preview bridge.
+      const match = scoreCreateAskMatch(files, briefText, productName);
+      askScore = match.score;
+      askReasons = match.reasons;
+      if (!match.ok) reasons.push(`brief match failed (${match.score}/10): ${match.reasons.slice(0, 3).join('; ')}`);
+    } catch (err) {
+      askScore = 0;
+      askReasons = [err instanceof Error ? err.message : 'brief judge failed'];
+      reasons.push('brief match judge unavailable');
+    }
+  }
+  if (briefText && /\b(?:reusable\s+workflow|repeatable\s+workflow|workflow\s+for|script\s+that|automate)\b/i.test(briefText)) {
+    const actions = [...rendered.matchAll(/\bon(?:Click|Submit|Change)\s*=|<form\b/gi)].length;
+    const state = /useState\s*\(|useReducer\s*\(/.test(rendered);
+    if (!actions || !state) reasons.push('requested interactions lack state-backed handlers');
+  }
+  return { ok: reasons.length === 0, reasons: [...new Set(reasons)], askScore, askReasons };
+}
+
 export function emptyCreateEvidence(partial?: Partial<CreateEvidence>): CreateEvidence {
   return {
     staticReady: false,
@@ -116,6 +196,8 @@ export async function collectLiveEvidence(opts: {
   brief: string;
   requireSmoke?: boolean;
   onStatus?: (label: string) => void;
+  /** Chat-scoped Live window id (`chat-…`) so evidence never opens another thread's preview. */
+  projectId?: string;
 }): Promise<Pick<CreateEvidence, 'httpOk' | 'mounted' | 'consoleClean' | 'consoleErrors' | 'smokeOk' | 'smokeDetail' | 'liveUrl'>> {
   const liveUrl = String(opts.liveUrl || '').trim();
   const consoleErrors: string[] = [];
@@ -167,6 +249,8 @@ export async function collectLiveEvidence(opts: {
           title?: string;
           waitMs?: number;
           hardTimeoutMs?: number;
+          projectId?: string;
+          show?: boolean;
         }) => Promise<CreateEvidenceProbe>;
       };
     }).novaDesktop;
@@ -181,6 +265,8 @@ export async function collectLiveEvidence(opts: {
             title: opts.productName || 'Preview',
             waitMs: 5000,
             hardTimeoutMs: 12_000,
+            projectId: opts.projectId || undefined,
+            show: false,
           }),
           new Promise<CreateEvidenceProbe>((resolve) => {
             window.setTimeout(
@@ -336,6 +422,6 @@ export function formatCreateProjectMap(files: Record<string, string>): string {
 export function createEvidencePassDefinition(): string {
   return [
     'Live unlock = npmInstalled && httpOk && mounted (smoke soft; console advisory).',
-    'Quality Ready = Live unlock + console clean + smoke + host judge + ProductPlan score + design score + no floor fallback.',
+    'Quality Ready = Live unlock + console clean + smoke + host judge + ProductPlan score + design score + original-brief ask match + no floor fallback.',
   ].join(' ');
 }

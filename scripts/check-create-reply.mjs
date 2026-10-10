@@ -144,6 +144,34 @@ check(
   );
 }
 
+{
+  // User-facing create/Live copy must not demand magic "Say rebuild the UI" phrases.
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const root = join(process.cwd(), 'src');
+  const paths = [
+    'lib/chatTurnHandlers/create.ts',
+    'lib/chatTurnHandlers/edit.ts',
+    'lib/createJobStore.ts',
+    'lib/createProjectFlow.ts',
+    'views/aichat/useAIChatController.ts',
+  ];
+  let hit = '';
+  for (const rel of paths) {
+    const text = readFileSync(join(root, rel), 'utf8');
+    if (/Say\s+\*\*rebuild the UI\*\*|say rebuild the UI|ask me to rebuild the UI/i.test(text)) {
+      hit = rel;
+      break;
+    }
+  }
+  check('no Say rebuild the UI in create/Live fail copy', !hit, hit);
+  const previewFail = readFileSync(join(process.cwd(), 'electron/novaPreview.cjs'), 'utf8');
+  check(
+    'no Say rebuild the UI in novaPreview fail fallback',
+    !/say rebuild the UI/i.test(previewFail),
+  );
+}
+
 if (failed) {
   console.error(`\n${failed} failed`);
   process.exit(1);

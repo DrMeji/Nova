@@ -94,19 +94,34 @@ const FORBID_COMMON = [
   'sample-placeholder-copy',
   'via.placeholder.com',
   'unsplash-cinema-forest-ocean',
+  // Prior Nova floor / clone fingerprints — brand landings must invent, not paste.
+  'Experience the future of technology',
+  'SoftPalm',
+  "Pond's",
+  'apple.com product bands',
+  // filteredProducts is intentionally NOT listed here or in FLOOR_CLONE_FINGERPRINT_RE —
+  // real storefronts use that variable name; depth stubShell still watches it separately.
 ];
+
+/** Known canned-floor / prior-build clone fingerprints (brand + marketing pages). */
+export const FLOOR_CLONE_FINGERPRINT_RE =
+  /Experience the future of technology|SoftPalm|Pond.?s|apple\.com product bands|A singular ritual for how you actually live|Form that earns its keep|Made for real rooms/i;
 
 /** True when the brief wants a real shop / cart / catalog — not a marketing one-pager. */
 export function briefLooksLikeStorefront(brief: string, productName = ''): boolean {
   const t = `${brief}\n${productName}`;
-  if (/\b(?:cart|checkout|purchase|add\s+to\s+cart|online\s+store|e-?commerce|product\s+catalog)\b/i.test(t)) {
+  // Brand landing with a "Shop" CTA is NOT a storefront — require real commerce intent.
+  if (/\b(?:cart|checkout|purchase|add\s+to\s+cart|online\s+store|e-?commerce|price\s+list)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|wine\s+shop)\b/i.test(t)) {
+  // Bare spirit nouns alone are brand pages — require shop/cart/buy cues for storefront.
+  if (/\b(?:bottle\s+shop|wine\s+shop|liquor\s+store)\b/i.test(t)) {
     return true;
   }
+  // "Shop + Steep guides" / brand pages must NOT trip this — need buy/browse/catalog/filter/qty.
   return /\b(?:shop|store|boutique)\b/i.test(t)
-    && /\b(?:buy|browse|products?|catalog|filter|quantity|checkout)\b/i.test(t);
+    && /\b(?:buy|browse|catalog|filter|quantit(?:y|ies)|checkout|add\s+to\s+cart)\b/i.test(t)
+    && !/\b(?:origin\s+story|brand\s+page|landing\s+page|steep\s+guide|how\s+to\s+steep)\b/i.test(t);
 }
 
 /** Infer genre + kind from brief (deterministic; LLM may refine). */

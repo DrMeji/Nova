@@ -209,7 +209,7 @@ import {
   stripComposerPrefix,
   workspacePathLabel,
 } from '@/lib/chatAgentTurn';
-import type { ClassifyTurnResult } from '@/lib/classifyTurn';
+import { isCreateTurn, planningHoldAllowed, type ClassifyTurnResult } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
   forgetFinishedChatTurnStatus,
@@ -272,7 +272,7 @@ import {
   ensureProductBrandInApp,
 } from '@/lib/createBuildQuality';
 import { pickLocalCoderModel } from '@/lib/enginePick';
-import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
+import { isChatTurnDead, shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
@@ -593,6 +593,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   setIpcFallbackDev(false);
   // Prefer live route id. Blank starters (no chatId) always mint a new id. never reuse persist.
   const blankStarter = route.name === 'chat' && !route.chatId;
+  const routeChatIdAtTurnStart = route.name === 'chat' ? (route.chatId || routeChatIdRef.current || null) : null;
   let activeChatId = blankStarter
     ? undefined
     : (routeChatIdRef.current || persistChatIdRef.current || undefined);
@@ -954,7 +955,16 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       stopRequestedByChatRef?.current?.[activeChatId]
       || stopRequestedRef.current,
     );
-    if (mySeq === liveSeq && !stopped) return false;
+    const turnDead = isChatTurnDead({
+      originChatId: activeChatId,
+      routeChatId: routeChatIdRef.current,
+      routeAtStartChatId: routeChatIdAtTurnStart,
+      sequence: mySeq,
+      currentSequence: liveSeq,
+      stopped,
+      keepBackground: true,
+    });
+    if (!turnDead) return false;
     try {
       const job = getCreateJobForChat(activeChatId);
       if (job && (job.status === 'queued' || job.status === 'writing' || job.status === 'npm' || job.status === 'verifying')) {
@@ -1447,9 +1457,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
 
   // Chip handlers for pending greenfield. MUST run even when message is just "Keep planning"
   // (that phrase alone is not a greenfield idea, so it used to fall through to the local model).
+  // SSOT: planningHoldAllowed / isCreateTurn — never hold when classifyTurn says create.
+  const createWinsThisTurn = isCreateTurn(intentText);
   const pendingPlanExpand = getLastPendingGreenfield(activeChatId);
   const looksLikePlanFeatureAdd = Boolean(
     pendingPlanExpand
+    && !createWinsThisTurn
     && !looksLikeGreenfieldCreateGo(intentText)
     && !looksLikeImplementGo(intentText)
     && !parseWorkOnFolderName(intentText)
@@ -1461,8 +1474,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       || /\bsoft\s+sage\b|\bsave-?a-?bag\b|\bundo\b/i.test(intentText)
     ),
   );
-  if ((mode === 'general' || mode === 'code') && (
-    looksLikeGreenfieldKeepPlanning(intentText)
+  if ((mode === 'general' || mode === 'code') && !createWinsThisTurn && (
+    planningHoldAllowed(intentText)
     || /\badd\s+more\s+features\s+to\s+the\s+plan\b/i.test(intentText)
     || /\bexpand\s+the\s+plan\b/i.test(intentText)
     || /\bfold\s+(?:those|these|them|it)\s+into\s+the\s+plan\b/i.test(intentText)
@@ -1558,6 +1571,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
 
   if (
     (mode === 'general' || mode === 'code')
+    && !createWinsThisTurn
+    && planningHoldAllowed(intentText)
     && wantsPlanningOnly(intentText)
     && !looksLikeImplementGo(intentText)
   ) {
@@ -1602,6 +1617,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     content,
     mode,
     activeChatId,
+    routeChatIdAtTurnStart,
+    backgroundAllowed: Boolean(routeChatIdAtTurnStart && routeChatIdAtTurnStart === activeChatId),
     assistantId,
     mySeq,
     replyStartedAt,

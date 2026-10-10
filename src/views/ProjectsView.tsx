@@ -163,36 +163,44 @@ export function ProjectsView() {
   };
 
   const deleteListItem = async (item: ListItem) => {
+    // Optimistic UI first — never await heavy disk rm before the list updates
+    // (sync node_modules deletes used to freeze the whole app for 30–40s).
     markProjectDeleted(item.id, item.diskPath, item.name);
-    let diskErr: string | null = null;
     const targetPath =
       item.diskPath
       || ((item.id.startsWith('nova-folder:') || item.id.startsWith('ark-folder:'))
         ? item.id.replace(/^(?:nova|ark)-folder:/, '')
         : '');
-    if (targetPath && window.novaDesktop?.workspaceDeleteFolder) {
-      const del = await window.novaDesktop.workspaceDeleteFolder({ targetPath });
-      if (del && del.ok === false) {
-        diskErr = String(del.error || 'Could not delete folder on disk');
-      }
-    }
     if (item.source === 'remote') {
-      try { await deleteProject(item.id); } catch { /* offline / already gone */ }
       setRemote(prev => prev.filter(p => p.id !== item.id));
+      void deleteProject(item.id).catch(() => undefined);
     }
     removeRecent(item.id);
     setNovaFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath && f.path !== targetPath));
-    // Re-scan so a failed disk delete cannot leave a ghost that looks "gone" until refresh.
-    try {
-      const next = await listNovaProjectFolders();
-      setNovaFolders(next.filter(f => !isProjectDeleted(f.id, f.path, f.name)));
-    } catch {
-      /* keep local filter */
-    }
-    if (diskErr) {
-      setNotice(`Removed from list, but folder delete failed: ${diskErr}`);
-      window.setTimeout(() => setNotice(null), 6000);
-    }
+
+    void (async () => {
+      let diskErr: string | null = null;
+      if (targetPath && window.novaDesktop?.workspaceDeleteFolder) {
+        try {
+          const del = await window.novaDesktop.workspaceDeleteFolder({ targetPath });
+          if (del && del.ok === false) {
+            diskErr = String(del.error || 'Could not delete folder on disk');
+          }
+        } catch (err) {
+          diskErr = err instanceof Error ? err.message : 'Could not delete folder on disk';
+        }
+      }
+      try {
+        const next = await listNovaProjectFolders();
+        setNovaFolders(next.filter(f => !isProjectDeleted(f.id, f.path, f.name)));
+      } catch {
+        /* keep local filter */
+      }
+      if (diskErr) {
+        setNotice(`Removed from list, but folder delete failed: ${diskErr}`);
+        window.setTimeout(() => setNotice(null), 6000);
+      }
+    })();
   };
 
   const handleCreate = async () => {

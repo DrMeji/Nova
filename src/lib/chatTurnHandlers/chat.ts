@@ -5,12 +5,14 @@
 
 import { answerStudio } from '@/lib/studioAnswerEngine';
 import { arkRoute, routerProviderLabel } from '@/lib/novaRouter';
+import { engineGenerateCancel } from '@/lib/novaEngine';
 import {
   buildRouterHistory,
   looksLikeExplicitTopicSwitch,
   looksLikeThreadMemoryAsk,
   looksLikeThreadMemoryPlant,
   looksLikeTopicSwitchBleed,
+  quietRetryExtendsPainted,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { extractVisionImages } from '@/lib/recentStore';
@@ -43,7 +45,7 @@ import {
   shoppingLinksHonestGap,
   howToGuideHonestGap,
 } from '@/lib/replySanity';
-import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import { isTalkFirstChatTurn } from '@/lib/classifyTurn';
 import {
   looksLikeSimpleBuildToyChatAsk,
   looksLikeBrokenToyDemoReply,
@@ -194,7 +196,7 @@ function plainChatHistorySeed(content: string): RouterChatTurn[] {
       content: 'Understood — one real sentence about NOVA.',
     }];
   }
-  if (looksLikeTalkBeforeCreateAsk(content) || looksLikeRequirementsAsk(content)) {
+  if (isTalkFirstChatTurn(content)) {
     // Hardware / DIY how-to must NOT get the software product-plan seed.
     if (looksLikeHowToGuideAsk(content)) {
       return [{
@@ -306,6 +308,25 @@ function threadHistoryForChat(host: ChatTurnHost): RouterChatTurn[] {
 
 /** Soft wall for abort only — never silence streaming chunks while the model is still writing. */
 const CHAT_STREAM_ABORT_MS = 300_000;
+const CHAT_EMPTY_TURN_FALLBACK = 'I could not finish that answer cleanly — try asking again in one short sentence.';
+const SCAFFOLD_TOKEN_BUDGET = 300;
+
+function estimateScaffoldTokens(text: string): number {
+  return Math.ceil(String(text || '').trim().length / 4);
+}
+
+function appendScaffoldUser(
+  turns: RouterChatTurn[],
+  content: string,
+  budget: { left: number },
+): RouterChatTurn[] {
+  const c = String(content || '').trim();
+  if (!c) return turns;
+  const cost = estimateScaffoldTokens(c);
+  if (cost > budget.left) return turns;
+  budget.left -= cost;
+  return [...turns, { role: 'user', content: c }];
+}
 
 function topicSwitchCleanReply(ask: string): string | null {
   const a = String(ask || '');
@@ -434,9 +455,9 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     if (host.shouldAbort()) {
       return {
         status: 'handled',
-        text: '',
+        text: CHAT_EMPTY_TURN_FALLBACK,
         intent: 'plain-chat',
-        contract: chatSuccess(''),
+        contract: chatSuccess(CHAT_EMPTY_TURN_FALLBACK),
         provider: 'NOVA',
       };
     }
@@ -485,6 +506,8 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
 
     webHit = gathered.webHit || null;
     const bookFindAskEarly = looksLikeBookFindOrBuyAsk(host.content);
+    const conversationalScaffold = talkOrAdvice && !contract.allowWeb;
+    const scaffoldBudget = { left: SCAFFOLD_TOKEN_BUDGET };
 
     if (contract.allowWeb && contract.grounding === 'web') {
       const identifyAsk = false;
@@ -501,99 +524,71 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           })
           : '');
       if (sideQuest || followUp || webHit?.ok) {
-        history = [
-          {
-            role: 'user',
-            content: [
-              sideQuestAnswerHint(host.content),
-              followUp
-                ? 'This is a follow-up. Stay on the same person/game from the prior turns. Do not invent a different title (e.g. do not switch Apex → Fortnite).'
-                : '',
-            ].filter(Boolean).join(' '),
-          },
-          {
-            role: 'assistant',
-            content: 'Understood. Answer only this question with concrete facts and markdown links from lookup notes — keep thread continuity.',
-          },
-          ...history,
-        ];
+        const hint = [
+          sideQuestAnswerHint(host.content),
+          followUp
+            ? 'This is a follow-up. Stay on the same person/game from the prior turns. Do not invent a different title (e.g. do not switch Apex → Fortnite).'
+            : '',
+          conversationalScaffold
+            ? ''
+            : 'Answer only this question with concrete facts and markdown links from lookup notes — keep thread continuity.',
+        ].filter(Boolean).join(' ');
+        history = appendScaffoldUser(history, hint, scaffoldBudget);
       }
       if (note) {
-        const shape = answerShapeHintForAsk(host.content);
-        history = [
-          ...history,
-          {
-            role: 'user',
-            content: [
-              note,
-              shape,
-              `User question (answer this now): ${String(host.content || '').trim()}`,
-            ].filter(Boolean).join('\n\n'),
-          },
-        ];
+        const shape = conversationalScaffold ? '' : answerShapeHintForAsk(host.content);
+        history = appendScaffoldUser(history, [
+          note,
+          shape,
+          `User question (answer this now): ${String(host.content || '').trim()}`,
+        ].filter(Boolean).join('\n\n'), scaffoldBudget);
       } else if (looksLikeWebGroundedAsk(host.content) || followUp) {
-        const shape = answerShapeHintForAsk(host.content);
-        history = [
-          ...history,
-          { role: 'user', content: webLookupUnavailableNote() },
-          ...(shape
-            ? [{ role: 'user' as const, content: shape }, { role: 'assistant' as const, content: 'Understood — I will follow that answer shape.' }]
-            : []),
-          {
-            role: 'assistant',
-            content: 'Understood — I will say when live lookup was thin and still give the best grounded answer I can, with links when known. I will not invent earnings or switch games.',
-          },
-        ];
+        const shape = conversationalScaffold ? '' : answerShapeHintForAsk(host.content);
+        history = appendScaffoldUser(history, [
+          webLookupUnavailableNote(),
+          shape,
+          conversationalScaffold
+            ? ''
+            : 'Say when live lookup was thin and still give the best grounded answer you can, with links when known. Do not invent earnings or switch games.',
+        ].filter(Boolean).join('\n\n'), scaffoldBudget);
       }
     } else if (contract.stance === 'companion' && gathered.promptNote) {
-      history = [
-        { role: 'user', content: gathered.promptNote || companionStanceHint(host.content) },
-        { role: 'assistant', content: 'Understood — stay on topic, no invented links or project dumps.' },
-        ...history,
-      ];
+      history = appendScaffoldUser(
+        history,
+        [
+          gathered.promptNote || companionStanceHint(host.content),
+          conversationalScaffold ? '' : 'Stay on topic; no invented links or project dumps.',
+        ].filter(Boolean).join(' '),
+        scaffoldBudget,
+      );
     }
 
     // Even without web notes, push shape for factoid vs expand asks (research stance only).
-    if (contract.allowWeb) {
+    if (contract.allowWeb && !conversationalScaffold) {
       const shape = answerShapeHintForAsk(host.content);
       if (shape && !looksLikeWebGroundedAsk(host.content) && !followUp) {
-        history = [
-          { role: 'user', content: shape },
-          { role: 'assistant', content: 'Understood — I will follow that answer shape.' },
-          ...history,
-        ];
+        history = appendScaffoldUser(history, shape, scaffoldBudget);
       } else if (shape && (looksLikeWebGroundedAsk(host.content) || followUp)) {
         const already = history.some((h) => /ANSWER SHAPE/i.test(String(h.content || '')));
         if (!already) {
-          history = [
-            { role: 'user', content: shape },
-            { role: 'assistant', content: 'Understood — I will follow that answer shape.' },
-            ...history,
-          ];
+          history = appendScaffoldUser(history, shape, scaffoldBudget);
         }
       }
     }
 
     if (host.regenerate) {
-      history = [
-        {
-          role: 'user',
-          content: [
-            'RETRY: The user asked for a better answer to the same question.',
-            'Do NOT repeat the previous short reply. Add more concrete facts (real name, teams, birth year, follower rank, brand history, products) and include 1–3 real links (Twitch/YouTube/official/store) when lookup notes or confident knowledge allow.',
-            'Use a short opening paragraph, then a **Quick facts** bullet list with bold labels, then links.',
-            'Never invent fake details. Prefer lookup notes when present.',
-          ].join(' '),
-        },
-        {
-          role: 'assistant',
-          content: 'Understood — deeper structured answer with facts and links.',
-        },
-        ...history,
-      ];
+      history = appendScaffoldUser(history, [
+        'RETRY: The user asked for a better answer to the same question.',
+        'Do NOT repeat the previous short reply. Add more concrete facts (real name, teams, birth year, follower rank, brand history, products) and include 1–3 real links (Twitch/YouTube/official/store) when lookup notes or confident knowledge allow.',
+        'Use a short opening paragraph, then a **Quick facts** bullet list with bold labels, then links.',
+        'Never invent fake details. Prefer lookup notes when present.',
+      ].join(' '), scaffoldBudget);
     }
 
-    const routed = await arkRoute({
+    let firstTokenAt = 0;
+    let abortPollId: number | null = null;
+    const killChatInfer = () => { void engineGenerateCancel(); };
+    const routePromise = arkRoute({
       message: host.content,
       kind: 'chat',
       preferredModelId: host.preferredModelId || undefined,
@@ -610,20 +605,28 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
       },
       onChunk: prefs.streamResponses && host.onDelta
         ? (piece) => {
+          if (!firstTokenAt) {
+            firstTokenAt = Date.now();
+          }
           if (host.shouldAbort() || garbageAbort) return;
           const delta = String(piece || '');
           if (!delta) return;
           // Full quiet-commit from the router (one-shot replace after a silent retry/hop).
           if (streamed.length === 0 && delta.length >= 80) {
-            // Never let a quiet hop/retry shrink a solid live answer.
-            if (lastGood.length >= 80 && delta.length < Math.floor(lastGood.length * 0.92)) {
+            if (
+              lastGood.length >= 24
+              && !quietRetryExtendsPainted(lastGood, delta)
+            ) {
               host.onDelta?.(lastGood);
               streamed = lastGood;
               return;
             }
             streamed = delta;
           } else if (delta.length > streamed.length + 40 && delta.length >= 80) {
-            if (lastGood.length >= 80 && delta.length < Math.floor(lastGood.length * 0.92)) {
+            if (
+              lastGood.length >= 24
+              && !quietRetryExtendsPainted(lastGood, delta)
+            ) {
               host.onDelta?.(lastGood);
               return;
             }
@@ -702,12 +705,8 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           }
           const candidate = preferEnglishSafeReply(live, lastGood, host.content);
           const nextGood = scrubMarkdownHashHeadings(candidate);
-          // Stream paint only grows — never retract mid-turn unless garbage/foreign bleed.
-          if (
-            nextGood.length >= lastGood.length
-            || lastGood.length < 24
-            || (nextGood.length >= Math.floor(lastGood.length * 0.92) && nextGood.startsWith(lastGood.slice(0, Math.min(32, lastGood.length))))
-          ) {
+          // Stream paint only grows — prefix extension or tiny seed paint only.
+          if (lastGood.length < 24 || quietRetryExtendsPainted(lastGood, nextGood)) {
             lastGood = nextGood;
             host.onDelta?.(lastGood);
           } else if (lastGood.length >= 2) {
@@ -716,6 +715,42 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
         }
         : undefined,
     });
+
+    // Hard timeout + abort poll — cooperative shouldAbort alone can leave "Thinking…" forever.
+    const abortRace = new Promise<{ ok: false; aborted: true }>((resolve) => {
+      abortPollId = window.setInterval(() => {
+        if (host.shouldAbort() || Date.now() - started > abortMs) {
+          killChatInfer();
+          resolve({ ok: false, aborted: true });
+        } else if (!firstTokenAt && Date.now() - started > 20_000) {
+          try { host.onStatus?.('Loading local brain…'); } catch { /* ignore */ }
+        }
+      }, 100);
+    });
+    const timed = await Promise.race([
+      routePromise.then((r) => ({ ok: true as const, routed: r })),
+      new Promise<{ ok: false; aborted?: false }>((resolve) => {
+        window.setTimeout(() => {
+          killChatInfer();
+          resolve({ ok: false });
+        }, abortMs);
+      }),
+      abortRace,
+    ]);
+    if (abortPollId != null) window.clearInterval(abortPollId);
+    if (!timed.ok) {
+      const keep = lastGood || streamed || CHAT_EMPTY_TURN_FALLBACK;
+      try { host.onDelta?.(keep); } catch { /* ignore */ }
+      return {
+        status: 'handled',
+        text: keep,
+        intent: 'plain-chat',
+        contract: chatSuccess(keep),
+        provider: 'NOVA · timed out',
+      };
+    }
+    const routed = timed.routed;
+
     // Prefer the longest solid live paint — never let a quieter scrub retract the bubble.
     // Exception: never restore a foreign-script bleed over scrubbed English.
     // Exception: topic-switch mid-sentence bleed — keep the clean abort paint, not the long prior-topic dump.
@@ -773,7 +808,7 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
     if (looksLikeOrphanChatTail(text)) {
       text = (lastGood && !looksLikeOrphanChatTail(lastGood) && !replyHasUnexpectedForeignBleed(lastGood, host.content))
         ? lastGood
-        : '';
+        : CHAT_EMPTY_TURN_FALLBACK;
     }
     // Prefer the live paint when a quiet hop shrunk a solid answer into a snippet dump.
     const preferSolid = (a: string, b: string) => {
@@ -1003,6 +1038,11 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
 
     // Final display sanitize: coding pitches, topic-switch bleed, plan Overall, etc.
     text = usableAssistantText(text, host.content) || text;
+    if (!String(text || '').trim() || isTalkFenceJunk(text)) {
+      text = (lastGood && !isTalkFenceJunk(lastGood) && String(lastGood).trim())
+        ? lastGood
+        : CHAT_EMPTY_TURN_FALLBACK;
+    }
     try { host.onDelta?.(text); } catch { /* ignore */ }
 
     return {

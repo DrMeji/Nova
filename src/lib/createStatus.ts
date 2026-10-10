@@ -74,7 +74,9 @@ export async function announceCreatePhase(
   // (craft binds once elsewhere). Default is setEngine=false to stop OS freezes.
   if (opts?.setEngine === true && model.id && model.id !== 'NOVA-auto') {
     try {
-      const { setEngineModel } = await import('@/lib/novaEngine');
+      const { setEngineModel, engineLoadedModel } = await import('@/lib/novaEngine');
+      const loaded = await engineLoadedModel();
+      if (loaded && loaded === model.id) return;
       void setEngineModel?.(model.id);
     } catch { /* ignore */ }
   }

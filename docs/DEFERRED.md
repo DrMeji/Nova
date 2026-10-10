@@ -22,6 +22,8 @@ Tracked so agents stop patching side quests. See [`CREATE_PIPELINE.md`](./CREATE
 | 9 | Repair must not become the product | ✅ 0.1.316 (`repairOwnedProduct`) |
 | 10 | Docs = code (this file + CREATE_PIPELINE) | ✅ 0.1.316 |
 
+**Thin create (0.1.318):** ✅ ask → sticky craft → syntax → honest Live; floors/marketing salvage gated off. Temp Nova stays a separate harness (not merged). See [`CREATE_PIPELINE.md`](./CREATE_PIPELINE.md).
+
 **Still later (not spine blockers):** chat mid-ladder AIChat peel, Windows signing cert, email reset hosting, richer shop-without-cart genre, ensemble unpark when cloud-only.
 
 ---

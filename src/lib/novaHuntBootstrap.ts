@@ -149,12 +149,14 @@ export async function installNextWhenCurrentRanOut(opts?: {
   return { id: next.id, name: next.name };
 }
 
-/** Hunt + cache only. Does not download. */
+/** Hunt + cache only. Does not download. Pauses while a chat/create is in flight (C6). */
 export function startModelHuntCycle() {
   const run = () => {
     if (!getLocalPrefs().huntInternetModels) return;
     void (async () => {
       try {
+        const { hasChatInflight } = await import('@/lib/chatInflight');
+        if (hasChatInflight()) return;
         const hw = await getAccurateHardware(true);
         await huntModelsForPc(hw);
       } catch {

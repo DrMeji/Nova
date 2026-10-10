@@ -21,9 +21,10 @@ import {
   usableAssistantText,
   stripFirstPersonAskRestatement,
   type RouterChatTurn,
+  quietRetryExtendsPainted,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/novaCapacity';
-import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import { isTalkBeforeCreateChatTurn, isTalkFirstChatTurn } from '@/lib/classifyTurn';
 import { scrubTalkFirstCodeBleed, isTalkFenceJunk } from '@/lib/plainChatAsk';
 import { brainGenerate, brainGenerateStream, probeBrain } from '@/lib/brain';
 import {
@@ -224,6 +225,17 @@ async function tryLocalChat(
         : await genQuiet(prompt, id);
       // Freeze what the live stream painted BEFORE quiet retries (one-paint rule).
       const livePaintedDraft = live ? String(result.reply || '').trim() : '';
+      let frozenChatPaint = kind === 'chat'
+        ? scrubUnexpectedForeignScript(livePaintedDraft, message).trim()
+        : '';
+      const chatQuietMayAdopt = (candidate: string, fallbackBaseline = ''): boolean => {
+        if (kind !== 'chat') return true;
+        const next = String(candidate || '').trim();
+        if (!next) return false;
+        const base = frozenChatPaint || String(fallbackBaseline || '').trim();
+        if (!base) return true;
+        return quietRetryExtendsPainted(base, next);
+      };
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
       let rawText = String(result.reply || '').trim();
       if (kind === 'coding') {
@@ -265,7 +277,7 @@ async function tryLocalChat(
       // Skip the expensive second generate for exploratory talk (keeps the desktop responsive).
       if (
         kind === 'chat'
-        && !looksLikeTalkBeforeCreateAsk(message)
+        && !isTalkBeforeCreateChatTurn(message)
         && looksLikeUserAskEcho(cleaned || rawText, message)
       ) {
         const firstDraft = (cleaned || rawText).trim();
@@ -418,8 +430,7 @@ async function tryLocalChat(
       const fenceOnlyJunk = kind === 'chat' && isTalkFenceJunk(workingReply);
       const talkBleed = kind === 'chat'
         && (
-          looksLikeTalkBeforeCreateAsk(message)
-          || looksLikeRequirementsAsk(message)
+          isTalkFirstChatTurn(message)
           || fenceOnlyJunk
           || /^```/.test(workingReply)
         )
@@ -625,49 +636,60 @@ async function tryLocalChat(
         }
       }
 
+      if (
+        kind === 'chat'
+        && silentUpgrade
+        && frozenChatPaint
+        && !chatQuietMayAdopt(String(cleaned || rawText || ''))
+      ) {
+        cleaned = frozenChatPaint;
+        rawText = frozenChatPaint;
+        silentUpgrade = false;
+      }
+
       let finalReply = (kind === 'coding' ? (cleaned || rawText) : (cleaned || rawText)) || reply;
       if (kind === 'chat') {
         finalReply = scrubUnexpectedForeignScript(finalReply, message) || finalReply;
       }
-      // One-paint rule for talk: never retract a solid live stream with a quieter rewrite.
-      // That is the “long answer appears → disappears → shorter answer” flash.
-      // Never restore a foreign-script bleed draft over a scrubbed English reply.
+      // One-paint rule: quiet retries must strictly extend the live paint — never replace it.
       const liveDraftSafe = kind === 'chat'
         ? scrubUnexpectedForeignScript(livePaintedDraft, message).trim()
         : livePaintedDraft;
-      if (live && kind === 'chat' && onChunk && liveDraftSafe) {
-        const liveLen = liveDraftSafe.length;
-        const nextLen = String(finalReply || '').trim().length;
-        const liveLooksJunk = liveLen < 48
-          || isCannedGreetingReply(liveDraftSafe, message)
-          || /^(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css))/i.test(liveDraftSafe)
-          || replyHasUnexpectedForeignBleed(livePaintedDraft, message);
-        const nextIsSnippetDump = /^here'?s what turned up live/i.test(String(finalReply || '').trim());
-        const liveIsProse = liveLen >= 160 && !/^here'?s what turned up live/i.test(liveDraftSafe);
-        if (!liveLooksJunk) {
-          // Keep live unless the quiet upgrade is clearly longer + richer.
-          if (!silentUpgrade || nextLen <= Math.floor(liveLen * 1.12) || (nextIsSnippetDump && liveIsProse)) {
-            finalReply = preferEnglishSafeReply(liveDraftSafe, finalReply, message);
-            silentUpgrade = false;
-          }
-        }
-      }
-      // Live first draft already painted. Quiet upgrades + quiet hops paint once here.
-      if ((!live || silentUpgrade) && onChunk && finalReply.trim()) {
-        // Never commit a shorter bubble over a longer live paint — unless the live
-        // paint was a foreign-language bleed and the final reply is clean English.
+      const liveLooksJunk = !liveDraftSafe
+        || liveDraftSafe.length < 48
+        || isCannedGreetingReply(liveDraftSafe, message)
+        || /^(?:here(?:'s| is)\s+(?:the\s+)?(?:basic\s+)?(?:html|css))/i.test(liveDraftSafe)
+        || replyHasUnexpectedForeignBleed(livePaintedDraft, message);
+      const candidateReply = String(finalReply || '').trim();
+      if (live && kind === 'chat' && onChunk && liveDraftSafe && !liveLooksJunk) {
+        const nextIsSnippetDump = /^here'?s what turned up live/i.test(candidateReply);
+        const liveIsProse = liveDraftSafe.length >= 160 && !/^here'?s what turned up live/i.test(liveDraftSafe);
         if (
-          live
-          && liveDraftSafe
-          && liveDraftSafe.length >= 48
-          && String(finalReply).trim().length < liveDraftSafe.length
-          && !replyHasUnexpectedForeignBleed(livePaintedDraft, message)
+          !silentUpgrade
+          || !chatQuietMayAdopt(candidateReply)
+          || (nextIsSnippetDump && liveIsProse)
         ) {
           finalReply = preferEnglishSafeReply(liveDraftSafe, finalReply, message);
           silentUpgrade = false;
-        } else {
-          commitBubble(finalReply);
         }
+      }
+      // Live first draft already painted. Quiet upgrades paint once here only when they extend.
+      if ((!live || silentUpgrade) && onChunk && candidateReply) {
+        let mayCommit = !live || silentUpgrade;
+        if (
+          mayCommit
+          && live
+          && kind === 'chat'
+          && liveDraftSafe
+          && !liveLooksJunk
+          && !chatQuietMayAdopt(candidateReply)
+          && !replyHasUnexpectedForeignBleed(livePaintedDraft, message)
+        ) {
+          finalReply = preferEnglishSafeReply(liveDraftSafe, finalReply, message);
+          mayCommit = false;
+          silentUpgrade = false;
+        }
+        if (mayCommit) commitBubble(finalReply);
       }
       return {
         reply: kind === 'chat'

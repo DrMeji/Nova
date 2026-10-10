@@ -92,6 +92,7 @@ import { studioPathBasename } from '@/lib/chatStudioStore';
 import { requestCloseChatCode, requestOpenChatCode } from '@/lib/openChatCode';
 import { prepareBrainRotation, emitRotationNote } from '@/lib/modelRotation';
 import { buildThreadSummaryFromMessages } from '@/lib/chatHistory';
+import { isChatTurnDead } from '@/lib/chatTurnIsolation';
 
 export type { AIChatSendCtx };
 
@@ -119,6 +120,9 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     diskIntent,
     genSeqRef,
     genSeqByChatRef,
+    activeGenChatIdRef,
+    routeChatIdAtTurnStart,
+    backgroundAllowed,
     stopRequestedRef,
     stopRequestedByChatRef,
     threadBrainRef,
@@ -182,11 +186,15 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     // Sync only — stopIfSuperseded is async and returns a Promise (always truthy if used as boolean).
     const turnDead = () => {
       const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) || genSeqRef.current;
-      return Boolean(
-        mySeq !== liveSeq
-        || stopRequestedRef.current
-        || stopRequestedByChatRef?.current?.[activeChatId],
-      );
+      return isChatTurnDead({
+        originChatId: activeChatId,
+        routeChatId: routeChatIdRef.current,
+        routeAtStartChatId: routeChatIdAtTurnStart,
+        sequence: mySeq,
+        currentSequence: liveSeq,
+        stopped: Boolean(stopRequestedRef.current || stopRequestedByChatRef?.current?.[activeChatId]),
+        keepBackground: backgroundAllowed === true,
+      });
     };
 
     // One-seat Auto: preload/handoff on context pressure (ensemble multi-seat stays parked).
@@ -912,15 +920,17 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
             // Ready-row / force-chat-model pin must survive create Done (ladder tests).
             try {
               const prefs = getLocalPrefs();
-              const pinned = [prefs.lastChatModelId, prefs.defaultModelId, prefs.activeChatId]
+              const chatPinned = [prefs.activeChatId, prefs.lastChatModelId]
                 .map((s) => String(s || '').trim())
                 .find((id) => id && id !== 'NOVA-auto');
-              if (!pinned) {
+              if (!chatPinned) {
                 setLocalPrefs({
                   lastChatModelId: 'NOVA-auto',
                   defaultModelId: 'NOVA-auto',
                   activeChatId: 'NOVA-auto',
                 });
+                prep.setActiveModel?.(defaultModelForKind('chat'));
+              } else {
                 prep.setActiveModel?.(defaultModelForKind('chat'));
               }
             } catch { /* ignore */ }
@@ -1059,7 +1069,8 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         const raw = String(text || '');
         const skipNudge = /<!--nova-(?:clinic|plan-report|trace|prompt-chips)/i.test(raw)
           || /\b(?:created the project|scaffolded|project folder is ready|@@@FILE|Live preview)\b/i.test(raw)
-          || /\bI can't do that yet\b/i.test(raw);
+          || /\bI can['’]t do that yet\b/i.test(raw)
+          || /\bfrom this window\b/i.test(raw);
         const deepMode = earlyComposerMode === 'plan'
           || earlyComposerMode === 'debug'
           || earlyComposerMode === 'agent'

@@ -36,7 +36,7 @@ type VoiceModeLayoutProps = {
   brainHint?: ReactNode;
 };
 
-/** Voice tab — ring + composer. Viz controls live in Settings → Voice. */
+/** Voice tab — sphere-of-dots viz + composer. Viz controls live in Settings → Voice. */
 export function VoiceModeLayout({ phase, composer, brainHint }: VoiceModeLayoutProps) {
   return (
     <div className="relative flex-1 flex flex-col min-h-0 w-full items-center overflow-hidden">

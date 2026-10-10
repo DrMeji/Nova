@@ -58,6 +58,21 @@ function isUnderDiskRoot(diskRoot: string, targetPath: string): boolean {
   return target === root || target.startsWith(`${root}/`);
 }
 
+/** True when SVG is the generic Lucide sparkles mark (must not clobber family logos). */
+function isSparklesLogoSvg(svg: string): boolean {
+  return /M9\.937 15\.5/i.test(String(svg || ''));
+}
+
+/** True when SVG looks like a product-family mark (wine / coffee / leaf). */
+function isFamilyLogoSvg(svg: string): boolean {
+  const s = String(svg || '');
+  return /M8 22h8/i.test(s)
+    || /M16 8a1 1 0 0 1 1 1v8/i.test(s)
+    || /M10 2v2/i.test(s)
+    || /M11 20A7 7 0 0 1 9\.8/i.test(s)
+    || /M3 2v7c0 1\.1/i.test(s); // utensils (ceramic / tableware)
+}
+
 async function writeViaDiskRoot(
   diskRoot: string,
   files: Record<string, string>,
@@ -73,6 +88,13 @@ async function writeViaDiskRoot(
     if (!isUnderDiskRoot(diskRoot, targetPath)) {
       return { ok: false, error: `Path escapes project folder: ${rel}` };
     }
+    // Never persist the generic sparkles mark as public/logo.svg — family stamps own the slot.
+    // Previously we only skipped when a family mark was already on disk; invent could still
+    // re-sparkle an empty/sparkles file after Ready and win the overnight ceramic race.
+    const normRel = rel.replace(/\\/g, '/');
+    if (/(^|\/)public\/logo\.svg$/i.test(normRel) && isSparklesLogoSvg(content)) {
+      continue;
+    }
     const written = await window.novaDesktop.workspaceWriteFile({
       targetPath,
       content,
@@ -82,7 +104,8 @@ async function writeViaDiskRoot(
     }
     // Confirm bytes landed (dotted folder names / grant paths can silently miss).
     // IPC returns `{ ok, text }` — NOT `content` (that always failed verify and blocked edits).
-    if (window.novaDesktop.readTextFile && /\.(?:jsx?|tsx?|css|html|json)$/i.test(rel)) {
+    // Include .svg — genre logo/hero locks must not silently miss on disk.
+    if (window.novaDesktop.readTextFile && /\.(?:jsx?|tsx?|css|html|json|svg)$/i.test(rel)) {
       try {
         const check = await window.novaDesktop.readTextFile({ path: targetPath });
         const got = typeof check?.text === 'string' ? check.text : '';
@@ -101,6 +124,82 @@ async function writeViaDiskRoot(
       }
     }
   }
+  return { ok: true };
+}
+
+/** Persist only accepted create keys (depth accept-first — never write rejects). */
+export async function persistAcceptedCreateFiles(
+  diskRoot: string,
+  files: Record<string, string>,
+  keys: string[],
+  opts?: { deleteKeys?: string[] },
+): Promise<{ ok: boolean; error?: string }> {
+  const payload: Record<string, string> = {};
+  for (const k of keys) {
+    if (typeof files[k] === 'string') payload[k] = files[k]!;
+  }
+  // Drop App/main twins left on disk after in-memory cleanup (blank Live cause).
+  const deletes = new Set((opts?.deleteKeys || []).map((k) => k.replace(/\\/g, '/')));
+  try {
+    const { cleanupAppTwins } = await import('@/lib/createBuildQuality');
+    const twin = cleanupAppTwins({ ...files, ...payload });
+    for (const rel of twin.removed || []) {
+      if (rel) deletes.add(String(rel).replace(/\\/g, '/'));
+    }
+  } catch { /* best-effort */ }
+  if (Object.keys(payload).length) {
+    const written = await writeViaDiskRoot(diskRoot, payload);
+    if (!written.ok) return written;
+  }
+  if (deletes.size) {
+    try {
+      const { deleteFileOnDisk } = await import('@/lib/chatDiskOps');
+      for (const rel of deletes) {
+        if (!rel || payload[rel]) continue;
+        const abs = joinDisk(diskRoot, rel);
+        await deleteFileOnDisk({ filePath: abs, projectId: '', relPath: rel }).catch(() => {});
+      }
+    } catch { /* ignore */ }
+  }
+  return { ok: true };
+}
+
+/** Write public/logo.svg alone and confirm it is not still sparkles. */
+export async function persistGenreLogoSvg(
+  diskRoot: string,
+  logoSvg: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const body = String(logoSvg || '');
+  if (!body.trim()) return { ok: false, error: 'empty logo' };
+  if (/M9\.937 15\.5/i.test(body)) return { ok: false, error: 'refusing to persist sparkles mark' };
+  const once = await writeViaDiskRoot(diskRoot, { 'public/logo.svg': body });
+  if (!once.ok) return once;
+  try {
+    const abs = joinDisk(diskRoot, 'public/logo.svg');
+    const check = await window.novaDesktop?.readTextFile?.({ path: abs });
+    const got = typeof check?.text === 'string' ? check.text : '';
+    if (got && /M9\.937 15\.5/i.test(got)) {
+      const retry = await writeViaDiskRoot(diskRoot, { 'public/logo.svg': body });
+      if (!retry.ok) return retry;
+      const check2 = await window.novaDesktop?.readTextFile?.({ path: abs });
+      const got2 = typeof check2?.text === 'string' ? check2.text : '';
+      if (got2 && /M9\.937 15\.5/i.test(got2)) {
+        return { ok: false, error: 'logo still sparkles after retry' };
+      }
+    }
+  } catch {
+    /* verify best-effort */
+  }
+  // Brief settle — catch late invent overwrites that land within ~1s.
+  await new Promise((r) => window.setTimeout(r, 400));
+  try {
+    const abs = joinDisk(diskRoot, 'public/logo.svg');
+    const check = await window.novaDesktop?.readTextFile?.({ path: abs });
+    const got = typeof check?.text === 'string' ? check.text : '';
+    if (got && /M9\.937 15\.5/i.test(got)) {
+      await writeViaDiskRoot(diskRoot, { 'public/logo.svg': body });
+    }
+  } catch { /* ignore */ }
   return { ok: true };
 }
 
@@ -212,6 +311,12 @@ export async function applyChatReplyEdits(opts: {
   files: ProjectFileMap;
   userMessage?: string;
   diskRoot?: string | null;
+  /** Create product brief — used for antiBleed family (not the micro-edit ask). */
+  originalBrief?: string;
+  productBrief?: string;
+  generationBrief?: string;
+  /** When true, apply in memory only — no disk / sandbox write (depth accept-first). */
+  dryRun?: boolean;
 }): Promise<ChatApplyResult> {
   const rawUser = opts.userMessage || '';
   const kind = detectProjectKind(rawUser);
@@ -225,7 +330,8 @@ export async function applyChatReplyEdits(opts: {
     ? `${rawUser}\n\n${appendix}`
     : rawUser;
   let baseFiles = normalizeStudioFileKeys(opts.files, opts.diskRoot);
-  if (opts.diskRoot) {
+  // dryRun: memory is source of truth — do not re-hydrate disk orphans into the apply.
+  if (opts.diskRoot && !opts.dryRun) {
     const fromDisk = await hydrateFilesFromDiskRoot(opts.diskRoot);
     if (Object.keys(fromDisk).length) {
       const isThinShell = (src: string) => {
@@ -375,7 +481,19 @@ export async function applyChatReplyEdits(opts: {
     if (hasViteApp) {
       try {
         const { buildProductPlan, antiBleedForFamily } = await import('@/lib/createProductPlan');
-        const plan = buildProductPlan(rawUser, opts.projectName || '');
+        // Micro-edits must not re-infer family from "make the title bigger" (strips heroes).
+        const briefForFamily = String(
+          opts.originalBrief
+          || opts.productBrief
+          || opts.generationBrief
+          || '',
+        ).trim();
+        const microEdit = rawUser.trim().length < 120
+          && !/\b(?:rebuild|redesign|restyle|new\s+hero|change\s+the\s+layout)\b/i.test(rawUser);
+        const plan = buildProductPlan(
+          briefForFamily && microEdit ? briefForFamily : (briefForFamily || rawUser),
+          opts.projectName || '',
+        );
         const bled = antiBleedForFamily(next, plan);
         if (bled.changed) {
           const hadProducts = Boolean(next['src/data/products.ts']);
@@ -453,9 +571,61 @@ export async function applyChatReplyEdits(opts: {
     }
   }
 
+  // Never let invent/edit write the generic sparkles mark when this brief wants a family logo.
+  // Also blocks late async invent writes that finish after genre lock and re-sparkle disk.
+  try {
+    const { brandLogoSvgFor, logoIconifyFor } = await import('@/lib/brandAssets');
+    const { detectHeroProductKind } = await import('@/lib/createIdentity');
+    let want = logoIconifyFor(String(opts.projectName || ''), String(opts.userMessage || ''));
+    if (want === 'lucide:sparkles') {
+      const hk = detectHeroProductKind(
+        String(opts.projectName || ''),
+        String(opts.userMessage || ''),
+      );
+      if (hk === 'bottle') want = 'lucide:wine';
+      else if (hk === 'coffee') want = 'lucide:coffee';
+      else if (hk === 'tea') want = 'lucide:leaf';
+      else if (hk === 'ceramic') want = 'lucide:utensils';
+    }
+    for (const key of Object.keys(next)) {
+      if (!/(^|\/)public\/logo\.svg$/i.test(key.replace(/\\/g, '/'))) continue;
+      if (want === 'lucide:sparkles') continue;
+      const incoming = String(next[key] || '');
+      const matchesWant = want === 'lucide:wine' ? /M8 22h8/i.test(incoming)
+        : want === 'lucide:coffee' ? /M16 8a1 1 0 0 1 1 1v8|M10 2v2/i.test(incoming)
+          : want === 'lucide:leaf' ? /M11 20A7 7 0 0 1 9\.8/i.test(incoming)
+            : want === 'lucide:utensils' ? /M3 2v7c0 1\.1/i.test(incoming)
+              : !isSparklesLogoSvg(incoming);
+      // Stomp sparkles OR wrong-family marks (e.g. coffee mug onto gin).
+      if (matchesWant && !isSparklesLogoSvg(incoming)) continue;
+      const prev = String(baseFiles[key] || opts.files?.[key] || '');
+      const family = brandLogoSvgFor({
+        productName: String(opts.projectName || ''),
+        brief: String(opts.userMessage || ''),
+      });
+      const keep = (prev && isFamilyLogoSvg(prev) && !isSparklesLogoSvg(prev)) ? prev : family;
+      if (keep && !isSparklesLogoSvg(keep)) {
+        next[key] = keep;
+        if (!changed.includes(key)) changed.push(key);
+      }
+    }
+  } catch { /* brand logo guard best-effort */ }
+
   const payloadFiles = Object.fromEntries(
     changed.filter((p: string) => typeof next[p] === 'string').map((p: string) => [p, next[p]]),
   );
+
+  // Depth accept-first: measure ledger gain in memory with zero disk side effects.
+  if (opts.dryRun) {
+    return {
+      ok: true,
+      updated: changed,
+      deleted: [],
+      files: next,
+      reply: '',
+      ...(syntaxFailed ? { syntaxFailed: true, syntaxReasons } : {}),
+    };
+  }
 
   let wroteOk = false;
   let writeError: string | undefined;
@@ -515,10 +685,17 @@ export async function applyChatReplyEdits(opts: {
   }
 
   // Guarantee disk bytes for every claimed update (apply can report ok with a thinned map).
+  // Same sparkles→family refuse as writeViaDiskRoot — this path used to bypass that guard
+  // and re-sparkle logo.svg after genre lock.
   if (autoSave && opts.diskRoot && changed.length && window.novaDesktop?.workspaceWriteFile) {
     for (const rel of changed) {
       const body = next[rel];
       if (typeof body !== 'string') continue;
+      const normRel = rel.replace(/\\/g, '/');
+      // Never re-sparkle logo.svg on the post-apply guarantee pass either.
+      if (/(^|\/)public\/logo\.svg$/i.test(normRel) && isSparklesLogoSvg(body)) {
+        continue;
+      }
       try {
         await window.novaDesktop.workspaceWriteFile({
           targetPath: joinDisk(opts.diskRoot, rel),

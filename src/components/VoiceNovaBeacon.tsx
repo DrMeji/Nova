@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
-import { VoiceParticleRing, voicePhaseEnergy } from '@/components/VoiceParticleRing';
+import { VoiceDotCircle } from '@/components/VoiceDotCircle';
 
-/** Invisible hit target over the ring — no status label in the middle. */
+/** Invisible hit target over the sphere — no status label in the middle. */
 export function VoiceNovaBeacon(_props: { phase: VoiceSessionPhase }) {
   return (
     <div className="relative flex flex-col items-center justify-center select-none">
@@ -11,22 +10,11 @@ export function VoiceNovaBeacon(_props: { phase: VoiceSessionPhase }) {
   );
 }
 
+/** Active voice field — white sphere of dots. */
 export function VoiceParticleField({ phase }: { phase: VoiceSessionPhase }) {
-  const [energy, setEnergy] = useState(() => voicePhaseEnergy(phase));
-
-  useEffect(() => {
-    let raf = 0;
-    const tick = (t: number) => {
-      setEnergy(voicePhaseEnergy(phase, t));
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [phase]);
-
   return (
     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none" aria-hidden>
-      <VoiceParticleRing energy={energy} phase={phase} />
+      <VoiceDotCircle phase={phase} />
     </div>
   );
 }

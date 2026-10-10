@@ -73,14 +73,18 @@ export async function openInAppPreview(
   const projectId = opts?.projectId || 'chat-preview';
   if (window.novaDesktop?.previewOpenWindow) {
     const device = opts?.device || null;
+    try {
+      await window.novaDesktop.previewSetActiveChat?.({ projectId });
+    } catch { /* ignore */ }
     await window.novaDesktop.previewOpenWindow({
       projectId,
       url,
       title: opts?.title || (device ? `${device.label} · Preview` : 'Preview'),
       kind: device ? 'device' : 'web',
       device: device || undefined,
-      // Always navigate when opening — never leave another project's page visible.
-      forceNavigate: opts?.forceNavigate !== false,
+      show: true,
+      // Reload only when forced or when switching projects (main compares base URL).
+      forceNavigate: opts?.forceNavigate === true,
     });
     return true;
   }
@@ -131,12 +135,14 @@ export async function verifyLivePreviewUrl(url: string | null | undefined): Prom
         return false;
       }
       if (/jsxDEV|createElement|createRoot/.test(body)) return true;
-      return true;
+      // Transformed entry without classic markers — still accept.
+      if (body.length > 200 && !/<\?xml|<html[\s>]/i.test(body)) return true;
     } catch {
       /* try next entry */
     }
   }
-  return true;
+  // Fail closed for Vite — port up without a transformed entry is not Live.
+  return false;
 }
 
 /**

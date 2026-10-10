@@ -80,7 +80,7 @@ export function VoiceVizSettingsPanel() {
         <div>
           <p className="text-sm font-medium text-content-primary">Ring visualization</p>
           <p className="text-[11px] text-content-tertiary mt-0.5 leading-snug">
-            Motion, equalizer, thinking ripple, colors, and float-away for the Voice ring.
+            Motion, equalizer, thinking ripple, colors, and float-away for the Voice sphere.
           </p>
         </div>
         <button

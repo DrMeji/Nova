@@ -221,11 +221,13 @@ export default function App() {
 
 {
   const { genreFloor, defaultCopyPack, buildProductSpec } = await import('../src/lib/createLayoutContract.ts');
+  const appleBrief = 'apple.com-style product homepage Mac iPad Watch AirPods full-bleed';
   const spec = buildProductSpec({
-    brief: 'apple.com-style product homepage Mac iPad Watch AirPods full-bleed',
+    brief: appleBrief,
     productName: 'Northfield',
   });
-  const floor = genreFloor(spec.genre);
+  // Mac/iPad/Watch bands are brief-gated (non-Apple brands must not get them).
+  const floor = genreFloor(spec.genre, appleBrief);
   assert.ok(floor.sections.some((s) => s.id === 'mac'), `sections ${floor.sections.map((s) => s.id)}`);
   assert.ok(!floor.sections.some((s) => /^band-\d+$/i.test(s.id)), 'no band-N section ids');
   const copy = defaultCopyPack(spec, floor);

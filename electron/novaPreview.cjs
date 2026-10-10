@@ -12,6 +12,40 @@ const { app, BrowserWindow, session } = require('electron');
 const sessions = new Map();
 /** @type {Map<string, import('electron').BrowserWindow>} */
 const previewWindows = new Map();
+/** Chat-scoped Live owner (`chat-…`). Prevents another thread's probe from showing over the active chat. */
+let activeLiveOwnerId = null;
+
+function isWebLiveWindowKey(key) {
+  const k = String(key || '');
+  return k === 'NOVA-live-preview'
+    || k === 'chat-preview'
+    || k === 'default'
+    || /^chat[-:]/i.test(k);
+}
+
+function closeOtherWebLiveWindows(exceptId) {
+  for (const [key, w] of [...previewWindows.entries()]) {
+    if (exceptId && key === exceptId) continue;
+    if (!isWebLiveWindowKey(key)) continue;
+    try {
+      if (w && !w.isDestroyed()) w.close();
+    } catch { /* ignore */ }
+    previewWindows.delete(key);
+  }
+}
+
+function liveWindowIdForPayload(payload, kind) {
+  if (kind === 'device') {
+    return String(payload?.projectId || 'device-preview');
+  }
+  const raw = String(payload?.projectId || '').trim();
+  if (raw && isWebLiveWindowKey(raw)) return raw;
+  if (raw) {
+    const safe = raw.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96);
+    return safe ? (safe.startsWith('chat-') || safe.startsWith('chat:') ? safe : `chat-${safe}`) : 'NOVA-live-preview';
+  }
+  return 'NOVA-live-preview';
+}
 
 /** Isolated from the NOVA shell session — Chromium zoom is per-host+partition. */
 const PREVIEW_PARTITION = 'nova-live-preview';
@@ -193,6 +227,15 @@ async function stopPreview(projectId) {
   });
   sessions.delete(id);
   return { ok: true };
+}
+
+/** Kill every preview HTTP session — app quit / reload so ports are free. */
+async function stopAllPreviews() {
+  const ids = [...sessions.keys()];
+  for (const id of ids) {
+    try { await stopPreview(id); } catch { /* ignore */ }
+  }
+  return { ok: true, stopped: ids.length };
 }
 
 function deviceShellHtml(url, device) {
@@ -424,13 +467,46 @@ function attachPreviewLoadGuards(win) {
   win.__novaPreviewGuards = true;
   let shown = false;
   const showFail = async (reason) => {
-    if (shown || !win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) return;
+    if (shown) {
+      try {
+        const stillUp = await win.webContents.executeJavaScript(
+          `Boolean(document.getElementById('nova-preview-fail'))`,
+          true,
+        );
+        if (stillUp) return;
+      } catch { return; }
+    }
     shown = true;
-    // Never paint the black "Live Preview could not render" card — close Live instead.
-    // Chat/create already owns the fix path; this overlay was the user-visible failure.
+    try { win.__novaPreviewGuardsShown = true; } catch { /* ignore */ }
+    const nice = sanitizePreviewFailMessage(reason).slice(0, 220);
     try {
-      win.__novaPreviewFailReason = sanitizePreviewFailMessage(reason).slice(0, 220);
+      win.__novaPreviewFailReason = nice;
     } catch { /* ignore */ }
+    const userVisible = Boolean(
+      win.__novaPreviewUserVisible || (typeof win.isVisible === 'function' && win.isVisible()),
+    );
+    // User-visible Live used to stay pure black (vite overlay is hidden). Paint a short
+    // Nova message so SoftPalm-class compile crashes are not a silent void.
+    if (userVisible) {
+      try {
+        const msg = JSON.stringify(
+          nice || 'This page failed to compile — tell me what looks wrong in chat and I will fix it.',
+        );
+        await win.webContents.executeJavaScript(`(() => {
+          try { document.querySelectorAll('vite-error-overlay').forEach((el) => el.remove()); } catch {}
+          try { const n = document.getElementById('nova-preview-fail'); if (n) n.remove(); } catch {}
+          var el = document.createElement('div');
+          el.id = 'nova-preview-fail';
+          el.setAttribute('role', 'alert');
+          el.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:2rem;background:#07090d;color:#e8eef4;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;text-align:center;';
+          el.textContent = ${msg};
+          document.documentElement.appendChild(el);
+          return true;
+        })()`, true);
+      } catch { /* ignore */ }
+      return;
+    }
     try {
       await win.webContents.executeJavaScript(`(() => {
         try { document.querySelectorAll('vite-error-overlay').forEach((el) => el.remove()); } catch {}
@@ -450,7 +526,7 @@ function attachPreviewLoadGuards(win) {
     // Keep raw for host diagnostics — never show raw paths to the user overlay.
     if (
       level >= 2
-      || /SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named|TypeError|ReferenceError|Uncaught/i.test(msg)
+      || /SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named|TypeError|ReferenceError|Uncaught|EvalError/i.test(msg)
     ) {
       try {
         const buf = win.__novaConsoleErrors;
@@ -460,7 +536,14 @@ function attachPreviewLoadGuards(win) {
         }
       } catch { /* ignore */ }
     }
-    if (/SyntaxError|Failed to fetch dynamically imported module|Unexpected token|does not provide an export named|plugin:vite|Transform failed|Expected corresponding JSX/i.test(msg)) {
+    // Close Live only for Vite/module compile failures — never for in-app runtime
+    // errors (calculator `eval` SyntaxError, React warnings, etc.). Those used to
+    // slam the window shut when the user pressed "=".
+    const viteCompile =
+      /plugin:vite|Transform failed|Failed to fetch dynamically imported module|does not provide an export named|Expected corresponding JSX|Failed to resolve import|Internal Server Error/i.test(msg)
+      || (/SyntaxError|Unexpected token/i.test(msg)
+        && /\.(?:tsx?|jsx?)\b|vite|import\s|export\s|<\/?[A-Za-z]/.test(msg));
+    if (viteCompile) {
       showFail(msg).catch(() => {});
     }
   });
@@ -526,6 +609,17 @@ function scheduleBlankRootCheck(win) {
         }
         return;
       }
+      // Late HMR mount — clear a premature blank-fail card.
+      if (probe.kids > 0 || probe.htmlLen >= 24 || probe.textLen >= 8) {
+        try {
+          await win.webContents.executeJavaScript(
+            `(() => { try { const n = document.getElementById('nova-preview-fail'); if (n) n.remove(); } catch (e) {} return true; })()`,
+            true,
+          );
+          win.__novaPreviewGuardsShown = false;
+        } catch { /* ignore */ }
+        return;
+      }
       // Empty #root after settle = blank Live (classic create crash / missing mount).
       if (probe.kids === 0 && probe.htmlLen < 8 && probe.textLen < 4) {
         const showFail = win.__novaPreviewShowFail;
@@ -533,10 +627,14 @@ function scheduleBlankRootCheck(win) {
           await showFail(
             'The page loaded but React never mounted into #root (blank Live). Re-run the build or say repair Live preview.',
           );
+        } else {
+          try {
+            win.__novaPreviewFailReason = 'The page loaded but React never mounted into #root (blank Live).';
+          } catch { /* ignore */ }
         }
       }
     })();
-  }, 3200);
+  }, 5200);
 }
 
 /** Race a promise so a wedged BrowserWindow cannot hang create/Live forever. */
@@ -556,24 +654,42 @@ function withTimeout(promise, ms, label) {
 /** Probe whether the Live window actually painted UI (for create “verified” honesty). */
 async function probePreviewMounted(payload) {
   const url = String(payload?.url || '').trim();
-  const id = 'NOVA-live-preview';
+  // Per-chat window — never reuse another thread's Live for evidence.
+  const id = liveWindowIdForPayload(payload, 'web');
   // Hard wall for the whole probe — wedged preview JS used to freeze TipWise ~11m on Fixing.
   const hardMs = Math.max(8_000, Math.min(20_000, Number(payload?.hardTimeoutMs) || 14_000));
   const run = async () => {
     let win = previewWindows.get(id);
     if ((!win || win.isDestroyed()) && url) {
+      // Hidden probe — do not flash Live while create is still verifying.
       const opened = await withTimeout(
         openPreviewWindow({
           url,
           title: String(payload?.title || 'Preview'),
           projectId: id,
           forceNavigate: true,
+          show: false,
         }),
         Math.min(10_000, hardMs),
         'openPreviewWindow timeout',
       );
       if (!opened?.ok) return { ok: false, mounted: false, error: opened?.error || 'open failed' };
       win = previewWindows.get(id);
+    } else if (win && !win.isDestroyed() && url && !win.__novaPreviewUserVisible) {
+      // Already probing hidden — stay on the same page (no reload flicker).
+      try {
+        const cur = win.webContents.getURL() || '';
+        if (previewBaseUrl(cur) !== previewBaseUrl(url)) {
+          await openPreviewWindow({
+            url,
+            title: String(payload?.title || 'Preview'),
+            projectId: id,
+            forceNavigate: true,
+            show: false,
+          });
+          win = previewWindows.get(id);
+        }
+      } catch { /* ignore */ }
     }
     if (!win || win.isDestroyed()) {
       return { ok: false, mounted: false, error: 'No preview window' };
@@ -675,6 +791,17 @@ async function loadDeviceIntoWindow(win, id, url, device, title) {
   await win.loadURL(shellUrl);
 }
 
+function previewBaseUrl(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    u.searchParams.delete('_ark');
+    u.hash = '';
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return String(raw || '').replace(/[?&]_ark=\d+/g, '');
+  }
+}
+
 async function openPreviewWindow(payload) {
   const url = String(payload?.url || '');
   if (!url) return { ok: false, error: 'No preview URL' };
@@ -684,28 +811,30 @@ async function openPreviewWindow(payload) {
   const rawTitle = String(payload?.title || (device ? `${device.label} · NOVA Preview` : 'NOVA Preview'));
   const title = `NOVA Preview · ${rawTitle}`;
   const size = kind === 'device' && device ? deviceWindowSize(device) : { width: 1100, height: 780 };
+  // Evidence probes open hidden so Live does not flicker open/close while crafting.
+  // Explicit Live pill / user open passes show: true (default).
+  const showWin = payload?.show !== false;
+  // Only force a reload when the caller asks — same-URL reuse stops create flicker.
+  const forceNavigate = payload?.forceNavigate === true;
 
-  // One live web preview window for the whole app — always navigate to the URL for the
-  // active chat's project (never leave another chat's localhost visible).
-  const id = kind === 'device'
-    ? String(payload?.projectId || 'device-preview')
-    : 'NOVA-live-preview';
+  // Per-chat Live window. Shared NOVA-live-preview only when no chat projectId given.
+  const id = liveWindowIdForPayload(payload, kind);
 
   if (kind === 'web') {
-    for (const [key, win] of [...previewWindows.entries()]) {
-      if (key === id) continue;
-      if (key.startsWith('chat:') || key === 'chat-preview' || key === 'default') {
-        try {
-          if (win && !win.isDestroyed()) win.close();
-        } catch {
-          /* ignore */
-        }
-        previewWindows.delete(key);
-      }
+    // Visible open for this chat: kill every other chat's Live so it cannot bleed over.
+    if (showWin) {
+      activeLiveOwnerId = id;
+      closeOtherWebLiveWindows(id);
+    } else if (activeLiveOwnerId && activeLiveOwnerId !== id) {
+      // Background evidence for another chat — keep that probe hidden; never steal the active Live.
+      // Still allow a hidden window for this id (create verify), but do not close the active one.
+    } else {
+      // No active owner yet — close legacy shared window so probes don't inherit the wrong URL.
+      closeOtherWebLiveWindows(id);
     }
   }
 
-  // Bust Vite/HTML caches so switching chats cannot show a stale document.
+  // Bust Vite/HTML caches only when we actually navigate.
   let navigateUrl = url;
   try {
     const u = new URL(url);
@@ -714,6 +843,24 @@ async function openPreviewWindow(payload) {
   } catch {
     navigateUrl = url;
   }
+
+  const reveal = (win) => {
+    if (!win || win.isDestroyed()) return;
+    win.__novaLiveOwnerId = id;
+    if (showWin) {
+      win.__novaPreviewUserVisible = true;
+      activeLiveOwnerId = id;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } else if (win.__novaPreviewUserVisible || (typeof win.isVisible === 'function' && win.isVisible())) {
+      // Probe reuse: never demote / hide a Live the user already opened (open↔close loop).
+    } else {
+      // Hidden probe only — leave flag false; do not show.
+      win.__novaPreviewUserVisible = false;
+    }
+    restoreShellChromeZoom();
+  };
 
   const existing = previewWindows.get(id);
   if (existing && !existing.isDestroyed()) {
@@ -732,7 +879,16 @@ async function openPreviewWindow(payload) {
           existing.setMinimumSize(480, 360);
           existing.setMaximumSize(4000, 3000);
           existing.setTitle(title);
-          // Always navigate for live web preview — never reload another project's host.
+        } catch { /* ignore */ }
+        let cur = '';
+        try { cur = existing.webContents.getURL() || ''; } catch { /* ignore */ }
+        const sameProject = previewBaseUrl(cur) === previewBaseUrl(url);
+        // Reuse without reload when evidence re-probes the same Live URL (stops flicker).
+        if (!forceNavigate && sameProject && cur && !/^about:blank/i.test(cur)) {
+          reveal(existing);
+          return { ok: true, reused: true, navigated: false };
+        }
+        try {
           await existing.loadURL(navigateUrl);
         } catch {
           try {
@@ -744,11 +900,8 @@ async function openPreviewWindow(payload) {
         scheduleBlankRootCheck(existing);
         try { fitPreviewZoom(existing); } catch { /* ignore */ }
       }
-      if (existing.isMinimized()) existing.restore();
-      existing.show();
-      existing.focus();
-      restoreShellChromeZoom();
-      return { ok: true, reused: true };
+      reveal(existing);
+      return { ok: true, reused: true, navigated: true };
     }
   }
 
@@ -762,6 +915,7 @@ async function openPreviewWindow(payload) {
     maximizable: kind !== 'device',
     minimizable: true,
     useContentSize: true,
+    show: false, // reveal after load when showWin
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -771,6 +925,7 @@ async function openPreviewWindow(payload) {
     },
   });
   previewWindows.set(id, win);
+  win.__novaPreviewUserVisible = showWin;
   attachPreviewLoadGuards(win);
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
@@ -811,35 +966,54 @@ async function openPreviewWindow(payload) {
   } else {
     await win.loadURL(navigateUrl);
   }
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+  reveal(win);
+  return { ok: true };
+}
+
+function closeLivePreviewWindow(payload) {
+  const onlyId = payload?.projectId
+    ? liveWindowIdForPayload({ projectId: payload.projectId }, 'web')
+    : null;
+  if (onlyId) {
+    const win = previewWindows.get(onlyId);
+    if (win && !win.isDestroyed()) {
+      try { win.close(); } catch { /* ignore */ }
+    }
+    previewWindows.delete(onlyId);
+    if (activeLiveOwnerId === onlyId) activeLiveOwnerId = null;
+  } else {
+    // Chat switch / New Chat — close every web Live so nothing bleeds into the next thread.
+    closeOtherWebLiveWindows(null);
+    activeLiveOwnerId = null;
+  }
   restoreShellChromeZoom();
   return { ok: true };
 }
 
-function closeLivePreviewWindow() {
-  const id = 'NOVA-live-preview';
-  const win = previewWindows.get(id);
-  if (win && !win.isDestroyed()) {
-    try { win.close(); } catch { /* ignore */ }
+/** Renderer sets the active chat so background probes cannot surface another project's Live. */
+function setActiveLiveChat(payload) {
+  const raw = String(payload?.projectId || payload?.chatId || '').trim();
+  if (!raw) {
+    activeLiveOwnerId = null;
+    return { ok: true, activeLiveOwnerId: null };
   }
-  previewWindows.delete(id);
+  activeLiveOwnerId = liveWindowIdForPayload({ projectId: raw }, 'web');
+  // Hide any other visible Live windows belonging to other chats.
   for (const [key, w] of [...previewWindows.entries()]) {
-    if (key.startsWith('chat:') || key === 'chat-preview' || key === 'default') {
-      try {
-        if (w && !w.isDestroyed()) w.close();
-      } catch { /* ignore */ }
-      previewWindows.delete(key);
-    }
+    if (!isWebLiveWindowKey(key) || key === activeLiveOwnerId) continue;
+    try {
+      if (w && !w.isDestroyed()) {
+        w.__novaPreviewUserVisible = false;
+        if (w.isVisible()) w.hide();
+      }
+    } catch { /* ignore */ }
   }
-  restoreShellChromeZoom();
-  return { ok: true };
+  return { ok: true, activeLiveOwnerId };
 }
 
 /** Push updated files into a running preview and reload the NOVA preview window. */
 async function updatePreview(payload) {
-  const id = String(payload?.projectId || 'default');
+  const id = liveWindowIdForPayload(payload, 'web');
   const files = payload?.files || {};
   const projectName = payload?.projectName || 'Preview';
   let session = sessions.get(id);
@@ -858,15 +1032,20 @@ async function updatePreview(payload) {
       const currentUrl = String(win.webContents.getURL() || '');
       // Item 16: Vite Live on 52xx — prefer HMR (no cache-bust reload). Soft reload only if needed.
       const viteLive = /127\.0\.0\.1:52\d{2}|localhost:52\d{2}/i.test(currentUrl);
+      const mayShow = win.__novaPreviewUserVisible && (!activeLiveOwnerId || activeLiveOwnerId === id);
       if (viteLive) {
         // Disk writes already landed; Vite HMR updates the page. Avoid reloadIgnoringCache thrash.
-        if (win.isMinimized()) win.restore();
-        win.show();
+        if (mayShow) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+        }
         return { ok: true, url: currentUrl || url, reloaded: false, hmr: true };
       }
       await win.webContents.reloadIgnoringCache();
-      if (win.isMinimized()) win.restore();
-      win.show();
+      if (mayShow) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+      }
     } catch {
       /* ignore */
     }
@@ -911,11 +1090,12 @@ function previewStatus(projectId) {
 }
 
 function captureLivePreview() {
-  const id = 'NOVA-live-preview';
+  const id = activeLiveOwnerId || 'NOVA-live-preview';
   let win = previewWindows.get(id);
   if (!win || win.isDestroyed()) {
-    for (const [, w] of previewWindows.entries()) {
-      if (w && !w.isDestroyed()) {
+    for (const [key, w] of previewWindows.entries()) {
+      if (!isWebLiveWindowKey(key)) continue;
+      if (w && !w.isDestroyed() && w.__novaPreviewUserVisible) {
         win = w;
         break;
       }
@@ -936,12 +1116,20 @@ function captureLivePreview() {
 module.exports = {
   startPreview,
   stopPreview,
+  stopAllPreviews,
   previewStatus,
   openPreviewWindow,
   closeLivePreviewWindow,
+  setActiveLiveChat,
   updatePreview,
   reloadPreviewWindow,
   captureLivePreview,
   probePreviewMounted,
   restoreShellChromeZoom,
+  /** Test hooks (scripts/smoke-live-ownership.mjs) — not used by the app. */
+  __test: {
+    previewWindows,
+    getActiveLiveOwnerId: () => activeLiveOwnerId,
+    setActiveLiveOwnerId: (v) => { activeLiveOwnerId = v; },
+  },
 };

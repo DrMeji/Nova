@@ -11,10 +11,11 @@ import {
   finalizeCreateEvidence,
   formatEvidenceForAgent,
   createRuntimeStageLabel,
+  verifyCreateRenderedQuality,
   type CreateEvidence,
 } from '@/lib/createEvidence';
 import { snapshotCreateCheckpoint } from '@/lib/createCheckpoint';
-import { condenseBrief, condenseObservations } from '@/lib/createProjectMap';
+import { condenseObservations } from '@/lib/createProjectMap';
 import {
   formatCreateCommanderFixPrompt,
   gateDesignPass,
@@ -23,6 +24,8 @@ import {
   createPassStatusLabel,
   type CreateVerifiedVerdict,
 } from '@/lib/createPassSpine';
+import { isThinCreatePath } from '@/lib/createThinPath';
+import { liveOwnerKey } from '@/lib/liveOwnerKey';
 
 export type CreateRuntimeLoopHost = {
   pushStatus: (label: string, writingPath?: string | null) => void;
@@ -46,6 +49,8 @@ export type CreateRuntimeFixResult = {
 
 /** Heal + commander rounds before giving up on quality. */
 const MAX_FIX_ROUNDS = 3;
+/** Thin create: more rounds so repair + commander can run after the first heals. */
+const THIN_MAX_FIX_ROUNDS = 5;
 
 /**
  * After static Ready + npm + Live URL: prove Live, then auto-heal/fix up to MAX_FIX_ROUNDS.
@@ -67,23 +72,130 @@ export async function runCreateVerifyAndFix(opts: {
 }): Promise<CreateRuntimeFixResult> {
   let files = { ...opts.files };
   let observations: string[] = [];
-  const maxRounds = Math.max(1, Math.min(8, opts.maxFixRounds ?? MAX_FIX_ROUNDS));
+  const thin = isThinCreatePath();
+  // Thin path: heal + syntax + plan repair / near-ready / commander when quality fails — never
+  // stuck at 2 rounds (too few for syntax heal → Live → quality repair).
+  const maxRounds = Math.max(
+    1,
+    Math.min(8, opts.maxFixRounds ?? (thin ? THIN_MAX_FIX_ROUNDS : MAX_FIX_ROUNDS)),
+  );
   let fixRounds = 0;
-  const brief = condenseBrief(opts.brief);
+  // Keep the user's original requirements intact through every verifier and repair prompt.
+  // Plan/ensemble notes may be long, but must not push the actual ask out of the capped brief.
+  const brief = String(opts.brief || '').trim();
+  // Thin create never unlocks quality via floors — flag only denies Ready.
   let floorFallback = Boolean(opts.floorFallback);
+  if (thin && floorFallback) {
+    observations.push('thin create: floorFallback present — quality Ready blocked');
+  }
 
   snapshotCreateCheckpoint(files, opts.productName, {
     label: 'pre-verify',
     diskRoot: opts.diskRoot,
   });
 
-  let evidence = emptyCreateEvidence({
+  let   evidence = emptyCreateEvidence({
     staticReady: opts.staticReady,
     staticReasons: opts.staticReasons || [],
     npmInstalled: opts.npmInstalled,
     liveUrl: opts.liveUrl,
     stage: 'live',
   });
+
+  const refreshEvidenceAfterFix = async (reason: string) => {
+    // A repair may affect the currently served files. Persist, wait for Vite/HMR, then
+    // measure the exact source snapshot used by the gate before reporting Live/Ready.
+    const appKey = files['src/App.jsx'] ? 'src/App.jsx' : files['src/App.tsx'] ? 'src/App.tsx' : '';
+    if (opts.diskRoot && appKey) {
+      const edit = await applyChatReplyEdits({
+        reply: [
+          `@@@FILE ${appKey}\n${files[appKey]}`,
+          files['src/App.css'] ? `@@@FILE src/App.css\n${files['src/App.css']}` : '',
+          files['src/index.css'] ? `@@@FILE src/index.css\n${files['src/index.css']}` : '',
+          ...Object.entries(files).filter(([path]) => /^src\/sections\/.+\.jsx?$/i.test(path.replace(/\\/g, '/')))
+            .map(([path, body]) => `@@@FILE ${path}\n${body}`),
+        ].filter(Boolean).join('\n'),
+        projectId: opts.projectId,
+        projectName: opts.productName,
+        files,
+        userMessage: brief,
+        diskRoot: opts.diskRoot,
+        originalBrief: brief,
+      }).catch(() => null);
+      if (edit?.ok) files = edit.files;
+    }
+    opts.host.pushStatus(createRuntimeStageLabel('live', `rechecking after ${reason}`));
+    try { await window.novaDesktop?.getOrAttachPreview?.(opts.diskRoot); } catch { /* best effort */ }
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    evidence = await probeOnce();
+  };
+
+  // Pre-Live import gate (static): catch missing relative imports.
+  let staticImportBlocked = false;
+  {
+    const appSrc = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+    const importMisses: string[] = [];
+    const relImports = appSrc.matchAll(/from\s+['"](\.[^'"]+)['"]/g);
+    for (const m of relImports) {
+      const spec = String(m[1] || '').replace(/\\/g, '/');
+      const base = spec.replace(/^\.\//, 'src/').replace(/^\.\.\//, '');
+      const candidates = [
+        base,
+        `${base}.js`, `${base}.jsx`, `${base}.ts`, `${base}.tsx`, `${base}.css`,
+        `${base}/index.js`, `${base}/index.jsx`,
+      ];
+      const hit = candidates.some((c) => Boolean(files[c]) || Boolean(files[c.replace(/^src\//, '')]));
+      if (!hit && /sections?|components?|styles?\//i.test(spec)) {
+        importMisses.push(spec);
+      }
+    }
+    if (importMisses.length) {
+      staticImportBlocked = true;
+      const msg = `Missing imports in App: ${importMisses.slice(0, 4).join(', ')}`;
+      observations.push(msg);
+      evidence = finalizeCreateEvidence({
+        ...evidence,
+        staticReady: false,
+        staticReasons: [...(opts.staticReasons || []), msg],
+      });
+    }
+  }
+
+  // Bounded vite build via desktop agentRun (never renderer spawn — hangs Windows).
+  // Soft: failure feeds observations; skipped when static imports already broken.
+  if (
+    !staticImportBlocked
+    && opts.diskRoot
+    && files['package.json']
+    && opts.npmInstalled
+    && typeof window !== 'undefined'
+    && window.novaDesktop?.agentRun
+  ) {
+    try {
+      opts.host.pushStatus('Build gate · vite build (bounded)…');
+      const build = await Promise.race([
+        window.novaDesktop.agentRun({
+          command: 'npm run build --if-present',
+          cwd: opts.diskRoot,
+          userConfirmed: true,
+          skipConfirm: true,
+        }),
+        new Promise<{ ok: false; error: string }>((resolve) => {
+          window.setTimeout(() => resolve({ ok: false, error: 'build gate timed out (90s)' }), 90_000);
+        }),
+      ]);
+      if (!build?.ok) {
+        const errText = String((build as { error?: string; output?: string })?.error
+          || (build as { output?: string })?.output
+          || 'build failed').slice(0, 400);
+        observations.push(`vite build gate: ${errText}`);
+      } else {
+        observations.push('vite build gate: ok');
+      }
+    } catch (e) {
+      observations.push(`vite build gate skipped: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   const probeOnce = async () => {
     opts.host.pushStatus(createRuntimeStageLabel('live'));
@@ -95,6 +207,7 @@ export async function runCreateVerifyAndFix(opts: {
       brief,
       requireSmoke: false,
       onStatus: (label) => opts.host.pushStatus(label),
+      projectId: liveOwnerKey(opts.projectId),
     });
     evidence = finalizeCreateEvidence({
       ...evidence,
@@ -141,6 +254,7 @@ export async function runCreateVerifyAndFix(opts: {
     if (floorFallback && fixRounds >= 1 && evidence.pass) break;
 
     fixRounds += 1;
+    let filesChanged = false;
     opts.host.pushStatus(createRuntimeStageLabel('fix', `round ${fixRounds}/${maxRounds}`));
     opts.host.onStage?.('fix', `round ${fixRounds}`);
     opts.host.pushStatus(createPassStatusLabel('verify', `fix ${fixRounds}`));
@@ -163,11 +277,13 @@ export async function runCreateVerifyAndFix(opts: {
         const closed = healNearCompleteTruncatedSource(appKey, files[appKey]);
         if (closed && closed !== files[appKey]) {
           files = { ...files, [appKey]: closed };
+          filesChanged = true;
           observations.push(`fix: healed truncated ${appKey}`);
         }
         const jsxFixed = healBrokenJsxOpenTags(files[appKey]);
         if (jsxFixed !== files[appKey]) {
           files = { ...files, [appKey]: jsxFixed };
+          filesChanged = true;
           observations.push(`fix: surgical JSX open-tags on ${appKey}`);
         }
       }
@@ -175,20 +291,15 @@ export async function runCreateVerifyAndFix(opts: {
       const syn = runCreateSyntaxGate(files);
       if (syn.healed) {
         files = syn.files;
+        filesChanged = true;
         observations.push('fix: syntax gate heal');
       }
 
-      // Compile / storefront bleed kills Live — strip + heal before re-probe.
-      const compileish = !syn.ok
-        || evidence.consoleErrors.some((e) => /vite|syntax|adjacent jsx|transform failed|could not be compiled|overlay/i.test(String(e || '')))
-        || /NOVA_STOREFRONT_ISLAND|data-nova=["']storefront-island["']/.test(
-          files['src/App.tsx'] || files['src/App.jsx'] || '',
-        );
-      if (compileish) {
+      // Thin path: strip-only bleed + syntax. No plan repair / near-ready / commander salvage.
+      if (thin) {
         try {
           const {
             buildProductPlan,
-            repairToContract,
             stripWrongFamilyStorefrontBleed,
           } = await import('@/lib/createProductPlan');
           const plan = buildProductPlan(brief, opts.productName);
@@ -198,76 +309,125 @@ export async function runCreateVerifyAndFix(opts: {
               const cleaned = stripWrongFamilyStorefrontBleed(files[appKeyBleed]);
               if (cleaned !== files[appKeyBleed]) {
                 files = { ...files, [appKeyBleed]: cleaned };
+                filesChanged = true;
                 delete files['src/data/products.ts'];
                 observations.push('fix: stripped wrong-family storefront bleed');
               }
             }
           }
-          const repaired = repairToContract(files, plan, brief);
-          if (repaired.changed) {
-            files = repaired.files;
-            observations.push(`fix: compile repair (${repaired.actions.slice(0, 4).join(', ')})`);
-          }
           const syn2 = runCreateSyntaxGate(files);
           if (syn2.healed || syn2.files !== files) {
             files = syn2.files;
+            filesChanged = true;
             observations.push('fix: syntax gate after bleed strip');
           }
         } catch {
           /* bleed strip optional */
         }
-      }
-
-      // Plan repair before near-ready (structure pass).
-      // If repair owns the product shell, keep files for Live but mark floorFallback so quality Ready fails.
-      if (!floorFallback) {
-        try {
-          const { buildProductPlan, repairToContract } = await import('@/lib/createProductPlan');
-          const plan = buildProductPlan(brief, opts.productName);
-          opts.host.pushStatus(createPassStatusLabel('structure', plan.compositionFamily));
-          const repaired = repairToContract(files, plan, brief);
-          if (repaired.changed) {
-            files = repaired.files;
-            observations.push(`fix: plan repair (${repaired.actions.slice(0, 4).join(', ')})`);
-            if (repaired.repairOwnedProduct || repaired.needFloor) {
-              floorFallback = true;
-              observations.push('fix: repair owned product — Live unlock only (not quality Ready)');
+      } else {
+        // Compile / storefront bleed kills Live — strip + heal before re-probe.
+        const compileish = !syn.ok
+          || evidence.consoleErrors.some((e) => /vite|syntax|adjacent jsx|transform failed|could not be compiled|overlay/i.test(String(e || '')))
+          || /NOVA_STOREFRONT_ISLAND|data-nova=["']storefront-island["']/.test(
+            files['src/App.tsx'] || files['src/App.jsx'] || '',
+          );
+        if (compileish) {
+          try {
+            const {
+              buildProductPlan,
+              repairToContract,
+              stripWrongFamilyStorefrontBleed,
+            } = await import('@/lib/createProductPlan');
+            const plan = buildProductPlan(brief, opts.productName);
+            if (plan.compositionFamily !== 'catalog-store') {
+              const appKeyBleed = files['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
+              if (appKeyBleed && files[appKeyBleed]) {
+                const cleaned = stripWrongFamilyStorefrontBleed(files[appKeyBleed]);
+                if (cleaned !== files[appKeyBleed]) {
+                  files = { ...files, [appKeyBleed]: cleaned };
+                  filesChanged = true;
+                  delete files['src/data/products.ts'];
+                  observations.push('fix: stripped wrong-family storefront bleed');
+                }
+              }
             }
+            const repaired = repairToContract(files, plan, brief);
+            if (repaired.changed) {
+              files = repaired.files;
+              filesChanged = true;
+              observations.push(`fix: compile repair (${repaired.actions.slice(0, 4).join(', ')})`);
+            }
+            const syn2 = runCreateSyntaxGate(files);
+            if (syn2.healed || syn2.files !== files) {
+              files = syn2.files;
+              filesChanged = true;
+              observations.push('fix: syntax gate after bleed strip');
+            }
+          } catch {
+            /* bleed strip optional */
           }
-        } catch {
-          /* plan repair optional */
         }
       }
 
-      const near = healNearReadyCreateUi(files, opts.productName, brief);
-      if (near.changed) {
-        files = near.files;
-        observations.push(`fix: near-ready heal (${near.actions.join(', ') || 'ok'})`);
-      }
-
-      if (evidence.mounted && (!evidence.smokeOk || !evidence.consoleClean)) {
-        try {
-          const { reactSurgicalMicroAskEdits, askLooksLikeMarketingOrProductHomepage } = await import('@/lib/webProjectCanon');
-          if (askLooksLikeMarketingOrProductHomepage(brief)) {
-            observations.push('fix: skip surgical micro (marketing/product homepage)');
-          } else {
-            const patches = reactSurgicalMicroAskEdits(files, brief);
-            if (patches.length) {
-              for (const e of patches) {
-                if (e.path && e.content) files = { ...files, [e.path]: e.content };
+      {
+        // Plan repair before near-ready (structure pass) — thin create runs it too when
+        // syntax/Live/quality still fails (never leave creates stuck on strip-only rounds).
+        // If repair owns the product shell, keep files for Live but mark floorFallback so quality Ready fails.
+        const thinRepairWanted = !thin || !syn.ok || !evidence.pass || fixRounds >= 2;
+        if (!floorFallback && thinRepairWanted) {
+          try {
+            const { buildProductPlan, repairToContract } = await import('@/lib/createProductPlan');
+            const plan = buildProductPlan(brief, opts.productName);
+            opts.host.pushStatus(createPassStatusLabel('structure', plan.compositionFamily));
+            const repaired = repairToContract(files, plan, brief);
+            if (repaired.changed) {
+              files = repaired.files;
+              filesChanged = true;
+              observations.push(`fix: plan repair (${repaired.actions.slice(0, 4).join(', ')})`);
+              if (repaired.repairOwnedProduct || repaired.needFloor) {
+                floorFallback = true;
+                observations.push('fix: repair owned product — Live unlock only (not quality Ready)');
               }
-              observations.push(`fix: surgical micro (${patches.length} files)`);
             }
+          } catch {
+            /* plan repair optional */
           }
-        } catch { /* optional */ }
-      }
+        }
 
-      const gate = previewReadyForBrief(files, {
-        productName: opts.productName,
-        brief,
-      });
-      if (!gate.ok) {
-        observations.push(`fix: still not static Ready — ${(gate.reasons || []).slice(0, 4).join('; ')}`);
+        if (thinRepairWanted) {
+          const near = healNearReadyCreateUi(files, opts.productName, brief);
+          if (near.changed) {
+            files = near.files;
+            filesChanged = true;
+            observations.push(`fix: near-ready heal (${near.actions.join(', ') || 'ok'})`);
+          }
+        }
+
+        if (evidence.mounted && (!evidence.smokeOk || !evidence.consoleClean)) {
+          try {
+            const { reactSurgicalMicroAskEdits, askLooksLikeMarketingOrProductHomepage } = await import('@/lib/webProjectCanon');
+            if (askLooksLikeMarketingOrProductHomepage(brief)) {
+              observations.push('fix: skip surgical micro (marketing/product homepage)');
+            } else {
+              const patches = reactSurgicalMicroAskEdits(files, brief);
+              if (patches.length) {
+                for (const e of patches) {
+                  if (e.path && e.content) files = { ...files, [e.path]: e.content };
+                }
+                filesChanged = true;
+                observations.push(`fix: surgical micro (${patches.length} files)`);
+              }
+            }
+          } catch { /* optional */ }
+        }
+
+        const gate = previewReadyForBrief(files, {
+          productName: opts.productName,
+          brief,
+        });
+        if (!gate.ok) {
+          observations.push(`fix: still not static Ready — ${(gate.reasons || []).slice(0, 4).join('; ')}`);
+        }
       }
 
       if (opts.diskRoot && appKey) {
@@ -284,16 +444,18 @@ export async function runCreateVerifyAndFix(opts: {
           files,
           userMessage: brief,
           diskRoot: opts.diskRoot,
-        }).then((r) => { if (r.ok) files = r.files; }).catch(() => {});
+          originalBrief: brief,
+        }).then((r) => { if (r.ok) { files = r.files; filesChanged = true; } }).catch(() => {});
       }
 
-      // Commander / agent tools when heals did not close quality (round 2+).
-      if (fixRounds >= 2 && !floorFallback && (!evidence.mounted || !evidence.consoleClean || needsQualityFix())) {
+      // Commander / agent tools when heals did not close quality (round 2+; thin waits until round 3
+      // so strip/heal/plan-repair get a chance first).
+      if (fixRounds >= (thin ? 3 : 2) && !floorFallback && (!evidence.mounted || !evidence.consoleClean || needsQualityFix())) {
         try {
           const planGate = gatePlanPass(files, brief, opts.productName);
           const designGate = gateDesignPass(files, planGate.plan);
           const { shouldUseNovaCreateBuildLoop, runNovaCreateBuildLoop } = await import('@/lib/novaBuildLoop');
-          if (shouldUseNovaCreateBuildLoop()) {
+          if (!thin && shouldUseNovaCreateBuildLoop()) {
             opts.host.pushStatus(createPassStatusLabel('interact', 'commander tools'));
             const commanderPrompt = formatCreateCommanderFixPrompt({
               brief,
@@ -315,6 +477,7 @@ export async function runCreateVerifyAndFix(opts: {
               priorObservations: condenseObservations(observations, 4),
             });
             files = loop.files;
+            filesChanged = true;
             observations.push(`fix: commander loop → ${loop.ok ? 'ok' : 'incomplete'}`);
           }
         } catch {
@@ -325,11 +488,12 @@ export async function runCreateVerifyAndFix(opts: {
       observations.push(`fix error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    try {
-      await window.novaDesktop?.getOrAttachPreview?.(opts.diskRoot);
-    } catch { /* ignore */ }
-    await new Promise((r) => setTimeout(r, 800));
-    evidence = await probeOnce();
+    if (filesChanged) await refreshEvidenceAfterFix(`fix round ${fixRounds}`);
+    else {
+      try { await window.novaDesktop?.getOrAttachPreview?.(opts.diskRoot); } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 800));
+      evidence = await probeOnce();
+    }
   }
 
   opts.host.pushStatus(createPassStatusLabel('critic'));
@@ -340,21 +504,22 @@ export async function runCreateVerifyAndFix(opts: {
     productName: opts.productName,
     floorFallback,
   });
-
-  let judgedOk = verified.qualityReady;
-  let judgeReasons = verified.reasons;
+  const renderedQuality = verifyCreateRenderedQuality(files, brief, opts.productName);
+  let judgedOk = verified.qualityReady && renderedQuality.ok;
+  let judgeReasons = [...verified.reasons, ...renderedQuality.reasons.map((r) => `rendered: ${r}`)];
+  // Leave a precise, actionable failure on the job card instead of letting callers report Ready.
   if (verified.liveUnlock) {
     opts.host.pushStatus(
-      verified.qualityReady
+      judgedOk
         ? createRuntimeStageLabel('verified')
-        : createRuntimeStageLabel('live', 'unlock — quality still open'),
+        : createRuntimeStageLabel('live', 'open — tell me what to tighten'),
     );
-    if (verified.qualityReady) {
+    if (judgedOk) {
       observations.push('host judge + plan/design PASS — quality Ready');
       opts.host.onStage?.('verified');
     } else {
       observations.push(`quality not Ready: ${judgeReasons.slice(0, 4).join('; ')}`);
-      opts.host.onStage?.('live', 'quality open');
+      opts.host.onStage?.('live', 'open — tighten if needed');
     }
   }
 
@@ -366,7 +531,7 @@ export async function runCreateVerifyAndFix(opts: {
     judgedOk,
     judgeReasons,
     liveUnlock: verified.liveUnlock,
-    qualityReady: verified.qualityReady,
+    qualityReady: judgedOk,
     verified,
   };
 }

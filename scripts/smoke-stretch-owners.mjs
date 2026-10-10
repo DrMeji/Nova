@@ -36,7 +36,7 @@ const { classifyTurn } = await import(
 }
 {
   const r = classifyTurn('Start building Nightcord first slice.');
-  check('stretch#2 start building → create', r.kind === 'create' && r.reason === 'greenfield-create-go', `${r.kind}/${r.reason}`);
+  check('stretch#2 start building → create', r.kind === 'create' && (r.reason === 'greenfield-create-go' || r.reason === 'hard-create-go'), `${r.kind}/${r.reason}`);
 }
 {
   const r = classifyTurn('ok start.', {

@@ -4,6 +4,146 @@ Product release notes for Settings → Update and release packaging.
 
 > **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`NOVA_CHANGELOG`).
 
+## 0.1.338
+
+- Create honesty: abort polarity fixed; Ready only when Quality Ready; Stop returns; Live chrome uses originalBrief
+- Invent contract: one compositional craft prompt; thin invent prefers coder seats; PageBody drops only on rich sections; invent stops when Live+genre clear
+- Brand truth: Apple negations scrubbed; ceramic depth; gin≠bare storefront; subscribe only with cues; sparkles hard-fails for ceramic/chocolate/lotion
+- Disk/Live infra: twin App delete on persist; shared liveOwnerKey (chat-scoped Live); port kill 5200–5350; blank-fail overlay clears on late mount
+- After-create: antiBleed uses create originalBrief; polite concrete builds → create; voice refuses builds; hydrate keeps App/css/logo
+- Smokes: create-job-abort + hydrate/identity/thin-path/ready/logo/chat-spine wired for the wave pack
+
+## 0.1.337
+
+- Genre seed + logo wire run before invent depth and persist hero/logo to disk (stops phone+sparkles Live after depth thrash)
+- Live visual gate hard-blocks phone heroes / sparkles marks on F&B asks; invent depth skipped when seed already clears Live
+- Disk writes verify `.svg` bytes so genre logo/hero locks cannot silently miss
+- Hero kind picks gin/coffee/tea before device/phone so “product visual” / Live wording cannot force an Apple stage
+- Logo family falls back to the product name (Gin → wine, Roasters → coffee) so late wire passes never leave sparkles
+
+## 0.1.336
+
+- Spirits logos use wine (not sparkles); coffee keeps the mug — “not coffee” no longer steals the coffee mark onto gin
+- Hero seed rejects Apple phone stages on F&B briefs and re-seeds bottle/bag silhouettes; “product visual” no longer trips the phone path
+- Ask-contract copy strips Skip Plan / brand-new marketing / run tokens so H1/lede stay brand voice
+
+## 0.1.335
+
+- Live judge reads per-section purpose — tasting-notes copy stranded under `#shop` (etc.) is a soft deficit; notes/shop mismatches hard-block Live on compositional asks only
+- Hero plates hash the brand name into 6 offline framing variants + a 1–2 brief-word prop chip — two gin brands are never identical SVGs
+- Interact v2: seeded shop bag and subscribe state persist in namespaced localStorage (no checkout, no prompt growth)
+
+## 0.1.334
+
+- Seed copy pulls up to 6 sentence cues from the brief into story / notes / shop blurbs
+- Ask contract keys off compositionFamily — tools/apps/games never force shop/notes; catalog/lotion get shop slots
+
+## 0.1.333
+
+- Depth reject status shows “stripped delivered …” when invent drops seeded interactivity or hero-art (Studio-visible)
+- Keeps seed-vs-invent guard; no longer looks like a plain thin rewrite in the depth log
+
+## 0.1.332
+
+- Compositional depth retires every rejected section path for the session (stops nav thrash / sameReject stall)
+- Compositional depth never feeds Prior App/CSS outline (stops 7B fat-App clones)
+- PageBodySection drops once ≥3 real sections land or visual Live floor clears
+
+## 0.1.331
+
+- Ask contract from brief: required notes / shop / subscribe sections + anchors
+- Copy from brief cues; Motion v1 (hero enter, CTA hover, reveal); Interact stubs (notes accordion, shop bag, subscribe form)
+- Live judge `scoreAskMatch` — hard block wrong genre / missing hero / missing brand (invent depth still soft)
+
+## 0.1.330
+
+- Graphics v1: thin brand seed paints a real product SVG stage (bottle / roast bag / tin / bar) instead of an empty gradient plate
+- Brief-aware palettes for spirits, coffee, matcha, chocolate; gin never draws coffee art
+- Compositional HeroSection + quality lint read section bodies for designed hero art (model-agnostic)
+
+## 0.1.329
+
+- CI: chat-spine, thin-create, tipjar, brand-assets-local, live-ownership, permanent-create, and other green gates wired into smoke.yml
+- Icons: intent nouns (magnifier/cart/…) plan icons without saying “icon”; non-lucide ids map to bundled Lucide
+- Heroes: canned Unsplash PC-case stock removed/banned — designed SVG or Openverse, not recycled stock
+- classifyTurn helpers are SSOT for create-vs-chat at high-traffic import sites; Live ownership smoke added
+
+## 0.1.328
+
+- Thin create repair rounds restored (plan/near-ready/commander when quality fails) — not stuck at 2 rounds
+- Edit verifyAsk: one retry with missing hints before revert; keep intact edits that aren’t broken
+- Dispatch: no flat “I can’t do that yet” — try chat host / next-step instead
+- Local Lucide icon pack first (offline); brand logo from product family, sparkles last resort
+- Intent: classifyTurn owns create vs soft “help build …” chat; delete/disk go-ahead phrases fixed
+- CI smokes repaired (failover/agent-eval ark→nova, create-reply Ready copy, stretch-owners, permanent-create, version-lock)
+
+## 0.1.327
+
+- Live no longer stays pure black on compile/mount failure — paints a clear fail message in the Live window
+- Heal depth-continue mangled nav/button JSX (`</div>) => setX…`) that blanked SoftPalm-class Live
+- Broken App after depth is finished or blocked before Live unlock (no silent Vite void)
+- Depth targets raised: up to 5 continues, ~9000 compact chars, 7+ sections, ~200+ lines
+- Depth continues reject same-size / shrink rewrites and retry so Apps actually grow
+
+## 0.1.326
+
+- Create depth continues for website/brand asks: invent more from the brief (no apple.com / marketing floors)
+- Thin create no longer accepts a ~50-line compiling stub as done for rich site asks
+- Up to 2 same-model depth rewrites before Live; toys (calc/todo) stay fast
+
+## 0.1.325
+
+- History/Projects delete no longer freezes the UI: folder wipe is async; list updates before disk work
+- Composer unlock after delete (single chat fires the same unlock as bulk); heavy localStorage scan deferred
+- Sidebar profile avatar locked at one size; handle + settings appear beside it when expanded
+
+## 0.1.324
+
+- Live open/close thrash: user-visible Live is not closed by blank-root / probe demotion; Live pill opens when verify already has a URL
+- Apple.com-style create gets an extra quality craft pass (bands + full-bleed); heal undeclared `COVER_HREFS`
+- “Build me a website” no longer names the product “Me A”
+- Account: remove sidebar profile outer box + Display Name; show GitHub handle only
+
+## 0.1.323
+
+- Live is per-chat: each thread owns its own Live window; switching / New Chat closes others
+- Background create probes stay hidden and cannot show another chat’s project over the active one
+- `previewSetActiveChat` + always-close on switch (fixes Tidepot/Calculator bleed into new chats)
+
+## 0.1.322
+
+- Live: do not close the window on in-app runtime errors (calculator `=` / `eval` SyntaxError)
+- Live evidence probes open hidden and reuse the same URL without reload (stops open/close flicker while crafting)
+- “Build me a simple calculator” (no “app”) routes to create — avoids chat plan that gets replaced mid-turn
+
+## 0.1.321
+
+- Calculator / simple toys: “build a calculator app” creates on disk (Vite) — no HTML chat dump with hex pills
+- Product name: Calculator (not “Site”); reject “it” from “build it”; recover prior calculator brief
+- Tool apps: strip marketing `/heroes/` CSS backgrounds (Tidepot Live looking like a fake mockup)
+- Heal `onClick={() => …}}">` craft typos; calculator uses utility Preview Ready path
+
+## 0.1.320
+
+- Thin create gate: CSS-only trunc/thin no longer fails a complete App; pass syntax reasons into `thinCraftMayContinue`
+- Finish App runs before final honesty / Preview Ready demotion; wrap finish replies missing `@@@FILE`
+- Thin path skips Preview Ready re-fail after a compiling App
+- Syntax gate heals near-complete missing closings; stop false “extra paren” trunc on `.map(() => …)`
+
+## 0.1.319
+
+- App.jsx harden: thin create always locks `src/App.jsx` (plain JS, no .tsx flip-flop)
+- Syntax gate strips TypeScript-in-JSX; same-model Finish App continue on trunc/broken (no floors)
+- Prefer coder over UIGEN for thin create; strip COVER bleed on tools/apps
+- `smoke:app-jsx-harden`
+
+## 0.1.318
+
+- Thin create path (Temp Nova shape, apps stay separate): ask → sticky craft → syntax → honest Live
+- Skip genre floors, marketing COVER heals, style-hop Ready, repair-owned salvage on create
+- Short invent-from-ask craft prompt (`formatThinCreateCraftRules`); fail closed without floor fake-success
+- `smoke:thin-create-path` + CREATE_PIPELINE thin diagram
+
 ## 0.1.317
 
 - Brief-first create: invent from the user ask — not tip/todo/notes/marketing/shop recipe menus

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
-  Settings, Search, ChevronDown, History, Clock3,
-  MessageSquare, Trash2, Code2, Pencil, Mic,
-  Globe, Bell, Star, Download, Brain, Cable, Bot,
+  Settings, Search, History,
+  MessageSquare, Trash2,
+  Globe, Bell, Download, Brain, Cable, Bot,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -27,12 +27,10 @@ import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { NovaMark } from '@/components/NovaMark';
-import { comparePinnedThenRecent, RECENT_SIDEBAR_MAX } from '@/lib/recentStore';
 import { formatNovaId } from '@/lib/novaUserId';
 import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import {
   clearActivity,
-  clearChatDone,
   getActivityFlags,
   getDoneChatIds,
   setActivityViewing,
@@ -100,28 +98,16 @@ function getNavGroups(): {
   ];
 }
 
-function resolveDisplayName(
-  prefsName: string | undefined,
-  profileName: string | null | undefined,
-  email: string | undefined,
-) {
-  const fromPrefs = prefsName?.trim();
-  if (fromPrefs && fromPrefs !== 'Guest') return fromPrefs;
-  if (profileName?.trim()) return profileName.trim();
-  return email?.split('@')[0] || 'Guest';
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent, pinChat, pinProject } = useRecentProjects();
+  const { deleteChatForever, removeRecent } = useRecentProjects();
   /** Hover-expanded main nav. Collapsed by default; no sticky toggle. */
   const [hoverOpen, setHoverOpen] = useState(false);
   const hoverLeaveTimer = useRef<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [recentOpen, setRecentOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -134,8 +120,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [updateBusy, setUpdateBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [wipeProjectDisk, setWipeProjectDisk] = useState(true);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
   const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
   const [inflightChats, setInflightChats] = useState(() => new Set(listInflightChatIds()));
@@ -264,8 +248,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   }, [route, settingsOpen]);
 
-  const displayName = resolveDisplayName(prefsName, profile?.display_name, user?.email);
-  const initial = displayName[0]?.toUpperCase() || '?';
+  void prefsName; // kept in sync for prefs listeners; sidebar shows GitHub handle only
 
   const inRecentChat = route.name === 'chat' && Boolean(route.chatId);
 
@@ -309,43 +292,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const activeRecentId = route.name === 'project' ? route.id : null;
   const activeChatId = route.name === 'chat' ? route.chatId ?? null : null;
-
-  const recentFeed = useMemo(() => {
-    // Recent is chats only — never a separate “Code project” filing-system row.
-    // Code files open from the Code pill on the chat that built them.
-    const chats = activeChats.map(c => ({
-      key: `chat:${c.id}`,
-      kind: 'chat' as const,
-      id: c.id,
-      title: c.title,
-      preview: c.preview,
-      pinned: Boolean(c.pinnedAt),
-      mode: c.mode,
-      updatedAt: c.updatedAt || '',
-    }));
-    const byPin = (a: { pinned: boolean; updatedAt: string }, b: { pinned: boolean; updatedAt: string }) =>
-      comparePinnedThenRecent(
-        { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
-        { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
-      );
-    const sorted = [...chats].sort(byPin).slice(0, RECENT_SIDEBAR_MAX);
-    return {
-      chats: sorted,
-      projects: [] as typeof sorted,
-      mixed: sorted,
-    };
-  }, [activeChats]);
-
-  const commitRename = () => {
-    if (!renamingId) return;
-    const name = renameDraft.trim();
-    if (name) {
-      if (renamingId.startsWith('chat:')) renameChat(renamingId.slice(5), name);
-      else if (renamingId.startsWith('project:')) renameRecent(renamingId.slice(8), name);
-    }
-    setRenamingId(null);
-    setRenameDraft('');
-  };
 
   const openSettings = (section = 'account') => {
     setSearchOpen(false);
@@ -495,155 +441,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const chatIcon = (mode: string) => {
-    if (mode === 'voice') return Mic;
-    if (mode === 'code') return Code2;
-    return MessageSquare;
-  };
-
-  type RecentRow = {
-    key: string;
-    kind: 'chat' | 'project';
-    id: string;
-    title: string;
-    preview?: string;
-    pinned: boolean;
-    mode?: string;
-    updatedAt: string;
-  };
-
-  const openRecent = (item: RecentRow) => {
-    if (item.kind === 'chat') {
-      clearChatDone(item.id);
-      const mode = item.mode === 'voice'
-        ? 'voice' as const
-        : item.mode === 'code'
-          ? 'code' as const
-          : undefined;
-      navigate({
-        name: 'chat',
-        mode,
-        chatId: item.id,
-      });
-      return;
-    }
-    // Legacy Code-project Recent rows are retired — jump to Chat; use the Code pill for files.
-    navigate({ name: 'chat' });
-  };
-
-  const renderRecentRow = (item: RecentRow) => {
-    const active = item.kind === 'chat' ? activeChatId === item.id : activeRecentId === item.id;
-    const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
-    const working = item.kind === 'chat' && inflightChats.has(item.id);
-    const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
-    const renameKey = item.key;
-    const editing = renamingId === renameKey;
-    return (
-      <div
-        key={item.key}
-        className={`group relative flex items-center min-w-0 rounded-lg mx-1 transition-colors ${
-          active
-            ? 'bg-surface-active text-content-primary'
-            : 'hover:bg-surface-hover text-content-secondary'
-        } ${doneAway && !working ? 'nova-nav-attention' : ''} ${working && !active ? 'nova-nav-working-away' : ''}`}
-      >
-        {editing ? (
-          <input
-            autoFocus
-            value={renameDraft}
-            onChange={e => setRenameDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commitRename();
-              }
-              if (e.key === 'Escape') {
-                setRenamingId(null);
-                setRenameDraft('');
-              }
-            }}
-            className="flex-1 min-w-0 mx-2 my-0.5 rounded-md bg-nova-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
-          />
-        ) : (
-          <div className="flex items-center min-w-0 w-full">
-            <button
-              type="button"
-              onClick={() => openRecent(item)}
-              onDoubleClick={(e) => {
-                e.preventDefault();
-                setRenamingId(renameKey);
-                setRenameDraft(item.title);
-              }}
-              className="nova-nav-item nova-nav-item-rail min-w-0 flex-1 !bg-transparent hover:!bg-transparent !relative"
-              title={
-                working
-                  ? `${item.title} · Nova is working here`
-                  : `${item.title} · double-click to rename`
-              }
-            >
-              <span className={`nova-nav-icon relative ${doneAway && !working ? 'text-sky-400' : ''}`}>
-                <Icon strokeWidth={1.75} />
-              </span>
-              <span className={`min-w-0 flex-1 text-left truncate relative ${doneAway && !working ? 'text-sky-300' : ''}`}>{item.title}</span>
-            </button>
-            <div
-              className={`flex items-center gap-0.5 shrink-0 pr-1 transition-opacity ${
-                item.pinned
-                  ? 'opacity-100'
-                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
-              }`}
-            >
-              <button
-                type="button"
-                title={item.pinned ? 'Unpin' : 'Pin'}
-                aria-label={item.pinned ? `Unpin ${item.title}` : `Pin ${item.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (item.kind === 'chat') pinChat(item.id);
-                  else pinProject(item.id);
-                }}
-                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                  item.pinned
-                    ? 'text-amber-300'
-                    : 'text-content-tertiary hover:text-amber-300 hover:bg-white/5'
-                }`}
-              >
-                <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
-              </button>
-              <button
-                type="button"
-                title="Rename"
-                aria-label={`Rename ${item.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setRenamingId(renameKey);
-                  setRenameDraft(item.title);
-                }}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                title="Delete forever"
-                aria-label={`Delete ${item.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
-                  setWipeProjectDisk(true);
-                }}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
     if (item.comingSoon) {
       // Parked — visible with Soon, but not navigable.
@@ -732,272 +529,132 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="h-full min-w-0 flex overflow-hidden relative bg-nova-navy-950">
       <AuthAmbientOrbs variant="app" />
+      {/* Left edge tab — downloads dock above the pill (outside); hover opens right */}
       {!voiceFocus ? (
+      <div className="relative z-10 shrink-0 mr-2 flex items-center self-stretch">
+      <div className="relative h-[70%] flex flex-col min-w-0">
+        {/* Downloads — outside the pill, above Search */}
+        <div className="absolute bottom-full left-0 right-0 mb-2 flex flex-col items-center gap-1.5 pointer-events-auto z-20">
+          <JobsStrip variant="sidebar" collapsed />
+          {updateInfo?.newerAvailable && updateInfo?.setupAssetUrl && updateInfo?.latestTag ? (
+            <button
+              type="button"
+              onClick={startUpdateDownload}
+              disabled={updateBusy}
+              title={updateBusy ? 'Downloading update…' : `Update available (${updateInfo?.latestTag})`}
+              aria-label="Update now"
+              className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors ${
+                updateBusy
+                  ? 'opacity-60 border-surface-border bg-nova-navy-900/80 text-content-tertiary'
+                  : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+              }`}
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          ) : null}
+        </div>
       <aside
-        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border nova-sidebar-panel nova-glass ${
+        className={`nova-sidebar-edge flex flex-col min-w-0 h-full overflow-hidden nova-sidebar-panel nova-glass ${
           collapsed ? 'is-collapsed' : ''
         }`}
         onMouseEnter={openSidebarHover}
         onMouseLeave={scheduleSidebarClose}
       >
-          <div className="flex-none h-10 flex items-center">
-            {collapsed ? (
-              <button
-                type="button"
-                onClick={() => setSearchOpen(true)}
-                className="nova-nav-item w-full nova-nav-item-rail !py-0 !min-h-0 h-10"
-                title="Search (Ctrl+K)"
-                aria-label="Search"
-              >
-                <span className="nova-nav-icon !h-10">
-                  <Search />
-                </span>
-              </button>
-            ) : (
-              <div className="flex items-center justify-between gap-2 min-w-0 w-full h-10 pr-2">
-                <span className="nova-nav-icon !h-10">
-                  <NovaMark className="w-6 h-6 text-content-primary" title="NOVA" />
-                </span>
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setSearchOpen(true)}
-                    className="nova-btn-ghost !p-1.5"
-                    title="Search (Ctrl+K)"
-                    aria-label="Search"
-                  >
-                    <Search className="w-4 h-4" />
-                  </button>
-                  {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
-                    <button
-                      type="button"
-                      onClick={startUpdateDownload}
-                      className={`relative rounded-lg !p-1.5 transition-colors ${
-                        updateBusy
-                          ? 'opacity-60'
-                          : 'text-sky-400 hover:bg-sky-500/10'
-                      }`}
-                      title={`Update available (${updateInfo.latestTag}). Click to download.`}
-                      aria-label="Download update"
-                    >
-                      <Download className={`w-4 h-4 ${updateBusy ? 'text-content-tertiary' : ''}`} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            )}
+          {/* Search — same icon plate open or closed so nothing jumps */}
+          <div className="flex-none pt-1">
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className={`nova-nav-item w-full ${collapsed ? 'nova-nav-item-rail' : ''}`}
+              title="Search (Ctrl+K)"
+              aria-label="Search"
+            >
+              <span className="nova-nav-icon">
+                <Search />
+              </span>
+              <span className={`nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
+                Search
+              </span>
+            </button>
           </div>
 
-          <nav className="flex-1 min-h-0 flex flex-col">
-            {/* Locked primary nav — Chat / Work / Tools / Connect never scroll away */}
+          <nav className="flex-none min-h-0 flex flex-col overflow-y-auto overscroll-contain mt-3 pt-1">
+            {/* Primary nav — labels fade in to the right; icons stay locked */}
             <div className="nova-nav-stack flex-none shrink-0 flex flex-col">
               {NAV_GROUPS.map(group => (
                 <div key={group.id} className={group.label ? 'nova-nav-group' : ''}>
-                  {group.label ? (
-                    <p
-                      className={`nova-nav-section-label uppercase text-content-tertiary whitespace-nowrap pl-4 pr-2 ${
-                        collapsed ? 'opacity-0' : ''
-                      }`}
-                      aria-hidden={collapsed || undefined}
-                    >
-                      {group.label}
-                    </p>
-                  ) : null}
                   {group.items.map(renderNavItem)}
                 </div>
               ))}
             </div>
+          </nav>
 
-            {/* Recent only scrolls */}
-            <div className="mt-3 min-h-0 flex-1 flex flex-col pt-2 border-t border-surface-border">
-              <button
-                type="button"
-                onClick={() => setRecentOpen(o => !o)}
-                title={collapsed ? 'Recent' : undefined}
-                aria-label="Recent"
-                className={`nova-nav-item w-full flex-none ${collapsed ? 'nova-nav-item-rail' : ''}`}
-              >
-                <span className="nova-nav-icon">
-                  <Clock3 />
-                </span>
-                <span className={`flex-1 text-left nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
-                  Recent
-                </span>
-                <ChevronDown
-                  className={`w-3.5 h-3.5 text-content-tertiary transition-transform nova-nav-label ${
-                    collapsed ? 'nova-nav-label-hide' : ''
-                  } ${recentOpen ? '' : '-rotate-90'}`}
-                />
-              </button>
+            {/* Spacer pushes profile to the bottom */}
+            <div className="min-h-0 flex-1" aria-hidden />
 
-              {recentOpen && !collapsed && (
-                <div className="mt-1 min-h-0 flex-1 max-h-[15.5rem] overflow-y-auto overscroll-contain flex flex-col gap-0.5 pr-0.5">
-                  {recentFeed.mixed.length === 0 ? (
-                    <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
-                      No recent chats
-                    </p>
-                  ) : (
-                    recentFeed.mixed.map(renderRecentRow)
-                  )}
-                </div>
-              )}
-
-              {collapsed && recentOpen && (
-                <div className="mt-1 min-h-0 flex-1 max-h-[15.5rem] overflow-y-auto overscroll-contain flex flex-col gap-0.5">
-                  {recentFeed.mixed.map(item => {
-                    const active = item.kind === 'chat'
-                      ? activeChatId === item.id
-                      : activeRecentId === item.id;
-                    const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
-                    const working = item.kind === 'chat' && inflightChats.has(item.id);
-                    const Icon = chatIcon(item.mode || 'general');
+            {/* Footer locked — same padding/height open or closed so profile never jumps */}
+            <div
+              className="flex-none shrink-0 relative px-0.5 pt-2 pb-3"
+              data-status-menu
+            >
+              {PRESENCE_UI_ENABLED && statusMenuOpen && (
+                <div
+                  className="absolute z-50 left-full bottom-0 ml-2 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0"
+                  role="menu"
+                >
+                  {PRESENCE_OPTIONS.map(opt => {
+                    const active = presence === opt.id;
                     return (
                       <button
-                        key={item.key}
+                        key={opt.id}
                         type="button"
-                        aria-label={working ? `${item.title} — working` : item.title}
-                        onClick={() => openRecent(item)}
-                        className={`nova-nav-item nova-nav-item-rail relative ${active ? 'active' : ''} ${doneAway && !working ? 'nova-nav-attention' : ''} ${working && !active ? 'nova-nav-working-away' : ''}`}
-                        title={working ? `${item.title} · Nova is working here` : item.title}
+                        role="menuitem"
+                        onClick={() => setPresenceStatus(opt.id)}
+                        className={`w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-white/5 first:rounded-t-xl last:rounded-b-xl ${
+                          active ? 'bg-white/[0.04]' : ''
+                        }`}
                       >
-                        <span className={`nova-nav-icon relative ${doneAway && !working ? 'text-sky-400' : ''}`}>
-                          <Icon strokeWidth={1.75} />
+                        <span className={`mt-1 shrink-0 h-3.5 w-3.5 rounded-full ${presenceDotClass(opt.id)}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-content-primary">{opt.label}</span>
                         </span>
                       </button>
                     );
                   })}
                 </div>
               )}
-            </div>
-          </nav>
-
-            <div
-              className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'px-1 pt-2 pb-2.5' : 'p-3 pt-2 pb-3'}`}
-              data-status-menu
-            >
-            <JobsStrip variant="sidebar" collapsed={collapsed} />
-            {PRESENCE_UI_ENABLED && statusMenuOpen && (
-              <div
-                className={`absolute z-50 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
-                  collapsed ? 'left-full bottom-2 ml-2' : 'left-3 right-3 bottom-full mb-2'
-                }`}
-                role="menu"
-              >
-                {PRESENCE_OPTIONS.map(opt => {
-                  const active = presence === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => setPresenceStatus(opt.id)}
-                      className={`w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-white/5 first:rounded-t-xl last:rounded-b-xl ${
-                        active ? 'bg-white/[0.04]' : ''
-                      }`}
-                    >
-                      <span className={`mt-1 shrink-0 h-3.5 w-3.5 rounded-full ${presenceDotClass(opt.id)}`} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm text-content-primary">{opt.label}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {collapsed ? (
-              <div className="flex flex-col items-center gap-1.5">
-                {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
-                  <button
-                    type="button"
-                    onClick={startUpdateDownload}
-                    disabled={updateBusy}
-                    title={updateBusy ? 'Downloading update…' : `Update available (${updateInfo.latestTag})`}
-                    aria-label="Update now"
-                    className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors ${
-                      updateBusy
-                        ? 'opacity-60 border-surface-border bg-nova-navy-900/80 text-content-tertiary'
-                        : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
-                    }`}
-                  >
-                    <Download className="w-4 h-4" />
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
-                  title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
-                  className={`w-9 h-9 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${
-                    PRESENCE_UI_ENABLED ? presenceRingClass(presence) : ''
-                  }`}
-                  aria-label={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
-                  aria-expanded={PRESENCE_UI_ENABLED ? statusMenuOpen : undefined}
-                >
-                  {profile?.avatar_url ? (
-                    <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <NovaMark className="w-5 h-5 text-content-primary" title="NOVA" />
-                  )}
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
-                  <button
-                    type="button"
-                    onClick={startUpdateDownload}
-                    disabled={updateBusy}
-                    className={`w-full flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
-                      updateBusy
-                        ? 'opacity-70 border-surface-border bg-nova-navy-950/80 text-content-secondary'
-                        : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-400/45'
-                    }`}
-                    title={updateBusy ? 'Downloading update…' : `Update to ${updateInfo.latestTag}`}
-                    aria-label="Update now"
-                  >
-                    <Download className="w-3.5 h-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[11px] font-semibold leading-tight">
-                        {updateBusy ? 'Downloading update…' : 'New update available'}
-                      </span>
-                      <span className="block text-[10px] text-emerald-300/80 truncate mt-0.5">
-                        {updateBusy ? 'Stay in the app while it installs' : `Update now · ${updateInfo.latestTag}`}
-                      </span>
-                    </span>
-                  </button>
-                ) : null}
-                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-nova-navy-900 px-2.5 py-2">
+              {/* Profile + settings — fixed h-10 row; labels only expand sideways */}
+              <div className="flex items-center min-w-0 h-10">
+                <span className="nova-nav-icon !h-10">
                   <button
                     type="button"
                     onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
-                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden ${
+                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
+                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors ${
                       PRESENCE_UI_ENABLED ? presenceRingClass(presence) : ''
                     }`}
-                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
                     aria-label={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
                     aria-expanded={PRESENCE_UI_ENABLED ? statusMenuOpen : undefined}
                   >
                     {profile?.avatar_url ? (
-                      <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                      <img src={profile?.avatar_url ?? undefined} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
+                      <NovaMark className="w-5 h-5 text-content-primary" title="NOVA" />
                     )}
                   </button>
+                </span>
+                <span className={`flex items-center gap-1 min-w-0 flex-1 h-10 ${collapsed ? 'nova-nav-label-hide' : ''}`}>
                   <button
                     type="button"
                     onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
                     className="flex-1 min-w-0 text-left"
                     title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
                   >
-                    <span className="block text-xs font-medium text-content-primary truncate">
-                      {displayName}
+                    <span className="block text-xs font-mono font-medium text-content-primary truncate">
+                      {isNovaDevEmail(user?.email)
+                        ? 'DEV'
+                        : (profile?.nova_id ? formatNovaId(String(profile?.nova_id)) : (user?.id === 'guest-local' ? 'Guest' : 'GitHub'))}
                     </span>
-                    {(profile?.nova_id || isNovaDevEmail(user?.email)) ? (
-                      <span className="block text-[10px] font-mono truncate mt-0.5 text-content-tertiary">
-                        {isNovaDevEmail(user?.email)
-                          ? 'DEV'
-                          : formatNovaId(profile!.nova_id!)}
-                      </span>
-                    ) : null}
                   </button>
                   <button
                     type="button"
@@ -1008,15 +665,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <Settings className="w-4 h-4" />
                   </button>
-                </div>
+                </span>
               </div>
-            )}
-          </div>
+            </div>
       </aside>
+      </div>
+      </div>
       ) : null}
 
         <main className={`relative z-10 flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col ${
-          voiceFocus ? 'm-0' : 'm-2 ml-2'
+          voiceFocus ? 'm-0' : 'm-2'
         }`}>
           <PostLoginSafetyTip />
           <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col h-full">
@@ -1112,19 +770,25 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => {
                 if (!deleteTarget) return;
                 const id = deleteTarget.id;
-                if (deleteTarget.kind === 'project') {
-                  if (wipeProjectDisk) {
-                    void window.novaDesktop?.projectDeleteFiles?.(id).catch(() => undefined);
+                const kind = deleteTarget.kind;
+                const wipeDisk = wipeProjectDisk;
+                const goChat = kind === 'project'
+                  ? activeRecentId === id
+                  : activeChatId === id;
+                // Close dialog first so backdrop cannot block the composer.
+                setDeleteTarget(null);
+                setWipeProjectDisk(true);
+                window.setTimeout(() => {
+                  if (kind === 'project') {
+                    if (wipeDisk) {
+                      void window.novaDesktop?.projectDeleteFiles?.(id).catch(() => undefined);
+                    }
+                    removeRecent(id);
+                  } else {
+                    deleteChatForever(id);
                   }
-                  removeRecent(id);
-                  setDeleteTarget(null);
-                  setWipeProjectDisk(true);
-                  if (activeRecentId === id) navigate({ name: 'chat' });
-                } else {
-                  deleteChatForever(id);
-                  setDeleteTarget(null);
-                  if (activeChatId === id) navigate({ name: 'chat' });
-                }
+                  if (goChat) navigate({ name: 'chat' });
+                }, 0);
               }}
               className="rounded-full px-4 py-2 text-xs font-semibold bg-rose-500/90 text-white hover:bg-rose-500 transition-colors"
             >

@@ -230,6 +230,13 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
   );
 }
 
+/** "…inside the project folder. Can you go ahead and delete it" — trailing "go ahead" must not read as a UI edit. */
+function looksLikeGoAheadDeleteItFollowUp(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!/\bgo\s+ahead\s+and\s+(?:delete|remove|trash|wipe)\s+(?:it|that|this)\s*[.!?]*\s*$/i.test(t)) return false;
+  return looksLikeDeleteFollowUp(t) || looksLikeDeleteProjectAsk(t);
+}
+
 function looksLikeDeleteFollowUp(text: string): boolean {
   const t = String(text || '').trim();
   if (!DELETE_RE.test(t)) return false;
@@ -379,13 +386,22 @@ export function extractAddFileParentHint(text: string): string | undefined {
   return extractDiskParentHintFromText(text);
 }
 
+/**
+ * "Go ahead and put it in pictures" — explicit file-destination follow-up.
+ * "go ahead" trips looksLikeImplementGo (code edit), so this must be checked first.
+ */
+function looksLikePutItInFolderFollowUp(text: string): boolean {
+  const t = String(text || '').trim();
+  return /\b(?:put|place|save|move)\s+(?:it|the\s+file)\s+(?:to|in|into|inside)\s+(?:the\s+|my\s+)*(?:pictures?|photos?|desktop|documents?|downloads?)\b(?!\s+(?:app|application|layout|window|ui)\b)/i.test(t);
+}
+
 export function looksLikeAddFileDestinationClarify(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   // Same-chat scrap/rebuild is not "where should this file go?"
   if (looksLikeInPlaceRebuildAsk(t)) return false;
   // Bound-project UI edits ("same project folder", bump contrast, add cube…) are never file destinations.
-  if (looksLikeCodeEditAsk(t)) return false;
+  if (looksLikeCodeEditAsk(t) && !looksLikePutItInFolderFollowUp(t)) return false;
   if (/\b(?:same|this|current|open|existing)\s+project(?:\s+folder)?\b/i.test(t)) return false;
   if (/\b(?:same|this|current)\s+folder\b/i.test(t) && !/\b(?:add|create|write|put)\s+(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) {
     return false;
@@ -497,6 +513,10 @@ export function classifyDiskIntent(
     looksLikeCodeEditAsk(t)
     && !looksLikeAddFileAsk(t)
     && !looksLikeRenameFileAsk(t)
+    // "go ahead and put it in pictures" / "…go ahead and delete it" are disk follow-ups,
+    // not UI edits (looksLikeImplementGo fires on "go ahead").
+    && !looksLikePutItInFolderFollowUp(t)
+    && !looksLikeGoAheadDeleteItFollowUp(t)
     && (!DELETE_RE.test(t) || looksLikeCodeSyntaxFixAsk(t) || !looksLikeDeleteFileAsk(t))
   ) {
     return { type: 'none' };

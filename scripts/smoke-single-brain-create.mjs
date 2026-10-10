@@ -30,13 +30,14 @@ const rules = formatOriginalCraftRules({
   freshnessKey: 'test-salt-abc',
 });
 const rulesText = rules.join('\n');
-check('original rules mention one-of-one', /ONE-OF-ONE|original/i.test(rulesText));
-check('original rules forbid templates', /FORBIDDEN|template/i.test(rulesText));
-check('original rules include freshness salt', /test-salt-abc/.test(rulesText));
+// Thin create (default): short Temp-Nova craft prompt.
+check('thin craft rules present', /THIN CREATE|@@@FILE/i.test(rulesText));
+check('thin craft mentions product', /ApexClean|vacuum/i.test(rulesText));
+check('thin craft invents from ask', /unique working UI|invent THIS ask/i.test(rulesText));
 check('original rules do not say fill slots only', !/fill slots only|SLOT FILL ONLY/i.test(rulesText));
 
 const premium = premiumWebCraftRules('vacuum website', null).join('\n');
-check('premiumWebCraftRules is originality-based', /ONE-OF-ONE|original/i.test(premium));
+check('premiumWebCraftRules is originality-based', /THIN CREATE|@@@FILE|ONE-OF-ONE|original/i.test(premium));
 check('premiumWebCraftRules no fill-slots law', !/Fill CopyPack slots only/i.test(premium));
 
 const thin = lintOriginalCreateQuality({

@@ -802,30 +802,42 @@ export async function answerStudio(
         streamed = '';
       },
       onChunk: prefs.streamResponses && onDelta
-        ? (piece) => {
-          if (input.shouldAbort?.()) {
-            killLocalInfer();
-            return;
-          }
-          const delta = String(piece || '');
-          if (!delta) return;
-          if (streamed.length === 0 && delta.length >= 80) streamed = delta;
-          else if (delta.length > streamed.length + 40 && delta.length >= 80) streamed = delta;
-          else streamed += delta;
-          const live = stripStudioMeta(streamed);
-          if (live.length < 2 || looksLikePromptEcho(live)) return;
-          onDelta(live);
-        }
+        ? (() => {
+          let paintTimer: number | null = null;
+          let pendingLive = '';
+          const flushPaint = () => {
+            paintTimer = null;
+            if (!pendingLive || pendingLive.length < 2 || looksLikePromptEcho(pendingLive)) return;
+            onDelta(pendingLive);
+          };
+          return (piece: string) => {
+            if (input.shouldAbort?.()) {
+              killLocalInfer();
+              return;
+            }
+            const delta = String(piece || '');
+            if (!delta) return;
+            if (streamed.length === 0 && delta.length >= 80) streamed = delta;
+            else if (delta.length > streamed.length + 40 && delta.length >= 80) streamed = delta;
+            else streamed += delta;
+            pendingLive = stripStudioMeta(streamed);
+            // ~50ms paint coalesce — avoid per-chunk React setState storms.
+            if (paintTimer == null) {
+              paintTimer = window.setTimeout(flushPaint, 50);
+            }
+          };
+        })()
         : undefined,
     });
 
     const abortRace = new Promise<{ ok: false; aborted: true }>((resolve) => {
+      // 100ms poll — Stop must reach GGUF cancel within ~1s, not wait on a 400ms cadence.
       abortPollId = window.setInterval(() => {
         if (input.shouldAbort?.()) {
           killLocalInfer();
           resolve({ ok: false, aborted: true });
         }
-      }, 400);
+      }, 100);
     });
 
     const timed = await Promise.race([

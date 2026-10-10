@@ -9,8 +9,16 @@ export type ImportProgress = {
 
 function yieldFrame(): Promise<void> {
   return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
     if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve());
+      // Hidden windows never paint → rAF may never fire; timer keeps imports moving.
+      requestAnimationFrame(() => finish());
+      setTimeout(finish, 32);
     } else {
       setTimeout(resolve, 0);
     }

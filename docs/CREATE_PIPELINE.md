@@ -1,80 +1,66 @@
 # Create pipeline ownership
 
-Nova create is **Single Brain Create** with a **pass spine**: bare Vite wiring → **ProductPlan** → craft (createV2 staged write) → polish + plan repair → Live evidence → commander fix rounds → **quality Ready** (plan + design + host judge).
+Nova create uses a **thin create path** (Temp Nova *shape*, not a merge of the Temp Nova app): ask → bare Vite scaffold → sticky single-brain craft → syntax → npm → honest Live → quality Ready.
 
-**Family owner (single):** `inferCreateCompositionFamily` in [`createProductPlan.ts`](../src/lib/createProductPlan.ts). `inferCompositionFamily` in Design Spine **delegates** to it (no marketing-default fork).
+**Do not merge Temp Nova into Nova.** Temp Nova stays a separate harness. We only copy the working approach: invent from the ask, write `@@@FILE`, skip the post-craft maze.
 
-**Brief is the source of truth.** Craft invents whatever the user asked for — not a tip/todo/notes/marketing/shop recipe menu. `compositionFamily` / `toolKind` / `appKind` are **soft shape hints** (anti-sabotage only: e.g. don’t ship a marketing hero when they asked for a working tool). Repair **strips** wrong-family bleed; it must not paste genre starters as the product.
+```mermaid
+flowchart LR
+  ask[HardGoAsk] --> scaffold[BareViteScaffold]
+  scaffold --> craft[StickyModelCraft]
+  craft --> syntax[SyntaxGateOnly]
+  syntax --> npm[NpmInstall]
+  npm --> live[HonestLiveProbe]
+  live --> ready[QualityReady]
+```
 
-Marketing COVER/hero heals must not run on `tool-panel` / `app-chrome`. `layoutReference` recipes (apple/Linear/cafe) are **retired** on create — do not reinject.
+Owner: [`isThinCreatePath()`](../src/lib/createThinPath.ts) — always on for create turns. Edit stays apply + anti-bleed + syntax.
 
-Static Preview Ready is **preflight only**. Live unlock = real probe mount (**no forged utility mount**). Quality Ready = Live unlock + smoke + host judge + ProductPlan score + design score + **no floor fallback** + **no repairOwnedProduct**.
+**Family owner (single):** `inferCreateCompositionFamily` in [`createProductPlan.ts`](../src/lib/createProductPlan.ts). Soft shape hint only (anti-sabotage). Craft invents from the brief — not tip/todo/notes/marketing/shop recipes.
 
-## Original one-of-one (non-negotiable)
+Static Preview Ready is **preflight only**. Live unlock = real probe mount (**no forged utility mount**). Quality Ready = Live unlock + smoke + host judge + ProductPlan/design scores + **no floorFallback** + **no repairOwnedProduct**.
 
-Every create invents a **unique professional** UI for *this* ask.
+## Thin path (default)
 
-**Forbidden on create:**
-- Product templates / locked Design Spine marketing shells pre-written before craft
-- Placeholders (lorem, Sample, Band-N, via.placeholder.com)
-- Reference recipes (apple.com / Linear / cafe word lists driving layout) — `layoutReferencePromptLines` is a no-op
-- Scaffold utility stubs (tip/todo/coffee) on unrelated product asks
-- Copy-paste `healDesignShell` restores of a prior shell
-- Forging Live `mounted`/`pass` from HTTP + disk heuristics
-- Treating repair starters / recovery floors as quality Ready (`repairOwnedProduct` / `floorFallback` block quality)
-- Multimodal Plan→Design→Copy→Craft GGUF seat swaps (ensemble Auto is **parked** via `ensembleAutoParked` — code kept, hops forced off)
+**Keep**
+- Hard-go → create · bare scaffold · sticky craft (`createV2`) · short craft prompt (`formatThinCreateCraftRules`)
+- Mechanical syntax gate · strip-only anti-bleed · npm · honest Live · quality Ready without floor rescue
 
-**Allowed infrastructure only:**
-- Bare Vite wiring (`package.json`, `index.html`, `main`, empty `#root`)
-- Quality **rules** in prompts (`QUALITY_FLOOR` / `formatOriginalCraftRules`) — not pasted layouts
+**Skip (gated when thin)**
+- Genre / recovery floors (`buildBriefInteractiveFloor`, utility/kiln/sticky/apple/game floors, `realizeBriefUi` salvage)
+- Marketing COVER / structure heals / CSS companion floors as Ready unlock
+- Plan repair that sets `repairOwnedProduct` / `floorFallback`
+- Style hop as a required polish step
+- Commander/tool-loop salvage rounds in verify/fix
 
-**If craft fails originality/quality lint:** one same-model retry path / fail Ready — never paste a template.
+**If craft fails:** clear fail message — never paste a floor to fake success.
 
-## Order (Create Runtime Loop)
+## Order
 
-1. **Talk** ([`src/lib/chatTurnHandlers/chat.ts`](../src/lib/chatTurnHandlers/chat.ts)) — Instruct only. Never builds.
-2. **Soft plan-talk** (optional, in normal chat) — no Plan pill required. Hard-go (“build it”, “on disk now”) enters create.
-3. **Bare scaffold** — disk folder + Vite entry files; App is an empty mount (`<div className="app" />`) — not a centered title phone-column. Craft owns the product UI.
-4. **Single Brain craft** ([`src/lib/chatTurnHandlers/create.ts`](../src/lib/chatTurnHandlers/create.ts) / [`createV2.ts`](../src/lib/createV2.ts)) — one sticky model invents UI from the brief (`@@@FILE`) following the **pass spine** (plan → structure → design → interact → verify → critic). See [`createPassSpine.ts`](../src/lib/createPassSpine.ts).
-   - Default: `src/App.tsx` + `src/App.css`.
-   - **Storefront genre** (cart/checkout/liquor/shop+browse): structural plan + **required** `src/data/products.ts` + optional `src/components/*` under the storefront LayoutContract. See [`createLayoutContract.ts`](../src/lib/createLayoutContract.ts), [`createStorefrontRepair.ts`](../src/lib/createStorefrontRepair.ts), [`createStorefrontFloor.ts`](../src/lib/createStorefrontFloor.ts).
-5. **Style polish** — CSS thicken on the **same** GGUF (no unload/reload); all families run ProductPlan repair before genre floors.
-6. **Originality lint** — `lintOriginalCreateQuality` + `scorePlanContract` + design quality.
-7. **Preflight** — Preview Ready. Floors are last-resort recovery only (honest status); marketing floor only for `marketing-bands` family. Floors / repair-owned starters unlock Live but **never** quality Ready alone.
-8. **Install** — npm bootstrap.
-9. **Live evidence** ([`src/lib/createEvidence.ts`](../src/lib/createEvidence.ts) + [`createRuntimeLoop.ts`](../src/lib/createRuntimeLoop.ts)) — HTTP + Electron mount + console + smoke. Probe must report mount — no forged utility shortcut.
-10. **Fix rounds** (up to 3) — trunc/near-ready heal → plan repair → surgical patches → optional commander tool loop → re-probe. Repair that owns the product sets `floorFallback`.
-11. **Host judge + pass spine** ([`src/lib/createHostJudge.ts`](../src/lib/createHostJudge.ts), [`createPassSpine.ts`](../src/lib/createPassSpine.ts)) — plan + design scores hard-gate quality Ready.
-12. **Ready** — `markCreateJobReady` requires Live URL; status distinguishes quality verified vs Live unlocked (quality open). Git commit only on quality Ready.
-13. **Edit** — every write goes through `applyChatReplyEdits` → `antiBleedForFamily` (strip wrong-family COVER / `products.ts` without inventing UI). In-place rebuild stays on the edit path (`keep_building`), not full create spine.
+1. **Talk** — Instruct only. Never builds.
+2. **Hard-go** — “build it” / “on disk now” → create.
+3. **Bare scaffold** — Vite entry; empty App mount. Craft owns the product UI.
+4. **Single Brain craft** — sticky model, `@@@FILE` invent-from-ask ([`createThinPath.ts`](../src/lib/createThinPath.ts), [`createV2.ts`](../src/lib/createV2.ts)).
+5. **Syntax gate** — mechanical heal only ([`createSyntaxGate.ts`](../src/lib/createSyntaxGate.ts)).
+6. **Install** — npm bootstrap.
+7. **Live evidence** — HTTP + real mount ([`createEvidence.ts`](../src/lib/createEvidence.ts), [`createRuntimeLoop.ts`](../src/lib/createRuntimeLoop.ts)). Thin fix rounds = trunc + syntax + re-probe only.
+8. **Ready** — `judgeCreateVerified` · floors never unlock quality.
+9. **Edit** — `applyChatReplyEdits` → `antiBleedForFamily` + syntax.
 
-Smokes: `npm run smoke:tool-craft-contract`, `npm run smoke:create-pass-spine`, `npm run smoke:single-brain-create`, `npm run smoke:design-spine`, `npm run smoke:product-plan`, `npm run smoke:create-intent`.
+Smokes: `npm run smoke:thin-create-path`, `npm run smoke:create-pass-spine`, `npm run smoke:tool-craft-contract`, `npm run smoke:single-brain-create`.
 
-## Manual live test (after smokes)
+## Already parked — do not revive
 
-1. Hello — natural reply, no freeze  
-2. Talk through a vacuum website — stays chat  
-3. Build it — Single Brain Create; Live looks unique/professional  
-4. Build a second different product — must not clone #3  
-5. Blank white website — solid empty page  
-6. No Plan/Agent/Multi-agent/Debug pills required; no OS freeze
-
-## Pill / engine
-
-- Status stages: `CREATE_RUNTIME_STAGES` in createEvidence.
-- Job store: `writing` → `npm` → `verifying` → `ready` | `failed`.
-- Pin honor: chat picker / sticky craft model wins (no silent 32B upgrade, no mid-create GGUF swap).
-- Composer model picker label: **Nova Auto** (one Ready brain) — not a multi-model team.
-
-## Composer surface
-
-Default `+` menu: **Debug (Coming Soon / parked)** + **files / bind project**. Plan, Agent, and Multi-agent stay removed. Debug is visible like Message/Networking (Soon badge) until the clinic is ready — flip `isDebugComposerParked()` in [`featurePark.ts`](../src/lib/featurePark.ts) when enabling.
+- Ensemble multi-seat (`ensembleAutoParked`)
+- `layoutReference` recipes
+- Forged utility mount
+- Commander create (`agentLoopOnCreate`)
 
 ## Do not
 
 - Claim success from static Ready alone.
 - Unlock Live with a null preview URL.
-- Treat Plan card as done.
+- Treat floors / repair-owned shells as quality Ready.
+- Merge Temp Nova UI/code into Nova create.
+- Pre-write Design Spine shells or restore them as Ready heals.
 - Run Multimodal create relay / multi-GGUF seat swaps.
-- Pre-write Design Spine product shells or restore them as Ready heals.
-- Open Live while status is `failed` / `verifying` / `npm` without evidence.
