@@ -14,6 +14,8 @@ import {
   svgHeroDataUrl,
 } from '@/lib/createIdentity';
 import { localIconifySvg } from '@/lib/localLucideIcons';
+import { productDeskLogoSvg, productDeliveryLogoSvg } from '@/lib/createProductLadder';
+import { briefLooksLikeInsulatedBottleShop } from '@/lib/createStorefrontFloor';
 
 export type BrandAssetRole = 'logo' | 'icon' | 'hero';
 
@@ -259,25 +261,33 @@ export const BRAND_LOGO_CATALOG: Array<{ id: string; label: string; iconify: str
 
 /** UI / product icons via Lucide. */
 export const UI_ICON_CATALOG: Array<{ id: string; label: string; iconify: string; re: RegExp }> = [
-  { id: 'menu', label: 'menu', iconify: 'lucide:menu', re: /\bmenu\b/i },
-  { id: 'search', label: 'search', iconify: 'lucide:search', re: /\b(?:search|magnifier|magnifying\s*glass)\b/i },
-  { id: 'user', label: 'profile', iconify: 'lucide:user', re: /\b(?:profile|user|account)\b/i },
-  { id: 'settings', label: 'settings', iconify: 'lucide:settings', re: /\b(?:settings?|gear|cog)\b/i },
-  { id: 'bell', label: 'bell', iconify: 'lucide:bell', re: /\b(?:bell|notif(?:ication)?s?)\b/i },
+  // Require icon cue — "hamburger menu on mobile" is nav layout, not a menu.svg rail.
+  { id: 'menu', label: 'menu', iconify: 'lucide:menu', re: /\bmenu\s*icons?\b|\bicons?\b[\s\S]{0,28}\bmenu\b|\b(?:hamburger\s+)?menu\s+icon\b/i },
+  // Require icon cue — "search box that filters" is an input, not search.svg rail.
+  { id: 'search', label: 'search', iconify: 'lucide:search', re: /\b(?:search|magnifier|magnifying\s*glass)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:search|magnifier)\b|\bsearch\s+icon\b|\bmagnifying\s+glass\b/i },
+  // Require icon cue — "profile card" / "Account dropdown" are UI chrome, not user.svg rails.
+  { id: 'user', label: 'profile', iconify: 'lucide:user', re: /\b(?:profile|user|account)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:profile|user|account)\b|\buser\s+icon\b/i },
+  // Require icon/gear cue — "settings page with toggles" is a page, not settings.svg.
+  { id: 'settings', label: 'settings', iconify: 'lucide:settings', re: /\b(?:settings?|gear|cog)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:settings?|gear|cog)\b|\b(?:gear|cog)\b/i },
+  // Require icon cue — "toast notifications" are banners, not a bell.svg rail.
+  { id: 'bell', label: 'bell', iconify: 'lucide:bell', re: /\b(?:bell|notif(?:ication)?s?)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:bell|notif(?:ication)?s?)\b|\bbell\s+icon\b/i },
   // Avoid prose false hits: "like a …", bare "Edit the project", nav "Help" links.
   { id: 'heart', label: 'heart', iconify: 'lucide:heart', re: /\b(?:heart|favorite|wishlist|like\s+icon|likes?\s+button)\b/i },
   { id: 'cart', label: 'cart', iconify: 'lucide:shopping-cart', re: /\b(?:cart|shopping)\b/i },
   { id: 'bag', label: 'bag', iconify: 'lucide:shopping-bag', re: /\bbag\b/i },
   { id: 'play', label: 'play', iconify: 'lucide:play', re: /\b(?:play\s*button|play\s*icon)\b/i },
   { id: 'home', label: 'home', iconify: 'lucide:home', re: /\bhome\s+icon\b|\bicon[s]?\b[\s\S]{0,32}\bhome\b/i },
-  { id: 'mail', label: 'mail', iconify: 'lucide:mail', re: /\b(?:mail|email|inbox)\b/i },
+  // Require icon cue — "email line" / Contact footer / form fields must not spawn a mail rail.
+  { id: 'mail', label: 'mail', iconify: 'lucide:mail', re: /\b(?:mail|email|inbox)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:mail|email|inbox)\b|\b(?:mail|email)\s+icon\b/i },
   { id: 'calendar', label: 'calendar', iconify: 'lucide:calendar', re: /\bcalendar\b/i },
   { id: 'camera', label: 'camera', iconify: 'lucide:camera', re: /\bcamera\b/i },
   { id: 'mic', label: 'mic', iconify: 'lucide:mic', re: /\b(?:mic|microphone)\b/i },
   { id: 'share', label: 'share', iconify: 'lucide:share-2', re: /\bshare\b/i },
   { id: 'download', label: 'download', iconify: 'lucide:download', re: /\bdownload\b/i },
-  { id: 'upload', label: 'upload', iconify: 'lucide:upload', re: /\bupload\b/i },
-  { id: 'trash', label: 'trash', iconify: 'lucide:trash-2', re: /\b(?:trash|delete|bin)\b/i },
+  // Require icon cue — "file upload drop zone" is a control, not upload.svg.
+  { id: 'upload', label: 'upload', iconify: 'lucide:upload', re: /\bupload\s*icons?\b|\bicons?\b[\s\S]{0,28}\bupload\b|\bupload\s+icon\b/i },
+  // Require icon cue — bare "delete the Contact link" is nav surgery, not a trash toolbar icon.
+  { id: 'trash', label: 'trash', iconify: 'lucide:trash-2', re: /\b(?:trash|bin)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:trash|delete|bin)\b|\bdelete\s+icon\b/i },
   { id: 'edit', label: 'edit', iconify: 'lucide:pencil', re: /\b(?:edit\s+icon|pencil(?:\s+icon)?)\b/i },
   { id: 'lock', label: 'lock', iconify: 'lucide:lock', re: /\b(?:lock|secure|security)\b/i },
   { id: 'star', label: 'star', iconify: 'lucide:star', re: /\bstar\b/i },
@@ -285,8 +295,10 @@ export const UI_ICON_CATALOG: Array<{ id: string; label: string; iconify: string
   { id: 'help', label: 'help', iconify: 'lucide:circle-help', re: /\b(?:help\s+icon|faq\s+icon)\b/i },
   { id: 'info', label: 'info', iconify: 'lucide:info', re: /\binfo\b/i },
   { id: 'filter', label: 'filter', iconify: 'lucide:list-filter', re: /\bfilter\b/i },
-  { id: 'grid', label: 'grid', iconify: 'lucide:layout-grid', re: /\b(?:grid|apps)\b/i },
-  { id: 'more', label: 'more', iconify: 'lucide:ellipsis', re: /\b(?:more|ellipsis|overflow)\b/i },
+  // Require icon cue — "card grid" / "2-by-2 grid" are layout, not a grid toolbar icon.
+  { id: 'grid', label: 'grid', iconify: 'lucide:layout-grid', re: /\b(?:grid|apps)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:grid|apps)\b|\b(?:layout[- ]?grid|apps)\s+icon\b/i },
+  // Require icon cue — bare "more" / "for now" / "more professional" must never spawn an ellipsis rail.
+  { id: 'more', label: 'more', iconify: 'lucide:ellipsis', re: /\b(?:more|ellipsis|overflow)\s*icons?\b|\bicons?\b[\s\S]{0,28}\b(?:more|ellipsis|overflow)\b/i },
   { id: 'clock', label: 'clock', iconify: 'lucide:clock', re: /\b(?:clock|time)\b/i },
   { id: 'map-pin', label: 'map', iconify: 'lucide:map-pin', re: /\b(?:map|location|pin)\b/i },
   { id: 'shield', label: 'shield', iconify: 'lucide:shield', re: /\bshield\b/i },
@@ -337,6 +349,11 @@ const LOGO_FAMILY_ICONS: Array<{ re: RegExp; iconify: string }> = [
   { re: /\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|reading\s+nook|checked\s*out)\b/i, iconify: 'lucide:library' },
   { re: /\b(?:security|doorbell|smart\s*home)\b/i, iconify: 'lucide:shield-check' },
   { re: /\b(?:air\s*purifier|hvac|clean\s*air)\b/i, iconify: 'lucide:wind' },
+  // Insulated / hydration bottles BEFORE spirits wine + music — water flask ≠ wine glass ≠ note.
+  {
+    re: /\b(?:insulated|water\s+bottle|tumbler|hydration|flask|rambler|\d+\s*oz)\b|\b(?:bottle|bottles)\b[\s\S]{0,80}\b(?:cart|checkout|e-?commerce|storefront|add\s+to\s+cart)\b/i,
+    iconify: 'lucide:shopping-bag',
+  },
   // Food / beverage BEFORE notes — "tasting notes" must not steal matcha/tea brands.
   // Spirits before coffee so "gin · not coffee" never gets a mug mark.
   { re: /\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac|wine)\b/i, iconify: 'lucide:wine' },
@@ -347,10 +364,14 @@ const LOGO_FAMILY_ICONS: Array<{ re: RegExp; iconify: string }> = [
   { re: /\b(?:lotion|skincare|serum|beauty|moisturizer|hand\s+cream|face\s+cream|body\s+cream)\b/i, iconify: 'lucide:sparkles' },
   { re: /\b(?:finance|budget|ledger|invoice|expense|banking|wallet)\b/i, iconify: 'lucide:wallet' },
   { re: /\b(?:gym|fitness|workout|hiit|yoga)\b/i, iconify: 'lucide:dumbbell' },
-  { re: /\b(?:music|playlist|podcast|album|band)\b/i, iconify: 'lucide:music' },
+  // Food delivery BEFORE desk/game — never ship a desk mark on PlateRush-class briefs.
+  { re: /\b(?:food\s+delivery|meal\s+delivery|delivery\s+(?:app|service|company))\b/i, iconify: 'nova:delivery' },
+  // Desk / hardware BEFORE music/shop — custom desk mark (not gamepad).
+  { re: /\b(?:gaming\s+desk|standing\s+desk|desk\s+brand|battlestation|rgb\s+edge|shop\s+the\s+desk)\b/i, iconify: 'nova:desk' },
+  { re: /\b(?:game|arcade|puzzle|playable|gaming)\b/i, iconify: 'lucide:gamepad-2' },
+  { re: /\b(?:music|playlist|podcast|album)\b/i, iconify: 'lucide:music' },
   { re: /\b(?:photo(?:graphy|grapher)?|gallery|portfolio|camera)\b/i, iconify: 'lucide:camera' },
   { re: /\b(?:chat|messag(?:e|ing)|inbox|community)\b/i, iconify: 'lucide:message-circle' },
-  { re: /\b(?:game|arcade|puzzle|playable)\b/i, iconify: 'lucide:gamepad-2' },
   { re: /\b(?:weather|forecast)\b/i, iconify: 'lucide:cloud-sun' },
   { re: /\b(?:travel|trip|flight|itinerary)\b/i, iconify: 'lucide:plane' },
   { re: /\b(?:course|learn(?:ing)?|school|study|tutor|flash\s*cards?)\b/i, iconify: 'lucide:graduation-cap' },
@@ -426,17 +447,50 @@ export function brandLogoSvgFor(opts: {
   const lightCanvas = /background\s*:\s*(?:#fef3c7|#fff(?:fff)?|#f[5-9a-f]{5})/i.test(css)
     || /\bcream\b|\bwhite\b|\bpaper\b|\bwalnut\b|\bbeige\b|\breading\s+nook\b|\bsoft\s+paper\b/i.test(brief);
   const ink = lightCanvas ? '#1a1a1a' : '#ffffff';
-  const id = resolveLocalIconifyId(logoIconifyFor(name, brief));
+  const rawId = logoIconifyFor(name, brief);
+  const deliveryBrief = /\b(?:food\s+delivery|meal\s+delivery|delivery\s+(?:app|service|company))\b/i
+    .test(`${name}\n${brief}`)
+    || (/\bdelivery\b/i.test(`${name}\n${brief}`) && /\b(?:food|meal|restaurant|order)\b/i.test(`${name}\n${brief}`));
+  if (rawId === 'nova:delivery' || deliveryBrief) {
+    return productDeliveryLogoSvg(ink);
+  }
+  const deskBrief = /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|battlestation|desk\s+brand)\b/i
+    .test(`${name}\n${brief}`);
+  // Desk mark is custom SVG — never a gamepad / music note / sparkles.
+  if (rawId === 'nova:desk' || deskBrief) {
+    return productDeskLogoSvg(ink);
+  }
+  // Insulated / hydration bottle shops — flask mark, never wine glass / music / gamepad.
+  const insulatedShop = briefLooksLikeInsulatedBottleShop(name, brief);
+  if (insulatedShop || rawId === 'lucide:shopping-bag') {
+    const bag = localIconifySvg('lucide:shopping-bag', ink);
+    if (bag && !/M9 18V5l12-2v13/i.test(bag)) return bag;
+  }
+  const id = resolveLocalIconifyId(rawId);
   let svg = localIconifySvg(id, ink) || '';
+  // Never Accept music/gamepad marks on commerce storefronts.
+  if (
+    briefLooksLikeInsulatedBottleShop(name, brief)
+    || /\b(?:cart|checkout|e-?commerce|storefront|add\s+to\s+cart)\b/i.test(`${name}\n${brief}`)
+  ) {
+    if (/M9 18V5l12-2v13/i.test(svg) || /M17\.32 5H6\.68/i.test(svg) || /M9\.937 15\.5/i.test(svg)) {
+      svg = localIconifySvg(
+        insulatedShop ? 'lucide:shopping-bag' : 'lucide:shopping-bag',
+        ink,
+      ) || svg;
+    }
+  }
   // F&B hard override — if family resolve somehow returns sparkles, still ship wine/mug/leaf.
   // Live gin runs logged "Logo lock: skipped mark=sparkles" while name still said Gin.
+  // Insulated water bottles stay shopping-bag (not wine).
   if (!svg || /M9\.937 15\.5/i.test(svg)) {
     const kind = detectHeroProductKind(name, brief);
-    const forcedId = kind === 'bottle' ? 'lucide:wine'
-      : kind === 'coffee' ? 'lucide:coffee'
-        : kind === 'tea' ? 'lucide:leaf'
-          : kind === 'ceramic' ? 'lucide:utensils'
-            : '';
+    const forcedId = insulatedShop ? 'lucide:shopping-bag'
+      : kind === 'bottle' ? 'lucide:wine'
+        : kind === 'coffee' ? 'lucide:coffee'
+          : kind === 'tea' ? 'lucide:leaf'
+            : kind === 'ceramic' ? 'lucide:utensils'
+              : '';
     if (forcedId) svg = localIconifySvg(forcedId, ink) || svg;
   }
   return svg || localIconifySvg('lucide:sparkles', ink) || '';
@@ -1210,10 +1264,10 @@ export async function materializeBrandAssets(opts: {
   ].join('');
   const hasChromeSlots = opts.plan.slots.some((s) => s.role === 'logo' || s.role === 'icon');
   if (hasChromeSlots && files['src/App.css'] && usesAbsoluteRail && !files['src/App.css'].includes('.brand-rail')) {
-    let css = files['src/App.css'].trimEnd();
+    const css = files['src/App.css'].trimEnd();
     files['src/App.css'] = `${css}\n${extraCss}\n`;
   } else if (hasChromeSlots && files['src/App.css'] && !files['src/App.css'].includes('.nav-tools')) {
-    let css = files['src/App.css'].trimEnd();
+    const css = files['src/App.css'].trimEnd();
     files['src/App.css'] = `${css}\n${extraCss}\n`;
   }
   // Prefer ink marks on cream/light canvases — strip forced invert filters.
@@ -1293,10 +1347,7 @@ async function allAttachedDataUrls(message: string): Promise<string[]> {
   return out;
 }
 
-async function firstAttachedDataUrl(message: string): Promise<string | null> {
-  const all = await allAttachedDataUrls(message);
-  return all[0] || null;
-}
+
 
 function patchFilesForHero(files: Record<string, string>, href: string, role: BrandAssetRole): Record<string, string> {
   const next = { ...files };

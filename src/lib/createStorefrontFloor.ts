@@ -71,10 +71,48 @@ export function genericCatalog(title: string): StorefrontProduct[] {
   ];
 }
 
+/** Insulated water bottles — 9 SKUs, distinct colors/prices (not spirits). */
+export function insulatedBottleCatalog(title: string): StorefrontProduct[] {
+  const brand = title.replace(/\s+/g, ' ').trim() || 'Peak';
+  return [
+    { id: 'trail-26', name: `${brand} Trail 26 oz`, type: '26 oz', color: '#6b2d3c', notes: 'Double-wall vacuum with color-matched flip chug cap.', price: 40 },
+    { id: 'summit-36', name: `${brand} Summit 36 oz`, type: '36 oz', color: '#f4f1ea', notes: 'Wide-mouth day bottle for long hikes and desk refills.', price: 50 },
+    { id: 'ridge-18', name: `${brand} Ridge 18 oz`, type: '18 oz', color: '#e11d8f', notes: 'Compact carry with durable UV ink banding.', price: 32 },
+    { id: 'alpine-26', name: `${brand} Alpine 26 oz`, type: '26 oz', color: '#0f766e', notes: 'Ice-holding trail bottle with leak-proof straw lid.', price: 42 },
+    { id: 'dusk-30', name: `${brand} Dusk 30 oz`, type: '30 oz', color: '#4c1d95', notes: 'Matte finish, soft-grip sleeve, all-day cold.', price: 46 },
+    { id: 'canyon-22', name: `${brand} Canyon 22 oz`, type: '22 oz', color: '#c2410c', notes: 'Slim pack-fit bottle with magnetic lid park.', price: 36 },
+    { id: 'frost-18', name: `${brand} Frost 18 oz`, type: '18 oz', color: '#0369a1', notes: 'Kids-friendly size with bite-valve straw.', price: 28 },
+    { id: 'ember-26', name: `${brand} Ember 26 oz`, type: '26 oz', color: '#b45309', notes: 'Hot-or-cold vacuum flask with pour spout.', price: 44 },
+    { id: 'mist-40', name: `${brand} Mist 40 oz`, type: '40 oz', color: '#64748b', notes: 'Big-day jug with carry handle and wide mouth.', price: 54 },
+  ];
+}
+
+export function briefLooksLikeInsulatedBottleShop(title: string, brief: string): boolean {
+  // Scrub negations first — "not liquor / not wine" must not demote a water-bottle shop.
+  const t = `${brief}\n${title}`
+    .replace(/\b(?:not|never|no|without|avoid)\s+(?:a\s+|an\s+)?(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|scotch|wine)\b/gi, ' ')
+    .replace(/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|scotch|wine)\s*-?\s*free\b/gi, ' ');
+  if (/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|scotch|wine)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(?:insulated|water\s+bottle|tumbler|hydration|flask|rambler|oz\s+bottle|bottle\s+brand|bottle\s+shop)\b/i.test(t)
+    || (/\bbottles?\b/i.test(t) && /\b(?:cart|checkout|e-?commerce|storefront|add\s+to\s+cart)\b/i.test(t));
+}
+
+export function briefLooksLikeLiquorShop(title: string, brief: string): boolean {
+  const t = `${brief}\n${title}`;
+  if (briefLooksLikeInsulatedBottleShop(title, brief)) return false;
+  return /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|scotch|wine)\b/i.test(t)
+    || (/\bbottle\s+shop\b/i.test(t) && /\b(?:liquor|spirits?|whiskey|wine|bourbon)\b/i.test(t));
+}
+
 /** Pick catalog by brief category — tea never gets whiskey fields. */
 export function catalogForStorefrontBrief(title: string, brief: string): StorefrontProduct[] {
   const t = `${brief}\n${title}`;
-  if (/\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch|wine)\b/i.test(t)) {
+  if (briefLooksLikeInsulatedBottleShop(title, brief)) {
+    return insulatedBottleCatalog(title);
+  }
+  if (briefLooksLikeLiquorShop(title, brief)) {
     return liquorCatalog();
   }
   if (/\b(?:matcha|tea|jasmine|oolong|sencha|tisane|steep)\b/i.test(t)) {
@@ -92,28 +130,35 @@ export function buildStorefrontCommerceFloor(
   brief: string,
   p: CreatePalette,
 ): StorefrontFloorFiles {
-  const liquor = /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|scotch|wine)\b/i.test(brief);
-  const tea = !liquor && /\b(?:matcha|tea|jasmine|oolong|sencha|tisane|steep)\b/i.test(`${brief}\n${title}`);
-  const coffee = !liquor && !tea && /\b(?:coffee|espresso|roast|pour[- ]?over|cold\s+brew|barista)\b/i.test(`${brief}\n${title}`);
-  const shopCta = liquor ? 'Browse bottles' : tea ? 'Browse tins' : coffee ? 'Browse bags' : 'Browse catalog';
-  const shopDetail = liquor
-    ? 'Filter the catalog, open a bottle for details, then add what you want.'
-    : tea
-      ? 'Filter by type, open a tin for details, then add what you want.'
-      : coffee
-        ? 'Filter by roast, open a bag for details, then add what you want.'
-        : 'Filter the catalog, open an item for details, then add what you want.';
-  const eyebrow = liquor ? 'Specialty bottle shop' : tea ? 'Small-batch tea' : coffee ? 'Fresh roast' : 'Online store';
-  const heroLine = liquor ? 'Spirits with a story.' : `${title}.`;
-  const heroSub = liquor
-    ? 'Browse by type, read origin and tasting notes, add quantities to cart, and check out in one flow.'
-    : tea
-      ? 'Browse tins and pouches, read steep notes, add quantities, and complete a demo purchase.'
-      : coffee
-        ? 'Browse bags and kits, read roast notes, add quantities, and complete a demo purchase.'
-        : 'Browse the catalog, filter by type, add quantities, and complete a demo purchase.';
+  const bottles = briefLooksLikeInsulatedBottleShop(title, brief);
+  const liquor = !bottles && briefLooksLikeLiquorShop(title, brief);
+  const tea = !liquor && !bottles && /\b(?:matcha|tea|jasmine|oolong|sencha|tisane|steep)\b/i.test(`${brief}\n${title}`);
+  const coffee = !liquor && !bottles && !tea && /\b(?:coffee|espresso|roast|pour[- ]?over|cold\s+brew|barista)\b/i.test(`${brief}\n${title}`);
+  const supportEmail = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 18) || 'hello'}@support.example`;
+  const shopCta = bottles ? 'Shop bottles' : liquor ? 'Browse bottles' : tea ? 'Browse tins' : coffee ? 'Browse bags' : 'Browse catalog';
+  const shopDetail = bottles
+    ? 'Nine insulated bottles — each with its own color, size, and price. Add any to cart.'
+    : liquor
+      ? 'Filter the catalog, open a bottle for details, then add what you want.'
+      : tea
+        ? 'Filter by type, open a tin for details, then add what you want.'
+        : coffee
+          ? 'Filter by roast, open a bag for details, then add what you want.'
+          : 'Filter the catalog, open an item for details, then add what you want.';
+  const eyebrow = bottles ? 'Insulated bottle shop' : liquor ? 'Specialty bottle shop' : tea ? 'Small-batch tea' : coffee ? 'Fresh roast' : 'Online store';
+  const heroLine = bottles ? `${title} bottles.` : liquor ? 'Spirits with a story.' : `${title}.`;
+  const heroSub = bottles
+    ? 'Welcoming cream storefront: browse nine bottles, add to cart, and check out — plus About, Careers, and Help.'
+    : liquor
+      ? 'Browse by type, read origin and tasting notes, add quantities to cart, and check out in one flow.'
+      : tea
+        ? 'Browse tins and pouches, read steep notes, add quantities, and complete a demo purchase.'
+        : coffee
+          ? 'Browse bags and kits, read roast notes, add quantities, and complete a demo purchase.'
+          : 'Browse the catalog, filter by type, add quantities, and complete a demo purchase.';
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'shop';
-  const hero = `/heroes/${slug}-hero.jpg`;
+  // Compose owns an SVG hero so Live never depends on photo fetch for Accept.
+  const hero = `/heroes/${slug}-hero.svg`;
   const products = catalogForStorefrontBrief(title, brief);
   const productsTs = `export type Product = {
   id: string;
@@ -122,6 +167,7 @@ export function buildStorefrontCommerceFloor(
   origin?: string;
   age?: string;
   abv?: string;
+  color?: string;
   notes: string;
   price: number;
   image?: string;
@@ -183,7 +229,9 @@ export default function App() {
         <nav className="topnav-inner" aria-label="Primary">
           <a className="mark" href="#top" onClick={() => setDetailId(null)}>${title}</a>
           <a href="#shop" onClick={() => setDetailId(null)}>Shop</a>
-          <a href="#story">Story</a>
+          <a href="#about">About</a>
+          <a href="#careers">Careers</a>
+          <a href="#help">Help</a>
           <button type="button" className="cart-btn" onClick={() => setOpen(true)} aria-label="Open cart">
             Cart ({count})
           </button>
@@ -225,7 +273,14 @@ export default function App() {
             <div className="product-grid">
               {visible.map((product) => (
                 <article className="product-card" key={product.id}>
-                  <button type="button" className="product-media" onClick={() => setDetailId(product.id)} aria-label={\`Open \${product.name}\`} />
+                  <button
+                    type="button"
+                    className="product-media"
+                    style={product.color ? { background: \`linear-gradient(160deg, \${product.color}, color-mix(in srgb, \${product.color} 55%, #111))\` } : undefined}
+                    onClick={() => setDetailId(product.id)}
+                    aria-label={\`Open \${product.name}\`}
+                  />
+                  {product.color ? <span className="swatch" style={{ background: product.color }} aria-label="Color" /> : null}
                   <p className="meta">{product.type}{product.origin ? \` · \${product.origin}\` : ''}</p>
                   <h3>
                     <button type="button" className="linkish" onClick={() => setDetailId(product.id)}>{product.name}</button>
@@ -235,19 +290,35 @@ export default function App() {
                     {product.age ? <span>{product.age}</span> : null}
                     {product.abv ? <span>{product.abv} ABV</span> : null}
                   </p>
-                  <p className="price">\${product.price}</p>
+                  <p className="price">\${product.price.toFixed(2)}</p>
                   <button type="button" className="add-to-cart" onClick={() => add(product)}>Add to cart</button>
                 </article>
               ))}
             </div>
           </section>
 
-          <section className="band story" id="story">
+          <section className="band story" id="about">
             <div className="band-copy">
-              <h2>Origin & craft</h2>
-              <p>${liquor
-                ? 'Every bottle lists where it was made, how long it rested, and how it tastes — so you can explore before you buy.'
-                : `A specialty storefront for ${title}: clear product data, filters, cart, and checkout.`}</p>
+              <h2>About ${title}</h2>
+              <p>${bottles
+                ? `${title} builds insulated bottles for trails, desks, and everyday carry — vacuum walls, bold colors, and lids that match the bottle.`
+                : liquor
+                  ? 'Every bottle lists where it was made, how long it rested, and how it tastes — so you can explore before you buy.'
+                  : `A specialty storefront for ${title}: clear product data, filters, cart, and checkout.`}</p>
+            </div>
+          </section>
+
+          <section className="band story" id="careers">
+            <div className="band-copy">
+              <h2>Careers</h2>
+              <p>We hire retail, warehouse, and design teammates who care about craft. Email careers@${slug}.example with a short note.</p>
+            </div>
+          </section>
+
+          <section className="band story" id="help">
+            <div className="band-copy">
+              <h2>Help & support</h2>
+              <p>Shipping, returns, and lid swaps — write <a href="mailto:${supportEmail}">${supportEmail}</a> and we will get back within one business day.</p>
             </div>
           </section>
         </>
@@ -304,7 +375,7 @@ export default function App() {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!cart.length) return;
-                setPlaced(\`Order placed for \${name.trim() || 'guest'} · \${count} item\${count === 1 ? '' : 's'} · \$\${total.toFixed(2)}. Confirmation sent to \${email.trim() || 'you'}.\`);
+                setPlaced(\`Order placed for \${name.trim() || 'guest'} · \${count} item\${count === 1 ? '' : 's'} · $\${total.toFixed(2)}. Confirmation sent to \${email.trim() || 'you'}.\`);
                 setCart([]);
               }}
             >
@@ -327,6 +398,10 @@ export default function App() {
       <footer className="foot">
         <a href="#top">${title}</a>
         <a href="#shop">Shop</a>
+        <a href="#about">About</a>
+        <a href="#careers">Careers</a>
+        <a href="#help">Help</a>
+        <a href="mailto:${supportEmail}">${supportEmail}</a>
         <span>${liquor ? '21+ only · ' : ''}Demo store</span>
       </footer>
     </div>
@@ -334,23 +409,29 @@ export default function App() {
 }
 `;
 
-  // Surface tokens — liquor keeps whiskey browns; tea/coffee/goods use palette (never liquor hexes).
-  const mediaA = liquor ? '#2c1b14' : (tea ? '#1a2e24' : coffee ? '#2a2118' : p.panel);
-  const mediaB = liquor ? '#100b09' : (tea ? '#0c1612' : coffee ? '#14100c' : p.bg);
-  const detailA = liquor ? '#322018' : (tea ? '#243d32' : coffee ? '#3a2e22' : p.panel);
-  const detailB = liquor ? '#120c0a' : (tea ? '#0e1a15' : coffee ? '#16110c' : p.bg);
-  const qtyBg = liquor ? '#2a1b15' : (tea ? '#1e332a' : coffee ? '#2c241c' : p.panel);
-  const inputBg = liquor ? '#18100d' : (tea ? '#121f1a' : coffee ? '#1a1510' : p.bg);
-  const btnInk = liquor ? '#1a100c' : (p.btnInk || '#0a0a0a');
+  // Surface tokens — bottles = welcoming ivory; liquor keeps whiskey browns; tea/coffee/goods use palette.
+  const mediaA = bottles ? '#e7e0d4' : liquor ? '#2c1b14' : (tea ? '#1a2e24' : coffee ? '#2a2118' : p.panel);
+  const mediaB = bottles ? '#d6cec0' : liquor ? '#100b09' : (tea ? '#0c1612' : coffee ? '#14100c' : p.bg);
+  const detailA = bottles ? '#efe8dc' : liquor ? '#322018' : (tea ? '#243d32' : coffee ? '#3a2e22' : p.panel);
+  const detailB = bottles ? '#ddd4c4' : liquor ? '#120c0a' : (tea ? '#0e1a15' : coffee ? '#16110c' : p.bg);
+  const qtyBg = bottles ? '#efe8dc' : liquor ? '#2a1b15' : (tea ? '#1e332a' : coffee ? '#2c241c' : p.panel);
+  const inputBg = bottles ? '#fffef9' : liquor ? '#18100d' : (tea ? '#121f1a' : coffee ? '#1a1510' : p.bg);
+  const btnInk = bottles ? '#fffef9' : liquor ? '#1a100c' : (p.btnInk || '#0a0a0a');
+  const rootBg = bottles ? '#f7f3eb' : liquor ? '#120c0a' : tea ? '#0f1a15' : coffee ? '#14110e' : p.bg;
+  const rootInk = bottles ? '#1c1917' : liquor ? '#f4ebe2' : tea ? '#e8f2ec' : coffee ? '#f3ebe3' : p.text;
+  const rootMute = bottles ? '#57534e' : liquor ? '#b7a597' : tea ? '#9bb5a8' : coffee ? '#b5a898' : p.muted;
+  const rootAccent = bottles ? '#0f766e' : liquor ? '#c9853a' : tea ? '#7dba8c' : coffee ? '#c4a574' : p.accent;
+  const rootPanel = bottles ? '#fffef9' : liquor ? '#1d1410' : tea ? '#15241d' : coffee ? '#1c1712' : p.panel;
+  const rootLine = bottles ? 'rgba(28, 25, 23, 0.12)' : 'rgba(244, 235, 226, 0.14)';
 
   const css = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;700&family=Source+Sans+3:wght@400;600;700&display=swap');
 :root {
-  --bg: ${liquor ? '#120c0a' : tea ? '#0f1a15' : coffee ? '#14110e' : p.bg};
-  --ink: ${liquor ? '#f4ebe2' : tea ? '#e8f2ec' : coffee ? '#f3ebe3' : p.text};
-  --mute: ${liquor ? '#b7a597' : tea ? '#9bb5a8' : coffee ? '#b5a898' : p.muted};
-  --accent: ${liquor ? '#c9853a' : tea ? '#7dba8c' : coffee ? '#c4a574' : p.accent};
-  --panel: ${liquor ? '#1d1410' : tea ? '#15241d' : coffee ? '#1c1712' : p.panel};
-  --line: rgba(244, 235, 226, 0.14);
+  --bg: ${rootBg};
+  --ink: ${rootInk};
+  --mute: ${rootMute};
+  --accent: ${rootAccent};
+  --panel: ${rootPanel};
+  --line: ${rootLine};
   --btn-ink: ${btnInk};
   --display: Fraunces, Georgia, serif;
   --body: "Source Sans 3", system-ui, sans-serif;
@@ -394,6 +475,7 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .product-media { height: 150px; border-radius: 14px; background:
   radial-gradient(130px 90px at 30% 28%, color-mix(in srgb, var(--accent) 50%, transparent), transparent),
   linear-gradient(155deg, ${mediaA}, ${mediaB}); }
+.swatch { width: 0.85rem; height: 0.85rem; border-radius: 999px; border: 1px solid var(--line); display: inline-block; margin: 0.15rem 0; }
 .linkish { text-align: left; font-weight: 700; font-size: 1.08rem; color: var(--ink); }
 .meta, .notes, .attrs, .dim, .fine, .total { color: var(--mute); font-size: 0.9rem; }
 .notes { line-height: 1.45; min-height: 2.6em; }
@@ -436,8 +518,10 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
     app,
     css,
     files: {
+      'src/App.jsx': app,
       'src/App.tsx': app,
       'src/App.css': css,
+      'src/index.css': `html, body, #root { margin: 0; min-height: 100%; background: ${rootBg}; color: ${rootInk}; }\n`,
       'src/data/products.ts': productsTs,
     },
   };

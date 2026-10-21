@@ -476,13 +476,51 @@ export async function bootstrapProjectWorkspace(
     opts?.files
     && Object.keys(opts.files).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
   );
-  const diskHasPkg = filesHavePkg || (await folderHasPackageJson(projectPath));
+  // Memory often has package.json while disk is still a static HTML scaffold (RidgeDesk miss).
+  // Flush the Vite shell BEFORE npm — otherwise install runs with no package.json and Live dies.
+  let flushedPkg = false;
+  if (filesHavePkg && opts?.files && projectPath) {
+    try {
+      const { persistAcceptedCreateFiles } = await import('@/lib/chatAgentApply');
+      const flushKeys = [
+        'package.json',
+        'index.html',
+        'vite.config.js',
+        'vite.config.ts',
+        'src/main.jsx',
+        'src/main.tsx',
+        'src/index.css',
+        'src/App.jsx',
+        'src/App.tsx',
+        'src/App.css',
+        'public/logo.svg',
+        'public/heroes/desk.svg',
+        'public/heroes/product.svg',
+      ].filter((k) => typeof opts.files?.[k] === 'string' && String(opts.files[k]).trim());
+      if (flushKeys.length) {
+        opts.onStatus?.('Writing Vite package files to disk before npm…');
+        const wrote = await persistAcceptedCreateFiles(projectPath, opts.files, flushKeys, {
+          deleteKeys: ['css/styles.css', 'js/app.js'],
+        });
+        flushedPkg = Boolean(wrote?.ok);
+      }
+    } catch { /* best-effort — disk check below still gates install */ }
+  }
+  const diskHasPkg = await folderHasPackageJson(projectPath);
 
   // Static HTML/CSS/JS scaffolds (no package.json) must never run npm.
   // If package.json exists on disk/files, ALWAYS install — wrong kind (e.g. static-web
   // mis-detect on a Vite todo) used to skip npm and then claim Live without node_modules.
-  if (!diskHasPkg) {
+  if (!diskHasPkg && !filesHavePkg) {
     return { npmInstalled: true };
+  }
+  if (!diskHasPkg && filesHavePkg && !flushedPkg) {
+    return {
+      npmInstalled: false,
+      previewLive: false,
+      bootstrapNote:
+        'package.json was generated but never landed on disk, so npm could not run. Say **install npm dependencies** after the project files finish writing, or create again.',
+    };
   }
   if (!projectUsesNpm(kind)) {
     // package.json present but kind says static — still treat as npm project.
@@ -521,8 +559,10 @@ export async function bootstrapProjectWorkspace(
       return 'react, vite, and friends';
     }
   })();
+  // Do not scare blank-screen creates with "up to 7 min" up front — only mention
+  // a slow first install after npm has actually been running a while.
   opts?.onStatus?.(
-    `Installing npm packages (${depHint}) — up to ${Math.round(npmTimeoutMs / 60_000)} min…`,
+    `Installing npm packages (${depHint})…`,
   );
   let npmBeat: number | null = null;
   const npmStarted = Date.now();
@@ -532,10 +572,13 @@ export async function bootstrapProjectWorkspace(
       const m = Math.floor(s / 60);
       const rem = s % 60;
       const clock = m > 0 ? `${m}m ${rem}s` : `${s}s`;
+      const wallMin = Math.round(npmTimeoutMs / 60_000);
       opts?.onStatus?.(
         s < 45
           ? `npm downloading ${depHint}… ${clock}`
-          : `npm still unpacking node_modules (${depHint})… ${clock} — first install is slow on Windows`,
+          : s < 120
+            ? `npm still unpacking node_modules (${depHint})… ${clock}`
+            : `npm still unpacking (${depHint})… ${clock} — first Windows install can take up to ~${wallMin} min`,
       );
     }, 5_000);
   }
@@ -697,46 +740,65 @@ export function formatCreateProjectReply(
     || (!hasPackageJson && intent.kind !== 'vite-react' && intent.kind !== 'python');
   const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
   const codeVerified = bootstrap?.codeVerified === true;
-  const folderLine = result.projectPath
-    ? `- Folder: \`${result.projectPath}\``
-    : '';
+  // Folder path lives only in the Files Changed card (Location) — never duplicate it here.
+  const briefBlob = String(intent.summary || '');
+  const blankNegated = /\b(?:not|n't|never|no|avoid|without|instead of)\b[\s\S]{0,24}\bblank\b/i.test(briefBlob);
+  const richStorefront = /\b(?:e-?commerce|storefront|add[\s-]?to[\s-]?(?:cart|bag)|product\s+(?:grid|catalog)|exactly\s+\d+\s+(?:bottles?|products?))\b/i.test(briefBlob);
+  const blankSolidAsk = !blankNegated && !richStorefront && (
+    /\b(?:blank|nothing else|plain\s+white|white\s+(?:blank\s+)?page|empty\s+page)\b/i.test(briefBlob)
+    || (result.files
+      && /aria-label=["']Blank page["']/i.test(String(result.files['src/App.jsx'] || result.files['src/App.tsx'] || ''))
+      && /background\s*:\s*#(?:fff|ffffff|000|000000)\b/i.test(String(result.files['src/App.css'] || '')))
+  );
 
   let body: string;
-  if (livePreview && codeVerified) {
+  if (blankSolidAsk && livePreview) {
+    const cssBlob = String(result.files?.['src/App.css'] || result.files?.['src/index.css'] || '');
+    const bgHex = cssBlob.match(/background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})\b/i)?.[1]?.toLowerCase() || '';
+    const colorHint = (
+      /#000(?:000)?\b/i.test(bgHex) ? 'plain black blank page'
+        : /#fca5a5|#ffa0a0/i.test(bgHex) ? 'plain light-red blank page'
+          : /#87ceeb/i.test(bgHex) ? 'plain sky-blue blank page'
+            : /#8b4513/i.test(bgHex) ? 'plain brown blank page'
+              : /#f5f0e8|#fffdd0/i.test(bgHex) ? 'plain cream blank page'
+                : /#fff(?:fff)?\b/i.test(bgHex) || !bgHex ? 'plain white blank page'
+                  : 'plain blank page'
+    );
     body = [
-      `**${displayName}** is up — files on disk, install finished, Live checked out.`,
-      folderLine,
+      `Here you go — I built a **${colorHint}** for **${displayName}**. Nothing else on it yet.`,
       '',
-      'Peek at **Live** under the chat, or tell me what to tweak.',
-    ].filter(Boolean).join('\n');
+      'Click **Live** under the chat to see what I built, or tell me what to add next.',
+    ].join('\n');
+  } else if (livePreview && codeVerified) {
+    body = [
+      `Here you go — **${displayName}** is up. Files are on disk, install finished, and Live is ready.`,
+      '',
+      'Click **Live** under the chat to see it, or tell me what to tweak.',
+    ].join('\n');
   } else if (livePreview) {
     body = [
-      `**${displayName}** is on disk. Live is open — tell me what to tighten if anything looks off.`,
-      folderLine,
+      `Here you go — **${displayName}** is on disk and Live is open. Tell me what to tighten if anything looks off.`,
       '',
-      'Open **Live** under the chat, or say what to fix.',
-    ].filter(Boolean).join('\n');
+      'Click **Live** under the chat to see it, or say what to fix.',
+    ].join('\n');
   } else if (bootstrap?.npmPending) {
     body = [
       `Created **${displayName}** — finishing setup (installing packages).`,
-      folderLine,
       '',
       'Live unlocks when Ready. If it stalls, say **install npm dependencies**.',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
   } else if (bootstrap?.npmInstalled === false) {
     body = [
       `Got **${displayName}** on disk, but install did not finish — Live stays locked until it does.`,
-      folderLine,
       '',
       bootstrap.bootstrapNote || 'Say **install npm dependencies** and I will retry.',
     ].filter(Boolean).join('\n');
   } else if (intent.kind === 'python') {
     body = [
       `**${displayName}** is on disk.`,
-      folderLine,
       '',
       'We can dig into `app/main.py` next, or you can tell me what to build.',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
   } else if (hasPackageJson || projectUsesNpm(intent.kind)) {
     // Vite/npm apps must never claim casual success without Live evidence.
     body = [
@@ -747,30 +809,27 @@ export function formatCreateProjectReply(
         ? '- Dependencies are not installed yet'
         : '- Dependencies may be installed, but Live evidence did not pass',
       '- Live stays locked until mount + console + smoke verify',
-      folderLine,
       '',
       bootstrap?.bootstrapNote
-        || 'Tell me what to fix, or open **Live** under the chat to retry. I will not claim success until Live verifies.',
+        || 'Tell me what to fix, or click **Live** under the chat to retry. I will not claim success until Live verifies.',
     ].filter(Boolean).join('\n');
   } else if (isStatic) {
     body = [
       `Created **${displayName}**.`,
       '',
       '- Project files written on disk',
-      folderLine,
       '',
       bootstrap?.bootstrapNote
-        || 'Open **Live** when it appears under the chat, or tell me what to change next.',
+        || 'Click **Live** when it appears under the chat, or tell me what to change next.',
     ].filter(Boolean).join('\n');
   } else {
     body = [
       `Created **${displayName}**.`,
       '',
       '- Project files written on disk',
-      folderLine,
       '',
       'Tell me what you want to change next.',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
   }
 
   return `${body}${result.grantHint ? `\n\n_${result.grantHint}_` : ''}`;

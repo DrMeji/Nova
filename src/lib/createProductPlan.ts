@@ -155,6 +155,12 @@ export function inferCreateCompositionFamily(brief: string, productName = ''): C
     return 'game-stage';
   }
   if (briefLooksLikeStorefront(brief, productName)) return 'catalog-store';
+  // Local retail / service websites need a marketing-style storefront page even
+  // when the user did not spell out checkout, cart, or e-commerce functionality.
+  // Avoid routing "build me a [local shop] website" into the generic app shell.
+  const localShopWebsite = /\b(?:plant\s+shop|flower\s+shop|bookshop|bookstore|gift\s+shop|hardware\s+store|bike\s+shop|pet\s+shop|record\s+shop|farm\s+stand|garden\s+center|neighborhood\s+(?:shop|store|business))\b/i.test(t)
+    && /\b(?:website|web\s*site|homepage|home\s+page|landing|online)\b/i.test(t);
+  if (localShopWebsite) return 'marketing-bands';
   // Tip / todo / calculator tools — include Tipjar-style names and “tiny tip calculator”.
   if (
     (/\b(?:calculator|converter|tip[- ]?(?:calc|calculator|wise|jar)?|todo|to-?do|task\s*list|checklist|counter|timer|utility|tool\s+ui|split\s+the\s+bill|reminders?|pomodoro|unit\s+convert|gratuity|bill\s+amount)\b/i.test(t)
@@ -177,6 +183,12 @@ export function inferCreateCompositionFamily(brief: string, productName = ''): C
     || /\b(?:web\s*app|application)\b/i.test(t)
   ) {
     return 'app-chrome';
+  }
+  // A plain request for a website is a public-facing page by default. Keep the
+  // generic fallback for app-like asks, but do not silently turn every unknown
+  // website into an internal dashboard shell.
+  if (/\b(?:website|web\s*site|homepage|home\s+page|landing\s+page|site)\b/i.test(t)) {
+    return 'marketing-bands';
   }
   return 'app-chrome';
 }
@@ -467,6 +479,16 @@ export function stripToolMarketingCssBleed(css: string): string {
   return next === before ? String(css || '') : next;
 }
 
+/** True when the project already ships a real shop (never strip on micro bg/color edits). */
+export function filesLookLikeLiveStorefront(files: Record<string, string>): boolean {
+  const app = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+  const products = String(files['src/data/products.ts'] || '');
+  if (!products.trim()) return false;
+  if (!/from\s+['"]\.\/data\/products['"]/i.test(app)) return false;
+  return /\b(?:setCart|addToCart|Add to cart)\b/i.test(app)
+    && /\b(?:Purchase|checkout|placeOrder)\b/i.test(app);
+}
+
 /**
  * Edit/create anti-bleed: strip wrong-family junk without inventing a new product UI.
  * Safe after surgical edits — never injects starters.
@@ -480,7 +502,9 @@ export function antiBleedForFamily(
   const appKey = next['src/App.jsx'] && !next['src/App.tsx'] ? 'src/App.jsx' : 'src/App.tsx';
   let app = String(next[appKey] || next['src/App.jsx'] || next['src/App.tsx'] || '');
 
-  if (plan.compositionFamily !== 'catalog-store') {
+  // Live shop on disk wins — micro asks ("change background to cream brown") often
+  // re-infer family from the short edit text and used to strip PRODUCTS → black Live.
+  if (plan.compositionFamily !== 'catalog-store' && !filesLookLikeLiveStorefront(next)) {
     const bled = /NOVA_STOREFRONT_ISLAND/.test(app)
       || /from\s+['"]\.\/data\/products['"]/.test(app)
       || Boolean(next['src/data/products.ts']);

@@ -34,6 +34,28 @@ export type ChatApplyResult = {
   syntaxReasons?: string[];
 };
 
+/** Syntax guard for generated section modules (App-only syntax checks miss imports). */
+export function generatedSectionSyntaxProblems(files: Record<string, string>): string[] {
+  const problems: string[] = [];
+  for (const [key, body] of Object.entries(files || {})) {
+    const norm = key.replace(/\\/g, '/');
+    if (!/^src\/sections\/[^/]+\.jsx$/i.test(norm)) continue;
+    const source = String(body || '');
+    if (!source.trim()) {
+      problems.push(`${norm} is empty`);
+      continue;
+    }
+    if (!/export\s+default\b/i.test(source)) problems.push(`${norm} has no default export`);
+    if (/\{\s*$/.test(source.trim()) || /<[A-Za-z][\w.:-]*[^>]*$/.test(source.trim())) {
+      problems.push(`${norm} looks truncated`);
+    }
+    const opens = (source.match(/\{/g) || []).length;
+    const closes = (source.match(/\}/g) || []).length;
+    if (opens !== closes) problems.push(`${norm} has unbalanced JSX braces`);
+  }
+  return problems;
+}
+
 function joinDisk(root: string, rel: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
   const cleanRoot = root.replace(/[/\\]+$/, '');
@@ -450,6 +472,17 @@ export async function applyChatReplyEdits(opts: {
         if (!Object.prototype.hasOwnProperty.call(earlyTwin.files, key)) delete next[key];
       }
       Object.assign(next, earlyTwin.files);
+      // App.tsx → App.jsx move must flush the kept path (not only the dropped twin).
+      if (earlyTwin.kept && typeof next[earlyTwin.kept] === 'string' && !changed.includes(earlyTwin.kept)) {
+        changed.push(earlyTwin.kept);
+      }
+      for (const mainKey of ['src/main.tsx', 'src/main.jsx'] as const) {
+        if (typeof next[mainKey] === 'string'
+          && next[mainKey] !== String(baseFiles[mainKey] || opts.files?.[mainKey] || '')
+          && !changed.includes(mainKey)) {
+          changed.push(mainKey);
+        }
+      }
     }
     const hasVite = Object.keys(next).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')))
       || /"vite"/i.test(next['package.json'] || '');
@@ -474,6 +507,16 @@ export async function applyChatReplyEdits(opts: {
     }
     for (const key of Object.keys(next)) delete next[key];
     Object.assign(next, twin.files);
+    if (twin.kept && typeof next[twin.kept] === 'string' && !changed.includes(twin.kept)) {
+      changed.push(twin.kept);
+    }
+    for (const mainKey of ['src/main.tsx', 'src/main.jsx'] as const) {
+      if (typeof next[mainKey] === 'string'
+        && next[mainKey] !== String(baseFiles[mainKey] || opts.files?.[mainKey] || '')
+        && !changed.includes(mainKey)) {
+        changed.push(mainKey);
+      }
+    }
   }
   // Family anti-bleed (all edit/apply paths) — strip COVER / orphan products.ts without inventing UI.
   {
@@ -497,6 +540,7 @@ export async function applyChatReplyEdits(opts: {
         const bled = antiBleedForFamily(next, plan);
         if (bled.changed) {
           const hadProducts = Boolean(next['src/data/products.ts']);
+          const appBeforeBleed = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
           for (const key of Object.keys(next)) {
             if (!Object.prototype.hasOwnProperty.call(bled.files, key)) {
               delete next[key];
@@ -504,11 +548,28 @@ export async function applyChatReplyEdits(opts: {
             }
           }
           Object.assign(next, bled.files);
-          for (const key of Object.keys(bled.files)) {
-            if (typeof next[key] === 'string' && !changed.includes(key)) changed.push(key);
-          }
-          if (hadProducts && !bled.files['src/data/products.ts'] && !twinRemoved.includes('src/data/products.ts')) {
-            twinRemoved.push('src/data/products.ts');
+          // Never keep a gut that removes PRODUCTS from a working shop (black Live).
+          const appAfterBleed = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
+          const strippedShop = /from\s+['"]\.\/data\/products['"]/i.test(appBeforeBleed)
+            && !/from\s+['"]\.\/data\/products['"]/i.test(appAfterBleed);
+          if (strippedShop) {
+            const restoreApp = String(baseFiles['src/App.jsx'] || baseFiles['src/App.tsx'] || appBeforeBleed);
+            const restoreKey = next['src/App.jsx'] != null || baseFiles['src/App.jsx'] != null
+              ? 'src/App.jsx'
+              : 'src/App.tsx';
+            next[restoreKey] = restoreApp;
+            if (hadProducts && baseFiles['src/data/products.ts']) {
+              next['src/data/products.ts'] = String(baseFiles['src/data/products.ts']);
+            }
+            const dropIdx = twinRemoved.indexOf('src/data/products.ts');
+            if (dropIdx >= 0) twinRemoved.splice(dropIdx, 1);
+          } else {
+            for (const key of Object.keys(bled.files)) {
+              if (typeof next[key] === 'string' && !changed.includes(key)) changed.push(key);
+            }
+            if (hadProducts && !bled.files['src/data/products.ts'] && !twinRemoved.includes('src/data/products.ts')) {
+              twinRemoved.push('src/data/products.ts');
+            }
           }
         }
       } catch {
@@ -554,6 +615,10 @@ export async function applyChatReplyEdits(opts: {
         const { runCreateSyntaxGate } = await import('@/lib/createSyntaxGate');
         const syn = runCreateSyntaxGate(next);
         Object.assign(next, syn.files);
+        // The App gate does not make generated section modules safe. Reject a
+        // truncated module so create retries that target before importing it.
+        syntaxReasons.push(...generatedSectionSyntaxProblems(next));
+        if (syntaxReasons.length) syntaxFailed = true;
         if (syn.healed) {
           for (const key of Object.keys(syn.files)) {
             if (/(^|\/)src\/App\.(jsx|tsx|css)$/i.test(key.replace(/\\/g, '/')) && !changed.includes(key)) {
@@ -563,7 +628,20 @@ export async function applyChatReplyEdits(opts: {
         }
         if (!syn.ok) {
           syntaxFailed = true;
-          syntaxReasons = syn.reasons || [];
+          syntaxReasons = [...syntaxReasons, ...(syn.reasons || [])];
+          // Prefer prior compiling App over a broken write (edit black-screen).
+          const priorKey = baseFiles['src/App.jsx'] ? 'src/App.jsx'
+            : (baseFiles['src/App.tsx'] ? 'src/App.tsx' : '');
+          if (priorKey && String(baseFiles[priorKey] || '').length > 200) {
+            const priorGate = runCreateSyntaxGate({ ...next, [priorKey]: baseFiles[priorKey] });
+            if (priorGate.ok) {
+              next[priorKey] = baseFiles[priorKey];
+              Object.assign(next, priorGate.files);
+              syntaxFailed = false;
+              syntaxReasons = [];
+              if (!changed.includes(priorKey)) changed.push(priorKey);
+            }
+          }
         }
       } catch {
         /* syntax gate best-effort */
@@ -595,7 +673,8 @@ export async function applyChatReplyEdits(opts: {
         : want === 'lucide:coffee' ? /M16 8a1 1 0 0 1 1 1v8|M10 2v2/i.test(incoming)
           : want === 'lucide:leaf' ? /M11 20A7 7 0 0 1 9\.8/i.test(incoming)
             : want === 'lucide:utensils' ? /M3 2v7c0 1\.1/i.test(incoming)
-              : !isSparklesLogoSvg(incoming);
+              : want === 'nova:desk' ? /viewBox="0 0 64 64"[\s\S]*width="48" height="8"/i.test(incoming)
+                : !isSparklesLogoSvg(incoming);
       // Stomp sparkles OR wrong-family marks (e.g. coffee mug onto gin).
       if (matchesWant && !isSparklesLogoSvg(incoming)) continue;
       const prev = String(baseFiles[key] || opts.files?.[key] || '');
@@ -614,6 +693,21 @@ export async function applyChatReplyEdits(opts: {
   const payloadFiles = Object.fromEntries(
     changed.filter((p: string) => typeof next[p] === 'string').map((p: string) => [p, next[p]]),
   );
+
+  // Syntax validation is an acceptance boundary, not a warning. Depth callers use
+  // `ok` to decide whether to merge files into the create session, so returning
+  // ok:true here would let a broken module count as progress (and later be saved).
+  if (syntaxFailed) {
+    return {
+      ok: false,
+      updated: [],
+      deleted: [],
+      files: baseFiles,
+      reply: '',
+      syntaxFailed: true,
+      syntaxReasons,
+    };
+  }
 
   // Depth accept-first: measure ledger gain in memory with zero disk side effects.
   if (opts.dryRun) {
@@ -663,14 +757,35 @@ export async function applyChatReplyEdits(opts: {
         files: payloadFiles,
       });
     }
-  } else if (opts.projectId) {
-    const write = await safeProjectWrite({
-      projectId: opts.projectId,
-      projectName: opts.projectName,
-      files: payloadFiles,
-    });
-    wroteOk = write.ok;
-    writeError = write.error;
+  } else {
+    // Last-chance: bind the newest create job on disk so step-ladder edits never die as write_failed.
+    let fallbackRoot = '';
+    try {
+      const { getLatestReusableCreateJob } = await import('@/lib/createJobStore');
+      fallbackRoot = String(getLatestReusableCreateJob()?.path || '').trim();
+    } catch { /* ignore */ }
+    if (fallbackRoot) {
+      const disk = await writeViaDiskRoot(fallbackRoot, payloadFiles);
+      if (!disk.ok) {
+        return {
+          ok: false,
+          updated: [],
+          deleted: [],
+          files: baseFiles,
+          reply: disk.error || `Could not write into ${fallbackRoot}`,
+          error: disk.error || 'disk_write_failed',
+        };
+      }
+      wroteOk = true;
+    } else if (opts.projectId) {
+      const write = await safeProjectWrite({
+        projectId: opts.projectId,
+        projectName: opts.projectName,
+        files: payloadFiles,
+      });
+      wroteOk = write.ok;
+      writeError = write.error;
+    }
   }
 
   if (!wroteOk) {

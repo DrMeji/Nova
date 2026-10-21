@@ -8,6 +8,8 @@ import { scoreAskMatch } from '@/lib/createAskContract';
 import { verifyCreateRenderedQuality } from '@/lib/createEvidence';
 import { preserveOriginalBriefInPrompt } from '@/lib/createBriefContext';
 import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
+import { briefWantsProductLadder, gradeProductQuality } from '@/lib/createProductLadder';
+import { briefWantsStorefrontLadder, gradeStorefrontQuality } from '@/lib/createStorefrontLadder';
 
 export type CreateJobStatus = 'writing' | 'npm' | 'verifying' | 'ready' | 'failed';
 
@@ -199,6 +201,23 @@ export function getCreateJobForPath(diskPath: string): CreateJob | null {
   return null;
 }
 
+/**
+ * Most recent create job that still has a disk folder — used when a UI edit ask
+ * lands in a chat that lost its Folder/Code bind (e.g. New Chat mid step-ladder).
+ */
+export function getLatestReusableCreateJob(): CreateJob | null {
+  hydrateAllFromSession();
+  let best: CreateJob | null = null;
+  for (const job of jobs.values()) {
+    if (!String(job.path || '').trim()) continue;
+    if (job.status === 'failed' && !job.previewUrl) continue;
+    if (!best || (Number(job.updatedAt) || 0) > (Number(best.updatedAt) || 0)) {
+      best = job;
+    }
+  }
+  return best;
+}
+
 export function startCreateJob(partial: Omit<CreateJob, 'updatedAt' | 'status'> & { status?: CreateJobStatus }): CreateJob {
   const job: CreateJob = {
     ...partial,
@@ -299,21 +318,91 @@ export function markCreateJobReady(
       const rendered = verifyCreateRenderedQuality(prev.files || {}, originalBrief, prev.name);
       qualityGateReasons.push(...rendered.reasons);
     }
+    // Product / brand landings: Ready requires Quality+ on the product ladder (Nova source gate).
+    let productLadderBlocked = false;
+    if (originalBrief && briefWantsProductLadder(originalBrief)) {
+      const graded = gradeProductQuality(prev.files || {}, originalBrief, prev.name || '');
+      if (!graded.okQuality) {
+        productLadderBlocked = true;
+        qualityGateReasons.push(
+          `product ladder ${graded.label} — Ready needs Quality+`,
+          ...graded.reasons.slice(0, 4),
+        );
+      }
+    }
+    // Storefront / catalog shops: Ready requires Quality+ on the storefront ladder.
+    let storefrontLadderBlocked = false;
+    if (
+      originalBrief
+      && !productLadderBlocked
+      && briefWantsStorefrontLadder(originalBrief, prev.name || '')
+    ) {
+      const graded = gradeStorefrontQuality(prev.files || {}, originalBrief, prev.name || '');
+      if (!graded.okQuality) {
+        storefrontLadderBlocked = true;
+        qualityGateReasons.push(
+          `storefront ladder ${graded.label} — Ready needs Quality+`,
+          ...graded.reasons.slice(0, 4),
+        );
+      }
+    }
     const askGateRequired = opts?.requireQuality === true
       || /(?:website|homepage|landing|brand|marketing|product|shop|store)/i.test(originalBrief);
     const newQualityDeficits = qualityGateReasons.slice(unlockReasons.length);
-    if (!unlock.ok || (askGateRequired && newQualityDeficits.length > 0)) {
+    // Hard Live blockers only (craft blocked / failed / missing URL). Soft composition notes stay on unlock.ok.
+    // Product Quality lock is also hard — never "Live open, quality later" below Quality.
+    if (!unlock.ok || productLadderBlocked || storefrontLadderBlocked) {
       updateCreateJob(id, {
         previewUrl: url,
         evidencePass: false,
         status: 'failed',
         stage: 'unverified',
-        craftBlocked: Boolean(prev.craftBlocked) || unlock.reasons.some((r) => /craft blocked|thin depth/i.test(r)),
+        craftBlocked: Boolean(prev.craftBlocked)
+          || productLadderBlocked
+          || storefrontLadderBlocked
+          || unlock.reasons.some((r) => /craft blocked|thin depth/i.test(r)),
         blockedReasons: qualityGateReasons.slice(0, 12),
         lastObservation: observation
           ? `${String(observation).slice(0, 180)} · Ready blocked: ${qualityGateReasons.slice(0, 2).join('; ')}`.slice(0, 400)
           : `Preview opened (unverified: ${qualityGateReasons.slice(0, 2).join('; ')})`,
       });
+      return;
+    }
+    // Blank / step-ladder solid pages: the painted shell IS the deliverable — never soft-fail
+    // into a forever "Verifying…" chip because "coffee site" brief still wants a brand name.
+    const blankNegated = /\b(?:not|n't|never|no|avoid|without|instead of)\b[\s\S]{0,24}\bblank\b/i.test(originalBrief);
+    const richStorefront = /\b(?:e-?commerce|storefront|add[\s-]?to[\s-]?(?:cart|bag)|product\s+(?:grid|catalog)|exactly\s+\d+\s+(?:bottles?|products?))\b/i.test(originalBrief);
+    const blankSolidAsk = !blankNegated && !richStorefront
+      && /\b(?:blank|nothing else|plain\s+white|white\s+(?:blank\s+)?page|empty\s+page)\b/i.test(originalBrief);
+    if (blankSolidAsk) {
+      if (originalBrief) updateCreateJob(id, { originalBrief, generationBrief });
+      updateCreateJob(id, {
+        status: 'ready',
+        previewUrl: url,
+        error: undefined,
+        evidencePass: true,
+        craftBlocked: false,
+        blockedReasons: undefined,
+        stage: 'verified',
+        lastObservation: observation
+          ? String(observation).slice(0, 400)
+          : 'Blank page Live ready',
+      });
+      return;
+    }
+    // Coding foundation: mount Live even when quality/ask still soft-fail — never craftBlock after URL Live.
+    // IMPORTANT: do NOT leave status as "verifying" (that freezes the Verifying… chip forever).
+    if (askGateRequired && newQualityDeficits.length > 0) {
+      markCreateJobLiveOpen(
+        id,
+        url,
+        observation
+          ? `${String(observation).slice(0, 180)} · Live open (quality later: ${newQualityDeficits.slice(0, 2).join('; ')})`.slice(0, 400)
+          : `Live open — quality later: ${newQualityDeficits.slice(0, 2).join('; ')}`,
+        originalBrief,
+        prev.files || {},
+        qualityGateReasons.slice(0, 12),
+      );
       return;
     }
     if (originalBrief) updateCreateJob(id, { originalBrief, generationBrief });
@@ -331,7 +420,8 @@ export function markCreateJobReady(
 }
 
 /**
- * Live is mounted but Quality Ready failed — keep URL for Live chrome, never status ready.
+ * Live is mounted but full quality Ready soft-failed — keep URL and unlock the Live/Preview
+ * pill. Never leave status as "verifying" (that stuck the Verifying… chip after Done).
  */
 export function markCreateJobLiveOpen(
   id: string,
@@ -363,9 +453,11 @@ export function markCreateJobLiveOpen(
     files,
     originalBrief: brief,
     previewUrl: url,
-    status: 'verifying',
-    stage: 'live',
-    evidencePass: false,
+    // ready + soft blockedReasons → amber Preview pill (openable). Not verifying.
+    status: 'ready',
+    stage: 'live-open',
+    evidencePass: true,
+    craftBlocked: false,
     error: undefined,
     blockedReasons: (blockedReasons || []).slice(0, 12),
     lastObservation: String(observation || 'Live mounted · quality not verified').slice(0, 400),

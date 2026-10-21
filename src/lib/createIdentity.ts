@@ -177,7 +177,9 @@ function paletteFromBrief(brief: string): CreatePalette {
 
 /** Product silhouette kind for designed hero stages — model-agnostic. */
 export type HeroProductKind =
-  | 'tea' | 'coffee' | 'bottle' | 'lotion' | 'chocolate' | 'ceramic' | 'device' | 'generic';
+  | 'tea' | 'coffee' | 'bottle' | 'lotion' | 'chocolate' | 'ceramic'
+  | 'mic' | 'headphones' | 'guitar' | 'keyboard' | 'mouse'
+  | 'device' | 'generic';
 
 /**
  * Pick a product silhouette from brief + name.
@@ -194,9 +196,26 @@ export function detectHeroProductKind(name: string, brief = '', label = ''): Her
   const ceramics = /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|plateware|dinnerware|clay)\b/i.test(blob);
   // Ceramics before spirits/tea — "ceramic wine tumblers" / "biscuit tin" must not become bottle/tea.
   if (ceramics) return 'ceramic';
+  // Audio / instrument glyphs before generic device (never fetch remote stock photos).
+  if (/\b(?:microphone|mic\b|condenser|dynamic\s+mic|lavalier|clip[- ]?on|room\s+condenser|desk\s+dynamic|travel\s+clip)\b/i.test(blob)
+    || /\bmicora\b/i.test(blob)) {
+    return 'mic';
+  }
+  if (/\b(?:headphones?|headset|earbuds?|earphones?|auralis)\b/i.test(blob)) return 'headphones';
+  if (/\b(?:guitar|ukulele|bass\s+guitar)\b/i.test(blob)) return 'guitar';
+  if (/\b(?:keyboard|keyboards|mechanical\s+key)\b/i.test(blob)) return 'keyboard';
+  if (/\b(?:gaming\s+)?mouse\b/i.test(blob) && !/\bmousepad\b/i.test(blob)) return 'mouse';
+  // Insulated / hydration bottles before spirits wine silhouette (water flask ≠ wine).
+  if (
+    /\b(?:insulated|water\s+bottle|tumbler|hydration|flask|rambler|\d+\s*oz)\b/i.test(blob)
+    && !/\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac|wine)\b/i.test(blob)
+  ) {
+    return 'bottle';
+  }
   // F&B silhouettes always beat device/phone.
   if (/\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac)\b/i.test(blob)
-    || /\b(?:wine|bottle)\b/i.test(blob)) {
+    || /\bwine\b/i.test(blob)
+    || (/\bbottle\b/i.test(blob) && /\b(?:spirit|liquor|whiskey|gin|vodka|shop|cart)\b/i.test(blob))) {
     return 'bottle';
   }
   // Bare "tin" alone is too broad — require tea framing.
@@ -617,6 +636,16 @@ export function svgHeroDataUrl(
 <ellipse cx="800" cy="360" rx="240" ry="42" fill="#faf4eb" stroke="#2a2118" stroke-width="2.5"/>
 <text x="800" y="375" text-anchor="middle" fill="#2a2118" font-family="Georgia,serif" font-size="26" font-weight="700">${escapeXml(name.slice(0, 14))}</text>
 <text x="800" y="620" text-anchor="middle" fill="#5a4636" font-family="Helvetica Neue,sans-serif" font-size="18">kiln-fired tableware</text>`;
+  } else if (kind === 'mic') {
+    product = svgMicSilhouette(800, 420, 1.15, p.accent);
+  } else if (kind === 'headphones') {
+    product = svgHeadphonesSilhouette(800, 400, 1.1, p.accent);
+  } else if (kind === 'guitar') {
+    product = svgGuitarSilhouette(800, 420, 1.05, p.accent);
+  } else if (kind === 'keyboard') {
+    product = svgKeyboardSilhouette(800, 480, 1, p.accent);
+  } else if (kind === 'mouse') {
+    product = svgMouseSilhouette(800, 420, 1.1, p.accent);
   } else {
     product = `<ellipse cx="800" cy="600" rx="200" ry="36" fill="#0a1018" opacity="0.4"/>
 <rect x="640" y="260" width="320" height="320" rx="28" fill="#e8eef4"/>
@@ -654,7 +683,7 @@ export function svgPremiumProductStageDataUrl(opts: {
   palette?: CreatePalette;
   kind?: 'phone' | 'laptop' | 'tablet' | 'watch' | 'buds' | 'stage';
 }): string {
-  const p = opts.palette || NEUTRAL;
+  
   const name = opts.name || 'Brand';
   const tag = String(opts.tag || name).slice(0, 32);
   const kind = opts.kind
@@ -711,6 +740,211 @@ function escapeXml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** Generated product glyphs — offline data-URIs, never remote stock photos. */
+function svgMicSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  // Wider capsule + shock-mount ring + stand — reads as condenser mic, not a lollipop.
+  return `<g transform="translate(${cx},${cy})">
+<ellipse cx="0" cy="${g(230)}" rx="${g(78)}" ry="${g(18)}" fill="#0a0a0a" opacity="0.45"/>
+<ellipse cx="0" cy="${g(210)}" rx="${g(55)}" ry="${g(12)}" fill="#3a4046"/>
+<rect x="${g(-16)}" y="${g(70)}" width="${g(32)}" height="${g(140)}" rx="${g(8)}" fill="#c8cdd2"/>
+<path d="M ${g(-78)} ${g(20)} C ${g(-78)} ${g(95)} ${g(78)} ${g(95)} ${g(78)} ${g(20)}" fill="none" stroke="#b8c0c6" stroke-width="${g(10)}" stroke-linecap="round"/>
+<rect x="${g(-70)}" y="${g(-150)}" width="${g(140)}" height="${g(220)}" rx="${g(62)}" fill="#e8eef4"/>
+<rect x="${g(-52)}" y="${g(-120)}" width="${g(104)}" height="${g(160)}" rx="${g(44)}" fill="#1a222c" opacity="0.16"/>
+${[0, 1, 2, 3, 4, 5].map((i) => `<ellipse cx="0" cy="${g(-95 + i * 26)}" rx="${g(42)}" ry="${g(8)}" fill="none" stroke="#1a222c" stroke-opacity="0.32" stroke-width="2"/>`).join('')}
+<circle cx="0" cy="${g(-150)}" r="${g(11)}" fill="${accent}" opacity="0.6"/>
+<rect x="${g(48)}" y="${g(20)}" width="${g(18)}" height="${g(28)}" rx="${g(5)}" fill="#6e767e"/>
+</g>`;
+}
+
+function svgHeadphonesSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  return `<g transform="translate(${cx},${cy})">
+<path d="M ${g(-130)} ${g(10)} C ${g(-130)} ${g(-130)} ${g(130)} ${g(-130)} ${g(130)} ${g(10)}" fill="none" stroke="#e8eef4" stroke-width="${g(28)}" stroke-linecap="round"/>
+<path d="M ${g(-130)} ${g(10)} C ${g(-130)} ${g(-130)} ${g(130)} ${g(-130)} ${g(130)} ${g(10)}" fill="none" stroke="#1a222c" stroke-opacity="0.12" stroke-width="${g(8)}"/>
+<rect x="${g(-168)}" y="${g(-20)}" width="${g(70)}" height="${g(130)}" rx="${g(28)}" fill="#e8eef4"/>
+<rect x="${g(98)}" y="${g(-20)}" width="${g(70)}" height="${g(130)}" rx="${g(28)}" fill="#e8eef4"/>
+<rect x="${g(-152)}" y="${g(8)}" width="${g(40)}" height="${g(80)}" rx="${g(16)}" fill="#1a222c" opacity="0.2"/>
+<rect x="${g(112)}" y="${g(8)}" width="${g(40)}" height="${g(80)}" rx="${g(16)}" fill="#1a222c" opacity="0.2"/>
+<rect x="${g(-146)}" y="${g(22)}" width="${g(28)}" height="${g(52)}" rx="${g(10)}" fill="${accent}" opacity="0.5"/>
+<rect x="${g(118)}" y="${g(22)}" width="${g(28)}" height="${g(52)}" rx="${g(10)}" fill="${accent}" opacity="0.5"/>
+</g>`;
+}
+
+function svgGuitarSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  return `<g transform="translate(${cx},${cy})">
+<rect x="${g(-10)}" y="${g(-220)}" width="${g(20)}" height="${g(200)}" rx="${g(6)}" fill="#cfd8e0"/>
+<ellipse cx="0" cy="${g(40)}" rx="${g(90)}" ry="${g(120)}" fill="#e8eef4"/>
+<ellipse cx="0" cy="${g(-20)}" rx="${g(55)}" ry="${g(50)}" fill="#e8eef4"/>
+<circle cx="0" cy="${g(20)}" r="${g(28)}" fill="#1a222c" opacity="0.2"/>
+<circle cx="0" cy="${g(20)}" r="${g(10)}" fill="${accent}" opacity="0.5"/>
+</g>`;
+}
+
+function svgKeyboardSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  const keys = Array.from({ length: 12 }, (_, i) => {
+    const x = g(-140 + (i % 6) * 48);
+    const y = g(-40 + Math.floor(i / 6) * 42);
+    return `<rect x="${x}" y="${y}" width="${g(36)}" height="${g(28)}" rx="${g(6)}" fill="#1a222c" opacity="0.2"/>`;
+  }).join('');
+  return `<g transform="translate(${cx},${cy})">
+<rect x="${g(-170)}" y="${g(-70)}" width="${g(340)}" height="${g(140)}" rx="${g(18)}" fill="#e8eef4"/>
+${keys}
+<rect x="${g(-40)}" y="${g(50)}" width="${g(80)}" height="${g(10)}" rx="${g(4)}" fill="${accent}" opacity="0.5"/>
+</g>`;
+}
+
+function svgMouseSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  return `<g transform="translate(${cx},${cy})">
+<ellipse cx="0" cy="${g(20)}" rx="${g(70)}" ry="${g(110)}" fill="#e8eef4"/>
+<line x1="0" y1="${g(-70)}" x2="0" y2="${g(20)}" stroke="#1a222c" stroke-opacity="0.2" stroke-width="3"/>
+<rect x="${g(-8)}" y="${g(-40)}" width="${g(16)}" height="${g(36)}" rx="${g(6)}" fill="${accent}" opacity="0.55"/>
+</g>`;
+}
+
+function svgClipMicSilhouette(cx: number, cy: number, scale = 1, accent = '#7d9b78'): string {
+  const g = (n: number) => Math.round(n * scale);
+  return `<g transform="translate(${cx},${cy})">
+<rect x="${g(-28)}" y="${g(-78)}" width="${g(56)}" height="${g(120)}" rx="${g(22)}" fill="#e8eef4"/>
+${[0, 1, 2, 3].map((i) => `<ellipse cx="0" cy="${g(-48 + i * 22)}" rx="${g(18)}" ry="${g(6)}" fill="none" stroke="#1a222c" stroke-opacity="0.35" stroke-width="2"/>`).join('')}
+<path d="M ${g(28)} ${g(-8)} L ${g(62)} ${g(28)} L ${g(52)} ${g(38)} L ${g(18)} ${g(2)} Z" fill="#cfd8e0"/>
+<path d="M ${g(52)} ${g(38)} L ${g(72)} ${g(58)}" stroke="#cfd8e0" stroke-width="${g(6)}" stroke-linecap="round"/>
+<circle cx="0" cy="${g(-78)}" r="${g(7)}" fill="${accent}" opacity="0.55"/>
+</g>`;
+}
+
+function productGlyphBody(
+  kind: HeroProductKind,
+  variant: 'clip' | 'dynamic' | 'condenser',
+  cx: number,
+  cy: number,
+  scale: number,
+  accent: string,
+  label: string,
+): string {
+  if (kind === 'mic' && variant === 'clip') return svgClipMicSilhouette(cx, cy, scale, accent);
+  if (kind === 'mic' && variant === 'dynamic') return svgMicSilhouette(cx, cy, scale * 0.85, accent);
+  if (kind === 'mic') return svgMicSilhouette(cx, cy, scale, accent);
+  if (kind === 'headphones') return svgHeadphonesSilhouette(cx, cy, scale, accent);
+  if (kind === 'guitar') return svgGuitarSilhouette(cx, cy, scale, accent);
+  if (kind === 'keyboard') return svgKeyboardSilhouette(cx, cy, scale, accent);
+  if (kind === 'mouse') return svgMouseSilhouette(cx, cy, scale, accent);
+  return `<rect x="${cx - 90}" y="${cy - 90}" width="180" height="180" rx="28" fill="#e8eef4"/>
+<text x="${cx}" y="${cy + 8}" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="22">${escapeXml(label.slice(0, 10))}</text>`;
+}
+
+/**
+ * Inline SVG JSX for App.jsx — preferred over data-URIs (syntax-gate safe, offline).
+ */
+export function productGlyphJsx(
+  label: string,
+  opts?: { role?: 'hero' | 'thumb'; brief?: string; accent?: string; className?: string },
+): string {
+  const name = String(label || 'Product').replace(/[<>&'"`]/g, '').slice(0, 40) || 'Product';
+  const brief = String(opts?.brief || '');
+  const role = opts?.role || 'thumb';
+  const accent = opts?.accent || '#7d9b78';
+  const kind = detectHeroProductKind(name, brief, name);
+  const variant = /\b(?:clip|travel|lav)\b/i.test(name) ? 'clip'
+    : /\b(?:desk|dynamic)\b/i.test(name) ? 'dynamic'
+    : 'condenser';
+  const cls = opts?.className || (role === 'hero' ? 'stage-glyph' : 'product-card__thumb');
+  const uid = `g${Math.abs(hashGlyph(`${name}:${role}:${kind}`)).toString(36)}`;
+
+  if (role === 'hero') {
+    const body = productGlyphBody(kind, variant, 800, 420, 1.35, accent, name);
+    return `<svg className="${cls}" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="${uid}-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stopColor="#0c1410" />
+      <stop offset="100%" stopColor="#0a0e0d" />
+    </linearGradient>
+    <radialGradient id="${uid}-glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stopColor="${accent}" stopOpacity="0.32" />
+      <stop offset="100%" stopColor="#0a0e0d" stopOpacity="0" />
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill={"url(#${uid}-bg)"} />
+  <rect width="1600" height="900" fill={"url(#${uid}-glow)"} />
+  <circle cx="420" cy="220" r="120" fill="${accent}" fillOpacity="0.12" />
+  <circle cx="1180" cy="640" r="180" fill="${accent}" fillOpacity="0.1" />
+  ${body.replace(/stroke-opacity=/g, 'strokeOpacity=').replace(/stroke-width=/g, 'strokeWidth=').replace(/fill-opacity=/g, 'fillOpacity=').replace(/stroke-linecap=/g, 'strokeLinecap=')}
+</svg>`;
+  }
+
+  const body = productGlyphBody(kind, variant, 160, 160, 1.15, accent, name);
+  return `<svg className="${cls}" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="${uid}-tg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stopColor="#121816" />
+      <stop offset="100%" stopColor="#0a0e0d" />
+    </linearGradient>
+    <radialGradient id="${uid}-g" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stopColor="${accent}" stopOpacity="0.28" />
+      <stop offset="100%" stopColor="#0a0e0d" stopOpacity="0" />
+    </radialGradient>
+  </defs>
+  <rect width="320" height="320" rx="18" fill={"url(#${uid}-tg)"} />
+  <rect width="320" height="320" rx="18" fill={"url(#${uid}-g)"} />
+  ${body.replace(/stroke-opacity=/g, 'strokeOpacity=').replace(/stroke-width=/g, 'strokeWidth=').replace(/fill-opacity=/g, 'fillOpacity=').replace(/stroke-linecap=/g, 'strokeLinecap=')}
+</svg>`;
+}
+
+function hashGlyph(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h | 0;
+}
+
+/**
+ * Offline product glyph for shop thumbs / hero stages.
+ * Never returns http(s) — only data:image/svg+xml.
+ */
+export function productGlyphDataUrl(
+  label: string,
+  opts?: { role?: 'hero' | 'thumb'; brief?: string; accent?: string },
+): string {
+  const name = String(label || 'Product').replace(/[<>&'"`]/g, '').slice(0, 40) || 'Product';
+  const brief = String(opts?.brief || '');
+  const role = opts?.role || 'thumb';
+  const accent = opts?.accent || '#7d9b78';
+  const kind = detectHeroProductKind(name, brief, name);
+  const variant = /\b(?:clip|travel|lav)\b/i.test(name) ? 'clip'
+    : /\b(?:desk|dynamic)\b/i.test(name) ? 'dynamic'
+    : 'condenser';
+
+  if (role === 'hero') {
+    return svgHeroDataUrl(
+      { name, brief: `${brief} ${name} ${kind}`, category: kind, palette: { ...NEUTRAL, accent } },
+      name,
+    );
+  }
+
+  const w = 320;
+  const h = 320;
+  const body = productGlyphBody(kind, variant, 160, 160, kind === 'mic' ? 1.05 : 0.95, accent, name);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+<defs>
+<linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0%" stop-color="#121816"/><stop offset="100%" stop-color="#0a0e0d"/>
+</linearGradient>
+<radialGradient id="glow" cx="50%" cy="40%" r="50%">
+<stop offset="0%" stop-color="${accent}" stop-opacity="0.28"/><stop offset="100%" stop-color="#0a0e0d" stop-opacity="0"/>
+</radialGradient>
+</defs>
+<rect width="${w}" height="${h}" rx="18" fill="url(#tg)"/>
+<rect width="${w}" height="${h}" rx="18" fill="url(#glow)"/>
+${body}
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 /** Reject obvious wrong-media dumps for the brief category (food ≠ radio, etc.). */

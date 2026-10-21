@@ -23,66 +23,16 @@ import { formatCreateProjectMap } from '@/lib/createEvidence';
 import { snapshotCreateCheckpoint } from '@/lib/createCheckpoint';
 import { buildRankedProjectMap } from '@/lib/createProjectMap';
 import { verifyCreateRenderedQuality } from '@/lib/createEvidence';
-import {
-  markCreateJobFailed,
-  markCreateJobNpm,
-  markCreateJobReady,
-  markCreateJobReadyVerified,
-  shouldAbortCreateJob,
-  markCreateJobVerifying,
-  startCreateJob,
-  updateCreateJob,
-} from '@/lib/createJobStore';
+import { markCreateJobFailed, markCreateJobNpm, markCreateJobReadyVerified, shouldAbortCreateJob, markCreateJobVerifying, startCreateJob, updateCreateJob } from '@/lib/createJobStore';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { clearChatStudio, clearLastDiskTarget, setLastPendingGreenfield } from '@/lib/chatStudioStore';
 import type { CreateSuccess } from '@/lib/productContract';
-import {
-  isThinCreatePath,
-  thinCraftMayContinue,
-  thinAppNeedsFinishPass,
-  thinNeedsDepthPass,
-  thinBlocksLivePreview,
-  thinLiveVisualDeficits,
-  thinDepthReplyGrew,
-  thinDepthDeficits,
-  countThinLandmarks,
-  thinDepthSameRejectStalled,
-  readThinDepthLedger,
-  formatThinDepthLedger,
-  thinAppLooksTruncated,
-  formatFinishAppPrompt,
-  formatDepthContinuePrompt,
-  THIN_CREATE_APP_PATH,
-  thinCreateLocksAppJsx,
-  thinCreatePrimaryAppPath,
-  thinCoerceLockedAppJsx,
-  thinMergeDepthAppFiles,
-  makeThinDepthStreamGuards,
-  THIN_DEPTH_CONTINUE_MAX,
-  THIN_DEPTH_MIN_SECTIONS,
-  THIN_DEPTH_SAME_REJECT_BAIL,
-  THIN_DEPTH_ZERO_GAIN_BAIL,
-  thinWantsCompositionalShell,
-  applyCompositionalDepthMerge,
-  assembleCompositionalAppShell,
-  seedCompositionalBrandVisuals,
-  appLooksLikeCompositionalShell,
-  replyHasCompositionalSectionBlock,
-  pickThinDepthFiles,
-  depthPersistKeys,
-  genreLockPersistKeys,
-  thinGenreSeedClearsLive,
-  thinAskMatchDeficits,
-  nextCompositionalDepthTarget,
-  compositionalDepthDropsDeliveredMarkers,
-  formatCompositionalDepthDropReason,
-} from '@/lib/createThinPath';
+import { isThinCreatePath, thinCraftMayContinue, thinAppNeedsFinishPass, thinNeedsDepthPass, thinBlocksLivePreview, thinLiveVisualDeficits, thinDepthReplyGrew, thinDepthDeficits, thinDepthSameRejectStalled, readThinDepthLedger, formatThinDepthLedger, thinAppLooksTruncated, formatFinishAppPrompt, formatDepthContinuePrompt, THIN_CREATE_APP_PATH, thinCreateLocksAppJsx, thinCreatePrimaryAppPath, thinCoerceLockedAppJsx, thinMergeDepthAppFiles, makeThinDepthStreamGuards, THIN_DEPTH_CONTINUE_MAX, THIN_DEPTH_SAME_REJECT_BAIL, THIN_DEPTH_ZERO_GAIN_BAIL, THIN_DEPTH_COMPOSITIONAL_ZERO_GAIN_CYCLES, thinWantsCompositionalShell, applyCompositionalDepthMerge, assembleCompositionalAppShell, seedCompositionalBrandVisuals, seedCompositionalSectionScaffolds, appLooksLikeCompositionalShell, replyHasCompositionalSectionBlock, pickThinDepthFiles, depthPersistKeys, genreLockPersistKeys, thinGenreSeedClearsLive, thinAskMatchDeficits, compositionalDepthIsComplete, compositionalSectionFileSubstantial, formatCompositionalSectionSpecs, nextCompositionalDepthTarget, compositionalDepthDropsDeliveredMarkers, formatCompositionalDepthDropReason } from '@/lib/createThinPath';
 import { detectHeroProductKind } from '@/lib/createIdentity';
 import { liveOwnerKey } from '@/lib/liveOwnerKey';
 import {
   isCreateV2Active,
   CREATE_V2_SOFT_BIND_MS,
-  CREATE_V2_AUTO_OPEN_CODE,
   CREATE_V2_STREAM_PAINT_FILES,
   CREATE_V2_MAX_CRAFT_ATTEMPTS,
   CREATE_V2_FIRST_TOKEN_MS,
@@ -113,11 +63,184 @@ import {
 
 export { pendingCreateBootstrap };
 
+function createApplyFailureReason(result: {
+  error?: string;
+  syntaxFailed?: boolean;
+  syntaxReasons?: string[];
+}): string {
+  if (result.syntaxFailed) {
+    const details = (result.syntaxReasons || []).slice(0, 3).join('; ');
+    return `Generated file rejected by syntax validation${details ? `: ${details}` : ''}`;
+  }
+  return result.error || 'Generated file could not be applied';
+}
+
+/** Apply a small build-error repair through the exact coder selected for this create turn. */
+async function repairCreateBuildWithCoder(opts: {
+  files: Record<string, string>;
+  brief: string;
+  productName: string;
+  errors: string[];
+  projectId: string;
+  diskRoot?: string | null;
+  coderId: string;
+  coderName: string;
+  coderSource?: string;
+  shouldAbort: () => boolean;
+}): Promise<{ files: Record<string, string>; changed: boolean; summary?: string }> {
+  if (!opts.coderId || opts.shouldAbort()) return { files: opts.files, changed: false };
+  const prompt = [
+    `TARGETED BUILD REPAIR for ${opts.productName}.`,
+    'The app build failed. Fix the reported compiler/build errors with the smallest necessary edits.',
+    'Preserve the user-requested design, copy, and interactions. Do not replace the product with a template or placeholder.',
+    'Return only complete @@@FILE blocks for files that need changes. Do not edit package or scaffold files unless the error requires it.',
+    `Original user brief:\n${opts.brief.slice(0, 1800)}`,
+    'Build errors:',
+    ...opts.errors.slice(0, 5).map((error) => `- ${error.slice(0, 500)}`),
+  ].join('\n');
+  const { answerStudio } = await import('@/lib/studioAnswerEngine');
+  const result = await answerStudio({
+    userMessage: prompt,
+    files: opts.files,
+    projectName: opts.productName,
+    mode: 'code',
+    preferredModelId: opts.coderId,
+    preferredModelName: opts.coderName,
+    preferredSource: opts.coderSource,
+    stickyModelId: opts.coderId,
+    stickyModelName: opts.coderName,
+    stickyPinnedSource: opts.coderSource || 'local',
+    allowFileEdits: true,
+    timeoutMs: 90_000,
+    shouldAbort: opts.shouldAbort,
+  });
+  const reply = String(result?.text || '');
+  if (!/@@@FILE\s+\S+/i.test(reply)) return { files: opts.files, changed: false, summary: 'coder returned no file edits' };
+  const applied = await applyChatReplyEdits({
+    reply,
+    projectId: opts.projectId,
+    projectName: opts.productName,
+    files: opts.files,
+    userMessage: prompt,
+    originalBrief: opts.brief,
+    diskRoot: opts.diskRoot,
+    dryRun: true,
+  });
+  if (!applied.ok) return { files: opts.files, changed: false, summary: 'repair edits were rejected' };
+  const changedPaths = Object.keys(applied.files).filter((path) => applied.files[path] !== opts.files[path]);
+  return changedPaths.length
+    ? { files: applied.files, changed: true, summary: `updated ${changedPaths.slice(0, 4).join(', ')}` }
+    : { files: opts.files, changed: false, summary: 'repair produced no source changes' };
+}
+
+/** Still run the real package build when Vite cannot start, then try bounded repair. */
+async function runCreatePackageBuildWithRepair(opts: {
+  files: Record<string, string>;
+  brief: string;
+  productName: string;
+  projectId: string;
+  diskRoot: string;
+  coderId: string;
+  coderName: string;
+  coderSource?: string;
+  shouldAbort: () => boolean;
+  onStatus?: (label: string) => void;
+}): Promise<{ files: Record<string, string>; ok: boolean | null; errors: string[]; repairs: number }> {
+  if (!window.novaDesktop?.agentRun) {
+    return { files: opts.files, ok: null, errors: ['Desktop build runner unavailable'], repairs: 0 };
+  }
+  let files = { ...opts.files };
+  let errors: string[] = [];
+  let repairs = 0;
+  for (let attempt = 0; attempt < 3 && !opts.shouldAbort(); attempt += 1) {
+    opts.onStatus?.(attempt === 0 ? 'Build · npm run build (preview unavailable)…' : `Build · retry after repair ${attempt}/2…`);
+    try {
+      const build = await window.novaDesktop.agentRun({
+        command: 'npm run build',
+        cwd: opts.diskRoot,
+        userConfirmed: true,
+        skipConfirm: true,
+        timeoutMs: 90_000,
+      });
+      if (build?.ok) return { files, ok: true, errors: [], repairs };
+      errors = [String((build as { error?: string; output?: string })?.error
+        || (build as { output?: string })?.output || 'npm run build failed').slice(0, 1200)];
+    } catch (error) {
+      errors = [String(error instanceof Error ? error.message : error).slice(0, 1200)];
+    }
+    if (attempt >= 2 || opts.shouldAbort()) break;
+    const repaired = await repairCreateBuildWithCoder({
+      files,
+      brief: opts.brief,
+      productName: opts.productName,
+      errors,
+      projectId: opts.projectId,
+      diskRoot: opts.diskRoot,
+      coderId: opts.coderId,
+      coderName: opts.coderName,
+      coderSource: opts.coderSource,
+      shouldAbort: opts.shouldAbort,
+    }).catch(() => ({ files, changed: false, summary: 'repair failed' }));
+    if (!repaired.changed) break;
+    const changedPaths = Object.keys(repaired.files).filter((path) => repaired.files[path] !== files[path]);
+    const reply = changedPaths.map((path) => `@@@FILE ${path}\n${repaired.files[path]}`).join('\n');
+    const applied = await applyChatReplyEdits({
+      reply,
+      projectId: opts.projectId,
+      projectName: opts.productName,
+      files,
+      userMessage: opts.brief,
+      originalBrief: opts.brief,
+      diskRoot: opts.diskRoot,
+    }).catch(() => null);
+    if (!applied?.ok) {
+      errors = applied?.syntaxReasons?.length
+        ? [`Build repair rejected: ${applied.syntaxReasons.slice(0, 3).join('; ')}`]
+        : ['Build repair edits could not be applied'];
+      break;
+    }
+    files = applied.files;
+    repairs += 1;
+  }
+  return { files, ok: false, errors, repairs };
+}
+
+/** Soft-bind folder + code pills without Live (previewUrl stays null; job not Ready). */
+const softBindLastAt = new Map<string, number>();
+const softBindCount = new Map<string, number>();
+/** Merged studio files per create key — never wipe map with a partial paint. */
+const softBindFilesAcc = new Map<string, Record<string, string>>();
+/** Trailing-edge coalesce — latest paint flushes after minGap instead of being dropped. */
+const softBindPending = new Map<string, {
+  host: CreateTurnHost;
+  opts: {
+    files: Record<string, string>;
+    projectId: string;
+    name: string;
+    diskRoot: string | null;
+    force?: boolean;
+  };
+  timer: ReturnType<typeof setTimeout> | null;
+}>();
+/** Cheap fingerprint so identical paints do not thrash React. */
+const softBindPaintSig = new Map<string, string>();
+
 /** Unbind chat from a partial create — folder may exist on disk, but chat is not a successful product. */
 function unbindCreateChat(
   host: Pick<CreateTurnHost, 'commitStudio' | 'setChatCodePill'>,
   chatId: string,
+  opts?: { keepCodePill?: boolean },
 ): void {
+  const key = String(chatId || '').trim();
+  if (key) {
+    const pend = softBindPending.get(key);
+    if (pend?.timer) clearTimeout(pend.timer);
+    softBindPending.delete(key);
+    softBindFilesAcc.delete(key);
+    softBindLastAt.delete(key);
+    softBindCount.delete(key);
+    softBindPaintSig.delete(key);
+  }
   try {
     host.commitStudio({
       files: {},
@@ -127,55 +250,78 @@ function unbindCreateChat(
       previewUrl: null,
     });
   } catch { /* ignore */ }
-  try { host.setChatCodePill(chatId, false); } catch { /* ignore */ }
+  // Keep Code pill when a folder was already written — user can still open Code manually.
+  if (opts?.keepCodePill) {
+    try { host.setChatCodePill(chatId, true); } catch { /* ignore */ }
+  } else {
+    try { host.setChatCodePill(chatId, false); } catch { /* ignore */ }
+  }
   try { clearLastDiskTarget(chatId); } catch { /* ignore */ }
   try { clearChatStudio(chatId); } catch { /* ignore */ }
 }
 
-/** Soft-bind folder + code pills without Live (previewUrl stays null; job not Ready). */
-const softBindLastAt = new Map<string, number>();
-const softBindCount = new Map<string, number>();
-function softBindCreateStudio(
+function softBindFingerprint(
+  files: Record<string, string>,
+  projectId: string,
+  diskRoot: string | null,
+): string {
+  const keys = Object.keys(files).sort();
+  let sig = `${projectId}|${diskRoot || ''}|${keys.length}`;
+  for (const k of keys) {
+    const v = files[k] || '';
+    sig += `|${k}:${v.length}:${v.length > 0 ? v.charCodeAt(0) : 0}:${v.length > 1 ? v.charCodeAt(v.length - 1) : 0}`;
+  }
+  return sig;
+}
+
+function flushSoftBindCreateStudio(
+  key: string,
   host: CreateTurnHost,
   opts: {
     files: Record<string, string>;
     projectId: string;
     name: string;
     diskRoot: string | null;
-    /** Force paint even if throttled (final bind / ready / fail). */
     force?: boolean;
   },
 ): void {
   const v2 = isCreateV2Active();
-  const key = String(host.chatId || opts.projectId || 'create');
-  const now = Date.now();
-  const last = softBindLastAt.get(key) || 0;
   const count = softBindCount.get(key) || 0;
-  const minGap = v2 ? CREATE_V2_SOFT_BIND_MS : 900;
-  const secondGap = v2 ? CREATE_V2_SOFT_BIND_MS : 1600;
-  if (!opts.force && now - last < minGap) return;
-  if (!opts.force && count >= 1 && now - last < secondGap) return;
-  // createV2: allow many paints so Code grows line-by-line (old cap of 8 froze mid-craft).
-  if (!opts.force && count > (v2 ? 400 : 24)) return;
-  softBindLastAt.set(key, now);
+  if (!opts.force && count > (v2 ? 48 : 24)) return;
+  const prev = softBindFilesAcc.get(key) || {};
+  const merged = { ...prev, ...opts.files };
+  softBindFilesAcc.set(key, merged);
+  const fp = softBindFingerprint(merged, opts.projectId, opts.diskRoot);
+  if (!opts.force && softBindPaintSig.get(key) === fp) {
+    // Still refresh pill / heartbeat without a redundant commitStudio.
+    if (opts.diskRoot || Object.keys(merged).length > 0) {
+      try { host.setChatCodePill(host.chatId, true); } catch { /* ignore */ }
+    }
+    return;
+  }
+  softBindPaintSig.set(key, fp);
+  softBindLastAt.set(key, Date.now());
   softBindCount.set(key, count + 1);
   try {
     pushBuildDiag({
       kind: 'soft-bind',
-      detail: `Studio paint #${count + 1} (${Object.keys(opts.files).length} files)`,
+      detail: `Studio paint #${count + 1} (${Object.keys(merged).length} files)`,
     });
-    tickBuildHeartbeat(`Studio · ${Object.keys(opts.files).length} files`);
+    tickBuildHeartbeat(`Studio · ${Object.keys(merged).length} files`);
   } catch { /* ignore */ }
   try {
     host.commitStudio({
-      files: opts.files,
+      files: merged,
       projectId: opts.projectId,
       name: opts.name,
       diskRoot: opts.diskRoot,
       previewUrl: null,
     });
   } catch { /* ignore */ }
-  try { host.setChatCodePill(host.chatId, true); } catch { /* ignore */ }
+  // Pill = manual open control only (never auto-opens overlay).
+  if (opts.diskRoot || Object.keys(merged).length > 0) {
+    try { host.setChatCodePill(host.chatId, true); } catch { /* ignore */ }
+  }
   try {
     if (host.shouldPaintStudioLive(host.routeChatId, host.chatId)) {
       host.setCodePillSticky(true);
@@ -193,6 +339,69 @@ function softBindCreateStudio(
   try {
     host.touchRecentProject?.(opts.projectId, opts.name, opts.diskRoot || undefined);
   } catch { /* ignore */ }
+}
+
+function softBindCreateStudio(
+  host: CreateTurnHost,
+  opts: {
+    files: Record<string, string>;
+    projectId: string;
+    name: string;
+    diskRoot: string | null;
+    /** Force paint even if throttled (final bind / ready / fail). */
+    force?: boolean;
+  },
+): void {
+  const v2 = isCreateV2Active();
+  const key = String(host.chatId || opts.projectId || 'create');
+  const now = Date.now();
+  const last = softBindLastAt.get(key) || 0;
+  const minGap = v2 ? CREATE_V2_SOFT_BIND_MS : 900;
+
+  if (opts.force) {
+    const pend = softBindPending.get(key);
+    if (pend?.timer) clearTimeout(pend.timer);
+    softBindPending.delete(key);
+    const forceOpts = {
+      ...opts,
+      files: { ...(softBindFilesAcc.get(key) || {}), ...opts.files },
+    };
+    flushSoftBindCreateStudio(key, host, forceOpts);
+    return;
+  }
+
+  // Trailing coalesce: merge file maps so a later paint cannot drop earlier paths.
+  const existing = softBindPending.get(key);
+  if (existing?.timer) clearTimeout(existing.timer);
+  const mergedOpts = existing
+    ? {
+      ...opts,
+      files: { ...existing.opts.files, ...opts.files },
+      projectId: opts.projectId || existing.opts.projectId,
+      name: opts.name || existing.opts.name,
+      diskRoot: opts.diskRoot || existing.opts.diskRoot,
+    }
+    : opts;
+  // Eager-acc so force/unbind paths still see every path that was scheduled.
+  softBindFilesAcc.set(key, { ...(softBindFilesAcc.get(key) || {}), ...mergedOpts.files });
+  // Larger trees: stretch the gap a bit so React is not painting 40+ files every tick.
+  const fileN = Object.keys(softBindFilesAcc.get(key) || {}).length;
+  const adaptiveGap = fileN >= 24 ? minGap + 120 : fileN >= 12 ? minGap + 60 : minGap;
+  const waitMs = Math.max(0, adaptiveGap - (now - last));
+  if (waitMs === 0 && !existing) {
+    flushSoftBindCreateStudio(key, host, mergedOpts);
+    return;
+  }
+  const timer = setTimeout(() => {
+    const pending = softBindPending.get(key);
+    softBindPending.delete(key);
+    if (!pending) return;
+    // Align commit with the next frame so React is not mid-layout when we paint.
+    const run = () => flushSoftBindCreateStudio(key, pending.host, pending.opts);
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
+  }, waitMs > 0 ? waitMs : adaptiveGap);
+  softBindPending.set(key, { host, opts: mergedOpts, timer });
 }
 
 /** Product-contract create success (Wave 2 alias for callers). */
@@ -331,6 +540,8 @@ export async function resolveCreateUiPolishCoder(host: {
   stickyModelName?: string | null;
   preferredModelName?: string | null;
   modelName?: string | null;
+  /** Raw user ask — blank solid creates must not wait on a coder GGUF. */
+  content?: string | null;
 }): Promise<{
   id: string;
   name: string;
@@ -338,6 +549,14 @@ export async function resolveCreateUiPolishCoder(host: {
   ok: boolean;
   reason?: string;
 }> {
+  // Deterministic blank color page — never block on Models / engine status.
+  try {
+    const { blankSolidColorFromAsk } = await import('@/lib/webProjectCanon');
+    if (blankSolidColorFromAsk(String(host.content || ''))) {
+      return { id: 'blank-solid', name: 'Blank page', source: 'auto', ok: true };
+    }
+  } catch { /* fall through to normal coder resolve */ }
+
   const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
   const { getActiveBrainId, isWeakCoderId } = await import('@/lib/brainRoles');
   const { getEngineStatus } = await import('@/lib/novaEngine');
@@ -579,7 +798,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   ) || intent.summary;
 
   const lockedFromAsk = extractProjectName(host.content)
-    || host.content.match(/\b(?:called|named|name\s+it|call\s+it)\s+[\"“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i)?.[1]
+    || host.content.match(/\b(?:called|named|name\s+it|call\s+it)\s+["“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i)?.[1]
     || host.content.match(/\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i)?.[1]
     || null;
   // Prefer on-page brand ("brand Aurelia") over folder slug ("called aurelia-042252").
@@ -719,7 +938,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       const hardGoNow = looksLikeImplementGo(ask)
         || /\bskip\s+plan\b/i.test(ask)
         || /\bon\s+disk\s+now\b/i.test(ask)
-        || /\b(?:create|build|scaffold)\b[\s\S]{0,80}\bon\s+disk\b/i.test(ask);
+        || /\b(?:create|build|scaffold|ship)\b[\s\S]{0,100}\bon\s+disk\b/i.test(ask)
+        || /\bgo\s+build\b/i.test(ask)
+        || /\bcreate\s+(?:the\s+)?(?:project|website|site|app|store|shop)\b/i.test(ask);
       const approving = isBuildApprovePhrase(host.content) || hardGoNow;
       const pendingPlan = loadPendingBuildPlan(host.chatId);
       if (!approving) {
@@ -801,8 +1022,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   // Gate BEFORE scaffolding: ready coder, else UIGEN / Instruct.
   // No Cursor / prebuilt shortcuts — every create goes through a local GGUF.
   type CoderGate = Awaited<ReturnType<typeof resolveCreateUiPolishCoder>>;
-  let coderGate: CoderGate;
-  coderGate = await resolveCreateUiPolishCoder(host);
+  const coderGate: CoderGate = await resolveCreateUiPolishCoder(host);
   if (!coderGate.ok) {
     await host.finishPlainReply(
       [
@@ -826,14 +1046,30 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   const createBriefForBudget = String(richestBrief || buildIntent.summary || host.content || '');
   const budgetProfile = createBudgetProfile(createBriefForBudget);
   const createWallMs = createWallBudgetMs(createBriefForBudget);
+  const totalBudgetMs = createWallMs;
+  const craftBudgetMs = isCreateV2Active()
+    ? createV2CraftTotalWallMs(budgetProfile)
+    : createWallMs;
   const createStartedAt = Date.now();
   const createTimedOut = () => Date.now() - createStartedAt > createWallMs;
   const turnAborted = () => Boolean(createTimedOut() || host.shouldAbort?.() || shouldAbortCreateJob(jobId, host.routeChatId));
-  if (isVisionEngineId(coderGate.id)) {
+  if (coderGate.id !== 'blank-solid' && isVisionEngineId(coderGate.id)) {
     // Explicit chat pin / ladder may stress-test VL on create. Auto never picks VL for craft.
     host.pushStatus(`Craft on pinned vision model **${coderGate.name}**…`);
   }
-  host.pushStatus(`Build uses **${coderGate.name}** · ${budgetProfile} budget…`);
+  if (coderGate.id === 'blank-solid') {
+    host.pushStatus('Blank solid page — skipping model load…');
+  }
+  let localContextNote = '';
+  if (coderGate.source === 'local') {
+    try {
+      const { ggufCtxCapacityLabel } = await import('@/lib/ggufContext');
+      localContextNote = ` · ${ggufCtxCapacityLabel()}`;
+    } catch { /* hardware snapshot optional */ }
+  }
+  host.pushStatus(
+    `Build uses **${coderGate.name}** · ${budgetProfile} budget (${Math.ceil(craftBudgetMs / 60_000)}m craft cap, ${Math.ceil(totalBudgetMs / 60_000)}m total cap)${localContextNote}…`,
+  );
   await yieldToUi(0);
   // Single Brain Create craft = createV2 staged write (avoids tool-loop thrash).
   // Post-craft gather→act→verify lives in createRuntimeLoop + createPassSpine — not prefs.agentLoopOnCreate.
@@ -854,11 +1090,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     host.pushStatus(`Blank page · solid ${blankSolidFromUser} (skip marketing hops)…`);
   }
 
-  let ensemblePlanText = '';
-  let ensembleAttribution = coderGate.name;
-  let ensembleSpec: import('@/lib/createLayoutContract').ProductSpec | null = null;
-  let ensembleContract: import('@/lib/createLayoutContract').LayoutContract | null = null;
-  let ensembleCopy: import('@/lib/createLayoutContract').CopyPack | null = null;
+  const ensemblePlanText = '';
+  const ensembleAttribution = coderGate.name;
+  const ensembleSpec: import('@/lib/createLayoutContract').ProductSpec | null = null;
+  const ensembleContract: import('@/lib/createLayoutContract').LayoutContract | null = null;
+  
   let ensembleContractBlock = '';
   /** Web research notes for craft — hoisted so polish prompts can see them after the ensemble try. */
   let createResearchNotes = '';
@@ -869,7 +1105,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     if (blankSolidFromUser) {
       /* blank pages are a solid shell, not a product story */
     } else {
-      const briefSeed = originalBrief;
+      
       createResearchNotes = '';
       // Brief-only craft law — no Design Spine shell, CopyPack, or layoutReference recipes.
       host.pushStatus('Writing originality craft law…');
@@ -925,19 +1161,16 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       } catch { /* ignore */ }
     }
   }
-  // createV2: do not auto-open Code mid-craft (tree+editor freezes the shell).
-  if (CREATE_V2_AUTO_OPEN_CODE || !isCreateV2Active()) {
-    try {
-      window.dispatchEvent(new CustomEvent('NOVA:open-code-overlay', {
-        detail: { openOverlay: true, name: lockedProductName },
-      }));
-    } catch { /* ignore */ }
-  }
+  // Never auto-open Code overlay mid-craft (tree+editor freezes the shell).
+  // Code pill stays user-clickable via setChatCodePill / softBind — manual open only.
+  // Do not re-introduce NOVA:open-code-overlay here (agentLoop bypass was the freeze root cause).
 
   const jobId = `create-${crypto.randomUUID().slice(0, 8)}`;
   host.pushStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
   pushBuildDiag({ kind: 'phase', detail: `Scaffold ${lockedProductName} (${buildIntent.slug})` });
   noteBuildContext({ productName: lockedProductName, phase: 'scaffold' });
+  /** Set after successful scaffold — catch uses this for Code-pill keep. */
+  let createDiskRootForPill: string | null = null;
   try {
     await host.syncGrants();
     host.pushStatus('Writing project files one by one…');
@@ -957,26 +1190,30 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     const { createFileBuildLabel } = await import('@/lib/createProgressCopy');
     let scaffoldAcc: Record<string, string> = {};
+    let scaffoldWrites = 0;
     const created = await runCreateProjectFlow(buildIntent, newProjectId, {
       onFileWrite: (rel, content) => {
         const path = String(rel || '').replace(/\\/g, '/');
         if (content != null) scaffoldAcc = { ...scaffoldAcc, [path]: content };
         const followPath = /\.gitignore$/i.test(path) ? undefined : path;
         host.pushStatus(createFileBuildLabel(path, 'Building'), followPath);
-        // createV2: status only during scaffold; paint studio once after scaffold completes.
-        if (!isCreateV2Active()) {
-          softBindCreateStudio(host, {
-            files: scaffoldAcc,
-            projectId: newProjectId,
-            name: lockedProductName,
-            diskRoot: null,
-          });
+        // Never soft-bind per scaffold file — commitStudio thrash freezes the chat
+        // shell ~6s after send. Paint once after scaffold completes (below).
+        scaffoldWrites += 1;
+        if (scaffoldWrites % 4 === 0) {
+          // Opportunistic yield every few writes (fire-and-forget; do not await IPC).
+          void yieldToUi(0);
         }
       },
     });
     if (await host.stopIfSuperseded()) {
       markCreateJobFailed(jobId, 'Stopped');
       unbindCreateChat(host, host.chatId);
+      markBuildDiagnosticsEnded();
+      await host.finishPlainReply(
+        `**${lockedProductName}** create miss — stopped before scaffold finished.`,
+        'NOVA · create',
+      );
       return { status: 'handled' };
     }
 
@@ -993,9 +1230,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     host.clearPending(host.chatId);
 
     const originDiskRoot = created.projectPath || null;
+    createDiskRootForPill = originDiskRoot;
     const originProjectId = created.projectId || newProjectId;
     let createFilesAcc: Record<string, string> = { ...created.files };
-    let craftCheckpoint = snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
+    snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
       label: 'scaffold',
       diskRoot: originDiskRoot,
     });
@@ -1015,29 +1253,34 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       createFilesAcc = repaired.files;
       if (repaired.repaired.length) {
         host.pushStatus('Scaffold · Vite entry files verified…');
-        if (originDiskRoot) {
-          const flushKeys = [
-            'package.json',
-            'index.html',
-            'vite.config.js',
-            'vite.config.ts',
-            'src/main.jsx',
-            'src/main.tsx',
-            'src/index.css',
-          ].filter((k) => createFilesAcc[k]);
-          if (flushKeys.length) {
-            await applyChatReplyEdits({
-              reply: flushKeys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
-              projectId: originProjectId,
-              projectName: lockedProductName,
-              files: createFilesAcc,
-              userMessage: host.content,
-              diskRoot: originDiskRoot,
-            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
-          }
+      }
+      // Always flush Vite entry to disk — skipping when repaired=[] left stale static
+      // index.html / missing package.json on disk and blanked Live (Glow ladder).
+      if (originDiskRoot) {
+        const flushKeys = [
+          'package.json',
+          'index.html',
+          'vite.config.js',
+          'vite.config.ts',
+          'src/main.jsx',
+          'src/main.tsx',
+          'src/index.css',
+        ].filter((k) => createFilesAcc[k]);
+        if (flushKeys.length) {
+          await applyChatReplyEdits({
+            reply: flushKeys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
+            projectId: originProjectId,
+            projectName: lockedProductName,
+            files: createFilesAcc,
+            userMessage: host.content,
+            diskRoot: originDiskRoot,
+          }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
         }
       }
     } catch { /* best-effort */ }
+    // Yield before first studio paint so the chat shell stays interactive after send.
+    await yieldToUi(16);
+    // One force paint after scaffold — Folder/Code pills on, Live still off.
     softBindCreateStudio(host, {
       files: createFilesAcc,
       projectId: originProjectId,
@@ -1063,14 +1306,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       updatedAt: new Date().toISOString(),
       preview: host.previewFromText(host.content),
     });
-
-    // Soft-bind so Folder + Code pills appear during polish (Live stays off until Ready).
-    softBindCreateStudio(host, {
-      files: createFilesAcc,
-      projectId: originProjectId,
-      name: lockedProductName,
-      diskRoot: originDiskRoot,
-    });
     await yieldToUi(0);
 
     // Prefer the longest brief: thin intent.summary must not hide host.content / thread brief.
@@ -1090,18 +1325,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       generationBrief: briefForUi,
       files: createFilesAcc,
     });
-    const {
-      briefNeedsCreateUiPolish,
-      briefLooksLikeMarketingLanding,
-      briefLooksLikeChatApp,
-      briefLooksLikeMicroWebToy,
-      briefRequiresInteractiveApp,
-      isPreviewReady,
-      looksLikeFillerStubAppSource,
-      isEmptyOrStubAppSource,
-    } = await import('@/lib/createBuildQuality');
+    const { briefNeedsCreateUiPolish, briefLooksLikeMarketingLanding, briefLooksLikeChatApp, briefLooksLikeMicroWebToy, briefRequiresInteractiveApp, looksLikeFillerStubAppSource, isEmptyOrStubAppSource } = await import('@/lib/createBuildQuality');
     // Prefer the raw user ask — ensemble fluff in briefForUi used to kill blank-solid detection.
-    let blankSolidColor: string | null = blankSolidFromUser || blankSolidColorFromAsk(String(host.content || ''));
+    // Also treat step-ladder "plain white blank page / nothing else yet" as a blank solid,
+    // even when coffee-site framing confused prior detectors.
+    let blankSolidColor: string | null = blankSolidFromUser || blankSolidColorFromAsk(String(host.content || ''))
+      || blankSolidColorFromAsk(String(authoritativeOriginalBrief || ''))
+      || blankSolidColorFromAsk(String(originalBrief || ''));
+    try {
+      const { isTinyBlankPageAsk } = await import('@/lib/novaBuildLoop');
+      const rawAskBlob = [host.content, authoritativeOriginalBrief, originalBrief].map((s) => String(s || '')).join('\n');
+      if (!blankSolidColor && isTinyBlankPageAsk(rawAskBlob)) {
+        blankSolidColor = '#ffffff';
+      }
+    } catch { /* optional */ }
     try {
       const { reactSurgicalMicroAskEdits } = await import('@/lib/webProjectCanon');
       // Never run micro surgical (center-word / cream rails) on rich marketing / chat creates —
@@ -1128,6 +1365,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       } else if (blankSolidColor) {
         host.pushStatus(`Painting solid ${blankSolidColor} shell…`);
         const shellFiles = viteSolidShellEdits(blankSolidColor);
+        // Always force the shell into the in-memory map — applyChatReplyEdits alone used to
+        // leave the dark scaffold when apply failed, then invent thrash wrote broken App.jsx.
+        for (const e of shellFiles) {
+          createFilesAcc[e.path] = e.content;
+        }
+        delete createFilesAcc['src/App.tsx'];
         const blankApplied = await applyChatReplyEdits({
           reply: shellFiles.map((e) => `@@@FILE ${e.path}\n${e.content}`).join('\n'),
           projectId: originProjectId,
@@ -1139,7 +1382,43 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         if (blankApplied.ok) {
           createFilesAcc = { ...blankApplied.files };
           delete createFilesAcc['src/App.tsx'];
+          // Re-assert shell contents so a mangled apply cannot keep sibling JSX.
+          for (const e of shellFiles) {
+            createFilesAcc[e.path] = e.content;
+          }
+          delete createFilesAcc['src/App.tsx'];
         }
+        if (originDiskRoot) {
+          await persistAcceptedCreateFiles(
+            originDiskRoot,
+            createFilesAcc,
+            shellFiles.map((e) => e.path),
+          ).catch(() => {});
+        }
+        // Blank shell only rewrites App.* — re-assert Vite entry so npm/Live never see a
+        // static html leftover without package.json.
+        try {
+          const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+          const healed = ensureViteReactProjectFiles(
+            createFilesAcc,
+            lockedProductName || buildIntent.name,
+          );
+          createFilesAcc = healed.files;
+          if (originDiskRoot) {
+            const keys = [
+              'package.json',
+              'index.html',
+              'vite.config.js',
+              'vite.config.ts',
+              'src/main.jsx',
+              'src/main.tsx',
+              'src/index.css',
+            ].filter((k) => createFilesAcc[k]);
+            if (keys.length) {
+              await persistAcceptedCreateFiles(originDiskRoot, createFilesAcc, keys).catch(() => {});
+            }
+          }
+        } catch { /* best-effort */ }
       }
     } catch { /* best-effort */ }
 
@@ -1150,6 +1429,54 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     let createFloorFallback = false;
     /** Invent-from-brief depth continues already ran this turn (avoid early+late double). */
     let thinDepthRan = false;
+    /**
+     * Product genre guard: skip floor/wire twin pastes.
+     * Invent owns look — do not freeze invent over a TypeScript seed.
+     */
+    let productGenreGuard = false;
+    let productSeedApp = '';
+    let productInventSnapshot: { appJsx: string; appCss: string; logo: string } | null = null;
+    /** @deprecated alias — floors/wire gates still check this name in a few sites */
+    let productSpineLocked = false;
+    /** Storefront compose spine owns catalog/cart/hero — invent must not wipe; hard-guarantee last resort. */
+    let storefrontSpineLocked = false;
+    let storefrontSpineSnapshot: { appJsx: string; appCss: string; logo: string; products: string } | null = null;
+    const restoreStorefrontSpineSnapshot = (why: string) => {
+      if (!storefrontSpineLocked || !storefrontSpineSnapshot?.appJsx) return false;
+      const cur = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+      if (cur === storefrontSpineSnapshot.appJsx) return false;
+      createFilesAcc = {
+        ...createFilesAcc,
+        'src/App.jsx': storefrontSpineSnapshot.appJsx,
+        'src/App.css': storefrontSpineSnapshot.appCss || createFilesAcc['src/App.css'] || '',
+        ...(storefrontSpineSnapshot.products
+          ? { 'src/data/products.ts': storefrontSpineSnapshot.products }
+          : {}),
+        ...(storefrontSpineSnapshot.logo
+          ? { 'public/logo.svg': storefrontSpineSnapshot.logo }
+          : {}),
+      };
+      delete createFilesAcc['src/App.tsx'];
+      host.pushStatus(`Ladder · restored storefront spine (${why})…`);
+      return true;
+    };
+    const restoreProductInventSnapshot = (why: string) => {
+      if (!productInventSnapshot?.appJsx) return false;
+      const cur = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+      if (cur === productInventSnapshot.appJsx) return false;
+      createFilesAcc = {
+        ...createFilesAcc,
+        'src/App.jsx': productInventSnapshot.appJsx,
+        'src/App.css': productInventSnapshot.appCss || createFilesAcc['src/App.css'] || '',
+        ...(productInventSnapshot.logo
+          ? { 'public/logo.svg': productInventSnapshot.logo }
+          : {}),
+      };
+      delete createFilesAcc['src/App.tsx'];
+      host.pushStatus(`Ladder · restored invent look (${why})…`);
+      return true;
+    };
+    const restoreProductSpineSnapshot = restoreProductInventSnapshot;
     // Blank solid pages are DONE after the shell paint — never force marketing polish.
     const needsUiPolish = !blankSolidColor;
     if (blankSolidColor) {
@@ -1166,22 +1493,313 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const briefSpec = createBriefSpecFromAsk(lockedProductName, authoritativeOriginalBrief);
     const chatAppBrief = briefLooksLikeChatApp(briefForUi);
 
-    // createV2: single-coder craft only — never enter the tool-loop → handoff → polish thrash.
+    // Coding foundation: scaffold + tool loop owns create when agentLoopOnCreate is on.
+    // Invent polish is fallback only if the loop was skipped or returned empty.
     if (needsUiPolish && uiPolishOk !== true) {
       let usedNovaLoop = false;
       let loopAttempted = false;
+      let loopWroteFiles = false;
       const skipLegacyLoop = isCreateV2Active();
+      // Step-ladder: blank white page is deterministic — never burn minutes on invent thrash.
+      try {
+        const { isTinyBlankPageAsk, blankWhitePageFiles } = await import('@/lib/novaBuildLoop');
+        if (isTinyBlankPageAsk(authoritativeOriginalBrief || briefForUi)) {
+          host.pushStatus('Tiny step · plain white page (no model thrash)…');
+          const blank = blankWhitePageFiles();
+          createFilesAcc = { ...createFilesAcc, ...blank };
+          delete createFilesAcc['src/App.tsx'];
+          updateCreateJob(jobId, { files: createFilesAcc });
+          if (originDiskRoot) {
+            await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              ['src/App.jsx', 'src/App.css'],
+            ).catch(() => {});
+          }
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+          });
+          uiPolishOk = true;
+          uiPolishReasons = [];
+          usedNovaLoop = true;
+          loopWroteFiles = true;
+          host.pushStatus('Tiny step · blank white page on disk…');
+        }
+      } catch { /* fall through to tool loop */ }
+      // Lounge / vibe ladder-lite: ordered verified beats before invent thrash.
+      try {
+        const { briefWantsLoungeLadder, runLoungeCreateLadder, LOUNGE_LADDER_WALL_MS } = await import('@/lib/createLoungeLadder');
+        if (uiPolishOk !== true && briefWantsLoungeLadder(authoritativeOriginalBrief || briefForUi)) {
+          host.pushStatus('Ladder · lounge vibe page (one beat at a time)…');
+          const ladder = await runLoungeCreateLadder({
+            brief: authoritativeOriginalBrief || briefForUi,
+            productName: lockedProductName,
+            files: createFilesAcc,
+            host: {
+              pushStatus: host.pushStatus,
+              shouldAbort: () => turnAborted(),
+            },
+            startedAt: createStartedAt,
+            wallMs: Math.min(LOUNGE_LADDER_WALL_MS, Math.max(60_000, createWallMs - (Date.now() - createStartedAt))),
+          });
+          createFilesAcc = ladder.files;
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+          });
+          if (originDiskRoot) {
+            await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              ['src/App.jsx', 'src/App.css', 'src/App.tsx', 'src/index.css'].filter((p) => createFilesAcc[p]),
+            ).catch(() => {});
+          }
+          updateCreateJob(jobId, { files: createFilesAcc });
+          if (ladder.ok) {
+            uiPolishOk = true;
+            uiPolishReasons = [];
+            usedNovaLoop = true;
+            loopWroteFiles = true;
+            host.pushStatus(`Ladder · lounge ready (${ladder.beatsDone.join(' → ')})…`);
+          } else {
+            uiPolishOk = false;
+            uiPolishReasons = [
+              ladder.reason || 'Lounge ladder incomplete',
+              ...(ladder.failedBeat ? [`failed beat: ${ladder.failedBeat}`] : []),
+            ];
+            host.pushStatus(`Ladder · ${ladder.reason || 'miss'} — invent fallback…`);
+          }
+        }
+      } catch { /* fall through to tool loop */ }
+      // Storefront ladder: compose-first catalog/cart/chrome/mark/hero (primary — not hard-guarantee salvage).
+      try {
+        const {
+          briefWantsStorefrontLadder,
+          runStorefrontCreateLadder,
+          STOREFRONT_LADDER_WALL_MS,
+          gradeStorefrontQuality,
+        } = await import('@/lib/createStorefrontLadder');
+        const storeBrief = authoritativeOriginalBrief || briefForUi;
+        if (uiPolishOk !== true && briefWantsStorefrontLadder(storeBrief, lockedProductName)) {
+          host.pushStatus('Ladder · storefront compose spine (catalog → cart → chrome)…');
+          const ladder = await runStorefrontCreateLadder({
+            brief: storeBrief,
+            productName: lockedProductName,
+            files: createFilesAcc,
+            host: {
+              pushStatus: host.pushStatus,
+              shouldAbort: () => turnAborted(),
+            },
+            startedAt: createStartedAt,
+            wallMs: Math.min(
+              STOREFRONT_LADDER_WALL_MS,
+              Math.max(60_000, createWallMs - (Date.now() - createStartedAt)),
+            ),
+            salt: String(jobId || lockedProductName).slice(-6),
+          });
+          createFilesAcc = ladder.files;
+          try {
+            const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+          } catch { /* best-effort */ }
+          storefrontSpineSnapshot = {
+            appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+            appCss: String(createFilesAcc['src/App.css'] || ''),
+            logo: String(createFilesAcc['public/logo.svg'] || ''),
+            products: String(createFilesAcc['src/data/products.ts'] || ''),
+          };
+          if (originDiskRoot) {
+            const heroKeys = Object.keys(createFilesAcc).filter((p) => /public\/heroes\//i.test(p.replace(/\\/g, '/')));
+            await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              [
+                'src/App.jsx',
+                'src/App.css',
+                'src/App.tsx',
+                'src/index.css',
+                'src/data/products.ts',
+                'public/logo.svg',
+                ...heroKeys,
+              ].filter((p) => createFilesAcc[p]),
+            ).catch(() => {});
+          }
+          updateCreateJob(jobId, { files: createFilesAcc });
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+          });
+          const graded = ladder.grade || gradeStorefrontQuality(createFilesAcc, storeBrief, lockedProductName);
+          let spineHasCommerce = false;
+          try {
+            const { appHasCommerceCart } = await import('@/lib/createBuildQuality');
+            const n = (String(createFilesAcc['src/data/products.ts'] || '').match(/"id"\s*:/g) || []).length;
+            spineHasCommerce = appHasCommerceCart(createFilesAcc) && n >= 6;
+          } catch { /* ignore */ }
+          // Compose spine wins: lock whenever catalog+cart landed — invent must not wipe.
+          if ((ladder.ok && (graded.okQuality || graded.okNormal)) || spineHasCommerce) {
+            storefrontSpineLocked = true;
+            uiPolishOk = true;
+            uiPolishReasons = graded.okQuality
+              ? []
+              : [`Storefront Accept ${graded.label || 'Normal'}`, ...graded.reasons.slice(0, 3)];
+            usedNovaLoop = true;
+            loopWroteFiles = true;
+            host.pushStatus(
+              ladder.ok
+                ? `Ladder · storefront ${graded.label} (${ladder.beatsDone.join(' → ')}) — invent polish only…`
+                : `Ladder · storefront spine locked (catalog+cart) — invent polish only…`,
+            );
+          } else {
+            // True spine miss — invent/hard-guarantee may finish (last resort).
+            uiPolishOk = false;
+            uiPolishReasons = [
+              ladder.reason || 'Storefront ladder incomplete',
+              ...(ladder.failedBeat ? [`failed beat: ${ladder.failedBeat}`] : []),
+              ...graded.reasons.slice(0, 3),
+            ];
+            host.pushStatus(`Ladder · ${ladder.reason || 'storefront miss'} — invent / repair…`);
+          }
+        }
+      } catch { /* fall through to tool loop */ }
+      // Product ladder: seed rotated recipe + logo, then invent MUST own the look (seed ≠ Ready).
+      try {
+        const {
+          briefWantsProductLadder,
+          materializeProductSpineFiles,
+          parseProductBriefSlots,
+          formatProductInventOwnLookPrompt,
+          gradeProductQuality,
+        } = await import('@/lib/createProductLadder');
+        const productBrief = authoritativeOriginalBrief || briefForUi;
+        if (uiPolishOk !== true && !storefrontSpineLocked && briefWantsProductLadder(productBrief)) {
+          const salt = String(jobId || lockedProductName).slice(-6);
+          const slots = parseProductBriefSlots(productBrief, lockedProductName, salt);
+          host.pushStatus(
+            `Ladder · understand ${slots.brand} (${slots.productNoun}) → write ${slots.recipe}…`,
+          );
+          if (originDiskRoot) {
+            try {
+              const { brandLogoSvgFor } = await import('@/lib/brandAssets');
+              const { localIconifySvg } = await import('@/lib/localLucideIcons');
+              let forced = brandLogoSvgFor({
+                productName: lockedProductName,
+                brief: productBrief,
+                css: 'background:#0b0f14',
+              });
+              if (!forced || /M9\.937 15\.5/i.test(forced) || /M9 18V5l12-2v13/i.test(forced)) {
+                const { productDeskLogoSvg } = await import('@/lib/createProductLadder');
+                forced = (
+                  /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|battlestation|desk)\b/i.test(productBrief)
+                    ? productDeskLogoSvg('#ffffff')
+                    : localIconifySvg('lucide:gamepad-2', '#ffffff')
+                ) || forced;
+              }
+              if (forced) {
+                createFilesAcc = { ...createFilesAcc, 'public/logo.svg': forced };
+                await persistGenreLogoSvg(originDiskRoot, forced).catch(() => {});
+              }
+            } catch { /* logo best-effort */ }
+          }
+          const spine = materializeProductSpineFiles(productBrief, lockedProductName, salt);
+          createFilesAcc = { ...createFilesAcc, ...spine };
+          if (createFilesAcc['src/App.jsx'] && createFilesAcc['src/App.tsx']) {
+            delete createFilesAcc['src/App.tsx'];
+          }
+          // Product write must keep a full Vite shell — missing package.json locked Live (RidgeDesk).
+          try {
+            const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+          } catch { /* best-effort */ }
+          productSeedApp = String(createFilesAcc['src/App.jsx'] || '');
+          productGenreGuard = true;
+          productSpineLocked = true; // floors/wire only
+          productInventSnapshot = {
+            appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+            appCss: String(createFilesAcc['src/App.css'] || ''),
+            logo: String(createFilesAcc['public/logo.svg'] || ''),
+          };
+          // Seed is a Normal floor only — NEVER Ready. Invent must own the look
+          // (marking seed Quality skipped invent and shipped renamed desk twins in ~1m).
+          const graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+          uiPolishOk = false;
+          uiPolishReasons = [
+            graded.okNormal
+              ? `Seed is ${graded.label} floor — invent must own a unique Quality look`
+              : `Below Normal floor (${graded.label}) — invent must rewrite`,
+            ...graded.reasons.slice(0, 4),
+          ];
+          host.pushStatus(
+            `Ladder · ${graded.label} seed · invent required for Ready (${slots.brand} / ${slots.recipe})…`,
+          );
+          // Do NOT set usedNovaLoop / loopWroteFiles here — both blocked invent
+          // (seed wrote files, so invent fallback thought craft already owned the write).
+          try {
+            const inventAsk = formatProductInventOwnLookPrompt({
+              brief: productBrief,
+              productName: lockedProductName,
+              seedRecipe: slots.recipe,
+            });
+            (createFilesAcc as Record<string, string>)['.__novaProductInventAsk'] = inventAsk;
+          } catch { /* ignore */ }
+          // Defer studio paint — seed App.jsx is large; painting mid-IPC freezes chat.
+          await yieldToUi(32);
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+          });
+          if (originDiskRoot) {
+            await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              [
+                'package.json',
+                'index.html',
+                'vite.config.js',
+                'vite.config.ts',
+                'src/main.jsx',
+                'src/main.tsx',
+                'src/App.jsx',
+                'src/App.css',
+                'src/index.css',
+                'public/logo.svg',
+                'public/heroes/desk.svg',
+                'public/heroes/delivery.svg',
+              ].filter((p) => createFilesAcc[p]),
+            ).catch(() => {});
+          }
+          updateCreateJob(jobId, { files: createFilesAcc });
+        }
+      } catch { /* fall through to tool loop */ }
       try {
         const { shouldUseNovaCreateBuildLoop, runNovaCreateBuildLoop } = await import('@/lib/novaBuildLoop');
         const { modeStatusLabel } = await import('@/lib/novaStudioModes');
-        if (!skipLegacyLoop && shouldUseNovaCreateBuildLoop() && coderGate.ok) {
+        // Product ladder already wrote Normal seed + queued invent ask — tool loop
+        // burns minutes (or soft-passes seed) before invent/lift ever runs. Skip it.
+        const productInventAskReady = typeof createFilesAcc['.__novaProductInventAsk'] === 'string'
+          && String(createFilesAcc['.__novaProductInventAsk'] || '').length > 40;
+        if (productGenreGuard && productInventAskReady) {
+          host.pushStatus('Ladder · skip tool loop — invent owns Quality look…');
+          uiPolishOk = false;
+          loopWroteFiles = false;
+        } else if (!skipLegacyLoop && shouldUseNovaCreateBuildLoop() && coderGate.ok && uiPolishOk !== true) {
           loopAttempted = true;
           usedNovaLoop = true;
           try {
             const { announceCreatePhase } = await import('@/lib/createStatus');
             await announceCreatePhase(host, 'craft', { id: coderGate.id, name: coderGate.name });
           } catch { /* ignore */ }
-          host.pushStatus(modeStatusLabel('build', `Craft · ${coderGate.name}`));
+          host.pushStatus(modeStatusLabel('build', `Tool loop · ${coderGate.name}`));
+          const filesBeforeLoop = Object.keys(createFilesAcc).length;
           const loopRes = await runNovaCreateBuildLoop({
             brief: authoritativeOriginalBrief,
             productName: lockedProductName,
@@ -1206,14 +1824,30 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ) ? 2 : 1,
           });
           createFilesAcc = loopRes.files;
+          loopWroteFiles = Object.keys(createFilesAcc).length > filesBeforeLoop
+            || Boolean(loopRes.ok)
+            || (loopRes.steps || []).some((s) => /^(?:write|patch)$/i.test(String(s.tool || '')));
+          const toolLoopCraftStalled = (loopRes.steps || []).some((s) =>
+            /craft stalled|stream idle|no tokens|step wall|Model timed out|timed out after/i.test(
+              String(s.label || s.detail || ''),
+            ),
+          );
           softBindCreateStudio(host, {
             files: createFilesAcc,
             projectId: originProjectId,
             name: lockedProductName,
             diskRoot: originDiskRoot,
           });
-          if (loopRes.ok) {
-            // Re-verify with the brief gate — never trust the loop alone on rich briefs.
+          if (toolLoopCraftStalled && !loopRes.ok) {
+            // Idle wall — do not soft-success; invent may recover, else honest miss.
+            uiPolishOk = false;
+            uiPolishReasons = [
+              'Craft stalled — tool loop idle wall',
+              ...(loopRes.reasons || []).slice(0, 4),
+            ];
+            host.pushStatus('Tool loop craft stalled — invent fallback…');
+          } else if (loopRes.ok || loopWroteFiles) {
+            // Agent owns success — soft note brief deficits; do not invent-gate fail-closed.
             const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
             const gate = previewReadyForBrief(createFilesAcc, {
               productName: lockedProductName,
@@ -1221,18 +1855,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               spec: ensembleSpec,
               contract: ensembleContract,
             });
-            if (gate.ok) {
-              uiPolishOk = true;
-              uiPolishReasons = [];
-            } else {
-              uiPolishOk = false;
-              uiPolishReasons = gate.reasons || ['Tool loop Ready did not hold'];
-              host.pushStatus('Tool loop finished — Ready still blocked; handing off to full UI polish…');
-            }
+            uiPolishOk = true;
+            uiPolishReasons = gate.ok ? [] : (gate.reasons || []).slice(0, 6);
+            host.pushStatus(
+              gate.ok
+                ? 'Tool loop cleared craft — continuing to Live…'
+                : `Tool loop wrote files — Live continues (soft: ${(gate.reasons || [])[0] || 'polish later'})…`,
+            );
           } else {
             uiPolishReasons = loopRes.reasons || [];
             uiPolishOk = false;
-            host.pushStatus('Tool loop did not clear Ready — handing off to full UI polish…');
+            host.pushStatus('Tool loop empty — invent fallback…');
           }
         }
       } catch (loopErr) {
@@ -1248,18 +1881,44 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         );
       }
 
-      // createV2 / loop-off: one craft owner writes App via stream (no loop handoff).
-      if (uiPolishOk !== true && (!usedNovaLoop || (loopAttempted && uiPolishOk === false))) {
+      // Invent craft fallback when tool loop did not own a write.
+      // Product seed used to set usedNovaLoop and block invent — always allow when invent ask is queued.
+      const productInventQueued = typeof createFilesAcc['.__novaProductInventAsk'] === 'string'
+        && String(createFilesAcc['.__novaProductInventAsk'] || '').length > 40;
+      // If craft soft-passed but App is still the disposable seed, force invent.
+      if (productInventQueued && productGenreGuard) {
+        try {
+          const { appLooksLikeProductSeedFloor } = await import('@/lib/createProductLadder');
+          const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+          if (appLooksLikeProductSeedFloor(appNow)) {
+            uiPolishOk = false;
+            loopWroteFiles = false;
+            host.pushStatus('Ladder · seed still on disk — invent must own the look…');
+          }
+        } catch { /* ignore */ }
+      }
+      if (
+        uiPolishOk !== true
+        && (
+          (!loopWroteFiles && (!usedNovaLoop || (loopAttempted && uiPolishOk === false)))
+          || productInventQueued
+        )
+      ) {
       let polishSnapshot = { ...createFilesAcc };
+      const inventFocusPath = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+        ? 'src/App.tsx'
+        : 'src/App.jsx';
       host.pushStatus(
-        isCreateV2Active()
-          ? createV2StatusCraft(coderGate.ok ? coderGate.name : 'coder')
-          : usedNovaLoop
-            ? `Full UI polish · **${coderGate.ok ? coderGate.name : 'coder'}**…`
-            : 'Planning UI from your brief…',
+        productInventQueued
+          ? `Ladder · invent · unique Quality look (${coderGate.ok ? coderGate.name : 'coder'})…`
+          : isCreateV2Active()
+            ? createV2StatusCraft(coderGate.ok ? coderGate.name : 'coder')
+            : usedNovaLoop
+              ? `Full UI polish · **${coderGate.ok ? coderGate.name : 'coder'}**…`
+              : 'Planning UI from your brief…',
         // Clear leftover scaffold follow (index.css) so Code does not show a fake stall.
-        isCreateV2Active()
-          ? (createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx'] ? 'src/App.tsx' : 'src/App.jsx')
+        productInventQueued || isCreateV2Active()
+          ? inventFocusPath
           : null,
       );
       if (isCreateV2Active()) {
@@ -1348,17 +2007,38 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             }
           }
           createFollowLock = appPath;
-          craftCheckpoint = snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
+          snapshotCreateCheckpoint(createFilesAcc, lockedProductName, {
             label: 'pre-craft',
             diskRoot: originDiskRoot,
           });
           const basePromptLines = [
             `AUTHORITATIVE USER BRIEF — implement every requested item; do not let plan notes replace it:\n${authoritativeOriginalBrief}`,
             ...polishPromptLinesFromBrief(briefSpec, appPath, briefForUi),
+            ...(typeof createFilesAcc['.__novaProductInventAsk'] === 'string'
+              ? [
+                  '',
+                  '## PRODUCT INVENT — OWN THE LOOK (required)',
+                  String(createFilesAcc['.__novaProductInventAsk']),
+                  '- Replace className app desk-* with a brand-specific shell (e.g. app pulsedesk).',
+                  '- Seed is disposable. Shipping the seed unchanged fails Ready.',
+                ]
+              : []),
             formatCreateProjectMap(createFilesAcc),
             buildRankedProjectMap(createFilesAcc, briefForUi, { limit: 16 }),
-            ...(isCreateV2Active()
+            ...(isCreateV2Active() || productInventQueued
               ? (() => {
+                // Product invent owns a single App + CSS landing — never compositional shells
+                // (sections wipe the Normal seed and leave Fail stubs).
+                if (productInventQueued || productGenreGuard) {
+                  return [
+                    'PRODUCT INVENT RULES:',
+                    `- Write ONLY @@@FILE ${appPath} and @@@FILE src/App.css — full landing in App (no src/sections).`,
+                    '- Do NOT create NavHeaderSection / HeroSection / compositional shells.',
+                    '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
+                    '- Keep brand name, hero, CTA, who/features/specs/trust bands from the info map.',
+                    createV2StagedWriteInstructions(preferTs),
+                  ];
+                }
                 const shopAsk = /\b(?:cart|checkout|purchase|add\s+to\s+cart|online\s+store|e-?commerce)\b/i.test(briefForUi)
                   || /\b(?:liquor|spirits?|whiskey|whisky|bourbon|vodka|gin|tequila|bottle\s+shop)\b/i.test(briefForUi)
                   || (/\b(?:shop|store|boutique)\b/i.test(briefForUi) && /\b(?:buy|browse|products?|filter|quantity)\b/i.test(briefForUi));
@@ -1378,7 +2058,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         `- Thin @@@FILE ${appPath} shell + @@@FILE src/App.css + src/sections/*Section.jsx.`,
                         '- Do NOT put the full page UI inline in App — sections own bands.',
                         '- Do NOT touch index.css, main.tsx, index.html, package.json, or vite.config.',
-                        createV2StagedWriteInstructions(preferTs),
+                        createV2StagedWriteInstructions(preferTs, true),
                       ]
                     : [
                       'createV2 RULES:',
@@ -1404,16 +2084,41 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               : []),
           ];
           const polishStarted = Date.now();
-          const attemptWallMs = isCreateV2Active()
-            ? createV2AttemptWallMs(budgetProfile)
-            : createPolishAttemptBudgetMs(briefForUi);
+          let productInventFirstTokenMs = CREATE_V2_FIRST_TOKEN_MS;
+          let productInventIdleMs = 0;
+          let productInventAttemptWallMs = 0;
+          let productInventTotalWallMs = 0;
+          if (productInventQueued) {
+            try {
+              const {
+                PRODUCT_INVENT_FIRST_TOKEN_MS,
+                PRODUCT_INVENT_IDLE_MS,
+                PRODUCT_INVENT_ATTEMPT_WALL_MS,
+                PRODUCT_INVENT_TOTAL_WALL_MS,
+              } = await import('@/lib/createProductLadder');
+              productInventFirstTokenMs = PRODUCT_INVENT_FIRST_TOKEN_MS;
+              productInventIdleMs = PRODUCT_INVENT_IDLE_MS;
+              productInventAttemptWallMs = PRODUCT_INVENT_ATTEMPT_WALL_MS;
+              productInventTotalWallMs = PRODUCT_INVENT_TOTAL_WALL_MS;
+            } catch { /* keep createV2 defaults */ }
+          }
+          const attemptWallMs = productInventQueued && productInventAttemptWallMs > 0
+            ? productInventAttemptWallMs
+            : isCreateV2Active()
+              ? createV2AttemptWallMs(budgetProfile)
+              : createPolishAttemptBudgetMs(briefForUi);
           const polishBudgetMs = attemptWallMs;
-          const polishTotalBudgetMs = isCreateV2Active()
-            ? attemptWallMs * CREATE_V2_MAX_CRAFT_ATTEMPTS
-            : Math.min(
+          const polishTotalBudgetMs = productInventQueued && productInventTotalWallMs > 0
+            ? Math.min(
               createWallMs - (Date.now() - createStartedAt),
-              createWallBudgetMs(briefForUi),
-            );
+              productInventTotalWallMs,
+            )
+            : isCreateV2Active()
+              ? attemptWallMs * CREATE_V2_MAX_CRAFT_ATTEMPTS
+              : Math.min(
+                createWallMs - (Date.now() - createStartedAt),
+                createWallBudgetMs(briefForUi),
+              );
           if (polishTotalBudgetMs < 20_000 || createTimedOut()) {
             // Soft wall already spent — stop before another craft attempt.
             uiPolishOk = false;
@@ -1435,10 +2140,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           let lastError = '';
           let streamBuf = '';
           let stalledPathHint = '';
+          // Product invent: one attempt then seed-lift (no 15m retry thrash).
           // createV2: craft + one stall retry. Legacy: simple=1, else 2.
-          const maxPolishAttempts = isCreateV2Active()
-            ? CREATE_V2_MAX_CRAFT_ATTEMPTS
-            : (budgetProfile === 'simple' ? 1 : 2);
+          const maxPolishAttempts = productInventQueued
+            ? 1
+            : isCreateV2Active()
+              ? CREATE_V2_MAX_CRAFT_ATTEMPTS
+              : (budgetProfile === 'simple' ? 1 : 2);
           const createV2CraftStartedAt = Date.now();
           for (let attempt = 0; attempt < maxPolishAttempts; attempt++) {
             await yieldToUi(0);
@@ -1508,7 +2216,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             let lastStudioPaint = 0;
             let lastFocusPath = '';
             let lastFocusLen = 0;
-            let lastGrowthAt = Date.now();
+            Date.now();
             let pathFocusedAt = Date.now();
             let appFamilyStartedAt = 0;
             let lastStreamAt = Date.now();
@@ -1536,22 +2244,34 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 if (now - lastWaitStatusAt >= 8_000) {
                   lastWaitStatusAt = now;
                   // Do NOT heartbeat here — that fakes "coding ·" while the model is still loading.
+                  const tokenCap = productInventQueued
+                    ? productInventFirstTokenMs
+                    : CREATE_V2_FIRST_TOKEN_MS;
                   host.pushStatus(
                     waited < 20_000
-                      ? `Loading model · waiting for first tokens… (${Math.round(waited / 1000)}s)`
-                      : `Still loading · will cancel if quiet past ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s… (${Math.round(waited / 1000)}s)`,
+                      ? (productInventQueued
+                        ? `Ladder · invent · loading model… (${Math.round(waited / 1000)}s)`
+                        : `Loading model · waiting for first tokens… (${Math.round(waited / 1000)}s)`)
+                      : (productInventQueued
+                        ? `Ladder · invent · still loading (lift at ${Math.round(tokenCap / 1000)}s)… (${Math.round(waited / 1000)}s)`
+                        : `Still loading · will cancel if quiet past ${Math.round(tokenCap / 1000)}s… (${Math.round(waited / 1000)}s)`),
                     null,
                   );
                 }
               }
-              if (!sawStreamToken && now - attemptStarted > CREATE_V2_FIRST_TOKEN_MS) {
+              const firstTokenWall = productInventQueued
+                ? productInventFirstTokenMs
+                : CREATE_V2_FIRST_TOKEN_MS;
+              if (!sawStreamToken && now - attemptStarted > firstTokenWall) {
                 stallAbort = true;
                 zeroTokenAbort = true;
                 stallAbortPath = createV2StallRetryPath(appPath, preferTs);
                 if (!stallCancelFired) {
                   stallCancelFired = true;
                   host.pushStatus(
-                    `No App output after ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s — cancelling…`,
+                    productInventQueued
+                      ? `Ladder · invent quiet ${Math.round(firstTokenWall / 1000)}s — cancelling for seed-lift…`
+                      : `No App output after ${Math.round(firstTokenWall / 1000)}s — cancelling…`,
                     appPath,
                   );
                   cancelCraftJob();
@@ -1559,13 +2279,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 return;
               }
               // Idle = no token flow at all (any chunk resets lastStreamAt). Never cancel while emitting.
-              if (sawStreamToken && now - lastStreamAt > createV2IdleStallMs(lastFocusPath || appPath)) {
+              const idleWall = productInventQueued && productInventIdleMs > 0
+                ? productInventIdleMs
+                : createV2IdleStallMs(lastFocusPath || appPath);
+              if (sawStreamToken && now - lastStreamAt > idleWall) {
                 stallAbort = true;
                 stallAbortPath = createV2StallRetryPath(lastFocusPath || appPath, preferTs);
                 if (!stallCancelFired) {
                   stallCancelFired = true;
                   host.pushStatus(
-                    `Stream idle — cancelling to retry App…`,
+                    productInventQueued
+                      ? `Ladder · invent idle — cancelling for seed-lift…`
+                      : `Stream idle — cancelling to retry App…`,
                     stallAbortPath,
                   );
                   cancelCraftJob();
@@ -1621,7 +2346,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   // Token-flow idle clock: any paint from the engine resets stall.
                   sawStreamToken = true;
                   lastStreamAt = Date.now();
-                  lastGrowthAt = lastStreamAt;
                 }
                 const activeHdr = (() => {
                   const active = streamBuf.lastIndexOf('@@@FILE');
@@ -1629,7 +2353,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   const hdr = streamBuf.slice(active).match(/^@@@FILE\s+([^\n\r]+)/);
                   return String(hdr?.[1] || '').replace(/\\/g, '/').replace(/^\.\//, '').trim();
                 })();
-                const activeIsScaffold = Boolean(activeHdr) && isCreateV2ScaffoldPath(activeHdr);
+                
                 let focusPath = '';
                 try {
                   // Prefer the in-progress @@@FILE (last header), not the last completed extract.
@@ -1684,7 +2408,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         && (!lastFocusPath || isCreateV2AppPath(lastFocusPath));
                       lastFocusPath = focusPath;
                       lastFocusLen = focusLen;
-                      lastGrowthAt = now;
                       // Stay on one App-family clock when hopping App.jsx ↔ App.css.
                       if (!appFamilyHop) pathFocusedAt = now;
                       if (isCreateV2AppPath(focusPath) && !appFamilyStartedAt) {
@@ -1693,7 +2416,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                       seenCodingPaths.add(focusPath);
                     } else if (contentGrew) {
                       lastFocusLen = focusLen;
-                      lastGrowthAt = now;
                       if (isCreateV2AppPath(focusPath) && !appFamilyStartedAt) {
                         appFamilyStartedAt = now;
                       }
@@ -1746,16 +2468,26 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         cancelCraftJob();
                       }
                     }
-                    // createV2: status + heartbeat only mid-stream — never soft-bind full files map.
-                    if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 32) {
+                    // Status often; soft-bind throttled (CREATE_V2_SOFT_BIND_MS) — never 32ms full-map thrash.
+                    // Product invent: wider paint gap so commitStudio does not freeze the chat shell.
+                    const studioPaintGapMs = productInventQueued
+                      ? CREATE_V2_SOFT_BIND_MS
+                      : 120;
+                    if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > studioPaintGapMs) {
                       lastStudioPaint = now;
                       const base = focusPath.split('/').pop() || focusPath;
                       host.pushStatus(
                         stallAbort
-                          ? `Stalled on ${base} — cancelling to retry App…`
+                          ? (productInventQueued
+                            ? `Ladder · invent stall on ${base} — seed-lift next…`
+                            : `Stalled on ${base} — cancelling to retry App…`)
                           : stalled && !contentGrew && !pathChanged
-                            ? `Still waiting on the coder for ${base}…`
-                            : createFileBuildLabel(focusPath, 'Coding'),
+                            ? (productInventQueued
+                              ? `Ladder · invent · waiting on ${base}…`
+                              : `Still waiting on the coder for ${base}…`)
+                            : (productInventQueued
+                              ? `Ladder · invent · ${createFileBuildLabel(focusPath, 'Coding')}`
+                              : createFileBuildLabel(focusPath, 'Coding')),
                         focusPath,
                       );
                       tickBuildHeartbeat(createFileBuildLabel(focusPath, 'Coding'));
@@ -1785,7 +2517,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     if (displayFocus !== lastFocusPath) {
                       lastFocusPath = displayFocus;
                       pathFocusedAt = now;
-                      lastGrowthAt = now;
                       host.pushStatus(createFileBuildLabel(displayFocus, 'Coding'), displayFocus);
                     }
                     const wallPath = isCreateV2ScaffoldPath(focusPath) ? focusPath : displayFocus;
@@ -1810,27 +2541,32 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             }
             // Fail closed before stall-heal / retry — includes thin create (stall block skipped).
             if (zeroTokenAbort && !sawStreamToken) {
-              lastError = `Coder produced no tokens in ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s`;
+              const tokWall = productInventQueued ? productInventFirstTokenMs : CREATE_V2_FIRST_TOKEN_MS;
+              lastError = productInventQueued
+                ? `Invent produced no tokens in ${Math.round(tokWall / 1000)}s — seed-lift next`
+                : `Coder produced no tokens in ${Math.round(tokWall / 1000)}s`;
               host.pushStatus(
-                `Coder produced no tokens in ${Math.round(CREATE_V2_FIRST_TOKEN_MS / 1000)}s — create stopped; retry with a smaller coder.`,
+                productInventQueued
+                  ? `Ladder · invent quiet ${Math.round(tokWall / 1000)}s — continuing to seed-lift…`
+                  : `Coder produced no tokens in ${Math.round(tokWall / 1000)}s — create stopped; retry with a smaller coder.`,
               );
               uiPolishOk = false;
               break;
             }
             if (stallAbort && stallAbortPath) {
+              // Product invent stall → seed-lift / Accept (never paste utility floors over seed).
+              if (productGenreGuard || productInventQueued) {
+                uiPolishOk = false;
+                lastError = `Invent stalled on ${stallAbortPath} — seed-lift next`;
+                uiPolishReasons = [lastError];
+                host.pushStatus('Ladder · invent stall — skipping floors, seed-lift next…');
+                break;
+              }
               // Thin create: truncation heal only (never paste utility/kiln/sticky floors).
               // Non-thin: may still ship utility floors below.
               try {
               if (!isThinCreatePath()) {
-                const {
-                  briefLooksLikeStickyNotePage,
-                  briefLooksLikeFiringJournal,
-                  stickyNotePageApp,
-                  stickyNotePageCss,
-                  buildUtilityFloorFromBrief,
-                  healNearReadyCreateUi,
-                  previewReadyForBrief,
-                } = await import('@/lib/createBuildQuality');
+                const { briefLooksLikeStickyNotePage, briefLooksLikeFiringJournal, stickyNotePageApp, stickyNotePageCss, buildUtilityFloorFromBrief } = await import('@/lib/createBuildQuality');
                 const kilnBrief = briefLooksLikeFiringJournal(briefForUi)
                   || briefLooksLikeFiringJournal(host.content)
                   || /\b(?:kilnbook|pottery|firing\s+journal)\b/i.test(`${briefForUi}\n${lockedProductName}`);
@@ -1943,8 +2679,28 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 // User Stop must win over stall-heal / Style hops — otherwise UI says
                 // "(stopped)" while create keeps coding in the background.
                 if (turnAborted()) {
-                  markCreateJobFailed(jobId, 'Stopped');
-                  unbindCreateChat(host, host.chatId);
+                  const abortReason = createTimedOut()
+                    ? 'Create soft wall reached during UI craft'
+                    : host.shouldAbort?.()
+                      ? 'Create stopped during UI craft'
+                      : 'Create superseded after switching chats';
+                  markCreateJobFailed(jobId, abortReason, undefined, {
+                    craftBlocked: true,
+                    blockedReasons: ['Craft stalled or stopped'],
+                  });
+                  unbindCreateChat(host, host.chatId, { keepCodePill: Boolean(originDiskRoot) });
+                  markBuildDiagnosticsEnded();
+                  clearBuildWritingPath(createTimedOut() ? 'Craft timed out' : 'Stopped');
+                  await host.finishPlainReply(
+                    createTimedOut()
+                      ? createBudgetExceededReply(budgetProfile, lockedProductName)
+                      : [
+                          `**${lockedProductName}** create miss — ${abortReason.toLowerCase()}.`,
+                          originDiskRoot ? `**Where:** \`${originDiskRoot}\`` : '',
+                          'Folder/Code stay available — craft stalled before Ready.',
+                        ].filter(Boolean).join('\n'),
+                    'NOVA · create',
+                  );
                   return { status: 'handled' };
                 }
               } // end non-thin floor salvage
@@ -1992,12 +2748,16 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     spec: ensembleSpec,
                     contract: ensembleContract,
                   });
-                  if (gate.ok && !isThinCreatePath()) {
+                  if (gate.ok && !isThinCreatePath() && !productGenreGuard) {
                     uiPolishOk = true;
                     uiPolishReasons = [];
                     lastError = '';
                     host.pushStatus('Partial App healed — Preview Ready…');
                     break;
+                  }
+                  if (productGenreGuard) {
+                    uiPolishOk = false;
+                    host.pushStatus('Ladder · partial invent heal — Quality Accept still required…');
                   }
                   if (isThinCreatePath()) {
                     host.pushStatus('Partial App healed — continuing thin depth (not Live yet)…');
@@ -2025,11 +2785,38 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
               stalledPathHint = '';
               host.pushStatus(`Craft wall hit on ${stallAbortPath} — continuing with partial App…`, stallAbortPath);
+              if (isThinCreatePath()) {
+                uiPolishOk = false;
+                uiPolishReasons = [
+                  `Craft stalled — idle wall on ${stallAbortPath}`,
+                  ...(uiPolishReasons || []).slice(0, 4),
+                ];
+              }
               break;
             }
             if (turnAborted() || await host.stopIfSuperseded()) {
-              markCreateJobFailed(jobId, 'Stopped');
-              unbindCreateChat(host, host.chatId);
+              const abortReason = createTimedOut()
+                ? 'Create soft wall reached during UI craft'
+                : host.shouldAbort?.()
+                  ? 'Create stopped during UI craft'
+                  : 'Create superseded after switching chats';
+              markCreateJobFailed(jobId, abortReason, undefined, {
+                craftBlocked: true,
+                blockedReasons: [lastError || 'Craft stalled or stopped'],
+              });
+              unbindCreateChat(host, host.chatId, { keepCodePill: Boolean(originDiskRoot) });
+              markBuildDiagnosticsEnded();
+              clearBuildWritingPath(createTimedOut() ? 'Craft timed out' : 'Stopped');
+              await host.finishPlainReply(
+                createTimedOut()
+                  ? createBudgetExceededReply(budgetProfile, lockedProductName)
+                  : [
+                      `**${lockedProductName}** create miss — ${abortReason.toLowerCase()}.`,
+                      originDiskRoot ? `**Where:** \`${originDiskRoot}\`` : '',
+                      lastError ? `**Why:** ${lastError}` : 'Folder/Code stay available — craft stalled before Ready.',
+                    ].filter(Boolean).join('\n'),
+                'NOVA · create',
+              );
               return { status: 'handled' };
             }
             modelReply = String(result.text || '').trim();
@@ -2069,12 +2856,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               diskRoot: originDiskRoot,
             });
             if (!applied.ok || !applied.updated.length) {
-              lastError = applied.error || 'Could not apply UI file edits';
+              lastError = createApplyFailureReason(applied);
+              host.pushStatus(`${lastError} — preserving the last valid project files and retrying…`);
               continue;
             }
             createFilesAcc = applied.files;
             if (
-              thinCreateLocksAppJsx(briefForUi, lockedProductName)
+              !productGenreGuard
+              && !productInventQueued
+              && thinCreateLocksAppJsx(briefForUi, lockedProductName)
               && thinWantsCompositionalShell(briefForUi)
             ) {
               createFilesAcc = applyCompositionalDepthMerge(
@@ -2082,6 +2872,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 briefForUi,
                 lockedProductName,
               );
+            }
+            // Product invent must never keep a compositional shell that wiped the seed.
+            if (
+              (productGenreGuard || productInventQueued)
+              && productInventSnapshot?.appJsx
+              && appLooksLikeCompositionalShell(
+                String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+              )
+            ) {
+              host.pushStatus('Ladder · invent wrote section shell — restoring Normal seed…');
+              restoreProductInventSnapshot('invent compositional shell');
             }
             softBindCreateStudio(host, {
               files: createFilesAcc,
@@ -2424,6 +3225,69 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               break;
             }
             // Ready means stop — no soft floor / forced enrich after success.
+            // Product invent: generic previewReady is not Quality Accept — seed still fails.
+            // If invent regresses below Normal (thin stub), restore seed then seed-lift.
+            if (productInventQueued || productGenreGuard) {
+              try {
+                const {
+                  appLooksLikeProductSeedFloor,
+                  gradeProductQuality,
+                } = await import('@/lib/createProductLadder');
+                const productBrief = authoritativeOriginalBrief || briefForUi;
+                let graded = gradeProductQuality(
+                  createFilesAcc,
+                  productBrief,
+                  lockedProductName,
+                );
+                const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+                const inventRegressed = !graded.okNormal
+                  || appNow.length < 1100
+                  || !graded.checks?.brand
+                  || appLooksLikeCompositionalShell(appNow);
+                if (inventRegressed && productInventSnapshot?.appJsx) {
+                  host.pushStatus('Ladder · invent regressed below Normal — restoring seed for lift…');
+                  restoreProductInventSnapshot('invent regression');
+                  if (originDiskRoot) {
+                    await persistAcceptedCreateFiles(
+                      originDiskRoot,
+                      createFilesAcc,
+                      ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => createFilesAcc[p]),
+                    ).catch(() => {});
+                  }
+                  graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+                }
+                if (appLooksLikeProductSeedFloor(
+                  String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+                ) || !graded.okQuality) {
+                  uiPolishOk = false;
+                  uiPolishReasons = [
+                    inventRegressed
+                      ? 'Invent regressed — seed restored for Quality seed-lift'
+                      : appLooksLikeProductSeedFloor(
+                        String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+                      )
+                        ? 'Invent still on seed floor — Quality Accept deferred to seed-lift'
+                        : `Invent below Quality (${graded.label}) — seed-lift / Accept next`,
+                    ...graded.reasons.slice(0, 3),
+                  ];
+                  host.pushStatus(`Ladder · invent miss (${graded.label}) — seed-lift next…`);
+                  break;
+                }
+                productInventSnapshot = {
+                  appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+                  appCss: String(createFilesAcc['src/App.css'] || ''),
+                  logo: String(createFilesAcc['public/logo.svg'] || ''),
+                };
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus(`Ladder · invent Accept ${graded.label}…`);
+                break;
+              } catch {
+                uiPolishOk = false;
+                uiPolishReasons = ['Invent grade failed — seed-lift next'];
+                break;
+              }
+            }
             uiPolishOk = true;
             uiPolishReasons = [];
             break;
@@ -2434,6 +3298,47 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               lastError,
               coder.id ? `Coder: ${coder.name || coder.id}` : '',
             ].filter(Boolean);
+          }
+          // Product invent stalled/empty/regressed → restore Normal seed so seed-lift can Accept.
+          if (
+            (productInventQueued || productGenreGuard)
+            && uiPolishOk !== true
+          ) {
+            try {
+              const {
+                appLooksLikeProductSeedFloor,
+                gradeProductQuality,
+              } = await import('@/lib/createProductLadder');
+              const productBrief = authoritativeOriginalBrief || briefForUi;
+              let graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+              const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+              if (
+                (!graded.okNormal || appNow.length < 1100)
+                && productInventSnapshot?.appJsx
+              ) {
+                host.pushStatus('Ladder · invent left thin/Fail page — restoring Normal seed…');
+                restoreProductInventSnapshot('invent post-loop regression');
+                if (originDiskRoot) {
+                  await persistAcceptedCreateFiles(
+                    originDiskRoot,
+                    createFilesAcc,
+                    ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => createFilesAcc[p]),
+                  ).catch(() => {});
+                }
+                graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+              }
+              if (appLooksLikeProductSeedFloor(
+                String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+              ) || graded.okNormal) {
+                uiPolishOk = false;
+                if (!uiPolishReasons.length) {
+                  uiPolishReasons = [
+                    lastError || 'Invent stalled — seed-lift will attempt Quality Accept',
+                  ];
+                }
+                host.pushStatus('Ladder · invent stalled — continuing to seed-lift…');
+              }
+            } catch { /* ignore */ }
           }
           } finally {
             stopPolishBeat();
@@ -2449,43 +3354,63 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       } // end dump polish (loop off or loop Ready handoff)
     }
 
-    // Brand assets + public wiring — always run when we have a disk project (even if Ready failed).
-    // Otherwise fail-closed builds keep broken /logo.svg and /heroes/*.jpg forever.
+    // Brand assets + public wiring.
+    // Structure-first (coding foundation): skip image fetch + logo wire — functional UI only.
     // Arcade / canvas games: skip hero image materialize (was hanging ~20m on "landing"
     // negation in briefs like "Not a website landing page").
     if (originDiskRoot && !blankSolidColor && needsUiPolish) {
       try {
+        const { wantsStructureFirstCreate } = await import('@/lib/novaBuildLoop');
+        const structureFirst = wantsStructureFirstCreate(briefForUi, lockedProductName);
+        if (structureFirst) {
+          host.pushStatus('Structure-first — skipping logo/image polish (design later)…');
+        }
         const { planBrandAssets, materializeBrandAssets } = await import('@/lib/brandAssets');
         const { looksLikePlayableCanvasGame, looksLikeFpsGame } = await import('@/lib/freshSpaFromBrief');
         const { wireCreatePublicAssets } = await import('@/lib/createBuildQuality');
         const isArcadeBrief = looksLikePlayableCanvasGame(briefForUi) || looksLikeFpsGame(briefForUi);
         // Skip hero fetch on short/simple creates — research-driven utility UIs don't need stock photos.
         const isUtilityToy = briefLooksLikeMicroWebToy(briefForUi) || budgetProfile === 'simple';
-        const tryMaterialize = !isArcadeBrief && !isUtilityToy && (
+        // Product / storefront spine owns App — skip stock-hero thrash (it also runs assembleCreateAppFromParts).
+        const tryMaterialize = !structureFirst && !isArcadeBrief && !isUtilityToy
+          && !productGenreGuard && !storefrontSpineLocked && (
           uiPolishOk === true
           || briefLooksLikeMarketingLanding(briefForUi)
           || briefNeedsCreateUiPolish(briefForUi)
         );
-        if (isArcadeBrief) {
+        if (structureFirst) {
+          /* status already pushed */
+        } else if (productGenreGuard || storefrontSpineLocked) {
+          // Product/delivery/storefront ladder already ships /heroes/*.svg — never thrash stock photos
+          // for 4+ minutes (was a major freeze/crash stressor with invent + local GGUF).
+          host.pushStatus('Ladder · keeping compose hero images (skip stock fetch)…');
+        } else if (isArcadeBrief) {
           host.pushStatus('Skipping hero fetch for playable game…');
         } else if (isUtilityToy) {
           host.pushStatus('Skipping hero fetch for simple utility UI…');
-        } else if (uiPolishOk === true) {
+        } else if (tryMaterialize) {
           host.pushStatus('Fetching images for this brief…');
         } else {
-          host.pushStatus(tryMaterialize
-            ? 'Fetching images + wiring hero fallbacks…'
-            : 'Wiring local icons and hero fallbacks…');
+          host.pushStatus('Wiring local icons and hero fallbacks…');
         }
         const plan = planBrandAssets(briefForUi, lockedProductName);
         if (tryMaterialize) {
-          const mat = await materializeBrandAssets({
-            diskRoot: originDiskRoot,
-            files: createFilesAcc,
-            plan,
-            brief: briefForUi,
-            projectName: lockedProductName,
-          });
+          // Hard cap — never let image fetch pin the machine for many minutes.
+          const mat = await Promise.race([
+            materializeBrandAssets({
+              diskRoot: originDiskRoot,
+              files: createFilesAcc,
+              plan,
+              brief: briefForUi,
+              projectName: lockedProductName,
+            }),
+            new Promise<Awaited<ReturnType<typeof materializeBrandAssets>>>((resolve) => {
+              window.setTimeout(() => {
+                host.pushStatus('Image fetch wall (90s) — continuing with local heroes…');
+                resolve({ files: createFilesAcc, saved: [] });
+              }, 90_000);
+            }),
+          ]);
           createFilesAcc = mat.files;
           for (const rel of mat.saved || []) {
             const norm = String(rel || '').replace(/\\/g, '/');
@@ -2499,43 +3424,73 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         }
         const linkedAfterHero = ensureStylesLinked(createFilesAcc);
         createFilesAcc = linkedAfterHero.files;
-        const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, briefForUi);
-        createFilesAcc = wired.files;
-        if (wired.changed.length || linkedAfterHero.changed.length) {
-          host.pushStatus(wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…');
-          const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
-            ? 'src/App.tsx'
-            : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
-          await applyChatReplyEdits({
-            reply: [
-              createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
-              createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
-              createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
-              createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
-              ...Object.keys(createFilesAcc)
-                .filter((p) => {
-                  const norm = p.replace(/\\/g, '/');
-                  if (!/^public\//i.test(norm)) return false;
-                  if (/\.(?:jpe?g|png|webp|gif|avif|ico|woff2?|ttf|otf)$/i.test(norm)) return false;
-                  const body = String(createFilesAcc[p] || '');
-                  if (!body.trim()) return false;
-                  return true;
-                })
-                .slice(0, 20)
-                .map((p) => `@@@FILE ${p}\n${createFilesAcc[p]}`),
-            ].filter(Boolean).join('\n'),
-            projectId: originProjectId,
-            projectName: buildIntent.name,
-            files: createFilesAcc,
-            userMessage: briefForUi,
-            diskRoot: originDiskRoot,
-          }).then((applied) => {
-            if (applied.ok && applied.updated.length) createFilesAcc = applied.files;
-          }).catch(() => {});
+        if (!structureFirst && !productGenreGuard) {
+          const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, briefForUi);
+          createFilesAcc = wired.files;
+          if (wired.changed.length || linkedAfterHero.changed.length) {
+            host.pushStatus(wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…');
+            const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+              ? 'src/App.tsx'
+              : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
+            await applyChatReplyEdits({
+              reply: [
+                createFilesAcc[appKey] ? `@@@FILE ${appKey}\n${createFilesAcc[appKey]}` : '',
+                createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
+                createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
+                createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+                ...Object.keys(createFilesAcc)
+                  .filter((p) => {
+                    const norm = p.replace(/\\/g, '/');
+                    if (!/^public\//i.test(norm)) return false;
+                    if (/\.(?:jpe?g|png|webp|gif|avif|ico|woff2?|ttf|otf)$/i.test(norm)) return false;
+                    const body = String(createFilesAcc[p] || '');
+                    if (!body.trim()) return false;
+                    return true;
+                  })
+                  .slice(0, 20)
+                  .map((p) => `@@@FILE ${p}\n${createFilesAcc[p]}`),
+              ].filter(Boolean).join('\n'),
+              projectId: originProjectId,
+              projectName: buildIntent.name,
+              files: createFilesAcc,
+              userMessage: briefForUi,
+              diskRoot: originDiskRoot,
+            }).then((applied) => {
+              if (applied.ok && applied.updated.length) createFilesAcc = applied.files;
+            }).catch(() => {});
+          }
+        } else if (productGenreGuard) {
+          host.pushStatus('Ladder · genre guard — skipping App wire assemble…');
+          // Only restore seed/invent snapshot when App was poisoned (wrong genre).
+          try {
+            const {
+              appLooksLikeWrongGenreForProductBrief,
+              appLooksLikeDeskSpineTemplate,
+            } = await import('@/lib/createProductLadder');
+            const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+            const productBrief = authoritativeOriginalBrief || briefForUi;
+            if (
+              productInventSnapshot?.appJsx
+              && (appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+                || appLooksLikeDeskSpineTemplate(appNow))
+            ) {
+              restoreProductInventSnapshot('after image fetch · wrong-genre overwrite');
+              if (originDiskRoot) {
+                await persistAcceptedCreateFiles(
+                  originDiskRoot,
+                  createFilesAcc,
+                  ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => createFilesAcc[p]),
+                ).catch(() => {});
+              }
+            }
+          } catch { /* keep Acc */ }
+          updateCreateJob(jobId, { files: createFilesAcc });
+        } else if (linkedAfterHero.changed.length) {
+          host.pushStatus('Linking App.css…');
         }
         // Thin compositional shells keep landmarks in section files — App-only
         // previewReady would false-fail nav/hero and demote a seed-ready Live.
-        if (uiPolishOk === true && !isThinCreatePath()) {
+        if (uiPolishOk === true && !isThinCreatePath() && !productGenreGuard) {
           // Same brief gate as craft — never demote a marketing homepage via raw requireInteractive.
           const { previewReadyForBrief } = await import('@/lib/createBuildQuality');
           const recheck = previewReadyForBrief(createFilesAcc, {
@@ -2555,11 +3510,31 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       }
     }
 
-    // Style polish on the SAME sticky craft model (never swap GGUFs).
+    // Optional sequential style seat: design GGUF (uigen) once for CSS only — never concurrent.
     // Thin create: skip style hop — keep craft CSS as written.
     if (turnAborted()) {
-      markCreateJobFailed(jobId, 'Stopped');
-      unbindCreateChat(host, host.chatId);
+      const abortReason = createTimedOut()
+        ? 'Create soft wall reached during UI craft'
+        : host.shouldAbort?.()
+          ? 'Create stopped during UI craft'
+          : 'Create superseded after switching chats';
+      markCreateJobFailed(jobId, abortReason, undefined, {
+        craftBlocked: true,
+        blockedReasons: ['Craft stalled or stopped'],
+      });
+      unbindCreateChat(host, host.chatId, { keepCodePill: Boolean(originDiskRoot) });
+      markBuildDiagnosticsEnded();
+      clearBuildWritingPath(createTimedOut() ? 'Craft timed out' : 'Stopped');
+      await host.finishPlainReply(
+        createTimedOut()
+          ? createBudgetExceededReply(budgetProfile, lockedProductName)
+          : [
+              `**${lockedProductName}** create miss — ${abortReason.toLowerCase()}.`,
+              originDiskRoot ? `**Where:** \`${originDiskRoot}\`` : '',
+              'Folder/Code stay available — craft stalled before Ready.',
+            ].filter(Boolean).join('\n'),
+        'NOVA · create',
+      );
       return { status: 'handled' };
     }
     if (needsUiPolish && coderGate.ok && !isThinCreatePath()) {
@@ -2570,20 +3545,60 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         const marketingStyle = briefLooksLikeMarketingLanding(briefForUi);
         const needsMotion = marketingStyle
           && (!/@keyframes/i.test(cssNow) || !/radial-gradient|linear-gradient/i.test(cssNow));
+        const wantSpecialtyStyle = getLocalPrefs().specialtyStyleHop !== false;
         if (cssThin || needsMotion || marketingStyle) {
           const { runCreateStyleHop } = await import('@/lib/createEnsemble');
-          host.pushStatus(`Style · **${coderGate.name}** (same brain · CSS polish)…`);
+          const { withEngineSeat } = await import('@/lib/engineSeatSwap');
+          let styleId = coderGate.id;
+          let styleName = coderGate.name;
+          if (wantSpecialtyStyle) {
+            try {
+              const { getActiveBrainId } = await import('@/lib/brainRoles');
+              const { isUiDesignEngineId } = await import('@/lib/enginePick');
+              const { getEngineStatus } = await import('@/lib/novaEngine');
+              const designPref = getActiveBrainId('design');
+              const status = await getEngineStatus();
+              const designHit = (status.models || []).find((m) => {
+                const id = String(m.id || '');
+                if (m.status !== 'ready') return false;
+                if (designPref && designPref !== 'NOVA-auto' && id === designPref) return true;
+                return isUiDesignEngineId(id);
+              });
+              if (designHit?.id && designHit.id !== coderGate.id) {
+                styleId = designHit.id;
+                styleName = String(designHit.name || designHit.id);
+              }
+            } catch { /* keep craft brain */ }
+          }
+          host.pushStatus(
+            styleId === coderGate.id
+              ? `Style · **${styleName}** (same brain · CSS polish)…`
+              : `Style · **${styleName}** (design seat · CSS only · one swap)…`,
+          );
           const appSrc = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
-          const styled = await runCreateStyleHop({
-            brief: briefForUi,
-            productName: lockedProductName,
-            appSource: appSrc,
-            cssSource: cssNow,
-            modelId: coderGate.id,
-            modelName: coderGate.name,
-            contract: ensembleContract,
-            shouldAbort: () => turnAborted(),
+          const { result: styled, usedId, swapped } = await withEngineSeat({
+            seatId: styleId,
+            restoreId: coderGate.id,
+            createInflight: true,
+            run: async (activeId) => {
+              const nameForSeat = activeId === styleId ? styleName : coderGate.name;
+              if (styleId !== coderGate.id && activeId === coderGate.id) {
+                host.pushStatus(`Style · **${coderGate.name}** (design swap failed · same brain)…`);
+              }
+              return runCreateStyleHop({
+                brief: briefForUi,
+                productName: lockedProductName,
+                appSource: appSrc,
+                cssSource: cssNow,
+                modelId: activeId,
+                modelName: nameForSeat,
+                contract: ensembleContract,
+                shouldAbort: () => turnAborted(),
+              });
+            },
           });
+          void usedId;
+          void swapped;
           if (styled.css && styled.css.length >= Math.min(cssNow.length, 200)) {
             createFilesAcc = { ...createFilesAcc, 'src/App.css': styled.css };
             await applyChatReplyEdits({
@@ -2699,7 +3714,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
 
     // Thin create: finish truncated App.jsx BEFORE final honesty / floors demote success.
-    if (isThinCreatePath() && needsUiPolish && uiPolishOk !== true) {
+    // Product ladder: invent/lift own App — never thin finish/compositional depth over seed.
+    if (isThinCreatePath() && !productGenreGuard && needsUiPolish && uiPolishOk !== true) {
       try {
         const { runCreateSyntaxGate } = await import('@/lib/createSyntaxGate');
         if (thinCreateLocksAppJsx(briefForUi, lockedProductName)) {
@@ -2809,21 +3825,19 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             updateCreateJob(jobId, { files: createFilesAcc });
           }
           // Rich website/brand asks: compiling ≠ done — invent-from-brief depth continues (no floors).
-          // When seed already clears Live + genre ask, skip invent thrash (was stuck 2/8 × 12).
+          // When seed already clears Live + genre ask + full composition, skip invent thrash.
+          // F&B (bottle/coffee/tea/…) still runs depth — seed owns logos, invent owns section files.
           if (
             !thinDepthRan
             && thinNeedsDepthPass(createFilesAcc, briefForUi)
             && !thinGenreSeedClearsLive(createFilesAcc, briefForUi, lockedProductName)
-            // F&B: seed owns bottle/bag/tin — invent depth only burns the soft wall + clobbers logos.
-            && !/^(?:bottle|coffee|tea|lotion|chocolate|ceramic)$/.test(
-              detectHeroProductKind(lockedProductName, briefForUi),
-            )
             && coderGate.ok
             && !turnAborted()
           ) {
             thinDepthRan = true;
             /** Why depth stopped — pushed to status + build diag so the exit is provable. */
             let depthSummary = 'no depth attempts recorded';
+            let depthCraftStalled = false;
             try {
               // Require a non-truncated prior before depth invent (poisoned prior → thrash).
               {
@@ -2892,13 +3906,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               const { answerStudio } = await import('@/lib/studioAnswerEngine');
               let grewPasses = 0;
               let lastDepthReject = '';
-              let lastSectionTarget = '';
+              
+              const compositionalDepth = thinWantsCompositionalShell(briefForUi);
+              const isAuthoredDepthComplete = () => compositionalDepthIsComplete(
+                createFilesAcc,
+                briefForUi,
+                lockedProductName,
+              );
               /** Rejected section paths stay retired for the whole depth session (Freebuff C2). */
               const retiredSectionPaths = new Set<string>();
               let depthAttemptsUsed = 0;
               const depthAttemptMax = THIN_DEPTH_CONTINUE_MAX + 4;
               const sameRejectState = { key: '', bytes: -1, count: 0 };
               let depthStall = 0;
+              let compositionalZeroGainCycles = 0;
               const noteDepthReject = (reason: string) => {
                 lastDepthReject = reason;
                 const appBytes = String(createFilesAcc['src/App.jsx'] || '').length;
@@ -2914,7 +3935,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               };
               for (let attempt = 1; attempt <= depthAttemptMax; attempt += 1) {
                 if (turnAborted()) break;
-                if (!thinNeedsDepthPass(createFilesAcc, briefForUi)) break;
+                if (!thinNeedsDepthPass(createFilesAcc, briefForUi) && (!compositionalDepth || isAuthoredDepthComplete())) break;
                 if (grewPasses >= THIN_DEPTH_CONTINUE_MAX) break;
                 const pass = grewPasses + 1;
                 depthAttemptsUsed = attempt;
@@ -2929,7 +3950,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 );
                 const priorCss = String(createFilesAcc['src/App.css'] || '');
                 const priorFilesSnap = pickThinDepthFiles(createFilesAcc);
-                const compositionalDepth = thinWantsCompositionalShell(briefForUi);
                 const retiredList = [...retiredSectionPaths];
                 const depthAskTarget = compositionalDepth
                   ? nextCompositionalDepthTarget(
@@ -2968,6 +3988,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     : Math.min(240_000, createV2AttemptWallMs(budgetProfile)),
                   shouldAbort: depthStream.shouldAbort,
                 }, depthStream.onDelta);
+                if (depthStream.wasQuietAbort()) {
+                  depthCraftStalled = true;
+                  host.pushStatus('Depth craft stalled — idle invent wall — finishing with create miss…');
+                  lastDepthReject = 'craft stalled — depth invent idle';
+                  break;
+                }
                 let reply = String(depthFinish?.text || '');
                 if (!/@@@FILE\s+src\//i.test(reply) && /export\s+default\b/i.test(reply)) {
                   const body = reply
@@ -3043,7 +4069,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   grewPasses += 1;
                   depthStall = 0;
                   lastDepthReject = '';
-                  lastSectionTarget = '';
                   // Un-retire only paths that became substantial; keep thrash targets out.
                   for (const p of [...retiredSectionPaths]) {
                     const body = String(accepted[p] || '');
@@ -3062,7 +4087,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 };
                 const bumpDepthNoGain = (reason: string, statusDetail: string) => {
                   if (depthAskTarget?.filePath) {
-                    lastSectionTarget = depthAskTarget.filePath;
                     retiredSectionPaths.add(depthAskTarget.filePath.replace(/\\/g, '/'));
                   }
                   noteDepthReject(reason);
@@ -3070,8 +4094,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     `Depth ${pass}/${THIN_DEPTH_CONTINUE_MAX} · attempt ${attempt}/${depthAttemptMax} · ${statusDetail}`,
                   );
                   depthStall += 1;
-                  // Compositional: never abort invent early — 7B needs the full attempt budget.
-                  // Advancing avoidPath is still progress; only stop at depthAttemptMax.
                   if (!compositionalDepth && depthStall >= THIN_DEPTH_ZERO_GAIN_BAIL) {
                     host.pushStatus(
                       `Depth stalled — ${depthStall} passes with zero ledger gain — stopping retry, keeping prior`,
@@ -3079,15 +4101,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     return true;
                   }
                   if (compositionalDepth && depthStall >= THIN_DEPTH_ZERO_GAIN_BAIL) {
+                    compositionalZeroGainCycles += 1;
+                    if (compositionalZeroGainCycles >= THIN_DEPTH_COMPOSITIONAL_ZERO_GAIN_CYCLES) {
+                      depthCraftStalled = true;
+                      host.pushStatus(
+                        `Depth stalled — craft stalled after ${compositionalZeroGainCycles} zero-gain cycles — finishing with create miss…`,
+                      );
+                      return true;
+                    }
                     host.pushStatus(
-                      `Depth · ${depthStall} zero-gain — advancing section target, still inventing…`,
+                      `Depth · ${depthStall} zero-gain — advancing section target (${compositionalZeroGainCycles}/${THIN_DEPTH_COMPOSITIONAL_ZERO_GAIN_CYCLES})…`,
                     );
                     depthStall = 0;
                   }
                   if (sameRejectState.count >= THIN_DEPTH_SAME_REJECT_BAIL) {
                     host.pushStatus(
-                      `Depth stalled — same thin shell ${sameRejectState.count} times — keeping prior, retry…`,
+                      `Depth stalled — same thin shell ${sameRejectState.count} times — stopping invent, keeping prior`,
                     );
+                    return true;
                   }
                   return false;
                 };
@@ -3120,7 +4151,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                           `${why} — keeping prior, retry…`,
                         )) break;
                       }
-                    } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                    } else if (bumpDepthNoGain(createApplyFailureReason(appliedSection), `${createApplyFailureReason(appliedSection)} — keeping prior, retry…`)) {
                       break;
                     }
                     continue;
@@ -3145,7 +4176,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         `${why} — keeping prior, retry…`,
                       )) break;
                     }
-                  } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                  } else if (bumpDepthNoGain(createApplyFailureReason(appliedCss), `${createApplyFailureReason(appliedCss)} — keeping prior, retry…`)) {
                     break;
                   }
                   continue;
@@ -3171,7 +4202,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         `${why} — keeping prior, retry…`,
                       )) break;
                     }
-                  } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                  } else if (bumpDepthNoGain(createApplyFailureReason(applied), `${createApplyFailureReason(applied)} — keeping prior, retry…`)) {
                     break;
                   }
                 } else if (bumpDepthNoGain(
@@ -3200,6 +4231,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
               depthSummary = `grew ${grewPasses}/${THIN_DEPTH_CONTINUE_MAX} in ${depthAttemptsUsed}/${depthAttemptMax} attempts${lastDepthReject ? ` · last: ${lastDepthReject}` : ' · all passes landed'}`;
               host.pushStatus(`Depth pass · ${depthSummary}`);
+              if (depthCraftStalled) {
+                uiPolishOk = false;
+                createFloorFallback = false;
+                uiPolishReasons = [
+                  'Craft stalled — depth invent idle / zero-gain wall',
+                  lastDepthReject || 'thin depth quiet abort',
+                ];
+                host.pushStatus('Thin create · craft stalled — will finish with create miss…');
+              }
               // Persist accepted App + sections + public/* after wireCreatePublicAssets.
               if (originDiskRoot) {
                 await persistAcceptedCreateFiles(
@@ -3215,7 +4255,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               const compositionalFinishOpen = thinWantsCompositionalShell(briefForUi)
                 && Boolean(nextCompositionalDepthTarget(createFilesAcc, briefForUi, lockedProductName));
               if (
-                !synEarly.ok
+                !depthCraftStalled
+                && !synEarly.ok
                 && !compositionalFinishOpen
                 && thinAppNeedsFinishPass(createFilesAcc, synEarly.reasons)
                 && coderGate.ok
@@ -3339,18 +4380,62 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 }
                 host.pushStatus('Thin create · visual seed + logo wire applied after depth…');
               }
-              if (thinBlocksLivePreview(createFilesAcc, briefForUi)) {
-                uiPolishOk = false;
-                createFloorFallback = false;
-                uiPolishReasons = [
-                  `Visual floor still open after depth (${depthSummary})`,
-                  ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
-                ];
-                host.pushStatus(`Thin create · visual floor open (${depthSummary}) — not Ready yet…`);
-              } else {
-                uiPolishOk = true;
-                uiPolishReasons = [];
-                host.pushStatus(`Thin create · visual floor cleared (${depthSummary}) — continuing…`);
+              if (
+                thinWantsCompositionalShell(briefForUi)
+                && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName)
+              ) {
+                createFilesAcc = seedCompositionalSectionScaffolds(
+                  createFilesAcc,
+                  briefForUi,
+                  lockedProductName,
+                );
+                updateCreateJob(jobId, { files: createFilesAcc });
+                if (originDiskRoot) {
+                  await persistAcceptedCreateFiles(
+                    originDiskRoot,
+                    createFilesAcc,
+                    depthPersistKeys(createFilesAcc),
+                  ).catch(() => {});
+                }
+                host.pushStatus('Thin create · section scaffolds after depth (complete missing bands)…');
+              }
+              {
+                const compositionOpen = thinWantsCompositionalShell(briefForUi)
+                  && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName);
+                const missingSections = compositionOpen
+                  ? formatCompositionalSectionSpecs(briefForUi, lockedProductName)
+                    .filter((spec) => !compositionalSectionFileSubstantial(String(createFilesAcc[spec.filePath] || '')))
+                    .map((spec) => spec.filePath)
+                  : [];
+                if (depthCraftStalled || thinBlocksLivePreview(createFilesAcc, briefForUi) || compositionOpen) {
+                  uiPolishOk = false;
+                  createFloorFallback = false;
+                  uiPolishReasons = [
+                    ...(depthCraftStalled
+                      ? ['Craft stalled — depth invent idle / zero-gain wall']
+                      : []),
+                    ...(thinBlocksLivePreview(createFilesAcc, briefForUi)
+                      ? [
+                        `Visual floor still open after depth (${depthSummary})`,
+                        ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
+                      ]
+                      : []),
+                    ...(compositionOpen
+                      ? [`compositional content incomplete: ${missingSections.slice(0, 6).join(', ') || 'required sections missing'}`]
+                      : []),
+                  ];
+                  host.pushStatus(
+                    depthCraftStalled
+                      ? `Thin create · craft stalled (${depthSummary}) — Live blocked…`
+                      : compositionOpen
+                        ? `Thin create · composition incomplete after depth (${depthSummary}) — Live blocked…`
+                        : `Thin create · visual floor open (${depthSummary}) — not Ready yet…`,
+                  );
+                } else {
+                  uiPolishOk = true;
+                  uiPolishReasons = [];
+                  host.pushStatus(`Thin create · visual + composition cleared (${depthSummary}) — continuing…`);
+                }
               }
             } else {
               createFloorFallback = false;
@@ -3363,11 +4448,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               host.pushStatus('Thin create · App broken after depth — failing closed (no black Live)…');
             }
           } else if (thinBlocksLivePreview(createFilesAcc, briefForUi)
-            || thinNeedsDepthPass(createFilesAcc, briefForUi)) {
-            // Depth never entered — still try visual seed before blocking Live.
+            || thinNeedsDepthPass(createFilesAcc, briefForUi)
+            || (thinWantsCompositionalShell(briefForUi)
+              && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName))) {
+            // Depth never entered — visual seed + section scaffolds before blocking Live.
             createFloorFallback = false;
             if (thinWantsCompositionalShell(briefForUi)) {
               createFilesAcc = seedCompositionalBrandVisuals(
+                createFilesAcc,
+                briefForUi,
+                lockedProductName,
+              );
+              createFilesAcc = seedCompositionalSectionScaffolds(
                 createFilesAcc,
                 briefForUi,
                 lockedProductName,
@@ -3379,18 +4471,40 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   depthPersistKeys(createFilesAcc),
                 ).catch(() => {});
               }
+              updateCreateJob(jobId, { files: createFilesAcc });
+              host.pushStatus('Thin create · section scaffolds (depth never entered)…');
             }
-            if (thinBlocksLivePreview(createFilesAcc, briefForUi)) {
-              uiPolishOk = false;
-              uiPolishReasons = [
-                'Visual floor still open — Live blocked',
-                ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
-              ];
-              host.pushStatus('Thin create · visual floor still open — not Ready yet…');
-            } else {
-              uiPolishOk = true;
-              uiPolishReasons = [];
-              host.pushStatus('Thin create · visual seed cleared Live floor — continuing…');
+            {
+              const compositionOpen = thinWantsCompositionalShell(briefForUi)
+                && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName);
+              const missingSections = compositionOpen
+                ? formatCompositionalSectionSpecs(briefForUi, lockedProductName)
+                  .filter((spec) => !compositionalSectionFileSubstantial(String(createFilesAcc[spec.filePath] || '')))
+                  .map((spec) => spec.filePath)
+                : [];
+              if (thinBlocksLivePreview(createFilesAcc, briefForUi) || compositionOpen) {
+                uiPolishOk = false;
+                uiPolishReasons = [
+                  ...(thinBlocksLivePreview(createFilesAcc, briefForUi)
+                    ? [
+                      'Visual floor still open — Live blocked',
+                      ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
+                    ]
+                    : []),
+                  ...(compositionOpen
+                    ? [`compositional content incomplete: ${missingSections.slice(0, 6).join(', ') || 'required sections missing'}`]
+                    : []),
+                ];
+                host.pushStatus(
+                  compositionOpen
+                    ? 'Thin create · composition incomplete — Live blocked…'
+                    : 'Thin create · visual floor still open — not Ready yet…',
+                );
+              } else {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Thin create · visual + composition cleared — continuing…');
+              }
             }
           } else {
             createFloorFallback = false;
@@ -3491,18 +4605,23 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         uiPolishReasons = ['App is still an empty Vite shell — UI polish did not build the page'];
       }
       // Liquor / cart asks: a cart icon alone is not a store — force polish recovery + commerce floor.
+      // Locked storefront spine: restore compose App instead of demoting into invent wipe.
       if (uiPolishOk === true) {
         const {
           briefLooksLikeCommerceStore,
           appHasCommerceCart,
         } = await import('@/lib/createBuildQuality');
         if (briefLooksLikeCommerceStore(briefForUi) && !appHasCommerceCart(createFilesAcc)) {
-          uiPolishOk = false;
-          uiPolishReasons = ['Storefront missing cart + purchase UI (icon-only shell is not enough)'];
+          if (storefrontSpineLocked && restoreStorefrontSpineSnapshot('missing cart after polish')) {
+            /* spine restored — keep Accept */
+          } else {
+            uiPolishOk = false;
+            uiPolishReasons = ['Storefront missing cart + purchase UI (icon-only shell is not enough)'];
+          }
         }
       }
       // apple.com-style briefs must keep product bands always visible — never a click-gated shell.
-      if (uiPolishOk === true) {
+      if (uiPolishOk === true && !productGenreGuard) {
         const { briefLooksLikeAppleStyleHomepage, appleHomepageHasProductBands } = await import('@/lib/createBuildQuality');
         if (briefLooksLikeAppleStyleHomepage(briefForUi)) {
           const hidesBands = /selectedProduct\s*===\s*['"][^'"]+['"]\s*&&/i.test(finalApp);
@@ -3527,7 +4646,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Last write wins. Re-wire the files that actually shipped so a late App.jsx
     // still gets on-disk heroes and any /icons/*.svg it named.
-    if (originDiskRoot && (createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'])) {
+    // Product spine locked: skip assembleCreateAppFromParts — it pastes todo/Apple over unique desk.
+    if (
+      originDiskRoot
+      && (createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'])
+      && !productGenreGuard
+    ) {
       const { wireCreatePublicAssets: wireFinalAssets } = await import('@/lib/createBuildQuality');
       const wiredFinal = wireFinalAssets(createFilesAcc, lockedProductName, briefForUi);
       if (wiredFinal.changed.length) {
@@ -3548,6 +4672,21 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           diskRoot: originDiskRoot,
         }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
       }
+    } else if (productGenreGuard && productInventSnapshot?.appJsx) {
+      try {
+        const {
+          appLooksLikeWrongGenreForProductBrief,
+          appLooksLikeDeskSpineTemplate,
+        } = await import('@/lib/createProductLadder');
+        const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+        const productBrief = authoritativeOriginalBrief || briefForUi;
+        if (
+          appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+          || appLooksLikeDeskSpineTemplate(appNow)
+        ) {
+          restoreProductInventSnapshot('skip final wire · wrong-genre overwrite');
+        }
+      } catch { /* keep Acc */ }
     }
 
     // Bind studio only when Preview-ready — fail-closed leaves chat unbound.
@@ -3563,7 +4702,19 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Fail-closed recovery: keep folder + code pills; try heals/floors before giving up.
     // Thin create: never rewrite App with genre/marketing floors — syntax + honest fail only.
-    if (uiPolishOk === false && !isThinCreatePath()) {
+    // Product spine locked / product ladder brief: never Apple/todo/utility floor paste.
+    if (uiPolishOk === false && !isThinCreatePath() && !productGenreGuard) {
+      let allowFloorSalvage = true;
+      try {
+        const { briefWantsProductLadder } = await import('@/lib/createProductLadder');
+        if (briefWantsProductLadder(authoritativeOriginalBrief || briefForUi)) {
+          allowFloorSalvage = false;
+          host.pushStatus('Ladder · product brief — skipping floor salvage (invent owns App)…');
+        }
+      } catch { /* ignore */ }
+      if (!allowFloorSalvage) {
+        /* spine / final guard owns App */
+      } else {
       // Floors:
       // - Apple / games / utility / kiln / sticky as before.
       // - Product/marketing thin shells (phone-column, missing footer, unused heroes):
@@ -4078,10 +5229,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       } catch {
         /* floor best-effort */
       }
+      } // end allowFloorSalvage
     }
 
     // Thin create: syntax heal → optional same-model finish-App → never floors.
-    if (isThinCreatePath() && uiPolishOk === false) {
+    // Product ladder skips — compositional depth would wipe Normal seed.
+    if (isThinCreatePath() && !productGenreGuard && uiPolishOk === false) {
       try {
         const { runCreateSyntaxGate } = await import('@/lib/createSyntaxGate');
         const writeThinApp = async () => {
@@ -4211,16 +5364,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             !thinDepthRan
             && thinNeedsDepthPass(createFilesAcc, briefForUi)
             && !thinGenreSeedClearsLive(createFilesAcc, briefForUi, lockedProductName)
-            // F&B: seed owns bottle/bag/tin — invent depth only burns the soft wall + clobbers logos.
-            && !/^(?:bottle|coffee|tea|lotion|chocolate|ceramic)$/.test(
-              detectHeroProductKind(lockedProductName, briefForUi),
-            )
             && coderGate.ok
             && !turnAborted()
           ) {
             thinDepthRan = true;
             /** Why depth stopped — pushed to status + build diag so the exit is provable. */
             let depthSummary = 'no depth attempts recorded';
+            let depthCraftStalled = false;
             try {
               // Require a non-truncated prior before depth invent (poisoned prior → thrash).
               {
@@ -4289,13 +5439,20 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               const { answerStudio } = await import('@/lib/studioAnswerEngine');
               let grewPasses = 0;
               let lastDepthReject = '';
-              let lastSectionTarget = '';
+              
+              const compositionalDepth = thinWantsCompositionalShell(briefForUi);
+              const isAuthoredDepthComplete = () => compositionalDepthIsComplete(
+                createFilesAcc,
+                briefForUi,
+                lockedProductName,
+              );
               /** Rejected section paths stay retired for the whole depth session (Freebuff C2). */
               const retiredSectionPaths = new Set<string>();
               let depthAttemptsUsed = 0;
               const depthAttemptMax = THIN_DEPTH_CONTINUE_MAX + 4;
               const sameRejectState = { key: '', bytes: -1, count: 0 };
               let depthStall = 0;
+              let compositionalZeroGainCycles = 0;
               const noteDepthReject = (reason: string) => {
                 lastDepthReject = reason;
                 const appBytes = String(createFilesAcc['src/App.jsx'] || '').length;
@@ -4311,7 +5468,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               };
               for (let attempt = 1; attempt <= depthAttemptMax; attempt += 1) {
                 if (turnAborted()) break;
-                if (!thinNeedsDepthPass(createFilesAcc, briefForUi)) break;
+                if (!thinNeedsDepthPass(createFilesAcc, briefForUi) && (!compositionalDepth || isAuthoredDepthComplete())) break;
                 if (grewPasses >= THIN_DEPTH_CONTINUE_MAX) break;
                 const pass = grewPasses + 1;
                 depthAttemptsUsed = attempt;
@@ -4326,7 +5483,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 );
                 const priorCss = String(createFilesAcc['src/App.css'] || '');
                 const priorFilesSnap = pickThinDepthFiles(createFilesAcc);
-                const compositionalDepth = thinWantsCompositionalShell(briefForUi);
                 const retiredList = [...retiredSectionPaths];
                 const depthAskTarget = compositionalDepth
                   ? nextCompositionalDepthTarget(
@@ -4365,6 +5521,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     : Math.min(240_000, createV2AttemptWallMs(budgetProfile)),
                   shouldAbort: depthStream.shouldAbort,
                 }, depthStream.onDelta);
+                if (depthStream.wasQuietAbort()) {
+                  depthCraftStalled = true;
+                  host.pushStatus('Depth craft stalled — idle invent wall — finishing with create miss…');
+                  lastDepthReject = 'craft stalled — depth invent idle';
+                  break;
+                }
                 let reply = String(depthFinish?.text || '');
                 if (!/@@@FILE\s+src\//i.test(reply) && /export\s+default\b/i.test(reply)) {
                   const body = reply
@@ -4434,7 +5596,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   grewPasses += 1;
                   depthStall = 0;
                   lastDepthReject = '';
-                  lastSectionTarget = '';
                   for (const p of [...retiredSectionPaths]) {
                     const body = String(accepted[p] || '');
                     if (body.replace(/\s+/g, '').length >= 480) retiredSectionPaths.delete(p);
@@ -4446,7 +5607,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 };
                 const bumpDepthNoGain = (reason: string, statusDetail: string) => {
                   if (depthAskTarget?.filePath) {
-                    lastSectionTarget = depthAskTarget.filePath;
                     retiredSectionPaths.add(depthAskTarget.filePath.replace(/\\/g, '/'));
                   }
                   noteDepthReject(reason);
@@ -4461,15 +5621,24 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                     return true;
                   }
                   if (compositionalDepth && depthStall >= THIN_DEPTH_ZERO_GAIN_BAIL) {
+                    compositionalZeroGainCycles += 1;
+                    if (compositionalZeroGainCycles >= THIN_DEPTH_COMPOSITIONAL_ZERO_GAIN_CYCLES) {
+                      depthCraftStalled = true;
+                      host.pushStatus(
+                        `Depth stalled — craft stalled after ${compositionalZeroGainCycles} zero-gain cycles — finishing with create miss…`,
+                      );
+                      return true;
+                    }
                     host.pushStatus(
-                      `Depth · ${depthStall} zero-gain — advancing section target, still inventing…`,
+                      `Depth · ${depthStall} zero-gain — advancing section target (${compositionalZeroGainCycles}/${THIN_DEPTH_COMPOSITIONAL_ZERO_GAIN_CYCLES})…`,
                     );
                     depthStall = 0;
                   }
                   if (sameRejectState.count >= THIN_DEPTH_SAME_REJECT_BAIL) {
                     host.pushStatus(
-                      `Depth stalled — same thin shell ${sameRejectState.count} times — keeping prior, retry…`,
+                      `Depth stalled — same thin shell ${sameRejectState.count} times — stopping invent, keeping prior`,
                     );
+                    return true;
                   }
                   return false;
                 };
@@ -4502,7 +5671,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                           `${why} — keeping prior, retry…`,
                         )) break;
                       }
-                    } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                    } else if (bumpDepthNoGain(createApplyFailureReason(appliedSection), `${createApplyFailureReason(appliedSection)} — keeping prior, retry…`)) {
                       break;
                     }
                     continue;
@@ -4527,7 +5696,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         `${why} — keeping prior, retry…`,
                       )) break;
                     }
-                  } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                  } else if (bumpDepthNoGain(createApplyFailureReason(appliedCss), `${createApplyFailureReason(appliedCss)} — keeping prior, retry…`)) {
                     break;
                   }
                   continue;
@@ -4553,7 +5722,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                         `${why} — keeping prior, retry…`,
                       )) break;
                     }
-                  } else if (bumpDepthNoGain('applyChatReplyEdits failed', 'apply failed — keeping prior, retry…')) {
+                  } else if (bumpDepthNoGain(createApplyFailureReason(applied), `${createApplyFailureReason(applied)} — keeping prior, retry…`)) {
                     break;
                   }
                 } else if (bumpDepthNoGain(
@@ -4583,6 +5752,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
               depthSummary = `grew ${grewPasses}/${THIN_DEPTH_CONTINUE_MAX} in ${depthAttemptsUsed}/${depthAttemptMax} attempts${lastDepthReject ? ` · last: ${lastDepthReject}` : ' · all passes landed'}`;
               host.pushStatus(`Depth pass · ${depthSummary}`);
+              if (depthCraftStalled) {
+                uiPolishOk = false;
+                createFloorFallback = false;
+                uiPolishReasons = [
+                  'Craft stalled — depth invent idle / zero-gain wall',
+                  lastDepthReject || 'thin depth quiet abort',
+                ];
+                host.pushStatus('Thin create · craft stalled — will finish with create miss…');
+              }
               await writeThinApp();
               syn = runCreateSyntaxGate(createFilesAcc);
               if (syn.healed) {
@@ -4592,7 +5770,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               const compositionalFinishOpen2 = thinWantsCompositionalShell(briefForUi)
                 && Boolean(nextCompositionalDepthTarget(createFilesAcc, briefForUi, lockedProductName));
               if (
-                !syn.ok
+                !depthCraftStalled
+                && !syn.ok
                 && !compositionalFinishOpen2
                 && thinAppNeedsFinishPass(createFilesAcc, syn.reasons)
                 && coderGate.ok
@@ -4621,7 +5800,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   timeoutMs: Math.min(180_000, createV2AttemptWallMs(budgetProfile)),
                   shouldAbort: () => turnAborted(),
                 });
-                let reply = String(finish?.text || '');
+                const reply = String(finish?.text || '');
                 if (/@@@FILE\s+/i.test(reply)) {
                   const applied = await applyChatReplyEdits({
                     reply,
@@ -4698,18 +5877,56 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 }
                 host.pushStatus('Thin create · visual seed + logo wire applied after depth…');
               }
-              if (thinBlocksLivePreview(createFilesAcc, briefForUi)) {
-                uiPolishOk = false;
-                createFloorFallback = false;
-                uiPolishReasons = [
-                  `Visual floor still open after depth (${depthSummary})`,
-                  ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
-                ];
-                host.pushStatus(`Thin create · visual floor open (${depthSummary}) — not Ready yet…`);
-              } else {
-                uiPolishOk = true;
-                uiPolishReasons = [];
-                host.pushStatus(`Thin create · visual floor cleared (${depthSummary}) — continuing to Live…`);
+              if (
+                thinWantsCompositionalShell(briefForUi)
+                && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName)
+              ) {
+                createFilesAcc = seedCompositionalSectionScaffolds(
+                  createFilesAcc,
+                  briefForUi,
+                  lockedProductName,
+                );
+                updateCreateJob(jobId, { files: createFilesAcc });
+                await writeThinApp();
+                host.pushStatus('Thin create · section scaffolds after depth (complete missing bands)…');
+              }
+              {
+                const compositionOpen = thinWantsCompositionalShell(briefForUi)
+                  && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName);
+                const missingSections = compositionOpen
+                  ? formatCompositionalSectionSpecs(briefForUi, lockedProductName)
+                    .filter((spec) => !compositionalSectionFileSubstantial(String(createFilesAcc[spec.filePath] || '')))
+                    .map((spec) => spec.filePath)
+                  : [];
+                if (depthCraftStalled || thinBlocksLivePreview(createFilesAcc, briefForUi) || compositionOpen) {
+                  uiPolishOk = false;
+                  createFloorFallback = false;
+                  uiPolishReasons = [
+                    ...(depthCraftStalled
+                      ? ['Craft stalled — depth invent idle / zero-gain wall']
+                      : []),
+                    ...(thinBlocksLivePreview(createFilesAcc, briefForUi)
+                      ? [
+                        `Visual floor still open after depth (${depthSummary})`,
+                        ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
+                      ]
+                      : []),
+                    ...(compositionOpen
+                      ? [`compositional content incomplete: ${missingSections.slice(0, 6).join(', ') || 'required sections missing'}`]
+                      : []),
+                  ];
+                  host.pushStatus(
+                    depthCraftStalled
+                      ? `Thin create · craft stalled (${depthSummary}) — Live blocked…`
+                      : compositionOpen
+                        ? `Thin create · composition incomplete after depth (${depthSummary}) — Live blocked…`
+                        : `Thin create · visual floor open (${depthSummary}) — not Ready yet…`,
+                  );
+                } else {
+                  uiPolishOk = true;
+                  uiPolishReasons = [];
+                  host.pushStatus(`Thin create · visual + composition cleared (${depthSummary}) — continuing to Live…`);
+                }
               }
             } else {
               createFloorFallback = false;
@@ -4722,7 +5939,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               host.pushStatus('Thin create · App broken after depth — failing closed (no black Live)…');
             }
           } else if (thinBlocksLivePreview(createFilesAcc, briefForUi)
-            || thinNeedsDepthPass(createFilesAcc, briefForUi)) {
+            || thinNeedsDepthPass(createFilesAcc, briefForUi)
+            || (thinWantsCompositionalShell(briefForUi)
+              && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName))) {
             createFloorFallback = false;
             if (thinWantsCompositionalShell(briefForUi)) {
               createFilesAcc = seedCompositionalBrandVisuals(
@@ -4730,19 +5949,44 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 briefForUi,
                 lockedProductName,
               );
+              createFilesAcc = seedCompositionalSectionScaffolds(
+                createFilesAcc,
+                briefForUi,
+                lockedProductName,
+              );
               await writeThinApp();
             }
-            if (thinBlocksLivePreview(createFilesAcc, briefForUi)) {
-              uiPolishOk = false;
-              uiPolishReasons = [
-                'Visual floor still open — Live blocked',
-                ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
-              ];
-              host.pushStatus('Thin create · visual floor still open — not Ready yet…');
-            } else {
-              uiPolishOk = true;
-              uiPolishReasons = [];
-              host.pushStatus('Thin create · visual seed cleared Live floor — continuing to Live…');
+            {
+              const compositionOpen = thinWantsCompositionalShell(briefForUi)
+                && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName);
+              const missingSections = compositionOpen
+                ? formatCompositionalSectionSpecs(briefForUi, lockedProductName)
+                  .filter((spec) => !compositionalSectionFileSubstantial(String(createFilesAcc[spec.filePath] || '')))
+                  .map((spec) => spec.filePath)
+                : [];
+              if (thinBlocksLivePreview(createFilesAcc, briefForUi) || compositionOpen) {
+                uiPolishOk = false;
+                uiPolishReasons = [
+                  ...(thinBlocksLivePreview(createFilesAcc, briefForUi)
+                    ? [
+                      'Visual floor still open — Live blocked',
+                      ...thinLiveVisualDeficits(createFilesAcc, briefForUi).slice(0, 4),
+                    ]
+                    : []),
+                  ...(compositionOpen
+                    ? [`compositional content incomplete: ${missingSections.slice(0, 6).join(', ') || 'required sections missing'}`]
+                    : []),
+                ];
+                host.pushStatus(
+                  compositionOpen
+                    ? 'Thin create · composition incomplete — Live blocked…'
+                    : 'Thin create · visual floor still open — not Ready yet…',
+                );
+              } else {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Thin create · visual + composition cleared — continuing to Live…');
+              }
             }
           } else {
             createFloorFallback = false;
@@ -4830,7 +6074,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Final thin hard-stop: visual floor open ⇒ never npm/Live (invent 9k may stay soft).
     // If seed clears the floor, promote Live even when earlier App-only Ready demoted craft.
-    if (isThinCreatePath()) {
+    // Product / storefront ladder owns App — never assemble compositional shells over the spine.
+    if (isThinCreatePath() && !productGenreGuard && !storefrontSpineLocked) {
       if (thinWantsCompositionalShell(briefForUi)) {
         createFilesAcc = seedCompositionalBrandVisuals(
           createFilesAcc,
@@ -4902,27 +6147,112 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         }
         updateCreateJob(jobId, { files: createFilesAcc });
       }
-      if (thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName)) {
-        uiPolishOk = false;
-        createFloorFallback = false;
-        uiPolishReasons = [
-          ...new Set([
-            ...(uiPolishReasons || []),
-            'Visual floor still open — Live blocked (thinBlocksLivePreview)',
-            ...thinLiveVisualDeficits(createFilesAcc, briefForUi, lockedProductName).slice(0, 4),
-            ...thinAskMatchDeficits(createFilesAcc, briefForUi, lockedProductName).slice(0, 4),
-          ]),
-        ];
-        host.pushStatus('Thin create · final visual gate — floor still open, Live blocked…');
-      } else {
-        uiPolishOk = true;
-        createFloorFallback = false;
-        uiPolishReasons = [];
-        host.pushStatus('Thin create · final visual gate cleared — continuing to Live…');
+      {
+        const { wantsStructureFirstCreate } = await import('@/lib/novaBuildLoop');
+        const structureFirst = wantsStructureFirstCreate(briefForUi, lockedProductName);
+        if (
+          !structureFirst
+          && thinWantsCompositionalShell(briefForUi)
+          && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName)
+        ) {
+          createFilesAcc = seedCompositionalSectionScaffolds(
+            createFilesAcc,
+            briefForUi,
+            lockedProductName,
+          );
+          updateCreateJob(jobId, { files: createFilesAcc });
+          if (originDiskRoot) {
+            await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              depthPersistKeys(createFilesAcc),
+            ).catch(() => {});
+          }
+          host.pushStatus('Thin create · section scaffolds before final gate…');
+        }
+        if (productGenreGuard) {
+          // Never mark polish ok from seed snapshot — Quality Accept / seed-lift owns Ready.
+          // Only restore snapshot when App was poisoned into wrong genre / twin.
+          try {
+            const {
+              appLooksLikeWrongGenreForProductBrief,
+              appLooksLikeDeskSpineTemplate,
+              appLooksLikeProductSeedFloor,
+            } = await import('@/lib/createProductLadder');
+            const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+            const productBrief = authoritativeOriginalBrief || briefForUi;
+            if (
+              productInventSnapshot?.appJsx
+              && (appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+                || appLooksLikeDeskSpineTemplate(appNow))
+            ) {
+              restoreProductInventSnapshot('thin final gate · wrong-genre overwrite');
+            }
+            if (appLooksLikeProductSeedFloor(
+              String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+            )) {
+              uiPolishOk = false;
+              if (!uiPolishReasons.length) {
+                uiPolishReasons = ['Seed floor still on disk — Quality Accept / seed-lift required'];
+              }
+              host.pushStatus('Ladder · thin final gate soft — invent/lift still owns Quality…');
+            } else if (uiPolishOk === true) {
+              host.pushStatus('Ladder · invent look held — thin final gate soft…');
+            } else {
+              host.pushStatus('Ladder · invent/lift still required — thin final gate does not clear seed…');
+            }
+          } catch {
+            uiPolishOk = false;
+            host.pushStatus('Ladder · invent still required — thin final gate does not clear seed…');
+          }
+        } else if (structureFirst) {
+          // Step-by-step / structure-first: never craft-block on visual floor or composition.
+          uiPolishOk = true;
+          createFloorFallback = false;
+          uiPolishReasons = [];
+          host.pushStatus('Structure-first · final gate soft — continuing to Live…');
+        } else {
+          const compositionOpen = thinWantsCompositionalShell(briefForUi)
+            && !compositionalDepthIsComplete(createFilesAcc, briefForUi, lockedProductName);
+          const missingSections = compositionOpen
+            ? formatCompositionalSectionSpecs(briefForUi, lockedProductName)
+              .filter((spec) => !compositionalSectionFileSubstantial(String(createFilesAcc[spec.filePath] || '')))
+              .map((spec) => spec.filePath)
+            : [];
+          if (thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName) || compositionOpen) {
+            uiPolishOk = false;
+            createFloorFallback = false;
+            uiPolishReasons = [
+              ...new Set([
+                ...(uiPolishReasons || []),
+                ...(thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName)
+                  ? [
+                    'Visual floor still open — Live blocked (thinBlocksLivePreview)',
+                    ...thinLiveVisualDeficits(createFilesAcc, briefForUi, lockedProductName).slice(0, 4),
+                    ...thinAskMatchDeficits(createFilesAcc, briefForUi, lockedProductName).slice(0, 4),
+                  ]
+                  : []),
+                ...(compositionOpen
+                  ? [`compositional content incomplete: ${missingSections.slice(0, 6).join(', ') || 'required sections missing'}`]
+                  : []),
+              ]),
+            ];
+            host.pushStatus(
+              compositionOpen
+                ? 'Thin create · final gate — composition incomplete, Live blocked…'
+                : 'Thin create · final visual gate — floor still open, Live blocked…',
+            );
+          } else {
+            uiPolishOk = true;
+            createFloorFallback = false;
+            uiPolishReasons = [];
+            host.pushStatus('Thin create · final visual + composition gate cleared — continuing to Live…');
+          }
+        }
       }
     }
 
-    // Absolute genre logo lock — before fail-closed or npm — invent must not leave sparkles on disk.
+    // Absolute genre logo lock — always when diskRoot exists (product spine needs /logo.svg).
     let absoluteLogoLockNote = 'not-run';
     if (originDiskRoot) {
       try {
@@ -4934,7 +6264,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           brief: briefForUi,
           css: String(createFilesAcc['src/App.css'] || ''),
         });
-        // Hard F&B/ceramic override if family resolve still yields sparkles.
         if (!forced || /M9\.937 15\.5/i.test(forced)) {
           const ink = /background\s*:\s*(?:#f|#fff)/i.test(String(createFilesAcc['src/App.css'] || ''))
             ? '#1a1a1a' : '#ffffff';
@@ -4944,10 +6273,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 : heroKind === 'ceramic' ? 'lucide:utensils'
                   : '';
           if (forcedId) forced = localIconifySvg(forcedId, ink) || forced;
+          if (
+            (!forced || /M9\.937 15\.5/i.test(forced))
+            && /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|battlestation|desk)\b/i.test(briefForUi)
+          ) {
+            const { productDeskLogoSvg } = await import('@/lib/createProductLadder');
+            forced = productDeskLogoSvg(ink);
+          }
         }
         const kind = /M8 22h8/.test(forced) ? 'wine'
           : /M16 8a1 1 0 0 1 1 1v8|M10 2v2/.test(forced) ? 'coffee'
             : /M3 2v7c0 1\.1/.test(forced) ? 'utensils'
+              : /viewBox="0 0 64 64"[\s\S]*width="48" height="8"/.test(forced) ? 'desk'
               : /M9\.937/.test(forced) ? 'sparkles' : 'other';
         if (forced && kind !== 'sparkles') {
           createFilesAcc = { ...createFilesAcc, 'public/logo.svg': forced };
@@ -4958,11 +6295,19 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           absoluteLogoLockNote = `${kind}${logoWrite?.ok === false ? ` write-failed:${String(logoWrite.error || '').slice(0, 40)}` : ' disk-ok'}`;
           host.pushStatus(`Thin create · absolute logo lock · ${absoluteLogoLockNote}`);
           updateCreateJob(jobId, { files: createFilesAcc });
-          if (uiPolishOk === false && !thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName)) {
-            uiPolishOk = true;
-            uiPolishReasons = [];
-            host.pushStatus('Thin create · logo lock cleared Live floor — continuing…');
-          }
+        } else if (forced) {
+          const ink = '#ffffff';
+          const { productDeskLogoSvg } = await import('@/lib/createProductLadder');
+          const desk = (
+            /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|battlestation|desk)\b/i.test(briefForUi)
+              ? productDeskLogoSvg(ink)
+              : localIconifySvg('lucide:gamepad-2', ink)
+          ) || forced;
+          createFilesAcc = { ...createFilesAcc, 'public/logo.svg': desk };
+          await persistGenreLogoSvg(originDiskRoot, desk).catch(() => {});
+          absoluteLogoLockNote = 'desk disk-ok';
+          host.pushStatus(`Thin create · absolute logo lock · ${absoluteLogoLockNote}`);
+          updateCreateJob(jobId, { files: createFilesAcc });
         } else {
           absoluteLogoLockNote = `skipped mark=${kind || 'empty'} hero=${heroKind} name=${lockedProductName.slice(0, 24)}`;
           host.pushStatus(`Thin create · absolute logo lock · ${absoluteLogoLockNote}`);
@@ -4975,6 +6320,321 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       absoluteLogoLockNote = 'skipped no-diskRoot';
       host.pushStatus('Thin create · absolute logo lock · skipped (no diskRoot)');
     }
+
+    // Product final verify — invent must leave desk-* seed behind; never ship seed as Ready.
+    try {
+      const {
+        briefWantsProductLadder,
+        runProductCreateLadder,
+        appLooksLikeDeskSpineTemplate,
+        appLooksLikeWrongGenreForProductBrief,
+        gradeProductQuality,
+        PRODUCT_LADDER_WALL_MS,
+        PRODUCT_LADDER_HARD_WALL_MS,
+      } = await import('@/lib/createProductLadder');
+      const productBrief = authoritativeOriginalBrief || briefForUi;
+      if (briefWantsProductLadder(productBrief)) {
+        const elapsed = Date.now() - createStartedAt;
+        if (elapsed >= PRODUCT_LADDER_HARD_WALL_MS) {
+          uiPolishOk = false;
+          createFloorFallback = false;
+          uiPolishReasons = ['Product create hard wall (20m) — craft stalled'];
+          host.pushStatus('Ladder · 20m hard wall — create miss…');
+        } else {
+          let appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+          // Restore invent look if floors poisoned; never re-seed the twin as success.
+          if (
+            productInventSnapshot?.appJsx
+            && (appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+              || appLooksLikeDeskSpineTemplate(appNow))
+          ) {
+            restoreProductInventSnapshot('final overwrite guard');
+            appNow = String(createFilesAcc['src/App.jsx'] || '');
+          }
+          if (appLooksLikeDeskSpineTemplate(appNow)) {
+            uiPolishOk = false;
+            createFloorFallback = false;
+            uiPolishReasons = [
+              'Page still matches a frozen prior template — not Ready for any brand',
+              'failed beat: not-template',
+            ];
+            host.pushStatus('Ladder · Accept miss — frozen template is not Ready…');
+          } else {
+            host.pushStatus('Ladder · Accept · Quality lock verify…');
+            let ladder = await runProductCreateLadder({
+              brief: productBrief,
+              productName: lockedProductName,
+              files: createFilesAcc,
+              host: {
+                pushStatus: host.pushStatus,
+                shouldAbort: () => turnAborted(),
+              },
+              startedAt: createStartedAt,
+              wallMs: Math.min(
+                PRODUCT_LADDER_WALL_MS,
+                Math.max(30_000, createWallMs - elapsed),
+              ),
+              salt: String(jobId || lockedProductName).slice(-6),
+              allowSpineMaterialize: false,
+            });
+            createFilesAcc = ladder.files;
+            if (originDiskRoot) {
+              await persistAcceptedCreateFiles(
+                originDiskRoot,
+                createFilesAcc,
+                ['src/App.jsx', 'src/App.css', 'src/App.tsx', 'src/index.css', 'public/logo.svg']
+                  .filter((p) => createFilesAcc[p]),
+              ).catch(() => {});
+            }
+            updateCreateJob(jobId, { files: createFilesAcc });
+            softBindCreateStudio(host, {
+              files: createFilesAcc,
+              projectId: originProjectId,
+              name: lockedProductName,
+              diskRoot: originDiskRoot,
+            });
+            let graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+            // Invent idle wall often leaves a good Normal seed — lift past seed markers so
+            // Ready unlocks (delivery/desk/any brand) instead of Unavailable with a fine page.
+            if (
+              (!ladder.ok || !graded.okQuality)
+              && graded.okNormal
+              && !appLooksLikeWrongGenreForProductBrief(
+                String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || ''),
+                productBrief,
+              )
+            ) {
+              try {
+                const { liftProductSeedPastFloor, appLooksLikeProductSeedFloor } = await import(
+                  '@/lib/createProductLadder'
+                );
+                const appLift = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+                if (appLooksLikeProductSeedFloor(appLift)) {
+                  host.pushStatus('Ladder · invent stalled — invent-rescue composition (not a renamed seed)…');
+                  createFilesAcc = {
+                    ...createFilesAcc,
+                    ...liftProductSeedPastFloor(
+                      createFilesAcc,
+                      productBrief,
+                      lockedProductName,
+                      String(jobId || lockedProductName).slice(-6),
+                    ),
+                  };
+                  if (originDiskRoot) {
+                    await persistAcceptedCreateFiles(
+                      originDiskRoot,
+                      createFilesAcc,
+                      [
+                        'src/App.jsx',
+                        'src/App.css',
+                        'src/App.tsx',
+                        'src/index.css',
+                        'public/logo.svg',
+                        'public/heroes/delivery.svg',
+                        'public/heroes/desk.svg',
+                      ].filter((p) => createFilesAcc[p]),
+                    ).catch(() => {});
+                  }
+                  graded = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+                  // Accept on graded Quality after lift — do not require a second ladder
+                  // pass (re-ladder was leaving ok=false and shipping Unavailable).
+                  if (graded.okQuality) {
+                    ladder = {
+                      ...ladder,
+                      ok: true,
+                      files: createFilesAcc,
+                      beatsDone: [...(ladder.beatsDone || []), 'quality-lift'],
+                      failedBeat: undefined,
+                      reason: undefined,
+                    };
+                    productInventSnapshot = {
+                      appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+                      appCss: String(createFilesAcc['src/App.css'] || ''),
+                      logo: String(createFilesAcc['public/logo.svg'] || ''),
+                    };
+                    softBindCreateStudio(host, {
+                      files: createFilesAcc,
+                      projectId: originProjectId,
+                      name: lockedProductName,
+                      diskRoot: originDiskRoot,
+                      force: true,
+                    });
+                  }
+                }
+              } catch { /* keep Accept miss */ }
+            }
+            if (!ladder.ok || !graded.okQuality) {
+              uiPolishOk = false;
+              createFloorFallback = false;
+              uiPolishReasons = [
+                ladder.reason || `Product Accept miss (${graded.label})`,
+                ...(ladder.failedBeat ? [`failed beat: ${ladder.failedBeat}`] : []),
+                ...graded.reasons.slice(0, 4),
+              ];
+              host.pushStatus(`Ladder · ${uiPolishReasons[0]}…`);
+            } else {
+              uiPolishOk = true;
+              uiPolishReasons = [];
+              createFloorFallback = false;
+              productGenreGuard = true;
+              productSpineLocked = true;
+              productInventSnapshot = {
+                appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+                appCss: String(createFilesAcc['src/App.css'] || ''),
+                logo: String(createFilesAcc['public/logo.svg'] || ''),
+              };
+              if (originDiskRoot) {
+                await persistAcceptedCreateFiles(
+                  originDiskRoot,
+                  createFilesAcc,
+                  ['src/App.jsx', 'src/App.css', 'src/App.tsx', 'src/index.css', 'public/logo.svg', 'public/heroes/delivery.svg', 'public/heroes/desk.svg']
+                    .filter((p) => createFilesAcc[p]),
+                ).catch(() => {});
+              }
+              updateCreateJob(jobId, { files: createFilesAcc });
+              host.pushStatus(
+                `Ladder · Accept ${graded.label} (${ladder.beatsDone.join(' → ')})…`,
+              );
+            }
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Last chance: product Normal seed on disk + invent idle → lift to Quality Ready (any brand).
+    if (uiPolishOk === false && productGenreGuard) {
+      try {
+        const {
+          briefWantsProductLadder,
+          gradeProductQuality,
+          liftProductSeedPastFloor,
+          appLooksLikeProductSeedFloor,
+          appLooksLikeWrongGenreForProductBrief,
+        } = await import('@/lib/createProductLadder');
+        const productBrief = authoritativeOriginalBrief || briefForUi;
+        if (briefWantsProductLadder(productBrief)) {
+          const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+          const pre = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+          if (
+            appLooksLikeProductSeedFloor(appNow)
+            && !appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+            && pre.okNormal
+          ) {
+            host.pushStatus('Ladder · last-chance invent-rescue composition…');
+            createFilesAcc = {
+              ...createFilesAcc,
+              ...liftProductSeedPastFloor(
+                createFilesAcc,
+                productBrief,
+                lockedProductName,
+                String(jobId || lockedProductName).slice(-6),
+              ),
+            };
+            const lifted = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
+            if (lifted.okQuality) {
+              uiPolishOk = true;
+              uiPolishReasons = [];
+              createFloorFallback = false;
+              productInventSnapshot = {
+                appJsx: String(createFilesAcc['src/App.jsx'] || ''),
+                appCss: String(createFilesAcc['src/App.css'] || ''),
+                logo: String(createFilesAcc['public/logo.svg'] || ''),
+              };
+              if (originDiskRoot) {
+                await persistAcceptedCreateFiles(
+                  originDiskRoot,
+                  createFilesAcc,
+                  ['src/App.jsx', 'src/App.css', 'src/App.tsx', 'src/index.css', 'public/logo.svg', 'public/heroes/delivery.svg', 'public/heroes/desk.svg']
+                    .filter((p) => createFilesAcc[p]),
+                ).catch(() => {});
+              }
+              updateCreateJob(jobId, { files: createFilesAcc });
+              softBindCreateStudio(host, {
+                files: createFilesAcc,
+                projectId: originProjectId,
+                name: lockedProductName,
+                diskRoot: originDiskRoot,
+                force: true,
+              });
+              host.pushStatus(`Ladder · Accept ${lifted.label} after seed lift…`);
+            } else {
+              host.pushStatus(
+                `Ladder · seed lift still ${lifted.label} — gaps: ${lifted.reasons.slice(0, 3).join(', ')}…`,
+              );
+            }
+          }
+        }
+      } catch { /* keep miss */ }
+    }
+
+    // Hard guarantee LAST RESORT: only when compose spine + invent failed (never the happy path).
+    try {
+      const {
+        briefLooksLikeCommerceStore,
+        appHasCommerceCart,
+        buildBriefInteractiveFloor,
+        wireCreatePublicAssets,
+      } = await import('@/lib/createBuildQuality');
+      const commerceBrief = authoritativeOriginalBrief || briefForUi;
+      // Require real catalog/cart ask — not a shell-only "e-commerce … cart icon" step.
+      const wantsFullCommerce = /\b(?:add[\s-]?to[\s-]?(?:cart|bag)|checkout|product\s+(?:grid|catalog|cards?)|exactly\s+\d+\s+(?:bottles?|products?)|src\/data\/products)\b/i.test(
+        commerceBrief,
+      );
+      if (
+        !blankSolidColor
+        && !storefrontSpineLocked
+        && wantsFullCommerce
+        && briefLooksLikeCommerceStore(commerceBrief)
+        && !appHasCommerceCart(createFilesAcc)
+      ) {
+        host.pushStatus('Storefront hard guarantee (last resort) — commerce floor after spine miss…');
+        const floor = buildBriefInteractiveFloor(lockedProductName, commerceBrief);
+        const appKey = createFilesAcc['src/App.jsx']
+          ? 'src/App.jsx'
+          : (createFilesAcc['src/App.tsx'] ? 'src/App.tsx' : 'src/App.jsx');
+        createFilesAcc = {
+          ...createFilesAcc,
+          ...(floor.files || {}),
+          [appKey]: floor.app,
+          'src/App.css': floor.css,
+        };
+        if (floor.files?.['src/data/products.ts']) {
+          createFilesAcc['src/data/products.ts'] = floor.files['src/data/products.ts'];
+        }
+        if (floor.files?.['src/index.css']) {
+          createFilesAcc['src/index.css'] = floor.files['src/index.css'];
+        }
+        createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+        const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName, commerceBrief);
+        if (wired.changed.length) createFilesAcc = wired.files;
+        if (originDiskRoot) {
+          await persistAcceptedCreateFiles(
+            originDiskRoot,
+            createFilesAcc,
+            [
+              'src/App.jsx',
+              'src/App.tsx',
+              'src/App.css',
+              'src/index.css',
+              'src/data/products.ts',
+              'public/logo.svg',
+            ].filter((p) => createFilesAcc[p]),
+          ).catch(() => {});
+        }
+        updateCreateJob(jobId, { files: createFilesAcc });
+        softBindCreateStudio(host, {
+          files: createFilesAcc,
+          projectId: originProjectId,
+          name: lockedProductName,
+          diskRoot: originDiskRoot,
+          force: true,
+        });
+        createFloorFallback = true;
+        uiPolishOk = true;
+        uiPolishReasons = ['storefront hard guarantee — commerce floor'];
+        host.pushStatus('Storefront hard guarantee shipped — Live unlock…');
+      }
+    } catch { /* best-effort */ }
 
     if (uiPolishOk === false) {
       // Always clear "Building · …" on fail-closed — otherwise the pill stays lit after Done.
@@ -5009,13 +6669,18 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       const depthOpen = uiPolishReasons.some((r) =>
         /thinNeedsDepthPass|thinBlocksLivePreview|Depth deficit|depth still open|Visual floor|visual floor/i.test(r),
       );
-      const failAt = depthOpen
-        ? 'Depth (App still too thin for Live)'
-        : uiPolishReasons.some((r) => /syntax|brace|truncat|broken App/i.test(r))
-          ? 'Syntax / App integrity'
-          : uiPolishReasons.some((r) => /logo|public\/|asset|sparkles/i.test(r))
-            ? 'Assets (logo / public)'
-            : 'Craft preflight (not Live-ready)';
+      const craftStalledMiss = uiPolishReasons.some((r) =>
+        /craft stalled|idle wall|invent idle/i.test(r),
+      );
+      const failAt = craftStalledMiss
+        ? 'Craft stalled (idle invent wall)'
+        : depthOpen
+          ? 'Depth (App still too thin for Live)'
+          : uiPolishReasons.some((r) => /syntax|brace|truncat|broken App/i.test(r))
+            ? 'Syntax / App integrity'
+            : uiPolishReasons.some((r) => /logo|public\/|asset|sparkles/i.test(r))
+              ? 'Assets (logo / public)'
+              : 'Craft preflight (not Live-ready)';
       const ledgerSnap = depthOpen
         ? formatThinDepthLedger(readThinDepthLedger(createFilesAcc))
         : '';
@@ -5023,9 +6688,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         /no local coder|no suitable coder|coder GGUF|install any coder/i.test(r),
       );
       const truncated = uiPolishReasons.some((r) =>
-        /truncat|mid-write|aborted|timeout|stop or timeout|thin|empty|placeholder|incomplete/i.test(r),
+        /truncat|mid-write|aborted|timeout|stop or timeout|thin|empty|placeholder|incomplete|craft stalled/i.test(r),
       );
-      const nextSteps = coderBlocked
+      let nextSteps: string[] = coderBlocked
         ? [
             '**Next**',
             '1. Open **Models** and install a local coder GGUF that fits this PC.',
@@ -5043,6 +6708,23 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               '1. Tell me what looks wrong and I will fix craft / Live evidence on this folder.',
               '2. Or open the **Code** / **Folder** pills to continue editing.',
             ];
+      let whyBlock = reasonLines;
+      try {
+        const { briefWantsProductLadder, formatProductCraftFailHelp } = await import('@/lib/createProductLadder');
+        if (briefWantsProductLadder(authoritativeOriginalBrief || briefForUi)) {
+          const failedBeat = uiPolishReasons.find((r) => /failed beat:/i.test(r))?.replace(/.*failed beat:\s*/i, '')
+            || (uiPolishReasons.find((r) => /Product ladder miss at (\w+)/i.test(r))?.match(/at (\w+)/i)?.[1]);
+          const help = formatProductCraftFailHelp({
+            brand: lockedProductName || displayName,
+            brief: authoritativeOriginalBrief || briefForUi,
+            reasons: uiPolishReasons,
+            failedBeat,
+          });
+          whyBlock = help.plainWhy.map((w) => `- ${w}`).join('\n')
+            || reasonLines;
+          nextSteps = help.nextSteps;
+        }
+      } catch { /* keep generic nextSteps */ }
       const failAnswer = [
         `**Created ${displayName}**: folder on disk, craft preflight failed`,
         '',
@@ -5053,11 +6735,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ledgerSnap ? `**Ledger:** ${ledgerSnap}` : '',
         absoluteLogoLockNote ? `**Logo lock:** ${absoluteLogoLockNote}` : '',
         '**Why:**',
-        reasonLines,
+        whyBlock,
         '',
         ...nextSteps,
         '',
-        'Folder and Code are available. Live stays locked until depth/syntax clear — Preview (unverified) can open the folder only.',
+        'Folder and Code are available. Live stays locked until craft clears — **Unavailable** until then.',
         'If the desktop froze, use **Copy freeze / build report** in the sidebar and paste it here.',
         created.grantHint || '',
       ].filter(Boolean).join('\n');
@@ -5167,6 +6849,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
 
     let bootstrap: ProjectBootstrapResult = { npmInstalled: true };
+    let packageBuildResult: { ok: boolean | null; errors: string[]; repairs: number } = {
+      ok: null,
+      errors: [],
+      repairs: 0,
+    };
     const diskHasPkg = Boolean(
       createFilesAcc['package.json']
       || Object.keys(createFilesAcc).some((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
@@ -5242,6 +6929,30 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           createFilesAcc = syn.files;
         }
         if (!syn.ok) {
+          // Blank / step-ladder asks: never die on invent thrash — force a clean solid shell.
+          if (blankSolidColor) {
+            try {
+              const shellFiles = viteSolidShellEdits(blankSolidColor);
+              for (const e of shellFiles) createFilesAcc[e.path] = e.content;
+              delete createFilesAcc['src/App.tsx'];
+              syn = runCreateSyntaxGate(createFilesAcc);
+              createFilesAcc = syn.files;
+              if (syn.ok) {
+                uiPolishOk = true;
+                uiPolishReasons = [];
+                host.pushStatus('Blank shell · healed syntax — continuing…');
+                if (originDiskRoot) {
+                  await persistAcceptedCreateFiles(
+                    originDiskRoot,
+                    createFilesAcc,
+                    shellFiles.map((e) => e.path),
+                  ).catch(() => {});
+                }
+              }
+            } catch { /* fall through to hard block */ }
+          }
+        }
+        if (!syn.ok) {
           uiPolishReasons = [...new Set([...(uiPolishReasons || []), ...syn.reasons.slice(0, 4)])];
           // HARD BLOCK — never open Live against uncompilable App (no fail overlay).
           host.pushStatus(`App won't compile yet (${syn.reasons[0] || 'syntax'}) — keeping Live closed…`);
@@ -5312,8 +7023,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         await host.finishPlainReply('Stopped.', 'NOVA · stop');
         return { status: 'handled' };
       }
-      // Belt-and-suspenders: never npm while visual Live floor is still open.
-      if (isThinCreatePath() && thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName)) {
+      // Keep the visual floor as a Ready gate, but do not hide compiler failures
+      // behind it. A runnable project still proceeds through install/build so the
+      // user gets a concrete build result and bounded code repair.
+      if (
+        isThinCreatePath()
+        && !productGenreGuard
+        && thinBlocksLivePreview(createFilesAcc, briefForUi, lockedProductName)
+      ) {
         uiPolishOk = false;
         createFloorFallback = false;
         uiPolishReasons = [
@@ -5324,40 +7041,35 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ...thinAskMatchDeficits(createFilesAcc, briefForUi, lockedProductName).slice(0, 4),
           ]),
         ];
-        host.pushStatus('Thin create · npm gate — visual floor open, Live blocked…');
-        try {
-          host.onCreatePhaseModel?.({ id: coderGate.id, name: coderGate.name, role: 'done' });
-        } catch { /* ignore */ }
-        softBindCreateStudio(host, {
-          files: createFilesAcc,
-          projectId: originProjectId,
-          name: lockedProductName,
-          diskRoot: originDiskRoot,
-          force: true,
-        });
-        markCreateJobFailed(jobId, uiPolishReasons[0] || 'Depth still open at npm gate', undefined, {
-          craftBlocked: true,
-          blockedReasons: uiPolishReasons.slice(0, 8),
-        });
-        markBuildDiagnosticsEnded();
-        clearBuildWritingPath('Craft blocked');
-        const why = uiPolishReasons.slice(0, 6).map((r) => '- ' + r).join('\n');
-        await host.finishPlainReply(
-          [
-            '**Created ' + lockedProductName + '**: folder on disk, depth still open — Live blocked',
-            '',
-            originDiskRoot ? ('**Where:** `' + originDiskRoot + '`') : '',
-            '',
-            '**Failed at:** Depth (App still too thin for Live)',
-            '**Why:**',
-            why,
-            '',
-            'Tell me to keep building and I will continue depth until landmarks + /logo.svg clear.',
-          ].filter(Boolean).join('\n'),
-          (ensembleAttribution || 'NOVA') + ' · depth gate',
-        );
-        return { status: 'handled' };
+        host.pushStatus('Thin create · visual floor open — continuing to install/build diagnostics; Ready stays gated…');
+      } else if (productGenreGuard && productInventSnapshot?.appJsx) {
+        restoreProductInventSnapshot('npm gate');
       }
+      // Last gate before npm: Vite shell must be on disk (not only in memory).
+      try {
+        const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+        createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+        if (originDiskRoot && createFilesAcc['package.json']) {
+          await persistAcceptedCreateFiles(
+            originDiskRoot,
+            createFilesAcc,
+            [
+              'package.json',
+              'index.html',
+              'vite.config.js',
+              'vite.config.ts',
+              'src/main.jsx',
+              'src/main.tsx',
+              'src/index.css',
+              'src/App.jsx',
+              'src/App.tsx',
+              'src/App.css',
+              'public/logo.svg',
+            ].filter((p) => createFilesAcc[p]),
+            { deleteKeys: ['css/styles.css', 'js/app.js'] },
+          ).catch(() => {});
+        }
+      } catch { /* best-effort */ }
       host.pushStatus('Installing project dependencies (npm) — downloading packages…');
       clearBuildWritingPath('Installing npm…');
       markCreateJobNpm(jobId);
@@ -5371,6 +7083,31 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             tickBuildHeartbeat(label);
           },
         });
+        if (bootstrap.npmInstalled && !bootstrap.previewLive && originDiskRoot) {
+          const buildOnly = await runCreatePackageBuildWithRepair({
+            files: createFilesAcc,
+            brief: authoritativeOriginalBrief,
+            productName: lockedProductName,
+            projectId: liveOwnerKey(host.chatId || originProjectId),
+            diskRoot: originDiskRoot,
+            coderId: coderGate.id,
+            coderName: coderGate.name,
+            coderSource: coderGate.source,
+            shouldAbort: () => turnAborted(),
+            onStatus: (label) => {
+              host.pushStatus(label);
+              tickBuildHeartbeat(label);
+            },
+          });
+          createFilesAcc = buildOnly.files;
+          packageBuildResult = { ok: buildOnly.ok, errors: buildOnly.errors, repairs: buildOnly.repairs };
+          pushBuildDiag({
+            kind: buildOnly.ok ? 'ready' : 'fail',
+            detail: buildOnly.ok
+              ? `Package build passed after ${buildOnly.repairs} repair(s); preview server unavailable`
+              : `Package build failed: ${buildOnly.errors[0] || 'unknown build error'}`,
+          });
+        }
         if (bootstrap.npmInstalled) {
           let codeVerified = false;
           const liveUrl = String(bootstrap.devServerUrl || '').trim();
@@ -5395,7 +7132,22 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 staticReady: true,
                 staticReasons: uiPolishReasons,
                 floorFallback: createFloorFallback,
-                maxFixRounds: isThinCreatePath() ? undefined : (createFloorFallback ? 1 : 3),
+                // Blank / step-ladder: never invent-repair a painted empty shell.
+                maxFixRounds: blankSolidColor
+                  ? 0
+                  : (isThinCreatePath() ? undefined : (createFloorFallback ? 1 : 3)),
+                repairBuild: ({ files, brief, productName, errors }) => repairCreateBuildWithCoder({
+                  files,
+                  brief,
+                  productName,
+                  errors,
+                  projectId: liveOwnerKey(host.chatId || originProjectId),
+                  diskRoot: originDiskRoot,
+                  coderId: coderGate.id,
+                  coderName: coderGate.name,
+                  coderSource: coderGate.source,
+                  shouldAbort: () => turnAborted(),
+                }),
                 host: {
                   pushStatus: (label) => host.pushStatus(label),
                   shouldAbort: () => turnAborted(),
@@ -5405,6 +7157,54 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 },
               });
               createFilesAcc = runtime.files;
+              // Blank / step-ladder: never keep invent-repair output — re-lock the solid shell.
+              if (blankSolidColor) {
+                const shellFiles = viteSolidShellEdits(blankSolidColor);
+                for (const e of shellFiles) createFilesAcc[e.path] = e.content;
+                delete createFilesAcc['src/App.tsx'];
+                if (originDiskRoot) {
+                  await persistAcceptedCreateFiles(
+                    originDiskRoot,
+                    createFilesAcc,
+                    shellFiles.map((e) => e.path),
+                  ).catch(() => {});
+                }
+              }
+              // Product genre: runtime plan-repair pastes todo/Apple — restore invent look only.
+              if (productGenreGuard || productInventSnapshot) {
+                const {
+                  appLooksLikeWrongGenreForProductBrief,
+                  appLooksLikeDeskSpineTemplate,
+                  briefWantsProductLadder,
+                } = await import('@/lib/createProductLadder');
+                const productBrief = authoritativeOriginalBrief || briefForUi;
+                if (briefWantsProductLadder(productBrief)) {
+                  const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
+                  if (
+                    productInventSnapshot?.appJsx
+                    && (
+                      appLooksLikeWrongGenreForProductBrief(appNow, productBrief)
+                      || appLooksLikeDeskSpineTemplate(appNow)
+                    )
+                  ) {
+                    host.pushStatus('Ladder · restoring invent look after Live repair…');
+                    restoreProductInventSnapshot('after Live repair');
+                    if (originDiskRoot) {
+                      await persistAcceptedCreateFiles(
+                        originDiskRoot,
+                        createFilesAcc,
+                        ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => createFilesAcc[p]),
+                      ).catch(() => {});
+                    }
+                    updateCreateJob(jobId, { files: createFilesAcc });
+                  }
+                }
+              }
+              packageBuildResult = {
+                ok: runtime.evidence.buildOk ?? null,
+                errors: runtime.evidence.buildErrors || [],
+                repairs: runtime.fixRounds,
+              };
               // Runtime fix rounds can re-inject COVER/full-bleed into App — re-lock shell.
               if (isThinCreatePath() && thinWantsCompositionalShell(briefForUi)) {
                 createFilesAcc = seedCompositionalBrandVisuals(
@@ -5455,8 +7255,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   });
                 } catch { /* ignore */ }
                 if (painted && !codeVerified) {
-                  // Post-Live logo stamp — materialize/invent can re-sparkle during npm verify.
-                  if (originDiskRoot) {
+                  // Post-Live logo stamp — skip on blank/step-ladder shells (no logos yet).
+                  if (originDiskRoot && !blankSolidColor) {
                     try {
                       const { brandLogoSvgFor } = await import('@/lib/brandAssets');
                       const { localIconifySvg } = await import('@/lib/localLucideIcons');
@@ -5477,7 +7277,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                       }
                     } catch { /* best-effort */ }
                   }
-                  host.pushStatus('Live is open — tell me what to tighten…');
+                  host.pushStatus(blankSolidColor
+                    ? 'Blank page Live — ready for the next tiny step…'
+                    : 'Live is open — tell me what to tighten…');
                 } else if (!mounted && !turnAborted()) {
                   host.pushStatus('Live blocked — page did not mount (blank render); keeping repair…');
                 }
@@ -5504,8 +7306,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             await host.finishPlainReply('Stopped.', 'NOVA · stop');
             return { status: 'handled' };
           } else if (liveUrl && bootstrap.previewLive && !turnAborted()) {
-            // Final disk stamp at Ready — wins over late materialize sparkles writes.
-            if (originDiskRoot) {
+            // Final disk stamp at Ready — skip logos on blank/step-ladder shells.
+            if (originDiskRoot && !blankSolidColor) {
               try {
                 const { brandLogoSvgFor } = await import('@/lib/brandAssets');
                 const { localIconifySvg } = await import('@/lib/localLucideIcons');
@@ -5526,7 +7328,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 }
               } catch { /* best-effort */ }
             }
-            const qualityOk = Boolean(codeVerified);
+            const qualityOk = Boolean(codeVerified) || Boolean(blankSolidColor);
             const readyNote = qualityOk
               ? 'Live ready · quality verified'
               : (createFloorFallback
@@ -5626,14 +7428,33 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               staticReady: true,
               staticReasons: uiPolishReasons,
               floorFallback: createFloorFallback,
+              repairBuild: ({ files, brief, productName, errors }) => repairCreateBuildWithCoder({
+                files,
+                brief,
+                productName,
+                errors,
+                projectId: liveOwnerKey(host.chatId || originProjectId),
+                diskRoot: originDiskRoot,
+                coderId: coderGate.id,
+                coderName: coderGate.name,
+                coderSource: coderGate.source,
+                shouldAbort: () => turnAborted(),
+              }),
               host: {
                 pushStatus: (label) => host.pushStatus(label),
                 shouldAbort: () => turnAborted(),
                 onStage: (stage, detail) => markCreateJobVerifying(jobId, stage, detail),
               },
-              maxFixRounds: isThinCreatePath() ? undefined : (createFloorFallback ? 1 : 3),
+              maxFixRounds: blankSolidColor
+                ? 0
+                : (isThinCreatePath() ? undefined : (createFloorFallback ? 1 : 3)),
             });
             createFilesAcc = runtime.files;
+            packageBuildResult = {
+              ok: runtime.evidence.buildOk ?? null,
+              errors: runtime.evidence.buildErrors || [],
+              repairs: runtime.fixRounds,
+            };
             codeVerified = Boolean(runtime.qualityReady);
             const mounted = Boolean(runtime.evidence?.mounted && runtime.liveUnlock);
             const liveQuality = verifyCreateRenderedQuality(createFilesAcc, authoritativeOriginalBrief, lockedProductName);
@@ -5729,7 +7550,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       return { path, added: Math.max(1, diff.added || body.split('\n').length), removed: 0 };
     });
     const prose = formatCreateProjectReply(
-      { ...buildIntent, kind: scaffoldKind },
+      {
+        ...buildIntent,
+        kind: scaffoldKind,
+        // Prefer the raw user ask so blank/step-ladder replies can say what we built.
+        summary: String(authoritativeOriginalBrief || buildIntent.summary || host.content || ''),
+      },
       {
         ok: true,
         projectPath: originDiskRoot || undefined,
@@ -5746,14 +7572,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       startedAt,
       elapsedMs: Math.max(1, Date.now() - startedAt),
       userMessage: host.content,
-      answer: `${prose}${grantNote}`,
+      answer: `${prose}${grantNote || ''}`.trim(),
       changedPaths: writtenPaths,
       fileChanges,
       projectPath: originDiskRoot || undefined,
       statusLabels: [
         'Created the project folder',
         'Wrote scaffold files',
-        'Coder built the product UI',
+        'Generated project files were written',
+        ...(packageBuildResult.ok === false
+          ? [`Production package build failed: ${(packageBuildResult.errors[0] || 'see details above').slice(0, 180)}`]
+          : []),
         bootstrap.previewLive && bootstrap.codeVerified
           ? 'Live verified (mount + evidence)'
           : bootstrap.previewLive
@@ -5783,7 +7612,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       buildIntent.name,
     );
     markCreateJobFailed(jobId, msg);
-    unbindCreateChat(host, host.chatId);
+    unbindCreateChat(host, host.chatId, { keepCodePill: Boolean(createDiskRootForPill) });
     markBuildDiagnosticsEnded();
     await host.finishPlainReply(msg);
     return { status: 'handled' };

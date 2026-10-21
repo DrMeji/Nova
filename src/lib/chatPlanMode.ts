@@ -34,6 +34,13 @@ export function looksLikeHardCreateGo(message: string): boolean {
   if (/\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|start\s+building|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|build\s+this\s+out|ok(?:ay)?\s+start\s+building)\b/i.test(t)) {
     return true;
   }
+  // Explicit create-on-disk / go-build phrasing (greenfield must not stay planning).
+  if (/\b(?:create|build|scaffold|ship)\b[\s\S]{0,100}\bon\s+disk\b/i.test(t)) return true;
+  if (/\bgo\s+build\b/i.test(t)) return true;
+  if (/\bcreate\s+(?:the\s+)?(?:project|website|site|app|store|shop)\b/i.test(t)
+    && /\b(?:now|immediately|please|today)\b/i.test(t)) {
+    return true;
+  }
   return false;
 }
 
@@ -258,15 +265,7 @@ function looksLikeSubsectionLabel(body: string): boolean {
   return false;
 }
 
-function looksLikeTopLevelLabel(body: string): boolean {
-  const t = cleanListLabel(body);
-  if (!t) return false;
-  if (looksLikeSubsectionLabel(t)) return false;
-  if (TOPLEVEL_LABEL_RE.test(t)) return true;
-  // Longer conceptual titles are main steps.
-  if (t.length > 42) return true;
-  return true;
-}
+
 
 function labelsRoughlyMatch(a: string, b: string): boolean {
   const na = cleanListLabel(a).toLowerCase().replace(/:$/, '');

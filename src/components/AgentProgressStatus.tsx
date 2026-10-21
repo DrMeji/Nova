@@ -154,10 +154,10 @@ export function AgentProgressStatus({
     || displaySteps.some((s) => /debug clinic|pass [123]|deep review|deep ·|verify ·|static ·|triage|^plan ·|^agent ·|^multi-agent ·|^reading /i.test(s.label));
 
   return (
-    <div ref={rootRef} className="relative min-w-0 max-w-full">
+    <div ref={rootRef} className="relative w-full min-w-0 max-w-full overflow-hidden">
       <button
         type="button"
-        className="flex items-center gap-2.5 py-0.5 min-w-0 max-w-full text-left rounded-md hover:bg-white/[0.04] transition-colors disabled:opacity-100"
+        className="flex w-full min-w-0 max-w-full items-center gap-2.5 py-0.5 text-left rounded-md hover:bg-white/[0.04] transition-colors disabled:opacity-100"
         aria-live="polite"
         aria-label={shown}
         aria-expanded={open}
@@ -183,7 +183,7 @@ export function AgentProgressStatus({
       </button>
       {open && canExpand ? (
         <ul
-          className="mt-1.5 ml-6 space-y-0.5"
+          className="mt-1.5 ml-6 w-[calc(100%-1.5rem)] max-w-full space-y-0.5"
           role="list"
         >
           {displaySteps.map((step, i) => {
@@ -195,24 +195,24 @@ export function AgentProgressStatus({
               <li
                 key={`${i}-${step.label.slice(0, 40)}-${step.at}`}
                 role="listitem"
-                className={`flex items-start gap-2 text-[12px] leading-snug py-0.5 ${
+                className={`grid grid-cols-[0.5rem_minmax(0,1fr)_3.75rem] items-start gap-x-2 text-[12px] leading-snug py-0.5 ${
                   isCurrent
                     ? 'text-white font-medium'
                     : 'text-content-tertiary'
                 }`}
               >
-                <span className="w-2 shrink-0 flex justify-center pt-1" aria-hidden>
+                <span className="flex justify-center pt-1" aria-hidden>
                   {isCurrent && !finished ? (
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
                   ) : (
                     <span className="w-1 h-1 rounded-full bg-content-tertiary/50 mt-0.5" />
                   )}
                 </span>
-                <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+                <span className="min-w-0 break-words [overflow-wrap:anywhere]">
                   {step.label.replace(/\*\*/g, '')}
                 </span>
                 <span
-                  className={`shrink-0 tabular-nums text-[10px] ${
+                  className={`text-right tabular-nums text-[10px] whitespace-nowrap ${
                     isCurrent && !finished ? 'text-violet-300/90' : 'text-content-tertiary/80'
                   }`}
                   title={isCurrent && !finished ? 'Time on this step so far' : 'Time spent on this step'}

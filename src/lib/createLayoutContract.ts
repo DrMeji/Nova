@@ -23,6 +23,8 @@ export type StorefrontProduct = {
   origin?: string;
   age?: string;
   abv?: string;
+  /** Hex swatch for insulated bottles / colored SKUs. */
+  color?: string;
   notes: string;
   price: number;
   image?: string;
@@ -105,7 +107,7 @@ const FORBID_COMMON = [
 
 /** Known canned-floor / prior-build clone fingerprints (brand + marketing pages). */
 export const FLOOR_CLONE_FINGERPRINT_RE =
-  /Experience the future of technology|SoftPalm|Pond.?s|apple\.com product bands|A singular ritual for how you actually live|Form that earns its keep|Made for real rooms/i;
+  /Experience the future of technology|SoftPalm|Pond.?s|apple\.com product bands|A singular ritual for how you actually live|Form that earns its keep|Made for real rooms|Channels and grommets keep every run clean|Soft cyan rim light without drowning the room|Sit, stand, and recall your perfect height|you@raid\.mail|className=["']app product["']|className=["']app vibe["']|nova-todos|placeholder=["']New todo["']|title:\s*['"]iPhone['"]/i;
 
 /** True when the brief wants a real shop / cart / catalog — not a marketing one-pager. */
 export function briefLooksLikeStorefront(brief: string, productName = ''): boolean {
@@ -668,7 +670,7 @@ export function scoreStorefrontContract(
   const productBlocks = (app.match(/["']?(?:id|name)["']?\s*:\s*['"`][^'"`]+['"`]/g) || []).length;
   const priceHits = (app.match(/["']?price["']?\s*:\s*\d+/g) || []).length;
   const hasCart = /\b(?:setCart|addToCart|add-to-cart)\b/i.test(app) && /Add to cart/i.test(app);
-  const hasQty = /\bqty\b|quantity|setQty|qty\s*[±+\-]/i.test(app);
+  const hasQty = /\bqty\b|quantity|setQty|qty\s*[±+-]/i.test(app);
   const hasCheckout = /\b(?:Purchase|checkout|Order placed|placeOrder)\b/i.test(app);
   const hasFilters = /\b(?:filter|category|type)\b/i.test(app)
     && (/\bsetFilter\b|\bactiveType\b|\bAll\b/.test(app) || /role=["'](?:tablist|toolbar)/i.test(app));
