@@ -86,7 +86,9 @@ export function classifyChatRoutes(
     pendingAddFile: null,
     stickyDiskTarget: null,
   });
-  if (!createBrief && !readFileAsk && (diskIntent.type === 'delete_file' || diskIntent.type === 'delete_project' || diskIntent.type === 'add_file')) {
+  // Only true deletes go through the disk→delete path. add_file must stay edit
+  // (classifyTurn used to map every disk route to delete — "Write tests for X" broke).
+  if (!createBrief && !readFileAsk && (diskIntent.type === 'delete_file' || diskIntent.type === 'delete_project')) {
     push('disk');
   }
 

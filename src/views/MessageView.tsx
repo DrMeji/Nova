@@ -21,7 +21,7 @@ import {
 } from '@/lib/novaSocial';
 import { formatNovaId, isNovaUserId, normalizeNovaId } from '@/lib/novaUserId';
 import { isNovaDevEmail, isDevNovaAlias } from '@/lib/novaDevAccount';
-import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
+import '@/lib/socialDemo';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
 import { Modal } from '@/components/Modal';

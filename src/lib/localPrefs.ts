@@ -83,6 +83,17 @@ export type LocalPrefs = {
   lockOnSleep: boolean;
   autoLockMinutes: number;
   sandboxAgent: boolean;
+  /**
+   * Codex-style approval policy for agent shell/tools.
+   * on-request = confirm risky; auto = workspace auto; never = no confirms (dangerous).
+   */
+  approvalPolicy: 'on-request' | 'never' | 'auto';
+  /** Codex-style sandbox mode for agent writes/commands. */
+  sandboxMode: 'read-only' | 'workspace-write' | 'full-access';
+  /** When true, networked agent commands need allowlist/confirm. */
+  networkDenyByDefault: boolean;
+  /** Hosts allowed when networkDenyByDefault is on. */
+  networkAllowlist: string[];
   /** Allow in-place workspace under ~/Desktop (still not all of C:). */
   allowDesktopFolderAccess: boolean;
   /** Allow in-place workspace under ~/Documents (still not all of C:). */
@@ -98,12 +109,11 @@ export type LocalPrefs = {
   /** Max tool steps per Agent loop (4–60). */
   agentLoopMaxSteps: number;
   /**
-   * Create craft via Nova tool loop (legacy). Default **off** — createV2 is staged craft;
-   * gather→act→verify lives in createRuntimeLoop + createPassSpine (not this pref).
-   * Opt in under Settings only for experimental full tool-loop craft.
+   * Create craft via Nova tool loop. Default **on** (coding foundation) —
+   * scaffold then agent loop owns greenfield builds; invent/gates are demoted.
    */
   agentLoopOnCreate: boolean;
-  /** Edit follow-ups prefer the tool loop when agentLoopEnabled is on (default on). */
+  /** Edit follow-ups use the tool loop when agentLoopEnabled is on (default on). */
   agentLoopOnEdit: boolean;
   /**
    * When true, create shows a Plan card and waits for “build it” before scaffolding.
@@ -120,6 +130,16 @@ export type LocalPrefs = {
    * to re-enable cooperative ensemble Auto without deleting that code.
    */
   ensembleAutoParked: boolean;
+  /**
+   * Share GPU with games / desktop: llama uses CPU (-ngl 0), smaller ctx, fewer threads.
+   * Default on so create does not collapse FPS / ping on a single gaming GPU.
+   */
+  shareGpuMode: boolean;
+  /**
+   * After craft, optionally run one CSS style hop on the design brain (uigen).
+   * Still sequential (swap once) — never concurrent multi-GGUF.
+   */
+  specialtyStyleHop: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
   agentLoopCommitOnSuccess: boolean;
   /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
@@ -148,7 +168,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   presenceStatus: 'online',
   defaultModelId: 'NOVA-auto',
   defaultCodeModelId: 'NOVA-auto',
-  prefsVersion: 13,
+  prefsVersion: 17,
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
@@ -182,6 +202,10 @@ const DEFAULT_PREFS: LocalPrefs = {
   lockOnSleep: true,
   autoLockMinutes: 30,
   sandboxAgent: true,
+  approvalPolicy: 'on-request',
+  sandboxMode: 'workspace-write',
+  networkDenyByDefault: true,
+  networkAllowlist: ['registry.npmjs.org', 'nodejs.org', 'github.com', 'raw.githubusercontent.com'],
   allowDesktopFolderAccess: false,
   // First-create needs a real NOVA Projects home without a Settings trip.
   allowDocumentsFolderAccess: true,
@@ -190,11 +214,13 @@ const DEFAULT_PREFS: LocalPrefs = {
   agentLoopEnabled: true,
   agentLoopInWorkspace: false,
   agentLoopMaxSteps: 32,
-  agentLoopOnCreate: false,
-  agentLoopOnEdit: false,
+  agentLoopOnCreate: true,
+  agentLoopOnEdit: true,
   planApproveGate: false,
   multiModelCreate: false,
   ensembleAutoParked: true,
+  shareGpuMode: true,
+  specialtyStyleHop: true,
   agentLoopCommitOnSuccess: false,
   chatFirst: true,
   voiceChatEnabled: false,
@@ -326,9 +352,34 @@ export function getLocalPrefs(): LocalPrefs {
       merged.multiModelCreate = false;
       merged.prefsVersion = 14;
     }
+    // v15: coding foundation — agent tool loop owns edit + create (not invent dumps).
+    if ((merged.prefsVersion || 0) < 15) {
+      merged.agentLoopOnEdit = true;
+      merged.agentLoopOnCreate = true;
+      if (typeof merged.agentLoopEnabled !== 'boolean') merged.agentLoopEnabled = true;
+      merged.prefsVersion = 15;
+    }
+    // v16: share GPU + specialty style hop defaults (containment + sequential design seat).
+    if ((merged.prefsVersion || 0) < 16) {
+      if (typeof merged.shareGpuMode !== 'boolean') merged.shareGpuMode = true;
+      if (typeof merged.specialtyStyleHop !== 'boolean') merged.specialtyStyleHop = true;
+      merged.prefsVersion = 16;
+    }
+    // v17: harness P0 approval_policy + sandbox + network deny-by-default.
+    if ((merged.prefsVersion || 0) < 17) {
+      if (!merged.approvalPolicy) merged.approvalPolicy = 'on-request';
+      if (!merged.sandboxMode) merged.sandboxMode = 'workspace-write';
+      if (typeof merged.networkDenyByDefault !== 'boolean') merged.networkDenyByDefault = true;
+      if (!Array.isArray(merged.networkAllowlist) || !merged.networkAllowlist.length) {
+        merged.networkAllowlist = ['registry.npmjs.org', 'nodejs.org', 'github.com', 'raw.githubusercontent.com'];
+      }
+      merged.prefsVersion = 17;
+    }
     // Dead feature — never honor stale true from older blobs after v12.
     merged.multiModelCreate = false;
     if (typeof merged.ensembleAutoParked !== 'boolean') merged.ensembleAutoParked = true;
+    if (typeof merged.shareGpuMode !== 'boolean') merged.shareGpuMode = true;
+    if (typeof merged.specialtyStyleHop !== 'boolean') merged.specialtyStyleHop = true;
     // Density / font: clamp only — do not re-lock every read after v13 migrate.
     if (typeof merged.fontSizePx !== 'number' || Number.isNaN(merged.fontSizePx)) {
       merged.fontSizePx = 16;
@@ -339,7 +390,7 @@ export function getLocalPrefs(): LocalPrefs {
       merged.density = 'comfortable';
     }
     // Only persist when we actually migrated this read (avoid rewrite thrash).
-    const shouldPersist = (merged.prefsVersion || 0) >= 14;
+    const shouldPersist = (merged.prefsVersion || 0) >= 16;
     if (shouldPersist) {
       try {
         const prev = raw ? JSON.parse(raw) as Partial<LocalPrefs> : null;
@@ -349,7 +400,11 @@ export function getLocalPrefs(): LocalPrefs {
           || prev.density !== merged.density
           || prev.multiModelCreate === true
           || prev.ensembleAutoParked !== merged.ensembleAutoParked
-          || prev.compactSidebar !== merged.compactSidebar;
+          || prev.shareGpuMode !== merged.shareGpuMode
+          || prev.specialtyStyleHop !== merged.specialtyStyleHop
+          || prev.compactSidebar !== merged.compactSidebar
+          || prev.agentLoopOnEdit !== merged.agentLoopOnEdit
+          || prev.agentLoopOnCreate !== merged.agentLoopOnCreate;
         if (changed) {
           localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
         }
@@ -402,11 +457,14 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
   if (typeof next.fontSizePx === 'number' && !Number.isNaN(next.fontSizePx)) {
     next.fontSizePx = Math.max(12, Math.min(22, Math.round(next.fontSizePx)));
   }
-  next.prefsVersion = Math.max(14, Number(next.prefsVersion) || 0);
+  next.prefsVersion = Math.max(16, Number(next.prefsVersion) || 0);
   next.multiModelCreate = false;
   if (typeof next.ensembleAutoParked !== 'boolean') next.ensembleAutoParked = true;
-  // Keep create craft on createV2 staged write; runtime pass spine owns verify/fix.
-  if (typeof next.agentLoopOnCreate !== 'boolean') next.agentLoopOnCreate = false;
+  if (typeof next.shareGpuMode !== 'boolean') next.shareGpuMode = true;
+  if (typeof next.specialtyStyleHop !== 'boolean') next.specialtyStyleHop = true;
+  // Coding foundation — agent loop owns create + edit unless explicitly cleared.
+  if (typeof next.agentLoopOnCreate !== 'boolean') next.agentLoopOnCreate = true;
+  if (typeof next.agentLoopOnEdit !== 'boolean') next.agentLoopOnEdit = true;
   try {
     // Do not invent grant keys from DEFAULT_PREFS — writing false would wipe Electron grants
     // on the next sync. Only persist grants when already stored or explicitly patched.
@@ -475,10 +533,6 @@ async function persistProviderKeys(map: ProviderKeyMap) {
     throw new Error('Secure key vault unavailable — API keys cannot be saved unsafely.');
   }
   writeLegacyLocalKeys(map);
-  try {
-      } catch {
-    /* ignore */
-  }
 }
 
 /** Load keys from OS-encrypted vault (or migrate legacy localStorage). Call once at app start. */

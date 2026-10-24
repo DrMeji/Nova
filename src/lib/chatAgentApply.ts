@@ -340,6 +340,17 @@ export async function applyChatReplyEdits(opts: {
   /** When true, apply in memory only — no disk / sandbox write (depth accept-first). */
   dryRun?: boolean;
 }): Promise<ChatApplyResult> {
+  const { agentWritesBlocked } = await import('@/lib/homeControlRuntime');
+  if (!opts.dryRun && agentWritesBlocked()) {
+    return {
+      ok: false,
+      updated: [],
+      deleted: [],
+      files: opts.files || {},
+      reply: '',
+      error: 'Writes blocked — Explore / dry-run is On in Studio controls.',
+    };
+  }
   const rawUser = opts.userMessage || '';
   const kind = detectProjectKind(rawUser);
   const appendix = skillPromptAppendix(rawUser, kind, {
@@ -484,8 +495,17 @@ export async function applyChatReplyEdits(opts: {
         }
       }
     }
-    const hasVite = Object.keys(next).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')))
-      || /"vite"/i.test(next['package.json'] || '');
+    // Only repair Vite shells that already look like SPAs — never inject Vite onto CLI/API Acc.
+    const pathsNorm = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
+    const looksNonWebEdit = pathsNorm.some((p) =>
+      /^(?:bin\/cli\.js|src\/cli\.[jt]s|src\/server\.[jt]s|server\.[jt]s|main\.py|manifest\.json|src\/index\.[jt]s)$/i.test(p)
+      || /\.(?:test|spec)\.[jt]sx?$/i.test(p)
+      || /^electron\//i.test(p),
+    ) && !pathsNorm.some((p) => /^src\/App\.(jsx|tsx)$/i.test(p));
+    const hasVite = !looksNonWebEdit && (
+      pathsNorm.some((p) => /^src\/App\.(jsx|tsx)$/i.test(p))
+      || /"vite"/i.test(next['package.json'] || '')
+    );
     if (hasVite) {
       const repaired = ensureViteReactProjectFiles(next, opts.projectName || 'app');
       for (const key of Object.keys(next)) {
@@ -517,6 +537,36 @@ export async function applyChatReplyEdits(opts: {
         changed.push(mainKey);
       }
     }
+  }
+  // Coding-agent pack: surgical micro-edits never rewrite App structure (CSS/tokens only).
+  {
+    try {
+      const { askIsSurgicalMicroOnly } = await import('@/lib/codingAgentPack');
+      if (askIsSurgicalMicroOnly(rawUser)) {
+        for (const appKey of ['src/App.jsx', 'src/App.tsx'] as const) {
+          const before = String(baseFiles[appKey] || '');
+          const after = String(next[appKey] || '');
+          if (before && after && before !== after) {
+            // Allow tiny label renames inside App; block gut / structure wipe.
+            const beforeLen = before.length;
+            const afterLen = after.length;
+            const gutted = afterLen < beforeLen * 0.55
+              || (!/from\s+['"]\.\/data\/products['"]/i.test(after) && /from\s+['"]\.\/data\/products['"]/i.test(before))
+              || (!/<nav\b/i.test(after) && /<nav\b/i.test(before) && beforeLen > 800);
+            if (gutted || Math.abs(afterLen - beforeLen) > 400) {
+              next[appKey] = before;
+              const idx = changed.indexOf(appKey);
+              if (idx >= 0) changed.splice(idx, 1);
+            }
+          }
+        }
+        // Prefer CSS-only landing for solid-bg / color asks.
+        if (!changed.includes('src/App.css') && typeof next['src/App.css'] === 'string'
+          && next['src/App.css'] !== String(baseFiles['src/App.css'] || '')) {
+          changed.push('src/App.css');
+        }
+      }
+    } catch { /* pack optional */ }
   }
   // Family anti-bleed (all edit/apply paths) — strip COVER / orphan products.ts without inventing UI.
   {
@@ -697,6 +747,27 @@ export async function applyChatReplyEdits(opts: {
   // Syntax validation is an acceptance boundary, not a warning. Depth callers use
   // `ok` to decide whether to merge files into the create session, so returning
   // ok:true here would let a broken module count as progress (and later be saved).
+  // Agent/edit exception: invent "completeness" must not block compile-valid thin writes
+  // (SWE-agent / Claude Code accept return-null + helper constants).
+  if (syntaxFailed) {
+    const onlyIncomplete = syntaxReasons.length > 0
+      && syntaxReasons.every((r) => /broken or incomplete/i.test(r));
+    const appBody = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
+    let inventCreate = false;
+    try {
+      const { briefWantsInventFirstCreate } = await import('@/lib/codingAgentPack');
+      inventCreate = briefWantsInventFirstCreate(rawUser);
+    } catch { /* optional */ }
+    if (onlyIncomplete && !inventCreate) {
+      try {
+        const { isAgentLoopWritableAppSource } = await import('@/lib/freshSpaFromBrief');
+        if (isAgentLoopWritableAppSource(appBody)) {
+          syntaxFailed = false;
+          syntaxReasons = [];
+        }
+      } catch { /* optional */ }
+    }
+  }
   if (syntaxFailed) {
     return {
       ok: false,
@@ -757,35 +828,16 @@ export async function applyChatReplyEdits(opts: {
         files: payloadFiles,
       });
     }
-  } else {
-    // Last-chance: bind the newest create job on disk so step-ladder edits never die as write_failed.
-    let fallbackRoot = '';
-    try {
-      const { getLatestReusableCreateJob } = await import('@/lib/createJobStore');
-      fallbackRoot = String(getLatestReusableCreateJob()?.path || '').trim();
-    } catch { /* ignore */ }
-    if (fallbackRoot) {
-      const disk = await writeViaDiskRoot(fallbackRoot, payloadFiles);
-      if (!disk.ok) {
-        return {
-          ok: false,
-          updated: [],
-          deleted: [],
-          files: baseFiles,
-          reply: disk.error || `Could not write into ${fallbackRoot}`,
-          error: disk.error || 'disk_write_failed',
-        };
-      }
-      wroteOk = true;
-    } else if (opts.projectId) {
-      const write = await safeProjectWrite({
-        projectId: opts.projectId,
-        projectName: opts.projectName,
-        files: payloadFiles,
-      });
-      wroteOk = write.ok;
-      writeError = write.error;
-    }
+  } else if (opts.projectId) {
+    // No diskRoot: write via project id only. Never fall back to another chat's
+    // create job path (that caused App↔VoltCore / unrelated-project misbinds).
+    const write = await safeProjectWrite({
+      projectId: opts.projectId,
+      projectName: opts.projectName,
+      files: payloadFiles,
+    });
+    wroteOk = write.ok;
+    writeError = write.error;
   }
 
   if (!wroteOk) {
@@ -853,6 +905,14 @@ export async function applyChatReplyEdits(opts: {
       changedPaths: changed,
     })
     : { summary: '' as string };
+  // Patches already landed on disk when autoSave — no Reject/Apply chrome.
+  // Clear any stale review stash so Code / Agents stay clean.
+  if (changed.length && autoSave) {
+    try {
+      const { clearPendingDiffReview } = await import('@/lib/pendingDiffReview');
+      clearPendingDiffReview();
+    } catch { /* best-effort */ }
+  }
   const reply = `${verify.summary ? `${spoken}${verify.summary}` : spoken}${autoSaveNote}`;
   return {
     ok: true,

@@ -130,6 +130,14 @@ export function looksLikeDeleteFollowUp(text: string): boolean {
   ) {
     return false;
   }
+  // "remove what you just added / clear those words" — UI copy, never disk delete.
+  if (
+    /\b(?:remove|clear|delete|get rid of)\b/i.test(t)
+    && /\b(?:words?|sentence|welcome|hello|goodbye|what\s+you\s+(?:just\s+)?added|on-page|text)\b/i.test(t)
+    && !/\b(?:project|folder|workspace|directory|file)\b/i.test(t)
+  ) {
+    return false;
+  }
   if (looksLikeDeleteProjectAsk(t)) return false;
   // Prefer an explicit delete verb for bare "it/this/that" follow-ups.
   if (/\bremove\b/i.test(t) && !/\b(?:delete|trash|wipe|get rid of)\b/i.test(t)) {

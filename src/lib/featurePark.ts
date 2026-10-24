@@ -96,3 +96,11 @@ export function isCodeTabEnabled(): boolean {
 export function isDebugComposerParked(): boolean {
   return true;
 }
+
+/**
+ * Test device (VM) — sidebar icon visible with Soon; no real boots until invent is solid.
+ * Flip to false when VirtualBox/Hyper-V/UTM orchestration is ready.
+ */
+export function isVmParked(): boolean {
+  return true;
+}

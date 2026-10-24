@@ -14,6 +14,22 @@ import {
 import type { CreateEvidence } from '@/lib/createEvidence';
 import { judgeCreateEvidence, type HostJudgeVerdict } from '@/lib/createHostJudge';
 import { scoreAskMatch } from '@/lib/createAskContract';
+import {
+  compositionalDepthIsComplete,
+  formatCompositionalSectionSpecs,
+  compositionalSectionFileSubstantial,
+  thinWantsCompositionalShell,
+  looksLikeInventFloorTwin,
+  atelierAccMissingLayoutSalt,
+  looksLikeHollowAtelierCraft,
+  looksLikeEmptySwatchAtelier,
+} from '@/lib/createThinPath';
+import { understandCreateBrief, verifyCreateBriefAgainstFiles } from '@/lib/codingCreatePipeline';
+import {
+  briefWantsProductLadder,
+  gradeProductQuality,
+} from '@/lib/createProductLadder';
+import { artifactWantsProductLadder, resolveArtifactKind } from '@/lib/createArtifactKind';
 
 export const CREATE_PASS_ORDER = [
   'plan',
@@ -130,29 +146,127 @@ export function judgeCreateVerified(opts: {
     productName: opts.productName,
   });
 
-  const liveUnlock = Boolean(opts.evidence.pass || (opts.evidence.httpOk && opts.evidence.mounted));
+  const compositionalComplete = compositionalDepthIsComplete(
+    opts.files,
+    opts.brief,
+    opts.productName || '',
+  );
+
+  // Coding foundation: Live = mount/evidence only. Composition stays a quality badge gate.
+  const liveUnlock = Boolean(
+    opts.evidence.pass || (opts.evidence.httpOk && opts.evidence.mounted),
+  );
   const floorFallback = Boolean(opts.floorFallback);
   const repairOwned = Boolean(opts.repairOwnedProduct);
+  const inventTwin = looksLikeInventFloorTwin(opts.files);
+  // Fox Latch 2026-10-23: twin Acc (same layout shell, swapped names) was Ready while
+  // floorFallback was false — unique-layout atelier asks must never Ready on a twin.
+  // Quill Latch: also treat leather/atelier productName as enough signal when brief
+  // was truncated upstream and lost "unique layout" / "premium" tokens.
+  const twinBrief = `${opts.brief || ''} ${opts.productName || ''}`;
+  const twinBlocksQuality = inventTwin && (
+    /\b(?:unique layout|no generic|atelier|leather[- ]goods|premium|professional|full[- ]?bleed|latch)\b/i.test(
+      twinBrief,
+    )
+  );
+  // Onyx Latch: hollow craft (Our Products / Espresso Briefcase) Ready'd with no layout salt.
+  // Noir Latch: empty identical product-swatch gradients Ready'd as "unique".
+  const missingSaltBlocks = atelierAccMissingLayoutSalt(opts.files, twinBrief)
+    || looksLikeHollowAtelierCraft(opts.files, twinBrief)
+    || looksLikeEmptySwatchAtelier(opts.files, twinBrief);
+  const floorBlocksQuality = (floorFallback && (inventTwin || repairOwned))
+    || twinBlocksQuality
+    || missingSaltBlocks;
 
   const reasons: string[] = [];
   if (!judge.ok) reasons.push(...judge.reasons.slice(0, 6));
   if (!planGate.ok) reasons.push(...planGate.reasons.slice(0, 4).map((r) => `plan: ${r}`));
   if (!designGate.ok) reasons.push(...designGate.reasons.slice(0, 3).map((r) => `design: ${r}`));
   if (!askMatch.ok) reasons.push(...askMatch.reasons.slice(0, 6).map((r) => `ask: ${r}`));
-  if (floorFallback) reasons.push('floor fallback used — original craft incomplete');
+  if (!compositionalComplete) {
+    // Mirror compositionalDepthIsComplete — optional bands must not appear as Ready blockers.
+    const optional = new Set([
+      'NotesSection',
+      'SecondaryCtaSection',
+      'ProofSection',
+      'SubscribeSection',
+      'ToolSection',
+      'ContentSection1',
+      'ContentSection2',
+      'ContentSection3',
+      'PageBodySection',
+    ]);
+    const missing = thinWantsCompositionalShell(opts.brief)
+      ? formatCompositionalSectionSpecs(opts.brief, opts.productName || '')
+        .filter((spec) => !optional.has(spec.componentName))
+        .filter((spec) => !compositionalSectionFileSubstantial(String(opts.files[spec.filePath] || '')))
+        .map((spec) => spec.filePath)
+      : [];
+    reasons.push(`compositional content incomplete: ${missing.slice(0, 4).join(', ') || 'required sections missing'}`);
+  }
+  if (floorBlocksQuality) {
+    reasons.push(
+      missingSaltBlocks
+        ? 'unique-layout atelier Acc missing layout salt / hollow craft shell'
+        : inventTwin
+          ? (twinBlocksQuality
+            ? 'invent-floor twin layout still on Acc — unique craft required'
+            : 'floor fallback used — invent-floor twin still on Acc')
+          : 'floor fallback used — original craft incomplete',
+    );
+  }
   if (repairOwned) reasons.push('repair owned product shell — not original craft');
 
-  // Floor / repair-owned can unlock Live but never qualityReady.
-  const qualityReady = Boolean(
+  // Peer Done checks (Replit/Devin) — brief must-haves must appear in App before quality Ready.
+  const understand = understandCreateBrief({
+    brief: opts.brief,
+    brand: opts.productName || '',
+  });
+  const briefVerify = verifyCreateBriefAgainstFiles({
+    files: opts.files,
+    brand: opts.productName || understand.brand,
+    mustHave: understand.mustHave,
+    verifyChecks: understand.verifyChecks,
+    outOfScope: understand.outOfScope,
+  });
+  if (!briefVerify.ok) {
+    for (const m of briefVerify.missing.slice(0, 4)) reasons.push(`brief miss: ${m}`);
+    for (const v of briefVerify.violations.slice(0, 3)) reasons.push(`brief violate: ${v}`);
+  }
+
+  // Quality Ready still requires composition + plan/design/ask + brief; Live does not.
+  let qualityReady = Boolean(
     liveUnlock
     && judge.ok
     && planGate.ok
     && designGate.ok
     && askMatch.ok
-    && !floorFallback
+    && compositionalComplete
+    && briefVerify.ok
+    && !floorBlocksQuality
     && !repairOwned
     && opts.evidence.smokeOk !== false
   );
+
+  // Product invents only: Ready means Premium craft — never for CLI/API/dashboard.
+  if (
+    qualityReady
+    && artifactWantsProductLadder(resolveArtifactKind(opts.brief), opts.brief)
+    && briefWantsProductLadder(opts.brief)
+  ) {
+    const graded = gradeProductQuality(
+      opts.files,
+      opts.brief,
+      opts.productName || '',
+    );
+    if (!graded.okPremium) {
+      qualityReady = false;
+      reasons.push(
+        `product invent below Premium (${graded.label})`,
+        ...graded.reasons.slice(0, 4),
+      );
+    }
+  }
 
   return {
     liveUnlock,

@@ -39,11 +39,11 @@ if (!/<h1 className="center-word">ORBIT Gear<\/h1>/.test(brandApp)) {
 
 const mouseEdits = reactSurgicalMicroAskEdits(
   files,
-  'Add a gaming mouse product photo in the hero. use a real https image URL, not example.com or path/to.',
+  'Add a gaming mouse product photo in the hero. use a generated product glyph, not example.com or path/to.',
 );
 const mouseApp = mouseEdits.find((e) => e.path.includes('App.jsx'))?.content || '';
-if (!/https:\/\/images\.unsplash\.com\//.test(mouseApp) || /example\.com|path\/to/.test(mouseApp)) {
-  console.error('FAIL mouse https photo', mouseApp);
+if (!/data:image\/svg/i.test(mouseApp) || /example\.com|path\/to|unsplash\.com/i.test(mouseApp)) {
+  console.error('FAIL mouse generated glyph', mouseApp.slice(0, 400));
   process.exit(2);
 }
 if (!/SOL Gear/.test(mouseApp)) {

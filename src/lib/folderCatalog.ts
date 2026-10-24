@@ -3,7 +3,7 @@
  * Never imports thousands of files into chat context.
  */
 
-import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from '@/lib/folderPathAsk';
+import { parseFolderPathAsk, type FolderPathRef } from '@/lib/folderPathAsk';
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
 import { looksLikeConversationalPlanningAsk, looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
@@ -280,7 +280,7 @@ async function peekSubfolderHint(dirPath: string): Promise<string | null> {
   return null;
 }
 
-async function summarizeSubfolder(dirPath: string, dirName: string): Promise<{
+async function summarizeSubfolder(dirPath: string, _dirName: string): Promise<{
   description: string | null;
   folders: string[];
   keyFiles: string[];

@@ -31,9 +31,33 @@ export type AgentTracePayload = {
   projectPath?: string;
   /** Whether Continue is available after step-cap. */
   canContinue?: boolean;
+  /**
+   * Soft-quality / invent holdback reasons shown under Files Changed so the user
+   * can see exactly where create stopped short of Ready (not a changelog dump).
+   */
+  qualityGaps?: string[];
 };
 
 const TRACE_MARKER_RE = /<!--nova-trace:([\s\S]*?)-->\n?/;
+
+/** Hide invent Acc noise from Files Changed (open-all shards, audit dumps, etc.). */
+export function isInventAccNoisePath(path: string): boolean {
+  const p = String(path || '').replace(/\\/g, '/');
+  // Agent harness prompts — not product source (were showing instead of README).
+  if (/(^|\/)\.__nova/i.test(p)) return true;
+  if (/\.nova\/open-all\//i.test(p)) return true;
+  if (/\.nova\/open-all-/i.test(p)) return true;
+  if (/\.nova\/coding-audit\.jsonl$/i.test(p)) return true;
+  if (/\.nova\/workers\//i.test(p)) return true;
+  if (/node_modules\//i.test(p)) return true;
+  if (/(^|\/)package-lock\.json$/i.test(p)) return true;
+  // Invent field/wave packs inflate +lines without being the site UI.
+  if (/\.nova\//i.test(p)) return true;
+  if (/\.(?:json)$/i.test(p) && /(?:a11y-gate|agents-window|analytics-stub|auth-db|ci-autofix|close-all|coding-)/i.test(p)) {
+    return true;
+  }
+  return false;
+}
 
 export function isTraceMessage(content: string): boolean {
   return TRACE_MARKER_RE.test(String(content || ''));
@@ -60,12 +84,34 @@ export function parseTraceMessage(content: string): {
 
 export function encodeTraceMessage(payload: AgentTracePayload): string {
   const answer = String(payload.answer || '').trim();
-  return `<!--nova-trace:${JSON.stringify(payload)}-->${answer ? `\n${answer}` : ''}`;
+  const changedPaths = (payload.changedPaths || []).filter((p) => !isInventAccNoisePath(p));
+  const fileChanges = (payload.fileChanges || []).filter((c) => !isInventAccNoisePath(c.path));
+  const gaps = (payload.qualityGaps || []).map((g) => String(g || '').trim()).filter(Boolean).slice(0, 8);
+  const slim: AgentTracePayload = {
+    ...payload,
+    answer,
+    changedPaths: changedPaths.length ? changedPaths : undefined,
+    fileChanges: fileChanges.length ? fileChanges : undefined,
+    qualityGaps: gaps.length ? gaps : undefined,
+  };
+  return `<!--nova-trace:${JSON.stringify(slim)}-->${answer ? `\n${answer}` : ''}`;
 }
 
 export function stripAgentTrace(content: string): string {
   const { answer } = parseTraceMessage(content);
-  return answer.trim();
+  return cleanSpokenAgentAnswer(answer);
+}
+
+/** Drop Agent tool trails / step-limit dumps from the spoken reply body. */
+export function cleanSpokenAgentAnswer(answer: string): string {
+  return String(answer || '')
+    .replace(/^_Agent:[\s\S]*?_\s*/gim, '')
+    .replace(/\*\*Step limit reached\.\*\*[^\n]*/gi, '')
+    .replace(/\*\*Recent steps:\*\*[\s\S]*?(?=\n\n(?:\*\*|Changed:|Send|\z))/gi, '')
+    .replace(/^Agent:\s*(?:Applying edits|Write failed|Checking Preview)[\s\S]*?(?=\n\n|\z)/gim, '')
+    .replace(/(?:Applying edits\.\.\.\s*→\s*)?(?:Write failed\s*→\s*)+/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function nextTraceStepId(steps: AgentTraceStep[]): string {
@@ -102,6 +148,14 @@ export function traceThoughtFromAsk(userMessage: string): string {
   if (/\b(?:build|create|scaffold|start building)\b/i.test(t)
     && /\b(?:app|project|todo|landing|site|page|vite|react)\b/i.test(t)) {
     return 'Creating the project folder, writing scaffold files, and verifying they exist on disk.';
+  }
+  // UI copy remove — never sound like disk delete.
+  if (
+    /\b(?:remove|clear|get rid of)\b/i.test(t)
+    && /\b(?:words?|sentence|welcome|hello|goodbye|what\s+you\s+(?:just\s+)?added|on-page|text|copy)\b/i.test(t)
+    && !/\b(?:project|folder|workspace|directory|file)\b/i.test(t)
+  ) {
+    return 'Removing the on-page text that was asked and verifying the preview.';
   }
   if (/\b(delete|remove|trash)\b/i.test(t) && !/\b(?:todo|task|row|list|item)\b/i.test(t)) {
     return 'Locating the path, confirming scope, then deleting only what was asked.';
@@ -165,11 +219,13 @@ export function wrapReplyWithFileChanges(opts: {
   statusLabels?: string[];
   elapsedMs?: number;
   projectPath?: string;
+  /** Soft Ready / invent holdback lines for the Quality gaps card. */
+  qualityGaps?: string[];
 }): string {
-  const paths = (opts.changedPaths || []).filter(Boolean);
-  const changes = opts.fileChanges?.length
-    ? opts.fileChanges
-    : paths.map(path => ({ path, added: 1, removed: 0 }));
+  const paths = (opts.changedPaths || []).filter(Boolean).filter((p) => !isInventAccNoisePath(p));
+  const changes = (opts.fileChanges?.length
+    ? opts.fileChanges.filter((c) => !isInventAccNoisePath(c.path))
+    : paths.map(path => ({ path, added: 1, removed: 0 })));
   const elapsedMs = opts.elapsedMs ?? Math.max(1, Date.now() - opts.startedAt);
   const steps: AgentTraceStep[] = [
     {
@@ -191,6 +247,10 @@ export function wrapReplyWithFileChanges(opts: {
   for (const path of paths.slice(0, 12)) {
     steps.push({ id: nextTraceStepId(steps), kind: 'write', label: path });
   }
+  const qualityGaps = (opts.qualityGaps || [])
+    .map((g) => String(g || '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
   return encodeTraceMessage({
     startedAt: opts.startedAt,
     done: true,
@@ -200,5 +260,6 @@ export function wrapReplyWithFileChanges(opts: {
     changedPaths: paths,
     fileChanges: changes,
     projectPath: opts.projectPath || undefined,
+    qualityGaps: qualityGaps.length ? qualityGaps : undefined,
   });
 }

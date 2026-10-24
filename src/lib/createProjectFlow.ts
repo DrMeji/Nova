@@ -11,6 +11,7 @@ import { runAgentCommand } from '@/lib/chatAgentExec';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 import { slugifyProjectName } from '@/lib/projectNames';
 import { attachPreviewIfExists, isPlaceholderPreviewUrl, verifyLivePreviewUrl } from '@/lib/projectPreview';
+import { formatCreateHandback } from '@/lib/taskHandbackReply';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
@@ -221,7 +222,15 @@ export async function runCreateProjectFlow(
   cleaned.name = finalName;
   cleaned.slug = finalSlug;
 
-  const scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
+  // Prefer artifactKind → project stack so CLI/API never get a Vite React scaffold.
+  let scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
+  let artifactKind: import('@/lib/createArtifactKind').ArtifactKind | undefined;
+  try {
+    const { resolveArtifactKind, projectKindFromArtifactKind } = await import('@/lib/createArtifactKind');
+    artifactKind = resolveArtifactKind(cleaned.summary || '');
+    const fromArtifact = projectKindFromArtifactKind(artifactKind);
+    if (fromArtifact !== 'unknown') scaffoldKind = fromArtifact;
+  } catch { /* keep resolveProjectKindForCreate */ }
   // Skills are for LLM prompts only — never bake "NOVA design skills" copy into App.jsx.
   let preferredLanguage = 'TypeScript';
   try {
@@ -232,6 +241,7 @@ export async function runCreateProjectFlow(
     name: cleaned.name,
     summary: cleaned.summary,
     preferredLanguage,
+    artifactKind,
   });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 
@@ -414,7 +424,7 @@ function npmInstallLooksFailed(outcome: { ok?: boolean; reply?: string; handled?
 }
 
 /** True when node_modules/vite is on disk (usable install, even if npm timed out). */
-async function projectHasViteModules(projectPath: string): Promise<boolean> {
+export async function projectHasViteModules(projectPath: string): Promise<boolean> {
   try {
     const base = String(projectPath || '').replace(/[\\/]+$/, '');
     if (!base) return false;
@@ -430,6 +440,53 @@ async function projectHasViteModules(projectPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Stable key for early-npm job dedupe (Moss Thread: invent hung before late npm). */
+export function normalizeProjectNpmKey(projectPath: string): string {
+  return String(projectPath || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+const earlyNpmJobs = new Map<string, Promise<ProjectBootstrapResult>>();
+
+/**
+ * Start npm install as soon as package.json is on disk — do not wait for invent/depth
+ * to finish. Late create awaits the same promise (deduped). Moss Thread Atelier
+ * 2026-10-23: invent hung ~12m, bootstrap never ran, vite missing after 240s wait.
+ */
+export function kickEarlyNpmInstall(
+  projectPath: string,
+  kind: NewProjectIntent['kind'],
+  opts?: {
+    files?: Record<string, string>;
+    preferPreviewUrl?: string | null;
+    onStatus?: (label: string) => void;
+    npmTimeoutMs?: number;
+  },
+): Promise<ProjectBootstrapResult> {
+  const key = normalizeProjectNpmKey(projectPath);
+  const existing = earlyNpmJobs.get(key);
+  if (existing) return existing;
+  const job = bootstrapProjectWorkspace(projectPath, kind, opts)
+    .catch((err): ProjectBootstrapResult => ({
+      npmInstalled: false,
+      previewLive: false,
+      bootstrapNote: String((err as Error)?.message || err || 'early npm failed'),
+    }));
+  earlyNpmJobs.set(key, job);
+  return job;
+}
+
+/** In-flight or finished early npm for this Acc (null if never kicked). */
+export function peekEarlyNpmInstall(
+  projectPath: string,
+): Promise<ProjectBootstrapResult> | null {
+  return earlyNpmJobs.get(normalizeProjectNpmKey(projectPath)) || null;
+}
+
+/** Test helper — clear early-npm registry between smokes. */
+export function clearEarlyNpmInstallJobs(): void {
+  earlyNpmJobs.clear();
 }
 
 /** After a timed-out / killed npm, keep polling briefly — Windows often finishes unpack late. */
@@ -476,31 +533,53 @@ export async function bootstrapProjectWorkspace(
     opts?.files
     && Object.keys(opts.files).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
   );
+  const filePaths = Object.keys(opts?.files || {}).map((p) => p.replace(/\\/g, '/'));
+  // CLI / API / library map to projectKind node-cli — never Vite flush / vite wait / Live.
+  // Contaminated Acc (App.jsx invent leak) must NOT flip us back onto the Vite path.
+  const codingNpmOnly = kind === 'node-cli' || kind === 'python' || kind === 'unknown';
   // Memory often has package.json while disk is still a static HTML scaffold (RidgeDesk miss).
   // Flush the Vite shell BEFORE npm — otherwise install runs with no package.json and Live dies.
   let flushedPkg = false;
   if (filesHavePkg && opts?.files && projectPath) {
     try {
       const { persistAcceptedCreateFiles } = await import('@/lib/chatAgentApply');
-      const flushKeys = [
-        'package.json',
-        'index.html',
-        'vite.config.js',
-        'vite.config.ts',
-        'src/main.jsx',
-        'src/main.tsx',
-        'src/index.css',
-        'src/App.jsx',
-        'src/App.tsx',
-        'src/App.css',
-        'public/logo.svg',
-        'public/heroes/desk.svg',
-        'public/heroes/product.svg',
-      ].filter((k) => typeof opts.files?.[k] === 'string' && String(opts.files[k]).trim());
+      const flushKeys = (codingNpmOnly
+        ? ['package.json', 'bin/cli.js', 'src/server.ts', 'src/server.js', 'src/index.ts', 'src/index.js', 'tsconfig.json']
+        : [
+          'package.json',
+          'index.html',
+          'vite.config.js',
+          'vite.config.ts',
+          'src/main.jsx',
+          'src/main.tsx',
+          'src/index.css',
+          'src/App.jsx',
+          'src/App.tsx',
+          'src/App.css',
+          'public/logo.svg',
+          'public/heroes/desk.svg',
+          'public/heroes/product.svg',
+        ]
+      ).filter((k) => typeof opts.files?.[k] === 'string' && String(opts.files[k]).trim());
       if (flushKeys.length) {
-        opts.onStatus?.('Writing Vite package files to disk before npm…');
+        opts.onStatus?.(codingNpmOnly
+          ? 'Writing package files to disk before npm…'
+          : 'Writing Vite package files to disk before npm…');
         const wrote = await persistAcceptedCreateFiles(projectPath, opts.files, flushKeys, {
-          deleteKeys: ['css/styles.css', 'js/app.js'],
+          deleteKeys: codingNpmOnly
+            ? [
+              'index.html',
+              'vite.config.js',
+              'vite.config.ts',
+              'src/App.jsx',
+              'src/App.tsx',
+              'src/App.css',
+              'src/main.jsx',
+              'src/main.tsx',
+              'src/index.css',
+              'public/logo.svg',
+            ]
+            : ['css/styles.css', 'js/app.js'],
         });
         flushedPkg = Boolean(wrote?.ok);
       }
@@ -527,6 +606,8 @@ export async function bootstrapProjectWorkspace(
     opts?.onStatus?.('package.json found — installing deps even though kind looked static…');
   }
 
+  // Coding npm-only projects never attach a Vite Live preview.
+  if (!codingNpmOnly) {
   // If createJob already has a live URL, attach only when modules exist AND HTTP is healthy.
   const earlyAttach = await attachPreviewIfExists({
     cwd: projectPath,
@@ -539,6 +620,40 @@ export async function bootstrapProjectWorkspace(
       return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
     }
   }
+
+  // Early kick may have finished while invent was still running — never double-install.
+  if (await projectHasViteModules(projectPath).catch(() => false)) {
+    opts?.onStatus?.('node_modules/vite already on disk — skipping npm install…');
+    const attached = await attachPreviewIfExists({
+      cwd: projectPath,
+      preferUrl: opts?.preferPreviewUrl,
+    });
+    if (attached.ok && attached.url) {
+      return { npmInstalled: true, devServerUrl: attached.url, previewLive: true };
+    }
+    if (window.novaDesktop?.getOrAttachPreview) {
+      const live = await window.novaDesktop.getOrAttachPreview(projectPath);
+      if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
+        return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
+      }
+    }
+    try {
+      const direct = await window.novaDesktop?.agentStartDevServer?.({
+        cwd: projectPath,
+        depsReady: true,
+      });
+      if (direct?.ok && direct.url && !isPlaceholderPreviewUrl(direct.url)) {
+        return { npmInstalled: true, devServerUrl: direct.url, previewLive: true };
+      }
+    } catch { /* fall through */ }
+    return {
+      npmInstalled: true,
+      previewLive: false,
+      bootstrapNote:
+        'Dependencies are installed. Click **Live** or say **run Preview** to start the dev server.',
+    };
+  }
+  } // end !codingNpmOnly early Vite attach / skip-install branch
 
   // Windows Defender + first Vite install often needs >5 min; keep a long wall.
   const npmTimeoutMs = Math.max(180_000, opts?.npmTimeoutMs ?? 420_000);
@@ -594,6 +709,20 @@ export async function bootstrapProjectWorkspace(
     });
   } finally {
     if (npmBeat != null) window.clearInterval(npmBeat);
+  }
+
+  // CLI / API / library: npm only — never wait for vite or start Live.
+  if (codingNpmOnly) {
+    if (npmInstallLooksFailed(install)) {
+      return {
+        npmInstalled: false,
+        previewLive: false,
+        bootstrapNote: sanitizeBootstrapNote(install.reply)
+          || 'Could not install npm dependencies. Say **install npm dependencies** to retry.',
+      };
+    }
+    opts?.onStatus?.('Dependencies installed — coding project (no Live preview)…');
+    return { npmInstalled: true, previewLive: false, codeVerified: true };
   }
 
   if (npmInstallLooksFailed(install)) {
@@ -729,7 +858,11 @@ export function formatCreateProjectReply(
   bootstrap?: ProjectBootstrapResult,
 ): string {
   if (!result.ok) {
-    return result.error || 'Could not create the project.';
+    return formatCreateHandback({
+      productName: cleanProductTitle(intent.name),
+      outcome: 'error',
+      note: result.error || 'Could not create the project.',
+    });
   }
 
   const displayName = cleanProductTitle(intent.name);
@@ -751,7 +884,6 @@ export function formatCreateProjectReply(
       && /background\s*:\s*#(?:fff|ffffff|000|000000)\b/i.test(String(result.files['src/App.css'] || '')))
   );
 
-  let body: string;
   if (blankSolidAsk && livePreview) {
     const cssBlob = String(result.files?.['src/App.css'] || result.files?.['src/index.css'] || '');
     const bgHex = cssBlob.match(/background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})\b/i)?.[1]?.toLowerCase() || '';
@@ -764,74 +896,64 @@ export function formatCreateProjectReply(
                 : /#fff(?:fff)?\b/i.test(bgHex) || !bgHex ? 'plain white blank page'
                   : 'plain blank page'
     );
-    body = [
-      `Here you go — I built a **${colorHint}** for **${displayName}**. Nothing else on it yet.`,
-      '',
-      'Click **Live** under the chat to see what I built, or tell me what to add next.',
-    ].join('\n');
-  } else if (livePreview && codeVerified) {
-    body = [
-      `Here you go — **${displayName}** is up. Files are on disk, install finished, and Live is ready.`,
-      '',
-      'Click **Live** under the chat to see it, or tell me what to tweak.',
-    ].join('\n');
-  } else if (livePreview) {
-    body = [
-      `Here you go — **${displayName}** is on disk and Live is open. Tell me what to tighten if anything looks off.`,
-      '',
-      'Click **Live** under the chat to see it, or say what to fix.',
-    ].join('\n');
-  } else if (bootstrap?.npmPending) {
-    body = [
-      `Created **${displayName}** — finishing setup (installing packages).`,
-      '',
-      'Live unlocks when Ready. If it stalls, say **install npm dependencies**.',
-    ].join('\n');
-  } else if (bootstrap?.npmInstalled === false) {
-    body = [
-      `Got **${displayName}** on disk, but install did not finish — Live stays locked until it does.`,
-      '',
-      bootstrap.bootstrapNote || 'Say **install npm dependencies** and I will retry.',
-    ].filter(Boolean).join('\n');
-  } else if (intent.kind === 'python') {
-    body = [
-      `**${displayName}** is on disk.`,
-      '',
-      'We can dig into `app/main.py` next, or you can tell me what to build.',
-    ].join('\n');
-  } else if (hasPackageJson || projectUsesNpm(intent.kind)) {
-    // Vite/npm apps must never claim casual success without Live evidence.
-    body = [
-      `**${displayName}** is on disk, but Live did not verify.`,
-      '',
-      '- Project files written on disk',
-      bootstrap?.npmInstalled !== true
-        ? '- Dependencies are not installed yet'
-        : '- Dependencies may be installed, but Live evidence did not pass',
-      '- Live stays locked until mount + console + smoke verify',
-      '',
-      bootstrap?.bootstrapNote
-        || 'Tell me what to fix, or click **Live** under the chat to retry. I will not claim success until Live verifies.',
-    ].filter(Boolean).join('\n');
-  } else if (isStatic) {
-    body = [
-      `Created **${displayName}**.`,
-      '',
-      '- Project files written on disk',
-      '',
-      bootstrap?.bootstrapNote
-        || 'Click **Live** when it appears under the chat, or tell me what to change next.',
-    ].filter(Boolean).join('\n');
-  } else {
-    body = [
-      `Created **${displayName}**.`,
-      '',
-      '- Project files written on disk',
-      '',
-      'Tell me what you want to change next.',
-    ].join('\n');
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'blank',
+      blankHint: colorHint,
+      grantHint: result.grantHint,
+    });
   }
-
-  return `${body}${result.grantHint ? `\n\n_${result.grantHint}_` : ''}`;
+  if (livePreview && codeVerified) {
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'ready',
+      grantHint: result.grantHint,
+    });
+  }
+  if (livePreview) {
+    // Live may mount while brief/quality still fails — never claim full success.
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'live-soft',
+      grantHint: result.grantHint,
+    });
+  }
+  if (bootstrap?.npmPending) {
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'npm-pending',
+      grantHint: result.grantHint,
+    });
+  }
+  if (bootstrap?.npmInstalled === false) {
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'npm-fail',
+      note: bootstrap.bootstrapNote,
+      grantHint: result.grantHint,
+    });
+  }
+  if (intent.kind === 'python') {
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'python',
+      grantHint: result.grantHint,
+    });
+  }
+  if (hasPackageJson || projectUsesNpm(intent.kind)) {
+    return formatCreateHandback({
+      productName: displayName,
+      outcome: 'disk-only',
+      note: bootstrap?.bootstrapNote,
+      grantHint: result.grantHint,
+    });
+  }
+  void isStatic;
+  return formatCreateHandback({
+    productName: displayName,
+    outcome: 'static',
+    note: bootstrap?.bootstrapNote,
+    grantHint: result.grantHint,
+  });
 }
 

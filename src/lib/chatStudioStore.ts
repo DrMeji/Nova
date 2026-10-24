@@ -59,10 +59,7 @@ async function pathLooksReal(absPath: string | null | undefined): Promise<boolea
   }
 }
 
-function studioPathJoin(root: string, name: string): string {
-  const sep = root.includes('\\') ? '\\' : '/';
-  return `${root.replace(/[/\\]+$/, '')}${sep}${name}`;
-}
+
 
 /**
  * Resolve THIS chat's project folder.
@@ -322,8 +319,19 @@ function chatCodePillKey(chatId: string) {
 export function setChatCodePill(chatId: string, on = true) {
   if (!chatId) return;
   try {
-    if (on) localStorage.setItem(chatCodePillKey(chatId), '1');
-    else localStorage.removeItem(chatCodePillKey(chatId));
+    const key = chatCodePillKey(chatId);
+    const prev = localStorage.getItem(key) === '1';
+    const next = Boolean(on);
+    if (next) localStorage.setItem(key, '1');
+    else if (prev) localStorage.removeItem(key);
+    else return;
+    // Notify shell so Code pill re-renders without a full route remount.
+    // Never opens the overlay — pill visibility only (manual click opens Code).
+    try {
+      window.dispatchEvent(new CustomEvent('NOVA:chat-code-pill', {
+        detail: { chatId, on: next },
+      }));
+    } catch { /* ignore */ }
   } catch {
     /* ignore */
   }

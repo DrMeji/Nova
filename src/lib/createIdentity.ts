@@ -5,6 +5,7 @@
 
 import { premiumWebCraftRules } from '@/lib/createEnsemble';
 import { detectLayoutReference } from '@/lib/layoutReference';
+import { atelierLeatherHeroDataUrl } from '@/lib/atelierLeatherPlate';
 
 function premiumWebCraftRulesSafe(brief: string): string[] {
   try {
@@ -78,9 +79,58 @@ const NEUTRAL: CreatePalette = {
   line: 'rgba(232, 238, 244, 0.14)',
 };
 
+/**
+ * True when the brief asks for parchment / soft-paper / cream atelier grounds.
+ * Used to stop dark SaaS CSS heals from stomping invent-floor atelier paint.
+ */
+export function briefWantsLightPaperGround(brief: string): boolean {
+  const t = String(brief || '').toLowerCase();
+  if (!t.trim()) return false;
+  if (/\b(?:not|never|no|avoid)\s+(?:a\s+)?(?:cream|parchment|paper\s+ground|soft\s+paper)\b/.test(t)) {
+    return false;
+  }
+  // Dark product UIs win unless the ask also names parchment/paper explicitly.
+  if (
+    /\b(?:dark\s+saas|oled|charcoal\s+ui|navy|harbor|seafoam|gin|whisky|whiskey|vodka)\b/.test(t)
+    && !/\b(?:parchment|cream\s+paper|soft\s+paper|paper\s+ground)\b/.test(t)
+  ) {
+    return false;
+  }
+  if (/\b(?:parchment|soft\s+paper|paper\s+ground|cream\s+paper|oatmeal\s+paper|leather[- ]?goods|warm\s+brass|off[- ]?white\s+paper)\b/.test(t)) {
+    return true;
+  }
+  if (/\batelier\b/.test(t) && /\b(?:parchment|cream|paper|brass|leather|bags?|shop)\b/.test(t)) {
+    return true;
+  }
+  if (
+    /\bcream\b/.test(t)
+    && /\b(?:website|homepage|landing|bakery|shop|marketing)\b/.test(t)
+    && !/\b(?:hand\s+cream|face\s+cream|body\s+cream|skincare|serum|lotion)\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const LIGHT_PAPER_PALETTE: CreatePalette = {
+  bg: '#f3eee4',
+  panel: '#faf7f0',
+  text: '#1a1f1c',
+  muted: '#5c665e',
+  accent: '#8a6b2f',
+  glow: 'rgba(198, 230, 192, 0.42)',
+  btnInk: '#faf7f0',
+  font: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
+  line: 'rgba(26, 31, 28, 0.12)',
+};
+
 /** Brief-aware starter palette — explicit vibe words beat cream/bakery defaults. */
 function paletteFromBrief(brief: string): CreatePalette {
   const t = String(brief || '').toLowerCase();
+  // Parchment / leather atelier — before coffee "espresso" token steals a dark roast UI.
+  if (briefWantsLightPaperGround(brief)) {
+    return { ...LIGHT_PAPER_PALETTE };
+  }
   // Maritime / dark vibes FIRST — ensemble plans often say "avoid cream" and the
   // word "cream" alone used to steal the palette from navy/seafoam briefs.
   if (/\b(?:navy|harbor|seafoam|ocean|maritime|dock|boat|clipper|coast|cove|brine)\b/.test(t)
@@ -110,7 +160,14 @@ function paletteFromBrief(brief: string): CreatePalette {
       line: 'rgba(238, 246, 239, 0.14)',
     };
   }
-  if (/\b(?:coffee|espresso|roaster|roast)\b/.test(t) && !/\bnot\s+coffee\b/.test(t)) {
+  // "espresso type/ink" is parchment copy — not a coffee roaster site.
+  const espressoInkOnly = /\bespresso\s+(?:type|ink|navy)\b/.test(t)
+    && !/\b(?:coffee|roaster|roast|cafe|café)\b/.test(t);
+  if (
+    !espressoInkOnly
+    && (/\b(?:coffee|roaster|roast)\b/.test(t) || /\bespresso\b/.test(t))
+    && !/\bnot\s+coffee\b/.test(t)
+  ) {
     return {
       bg: '#140e0a',
       panel: '#221810',
@@ -160,17 +217,7 @@ function paletteFromBrief(brief: string): CreatePalette {
       && !/\b(?:not\s+(?:cafe\s+)?sage|avoid\s+sage)\b/.test(t))
   );
   if (wantsCream) {
-    return {
-      bg: '#f3eee4',
-      panel: '#faf7f0',
-      text: '#1a1f1c',
-      muted: '#5c665e',
-      accent: '#8a6b2f',
-      glow: 'rgba(198, 230, 192, 0.42)',
-      btnInk: '#faf7f0',
-      font: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
-      line: 'rgba(26, 31, 28, 0.12)',
-    };
+    return { ...LIGHT_PAPER_PALETTE };
   }
   return { ...NEUTRAL };
 }
@@ -178,12 +225,14 @@ function paletteFromBrief(brief: string): CreatePalette {
 /** Product silhouette kind for designed hero stages — model-agnostic. */
 export type HeroProductKind =
   | 'tea' | 'coffee' | 'bottle' | 'lotion' | 'chocolate' | 'ceramic'
+  | 'bag'
   | 'mic' | 'headphones' | 'guitar' | 'keyboard' | 'mouse'
   | 'device' | 'generic';
 
 /**
  * Pick a product silhouette from brief + name.
  * Spirits win over coffee so "gin · not coffee" never draws a mug.
+ * Leather atelier wins over "espresso type" typography (Oak Latch coffee-bag miss).
  */
 export function detectHeroProductKind(name: string, brief = '', label = ''): HeroProductKind {
   // Scrub negations first — "do not copy Apple" / "not coffee" must not pick silhouettes.
@@ -191,11 +240,26 @@ export function detectHeroProductKind(name: string, brief = '', label = ''): Her
     .replace(/\b(?:do\s+not|don't|dont|never|not|avoid|without)\s+copy\b[^.!?\n]{0,80}\b(?:apple(?:\.com)?|iphone)\b/gi, ' ')
     .replace(/\b(?:not|never|no|without|avoid)\s+(?:a\s+|an\s+)?(?:apple(?:\.com)?|iphone|ipad|mac)\b/gi, ' ')
     .replace(/\bor\s+apple(?:\.com)?\b/gi, ' ')
-    .replace(/\bnot\s+coffee\b/gi, ' ');
+    .replace(/\bnot\s+coffee\b/gi, ' ')
+    // "espresso type / espresso navy / espresso ink" is parchment copy — not a roaster.
+    .replace(/\bespresso\s+(?:type|ink|navy)\b/gi, ' ');
   const blob = scrubbed;
   const ceramics = /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|plateware|dinnerware|clay)\b/i.test(blob);
   // Ceramics before spirits/tea — "ceramic wine tumblers" / "biscuit tin" must not become bottle/tea.
   if (ceramics) return 'ceramic';
+  // Leather-goods atelier BEFORE coffee — "espresso type" + leather must not draw a roast bag.
+  // Negation ("not a leather atelier") must not force bags onto gaming mice / tech.
+  const leatherNegated = /\b(?:not|no|never|without|unlike|don't|dont|do\s+not)\b[\s\S]{0,40}\b(?:leather|atelier|parchment|satchel|tote|lookbook)\b/i.test(blob);
+  if (
+    !leatherNegated
+    && (
+      /\b(?:leather[- ]?goods|leather\s+atelier|handcrafted\s+bags?|full[- ]?grain|bridle\s+leather|saddle\s+leather|vegetable[- ]?tanned)\b/i.test(blob)
+      || (/\batelier\b/i.test(blob) && /\b(?:bag|bags|leather|parchment|brass|tote|satchel)\b/i.test(blob))
+      || (/\bbags?\b/i.test(blob) && /\b(?:leather|atelier|handcrafted|premium)\b/i.test(blob))
+    )
+  ) {
+    return 'bag';
+  }
   // Audio / instrument glyphs before generic device (never fetch remote stock photos).
   if (/\b(?:microphone|mic\b|condenser|dynamic\s+mic|lavalier|clip[- ]?on|room\s+condenser|desk\s+dynamic|travel\s+clip)\b/i.test(blob)
     || /\bmicora\b/i.test(blob)) {
@@ -305,18 +369,64 @@ export function extractMustHaveFromBrief(brief: string): string[] {
     push('cart or purchase actions from the brief');
   }
   if (/\bchat\b|\bmessag/i.test(t)) push('messaging UI that matches the brief (original — not a clone shell)');
-  if (/\blogin\b|\bsign[\s-]?in\b|\bauth/i.test(t)) push('sign-in / account UI if the brief asks for it');
+  // Word-bound auth only — do NOT match "author" / "authority" substrings.
+  if (/\blogin\b|\bsign[\s-]?in\b|\bauth(?:entication|orize[ds]?|z)?\b/i.test(t)) {
+    push('sign-in / account UI if the brief asks for it');
+  }
   if (/\bdashboard\b/i.test(t)) push('dashboard with real panels from the brief');
   if (/\bmap\b|\blocation\b/i.test(t)) push('location / map affordance from the brief');
-  if (/\btool|neighbor|community\s+garden|shed/i.test(t) && /\b(?:reserv|book|share|borrow)/i.test(t)) {
+  // Tool-lending only — do NOT match "polished" via bare "shed", or "book cards" alone.
+  if (
+    (/\b(?:tool\s+(?:library|share|lending)|neighbor(?:hood)?\s+tool|community\s+garden|tool\s+shed)\b/i.test(t)
+      || (/\btools?\b/i.test(t) && /\b(?:reserv|borrow|share|lend)\b/i.test(t)))
+    && !/\b(?:book\s+cards?|reading\s+shelf|title\s*\+?\s*author)\b/i.test(t)
+  ) {
     push('browseable tool / item list from the brief');
   }
   if (/\brestaurant/i.test(t) && /\b(?:any|search|pick|choose|list|browse)/i.test(t)) {
     push('multi-restaurant browse/search — not a single restaurant landing');
   }
 
+  // Editorial / marketing landing must-haves (peers extract these before invent).
+  if (/\b(?:soft\s+paper|paper\s+background|oatmeal|cream\s+paper|off[- ]?white\s+paper)\b/i.test(t)) {
+    push('soft paper / light paper background (not dark neon tech shell)');
+  }
+  if (/\b(?:ink\s+navy|deep\s+(?:ink\s+)?navy|navy\s+type|navy\s+text)\b/i.test(t)) {
+    push('deep ink navy type / text color from the brief');
+  }
+  if (/\b(?:warm\s+brass|brass\s+accent|brass)\b/i.test(t)) {
+    push('warm brass accent color from the brief');
+  }
+  if (/\b(?:full[- ]?bleed|quiet\s+hero|hero\s+with\s+the\s+brand|brand[- ]?first\s+hero)\b/i.test(t)
+    || (/\bhero\b/i.test(t) && /\b(?:brand|name|title)\b/i.test(t))) {
+    push('full-bleed quiet hero with the brand name in first viewport');
+  }
+  // "not Book One / Card one" on leather invents must NOT force a reading-shelf must-have.
+  const forbidsBookLadder = /\bnot\s+book\s+one\b|\bavoid\s+book\s+one\b|\bno\s+book\s+one\b/i.test(t);
+  const leatherGoodsAsk = /\b(?:leather[- ]?goods|leather\s+atelier|handcrafted\s+bags?|bags?\s+with|satchel|weekender|tote)\b/i.test(t);
+  if (
+    !forbidsBookLadder
+    && !leatherGoodsAsk
+    && (/\b(?:reading\s+shelf|book\s+shelf|bookshelf|book\s+cards?|grid\s+of\s+\d+\s+book)\b/i.test(t)
+      || (/\bbooks?\b/i.test(t) && /\b(?:grid|cards?|shelf|title\s*\+\s*author|title and author)\b/i.test(t)))
+  ) {
+    push('reading shelf / book grid with title + author cards from the brief');
+  }
+  if (leatherGoodsAsk && /\bgrid\s+of\s+\d+\s+product/i.test(t)) {
+    push('product grid with real bag names + material lines from the brief');
+  }
+  const gridN = t.match(/\bgrid\s+of\s+(\d+)\s+/i)?.[1]
+    || t.match(/\b(\d+)\s+book\s+cards?\b/i)?.[1];
+  if (gridN) push(`exactly ${gridN} cards/items in the primary grid`);
+  if (/\b(?:polished\s+single\s+page|single\s+page|one\s+page)\b/i.test(t)) {
+    push('polished single-page site (not a multi-route app shell)');
+  }
+  if (/\b(?:not\s+neon|no\s+neon|not\s+tech|not\s+a\s+todo|not\s+todo)\b/i.test(t)) {
+    push('avoid neon/tech/todo twin shells — match this brief only');
+  }
+
   // Keep short — polish prompt stays brief-led.
-  return out.slice(0, 8);
+  return out.slice(0, 12);
 }
 
 /**
@@ -580,7 +690,7 @@ export function svgHeroDataUrl(
   // F&B / product silhouettes always win. "hero with product visual" / photo-query labels
   // used to trip the Apple phone stage because `product` appeared in the label/category.
   const fnbKind = kind === 'bottle' || kind === 'coffee' || kind === 'tea'
-    || kind === 'lotion' || kind === 'chocolate' || kind === 'ceramic';
+    || kind === 'lotion' || kind === 'chocolate' || kind === 'ceramic' || kind === 'bag';
   const appleAsk = /\b(?:apple\.com|iphone|ipad|macbook|airpods|product[- ]?home)\b/i.test(`${name} ${brief}`)
     || (/\b(?:apple|mac)\b/i.test(`${name} ${brief}`) && /\b(?:iphone|ipad|watch|airpods|laptop|phone)\b/i.test(brief));
   const deviceCat = /^(?:product|device|phone|laptop|watch|earbuds)$/i.test(cat);
@@ -589,7 +699,17 @@ export function svgHeroDataUrl(
   }
   const mark = escapeXml(name.slice(0, 14));
   let product = '';
-  if (kind === 'tea') {
+  if (kind === 'bag') {
+    // Permanent v2 leather plate (grain + form) — replaces flat toy satchel paths
+    // that made every Latch invent look like the same icon stamp.
+    const forcedBag = /\bbag-variant-([0-3])\b/i.exec(brief);
+    const bagSalt = forcedBag ? Number(forcedBag[1]) % 4 : hue % 8;
+    return atelierLeatherHeroDataUrl({
+      name,
+      brief: brief || `${tag} ${cat}`,
+      variant: bagSalt,
+    });
+  } else if (kind === 'tea') {
     product = `<ellipse cx="800" cy="560" rx="170" ry="32" fill="#1a2220" opacity="0.55"/>
 <rect x="640" y="280" width="320" height="260" rx="36" fill="#e8eef4"/>
 <rect x="670" y="248" width="260" height="52" rx="16" fill="#cfd8e0"/>
@@ -652,17 +772,23 @@ export function svgHeroDataUrl(
 <rect x="680" y="300" width="240" height="10" rx="5" fill="${p.accent}" opacity="0.45"/>
 <text x="800" y="430" text-anchor="middle" fill="#1a222c" font-family="Georgia,serif" font-size="32">${escapeXml(name.slice(0, 16))}</text>`;
   }
-  // Patch H — name-hashed framing + 1–2 brief words as an offline prop chip.
+  // Patch H — name-hashed framing + brief chip.
+  // Leather/bag heroes return early via atelierLeatherHeroDataUrl above, so
+  // this plate path is non-bag only (quiet chrome not needed here).
   const frame = svgPlateFrame(name, p);
   const chip = plateBriefChip(brief);
+  const titleBlock = `<text x="800" y="780" text-anchor="middle" fill="${p.text}" font-family="SF Pro Display, Helvetica Neue, system-ui, sans-serif" font-size="42" font-weight="650">${escapeXml(name)}</text>
+<text x="800" y="830" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="20" opacity="0.65">${escapeXml(tag)}</text>`;
+  const stageBg = p.bg;
+  const stagePanel = p.panel;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
 <defs>
 <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-<stop offset="0%" stop-color="${p.bg}"/><stop offset="100%" stop-color="${p.panel}"/>
+<stop offset="0%" stop-color="${stageBg}"/><stop offset="100%" stop-color="${stagePanel}"/>
 </linearGradient>
 <radialGradient id="glow" cx="50%" cy="42%" r="45%">
 <stop offset="0%" stop-color="hsl(${hue},35%,55%)" stop-opacity="0.35"/>
-<stop offset="100%" stop-color="${p.bg}" stop-opacity="0"/>
+<stop offset="100%" stop-color="${stageBg}" stop-opacity="0"/>
 </radialGradient>
 </defs>
 <rect width="1600" height="900" fill="url(#g)"/>
@@ -670,8 +796,7 @@ export function svgHeroDataUrl(
 ${frame}
 ${product}
 ${chip ? `<text x="800" y="118" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="18" letter-spacing="6" opacity="0.55">${escapeXml(chip.toUpperCase())}</text>` : ''}
-<text x="800" y="780" text-anchor="middle" fill="${p.text}" font-family="SF Pro Display, Helvetica Neue, system-ui, sans-serif" font-size="42" font-weight="650">${escapeXml(name)}</text>
-<text x="800" y="830" text-anchor="middle" fill="${p.text}" font-family="SF Pro Text, Helvetica Neue, system-ui, sans-serif" font-size="20" opacity="0.65">${escapeXml(tag)}</text>
+${titleBlock}
 </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

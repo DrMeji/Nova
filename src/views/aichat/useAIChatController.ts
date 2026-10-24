@@ -18,7 +18,15 @@ import '@/components/ParkedNotice';
 import {
   BACKUP_DOWNLOAD_EVENT,
 } from '@/lib/novaHuntBootstrap';
-import { chatThreadKey, mediaMessageMarkdown, rememberThumb, resolveCreationDataUrl, slimChatContent, loadRecentChats } from '@/lib/recentStore';
+import {
+  chatThreadKey,
+  mediaMessageMarkdown,
+  rememberThumb,
+  resolveCreationDataUrl,
+  slimChatContent,
+  loadRecentChats,
+  isChatDeleted,
+} from '@/lib/recentStore';
 import { looksLikeImageAsk } from '@/lib/chatIntent';
 import '@/lib/chatStudio';
 import {
@@ -49,7 +57,13 @@ import '@/lib/chatAgentApply';
 import '@/lib/novaMultiAgent';
 import '@/lib/novaSkills';
 import '@/lib/novaQuickEdit';
-import { beginChatInflight, endChatInflight, hasChatInflight, isChatInflight } from '@/lib/chatInflight';
+import {
+  beginChatInflight,
+  endChatInflight,
+  hasChatInflight,
+  isChatInflight,
+  listInflightChatIds,
+} from '@/lib/chatInflight';
 import '@/lib/nsfwGate';
 import { arkSelfHarmBlockedReply, looksLikeArkSelfHarmAsk } from '@/lib/novaSelfGuard';
 import {
@@ -87,7 +101,11 @@ import '@/lib/chatCreateBrief';
 import '@/lib/chatIdeaIntent';
 import { hasActiveWorkspace } from '@/lib/chatAgentTurn';
 
-import { clearChatTurnStatus, forgetFinishedChatTurnStatus } from '@/lib/chatTurnStatusStore';
+import {
+  clearChatTurnStatus,
+  forgetFinishedChatTurnStatus,
+  getChatTurnStatus,
+} from '@/lib/chatTurnStatusStore';
 import { clearPendingStudioBind, writePendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
 import { useCreateJob } from '@/hooks/useCreateJob';
@@ -170,6 +188,9 @@ export function useAIChatController() {
   const effectiveChatId = shouldForceNewChat ? undefined : chatRoute?.chatId;
 
   const [loading, setLoading] = useState(() => {
+    // Blank New Chat must start ready — remount after History delete used to leave
+    // loading=true and hide the composer until an effect raced clear.
+    if (route.name === 'chat' && !effectiveChatId) return false;
     // Sync-load the active Recent thread so clicking Recent doesn't flash blank.
     if (route.name === 'chat' && effectiveChatId) {
       try {
@@ -1045,41 +1066,109 @@ export function useAIChatController() {
     return () => window.removeEventListener('NOVA:new-chat', onNew);
   }, [navigate]);
 
-  // After bulk History delete: unlock composer immediately (don't leave readOnly/generating stuck).
+  // Returning to Chat (e.g. after History delete → navigate) must never leave the
+  // Loading shell or a deleted-thread busy flag covering the textarea.
   useEffect(() => {
-    const onBulkDeleted = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ chatIds?: string[] }>).detail;
-      const deleted = new Set((detail?.chatIds || []).map(String).filter(Boolean));
+    if (route.name !== 'chat') return;
+    const chatId = route.chatId;
+    if (chatId && isChatDeleted(chatId)) return; // handled by load effect → blank chat
+    if (!chatId) {
+      setLoading(false);
+      setThreadSwitching(false);
+      // Blank canvas: hide Stop unless a background non-view gen is intentionally live.
+      const bgLive = Boolean(
+        activeGenChatIdRef.current
+        && (generatingRef.current || isChatInflight(activeGenChatIdRef.current)),
+      );
+      if (!bgLive) {
+        setGenerating(false);
+      }
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+    }
+  }, [route]);
+
+  // After History/sidebar chat delete: permanently unlock the composer.
+  // Prior bug: only unlocked when deleted id matched view/gen refs — stale inflight,
+  // legacy beginChatInflight(), stuck loading, or deleted-chat re-navigation left the
+  // textarea unusable ("timing out" / cannot type) after delete.
+  useEffect(() => {
+    const unlockComposerAfterDelete = (deletedIds: string[]) => {
+      const deleted = new Set((deletedIds || []).map(String).filter(Boolean));
       const viewing = routeChatIdRef.current || persistChatIdRef.current || null;
       const genId = activeGenChatIdRef.current;
       const hitView = Boolean(viewing && deleted.has(viewing));
       const hitGen = Boolean(genId && deleted.has(genId));
-      if (!hitView && !hitGen && deleted.size === 0) {
-        // Still refocus — bulk wipe can steal focus / jam the main thread briefly.
-        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
-        return;
+
+      // Always end inflight slots for deleted chats (and drain legacy leftovers).
+      for (const id of deleted) {
+        try { endChatInflight(id); } catch { /* ignore */ }
       }
-      if (hitGen || hitView) {
+      try {
+        const status = getChatTurnStatus();
+        if (!status || (status.chatId && deleted.has(status.chatId)) || hitView || hitGen) {
+          clearChatTurnStatus();
+        }
+      } catch { /* ignore */ }
+      try {
+        const rawInflight = sessionStorage.getItem('NOVA:inflight-media');
+        if (rawInflight) {
+          const inflight = JSON.parse(rawInflight) as { chatId?: string };
+          if (!inflight?.chatId || deleted.has(String(inflight.chatId))) {
+            sessionStorage.removeItem('NOVA:inflight-media');
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Unlock whenever the deleted set touched this view/gen, OR there is no remaining
+      // live work for a non-deleted chat (covers legacyCount / orphaned generatingRef).
+      const otherLive = Boolean(
+        genId
+        && !deleted.has(genId)
+        && (generatingRef.current || isChatInflight(genId)),
+      ) || listInflightChatIds().some((id) => !deleted.has(id));
+
+      if (hitGen || hitView || !otherLive) {
         generatingRef.current = false;
         activeGenChatIdRef.current = null;
         setGenerating(false);
-        try {
-          clearChatTurnStatus();
-        } catch { /* ignore */ }
-        if (hitGen && genId) endChatInflight(genId);
-        if (hitView && viewing) endChatInflight(viewing);
+        // Drain legacy beginChatInflight() counters that keep keepChatAlive / Stop stuck.
+        if (!otherLive) {
+          try {
+            while (hasChatInflight()) endChatInflight();
+          } catch { /* ignore */ }
+        }
       }
-      if (hitView) {
+
+      if (hitView || (viewing && deleted.has(viewing))) {
         setMessages([]);
         messagesRef.current = [];
+        messagesChatIdRef.current = null;
         persistChatIdRef.current = null;
         routeChatIdRef.current = undefined;
       }
-      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+
+      // Never leave the Loading-chat shell up after a wipe (hides the composer).
+      setLoading(false);
+      setThreadSwitching(false);
+      setDropHint(null);
+      stopComposerDictation();
+
+      // Focus after History→Chat paint; chat may still be aria-hidden for one frame.
+      const focus = () => focusComposerIfSafe(textareaRef.current);
+      requestAnimationFrame(() => {
+        focus();
+        window.setTimeout(focus, 50);
+        window.setTimeout(focus, 200);
+      });
+    };
+
+    const onBulkDeleted = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ chatIds?: string[] }>).detail;
+      unlockComposerAfterDelete(detail?.chatIds || []);
     };
     window.addEventListener('NOVA:chats-bulk-deleted', onBulkDeleted);
     return () => window.removeEventListener('NOVA:chats-bulk-deleted', onBulkDeleted);
-  }, []);
+  }, [stopComposerDictation]);
 
   useEffect(() => {
     if (mode !== 'voice') {
@@ -1251,6 +1340,23 @@ export function useAIChatController() {
     );
 
     if (route.chatId) {
+      // Tombstoned chat (just deleted from History) — never restore busy chrome on it.
+      if (isChatDeleted(route.chatId)) {
+        try { endChatInflight(route.chatId); } catch { /* ignore */ }
+        generatingRef.current = false;
+        activeGenChatIdRef.current = null;
+        setGenerating(false);
+        setLoading(false);
+        setThreadSwitching(false);
+        setMessages([]);
+        messagesRef.current = [];
+        messagesChatIdRef.current = null;
+        persistChatIdRef.current = null;
+        routeChatIdRef.current = undefined;
+        navigate({ name: 'chat', mode: route.mode && route.mode !== 'general' ? route.mode : undefined });
+        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+        return;
+      }
       const inFlight = Boolean(
         (generatingRef.current && activeGenChatIdRef.current === route.chatId)
         || isChatInflight(route.chatId),
@@ -1388,10 +1494,20 @@ export function useAIChatController() {
       pinMessagesToBottom('auto');
 
       void (async () => {
+        const abortSwitch = () => {
+          setThreadSwitching(false);
+          setLoading(false);
+        };
         try {
-          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) {
+            abortSwitch();
+            return;
+          }
         } catch {
-          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) {
+            abortSwitch();
+            return;
+          }
         }
 
         const liveGenHere = Boolean(
@@ -1440,7 +1556,10 @@ export function useAIChatController() {
           setPreviewUrl(null);
           previewUrlRef.current = null;
         }
-        if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+        if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) {
+          abortSwitch();
+          return;
+        }
         setCodePillSticky(hasChatCodePill(switchChatId));
         setPlanPillSticky(hasChatPlanPill(switchChatId));
         // Clear stale generating placeholders from a crashed prior turn.
@@ -1524,7 +1643,11 @@ export function useAIChatController() {
     try {
       const raw = sessionStorage.getItem('NOVA:inflight-media');
       const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
-      if (
+      if (inflight?.chatId && isChatDeleted(inflight.chatId)) {
+        // Deleted chat leftover — never re-navigate into a tombstoned id (locks composer).
+        sessionStorage.removeItem('NOVA:inflight-media');
+        try { endChatInflight(inflight.chatId); } catch { /* ignore */ }
+      } else if (
         inflight?.chatId
         && inflight.mode
         && (route.mode === inflight.mode || (!route.mode && inflight.mode === 'general'))

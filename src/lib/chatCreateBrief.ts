@@ -4,7 +4,7 @@
  */
 
 import { looksLikeInPlaceRebuildAsk, looksLikeProjectBuildAsk } from './chatBuildIntent';
-import { looksLikeConversationalPlanningAsk, looksLikeGreenfieldIdea, wantsClarifyBeforeCreate, wantsPlanningOnly } from './chatIdeaIntent';
+import { looksLikeGreenfieldIdea, wantsClarifyBeforeCreate, wantsPlanningOnly } from './chatIdeaIntent';
 
 const CREATE_RE =
   /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?)\b/i;
@@ -13,7 +13,7 @@ const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
 
 const PROJECT_NOUN_RE =
-  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter)\b/i;
+  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|cli|command[\s-]?line|api|server|backend|library|package|script|tool|game|extension|service|dashboard)\b/i;
 
 export function normalizeChatIntentText(text: string): string {
   return String(text || '').trim();

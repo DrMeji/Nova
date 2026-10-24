@@ -32,9 +32,8 @@ export function TokenUsageRing({
   const mdl = Math.max(0, Math.min(1, modelRatio));
   const ctxPct = displayUsagePercent(ctx);
   const mdlPct = displayUsagePercent(mdl);
-  /** Combined load — average of context + model pressure. */
+  /** Combined load — average of context + model pressure. Always show N% (0% ok while working). */
   const combinedPct = displayUsagePercent(Math.min(1, (ctx + mdl) / 2));
-  const showPct = !working;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -95,11 +94,11 @@ export function TokenUsageRing({
               ? 'text-amber-300'
               : 'text-content-secondary'
         } ${className}`}
-        title={title || (working ? `${label} · working` : `${label} · ${combinedPct}% session budget`)}
-        aria-label={working ? `${label}, working` : `${label}, ${combinedPct} percent session budget`}
+        title={title || `${label} · ${combinedPct}% session budget${working ? ' · working' : ''}`}
+        aria-label={`${label}, ${combinedPct} percent session budget${working ? ', working' : ''}`}
         aria-expanded={open}
       >
-        {showPct ? `${combinedPct}%` : '…'}
+        {`${combinedPct}%`}
       </button>
 
       {open && pos && createPortal(

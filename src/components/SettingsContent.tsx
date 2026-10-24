@@ -4,56 +4,32 @@ import { SettingsModels } from '@/components/SettingsModels';
 import { SettingsPrivacy } from '@/components/SettingsPrivacy';
 import { SettingsAdvanced } from '@/components/SettingsAdvanced';
 import type { SettingsSharedCtx } from '@/components/SettingsShared';
+import { HomeControlsPanel } from '@/components/HomeControlsPanel';
 
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useRouter } from '@/context/RouterContext';
-import {
-  getLocalPrefs,
-  getProviderApiKeys,
-  setLocalPrefs,
-  setProviderApiKey,
-  type AccentPref,
-  type AiModePref,
-  type DensityPref,
-  type LocalPrefs,
-} from '@/lib/localPrefs';
+import { getLocalPrefs, getProviderApiKeys, setLocalPrefs, type LocalPrefs } from '@/lib/localPrefs';
 import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { clearSetupCompleted } from '@/lib/setup';
+import '@/lib/setup';
 import { hydratePrefsFromWorkspaceGrants, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
-import { formatNovaId } from '@/lib/novaUserId';
-import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import {
-  detectHardware,
-  getAccurateHardware,
-  getHardwareClass,
-  loadHardwareSnapshot,
-  type HardwareInfo,
-} from '@/lib/api';
-import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
-import {
-  User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
-  FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Sparkles,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, AudioLines,
-} from 'lucide-react';
+import '@/lib/novaUserId';
+import '@/lib/novaDevAccount';
+import { detectHardware, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
+import '@/lib/ggufContext';
+import { User, Palette, Zap, Boxes, Cloud, Shield, HardDrive, FolderKanban, Lock, RefreshCw, Check, Monitor, AudioLines } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/novaEngine';
-import { NovaMark } from '@/components/NovaMark';
-import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
-import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
-import { probeProviderKey } from '@/lib/providerSpeed';
-import { setCloudProviderEnabled } from '@/lib/cloudSources';
-import {
-  getEnabledSkillIds,
-  listBuiltinSkillPacks,
-  toggleSkillEnabled,
-  type BuiltinNovaSkillId,
-} from '@/lib/novaSkills';
-import { isNovaDevSession } from '@/lib/novaRuntime';
+import '@/components/NovaMark';
+import '@/lib/pinLock';
+import '@/lib/twoFactor';
+import '@/lib/providerSpeed';
+import '@/lib/cloudSources';
+import { getEnabledSkillIds, type BuiltinNovaSkillId } from '@/lib/novaSkills';
+import '@/lib/novaRuntime';
 import { getBrainUrl } from '@/lib/brainUrl';
-import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import '@/components/SettingsSystemHealth';
+import '@/components/BrandMark';
 import { useSocial } from '@/context/SocialContext';
 import { supabase } from '@/lib/supabase';
 
@@ -571,6 +547,61 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           {(['storage','projects','updates'].includes(activeSection)) && (
             <SettingsAdvanced ctx={settingsCtx} />
           )}
+          {activeSection === 'ai' ? (
+            <div className="mt-8">
+              <HomeControlsPanel
+                home="settings-ai"
+                title="AI helpers"
+                blurb="Open a suite to see what’s active. Tool safety, seats, and skills start On where safe."
+                peerBoxes
+                defaultOn
+              />
+            </div>
+          ) : null}
+          {activeSection === 'privacy' ? (
+            <div className="mt-8">
+              <HomeControlsPanel
+                home="settings-privacy"
+                title="Privacy helpers"
+                blurb="Open a suite to see what’s active. Air-gap / local-only stay as you set them in AI mode."
+                peerBoxes
+                defaultOn
+              />
+            </div>
+          ) : null}
+          {activeSection === 'projects' ? (
+            <div className="mt-8">
+              <HomeControlsPanel
+                home="settings-projects"
+                title="Project helpers"
+                blurb="Open a suite to see what’s active — rules and safe env editing."
+                peerBoxes
+                defaultOn
+              />
+            </div>
+          ) : null}
+          {activeSection === 'providers' ? (
+            <div className="mt-8">
+              <HomeControlsPanel
+                home="settings-providers"
+                title="Provider helpers"
+                blurb="Open a suite to see what’s active. Keys still live in the rows above."
+                peerBoxes
+                defaultOn
+              />
+            </div>
+          ) : null}
+          {activeSection === 'storage' ? (
+            <div className="mt-8">
+              <HomeControlsPanel
+                home="settings-advanced"
+                title="Advanced helpers"
+                blurb="Open a suite to see what’s active for storage and advanced shell tools."
+                peerBoxes
+                defaultOn
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

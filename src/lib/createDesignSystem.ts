@@ -14,6 +14,7 @@ import {
 } from '@/lib/createProductPlan';
 import { formatThinCreateCraftRules, isThinCreatePath, thinBriefWantsDepth } from '@/lib/createThinPath';
 import { createIdentityFromBrief, svgHeroDataUrl } from '@/lib/createIdentity';
+import { resolveArtifactKind, type ArtifactKind } from '@/lib/createArtifactKind';
 
 export type CompositionFamily =
   | 'marketing-bands'
@@ -603,11 +604,13 @@ export function formatOriginalCraftRules(opts: {
   brief: string;
   productName?: string;
   freshnessKey?: string;
+  artifactKind?: ArtifactKind;
 }): string[] {
   if (isThinCreatePath()) {
     return formatThinCreateCraftRules({
       brief: opts.brief,
       productName: opts.productName,
+      artifactKind: opts.artifactKind || resolveArtifactKind(opts.brief),
     });
   }
   const name = String(opts.productName || '').trim();
@@ -720,6 +723,11 @@ export function ensureDesignedHeroVisual(
   const app = String(files[appKey] || '');
   const css = String(files['src/App.css'] || '');
   const sections = compositionalSectionBlob(files);
+  // Modern atelier shells own hero art (or typography-only rail/commission).
+  // Injecting the same bag SVG into every shell made Latch invents look copied (Prism).
+  if (/data-nova-shell=["'](?:lookbook|rail|feature|strip|commission)["']/i.test(`${app}\n${sections}`)) {
+    return { files, changed: false };
+  }
   if (!app.trim() || heroVisualRendered(app, css, sections)) return { files, changed: false };
   if (/<(?:img|video)\b[^>]*(?:className=["'][^"']*hero|alt=["'][^"']*(?:hero|product))/i.test(`${app}\n${sections}`)) {
     return { files, changed: false };

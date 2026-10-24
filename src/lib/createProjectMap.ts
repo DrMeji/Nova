@@ -1,7 +1,32 @@
 /**
  * Ranked project map for craft/edit (Aider-inspired, no tree-sitter dependency).
  * Scores files by brief keyword hits + centrality (App/css/main/package).
+ * Cheap symbol skim (exports / components) fills the Missing "repo map" gap.
  */
+
+function skimSymbols(text: string, limit = 8): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (name: string) => {
+    const n = String(name || '').trim();
+    if (!n || n.length > 64 || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  };
+  for (const m of text.matchAll(
+    /\b(?:export\s+(?:default\s+)?(?:async\s+)?function|export\s+(?:default\s+)?(?:const|class)|function|const)\s+([A-Z][A-Za-z0-9_]*)/g,
+  )) {
+    push(m[1]);
+    if (out.length >= limit) break;
+  }
+  if (out.length < limit) {
+    for (const m of text.matchAll(/\b(?:export\s+(?:async\s+)?function|function)\s+([a-z][A-Za-z0-9_]*)/g)) {
+      push(m[1]);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
 
 export function buildRankedProjectMap(
   files: Record<string, string>,
@@ -14,11 +39,12 @@ export function buildRankedProjectMap(
     .split(/[^a-z0-9_]+/)
     .filter((t) => t.length > 2)
     .slice(0, 40);
-  const rows: Array<{ path: string; score: number; peek: string }> = [];
+  const rows: Array<{ path: string; score: number; peek: string; symbols: string[] }> = [];
 
   for (const [raw, body] of Object.entries(files || {})) {
     const path = raw.replace(/\\/g, '/');
     if (/node_modules|dist\/|\.lock$/i.test(path)) continue;
+    if (/^\.__nova/i.test(path)) continue;
     const text = String(body || '');
     let score = 0;
     if (/^src\/App\.(jsx|tsx)$/i.test(path)) score += 50;
@@ -26,6 +52,9 @@ export function buildRankedProjectMap(
     if (/^package\.json$/i.test(path)) score += 20;
     if (/^src\/main\./i.test(path)) score += 15;
     if (/index\.html$/i.test(path)) score += 12;
+    if (/^src\/(components|sections|data)\//i.test(path)) score += 8;
+    const symbols = /\.(jsx?|tsx?)$/i.test(path) ? skimSymbols(text) : [];
+    if (symbols.length) score += Math.min(12, symbols.length * 2);
     const lower = `${path}\n${text.slice(0, 4000)}`.toLowerCase();
     for (const t of tokens) {
       if (lower.includes(t)) score += 2;
@@ -34,7 +63,8 @@ export function buildRankedProjectMap(
     rows.push({
       path,
       score,
-      peek: text.replace(/\s+/g, ' ').trim().slice(0, 120),
+      peek: text.replace(/\s+/g, ' ').trim().slice(0, 100),
+      symbols,
     });
   }
 
@@ -50,9 +80,12 @@ export function buildRankedProjectMap(
   } catch { /* ignore */ }
 
   return [
-    '## Ranked project map',
+    '## Ranked project map (symbols)',
     scripts ? `package scripts: ${scripts}` : '',
-    ...top.map((r) => `- ${r.path} (score ${r.score}) · ${r.peek}${r.peek.length >= 120 ? '…' : ''}`),
+    ...top.map((r) => {
+      const sym = r.symbols.length ? ` · [${r.symbols.slice(0, 6).join(', ')}]` : '';
+      return `- ${r.path} (score ${r.score})${sym} · ${r.peek}${r.peek.length >= 100 ? '…' : ''}`;
+    }),
   ].filter(Boolean).join('\n');
 }
 

@@ -79,9 +79,10 @@ export function createPolishAttemptBudgetMs(brief?: string): number {
 }
 
 export function createBudgetExceededReply(profile: CreateBudgetProfile, productName: string): string {
+  const totalMinutes = profile === 'simple' ? 6 : profile === 'complex' ? 14 : 10;
   return [
-    `**Stopped the create wall for ${productName || 'this project'}** (${profile} profile).`,
+    `**The create time limit was reached for ${productName || 'this project'}** (${profile} profile, ${totalMinutes} minute session cap).`,
     '',
-    'Say **keep building** to continue, or tell me what to change.',
+    'The latest saved files are still available. Say **keep building** to continue from them, or tell me what to change.',
   ].join('\n');
 }

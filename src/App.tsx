@@ -18,6 +18,12 @@ import { McpView } from '@/views/McpView';
 import { BrainView } from '@/views/BrainView';
 import { Settings } from '@/views/Settings';
 import { NotificationsView } from '@/views/NotificationsView';
+import { MissingItemsView } from '@/views/MissingItemsView';
+import { AgentsView } from '@/views/AgentsView';
+import { TestDeviceView } from '@/views/TestDeviceView';
+import { isVmParked } from '@/lib/featurePark';
+import { AutomationsView } from '@/views/AutomationsView';
+import { IntegrationsView } from '@/views/IntegrationsView';
 import { SocialProvider } from '@/context/SocialContext';
 import { PinLockGate } from '@/components/PinLockGate';
 import { isCodeTabEnabled, isSocialParked } from '@/lib/featurePark';
@@ -128,6 +134,13 @@ function AppRoutes() {
           : <LazyPane><MessageView /></LazyPane>;
         break;
       case 'notifications': other = <NotificationsView />; break;
+      case 'missing-items': other = <MissingItemsView />; break;
+      case 'agents': other = <AgentsView />; break;
+      case 'automations': other = <AutomationsView />; break;
+      case 'integrations': other = <IntegrationsView />; break;
+      case 'test-device':
+        other = isVmParked() ? null : <TestDeviceView />;
+        break;
       case 'call':
         other = isSocialParked('message')
           ? null
@@ -163,12 +176,20 @@ function AppRoutes() {
 }
 
 function AppContent() {
-  const { user, profile, loading, bypass } = useAuth();
+  const { user, loading, bypass } = useAuth();
   const [setupTick, setSetupTick] = useState(0);
 
   useEffect(() => {
     // Clear stale inflight from a prior crash / HMR so Chat is not stuck mounted.
     cancelAll();
+  }, []);
+
+  useEffect(() => {
+    let uninstall: (() => void) | undefined;
+    void import('@/lib/inventClickToSource').then((m) => {
+      uninstall = m.installClickToSourceHost();
+    });
+    return () => uninstall?.();
   }, []);
 
   useEffect(() => {

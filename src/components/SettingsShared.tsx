@@ -276,15 +276,40 @@ export function ToggleRow({
   );
 }
 
-export function ThemeCard({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+export function ThemeCard({
+  label,
+  variant,
+  active,
+  onClick,
+}: {
+  label: string;
+  /** Preview swatch — Fun shows tiny color dots; Dark/Light/Gray are solid. */
+  variant: 'fun' | 'dark' | 'light' | 'gray';
+  active: boolean;
+  onClick: () => void;
+}) {
+  const swatch =
+    variant === 'light'
+      ? 'bg-white'
+      : variant === 'gray'
+        ? 'bg-[#141414]'
+        : 'bg-black';
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`p-4 rounded-lg border transition-all ${active ? 'border-content-primary bg-surface-hover' : 'border-surface-border hover:border-surface-border-light'}`}
+      className={`p-4 rounded-lg border transition-all text-left ${active ? 'border-content-primary bg-surface-hover' : 'border-surface-border hover:border-surface-border-light'}`}
     >
-      <div className={`h-16 rounded-md mb-2 border border-surface-border ${label === 'Dark' ? 'bg-black' : 'bg-white'}`}>
-        <div className={`h-3 rounded-t-md ${label === 'Dark' ? 'bg-neutral-800' : 'bg-neutral-100'}`} />
+      <div className={`relative h-16 rounded-md mb-2 border border-surface-border overflow-hidden ${swatch}`}>
+        {variant === 'fun' ? (
+          <span className="absolute inset-0 pointer-events-none" aria-hidden>
+            <span className="absolute left-[18%] top-[28%] h-2.5 w-2.5 rounded-full bg-amber-400/90 blur-[0.5px]" />
+            <span className="absolute right-[22%] top-[38%] h-2 w-2 rounded-full bg-cyan-400/90 blur-[0.5px]" />
+            <span className="absolute left-[40%] bottom-[22%] h-2 w-2 rounded-full bg-violet-400/85 blur-[0.5px]" />
+            <span className="absolute right-[34%] bottom-[30%] h-1.5 w-1.5 rounded-full bg-rose-400/80" />
+          </span>
+        ) : null}
       </div>
       <p className={`text-sm font-medium ${active ? 'text-content-primary' : 'text-content-secondary'}`}>{label}</p>
     </button>

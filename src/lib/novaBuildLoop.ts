@@ -9,6 +9,12 @@ import { runNovaAgentLoop, type AgentLoopResult, type AgentLoopStep } from '@/li
 import { packNovaBuildContext, novaCreateWriteTargets } from '@/lib/novaBuildContext';
 import { modeStatusLabel } from '@/lib/novaStudioModes';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import {
+  type ArtifactKind,
+  isNonWebArtifactKind,
+  resolveArtifactKind,
+  stripWebShellFromNonWebFiles,
+} from '@/lib/createArtifactKind';
 
 export type NovaBuildLoopHost = {
   pushStatus: (label: string, writingPath?: string | null) => void;
@@ -31,7 +37,23 @@ export type NovaBuildLoopOpts = {
   /** Max Ready→fix rounds after the first tool loop. */
   maxFixRounds?: number;
   priorObservations?: string[];
+  /** When set, non-web kinds skip Vite/App Ready gates and use coding craft. */
+  artifactKind?: ArtifactKind | null;
 };
+
+function resolveLoopKind(opts: Pick<NovaBuildLoopOpts, 'brief' | 'artifactKind'>): ArtifactKind {
+  if (opts.artifactKind && opts.artifactKind !== 'unknown') return opts.artifactKind;
+  return resolveArtifactKind(String(opts.brief || ''));
+}
+
+/** Non-web / unknown kinds — never Vite/App invent. Kind decides; markers must not force web-app into code-only. */
+function isCodingLoopNonWeb(opts: Pick<NovaBuildLoopOpts, 'brief' | 'artifactKind'>): boolean {
+  const kind = resolveLoopKind(opts);
+  if (isNonWebArtifactKind(kind)) return true;
+  // Explicit unknown artifact (Go/Rust/mobile/Tauri/Terraform/…) stays code-only.
+  if (opts.artifactKind === 'unknown' || kind === 'unknown') return true;
+  return false;
+}
 
 export type NovaBuildLoopResult = {
   ok: boolean;
@@ -41,6 +63,81 @@ export type NovaBuildLoopResult = {
   usedAgentLoop: true;
   replySummary: string;
 };
+
+/** Docs/lockfile/meta paths — not enough for unknown Ready or “wrote implementation”. */
+const DOCS_OR_META =
+  /(^|\/)(readme|license|licence|changelog|contributing|notice|requirements)(\.[^/]*)?$|\.(md|markdown|rst|txt)$|(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig\.json|manifest\.json|\.gitignore)$/i;
+
+/** Lockfiles / empty package manifests — not enough for unknown Ready by themselves. */
+const MANIFEST_ONLY_RE =
+  /(?:^|\/)(?:go\.mod|go\.sum|cargo\.toml|cargo\.lock|package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pyproject\.toml|poetry\.lock|composer\.json|gemfile(?:\.lock)?|requirements\.txt|\.env(?:\..*)?|tsconfig(?:\.\w+)?\.json)$/i;
+
+/** Non-web tool-loop budget — raised after Ready gates need multi-file implementation. */
+export function codingLoopMaxSteps(
+  loopKind: ArtifactKind,
+  prefs: { agentLoopMaxSteps?: number | string | null },
+): number {
+  const ceiling = loopKind === 'unknown' || loopKind === 'electron' ? 20 : 16;
+  return Math.min(ceiling, Math.max(10, Number(prefs.agentLoopMaxSteps) || 12));
+}
+
+/** Pull a real path out of a step label like “Patch README.md (2 edits)”. */
+export function pathOfWriteHint(hint: string): string {
+  return (String(hint).replace(/\\/g, '/').match(/[\w@./-]+\.[A-Za-z0-9]{1,8}\b|(?:^|\s)(?:Makefile|Dockerfile)\b/) || [''])[0].trim();
+}
+
+function stripSourceNoise(src: string): string {
+  return String(src || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    .replace(/^\s*#.*$/gm, '')
+    .replace(/\s+/g, '');
+}
+
+/**
+ * Unknown Ready needs a real source/config body — not README + go.mod / empty main.go alone.
+ * Config-first briefs (terraform/docker/actions/Makefile) accept a config file ≥20 chars.
+ * Tauri/Capacitor/Ionic/RN/Expo/Flutter keep tiny stubs (≥1 char).
+ */
+export function unknownHasRealSource(
+  files: Record<string, string>,
+  brief: string,
+): boolean {
+  const t = String(brief || '');
+  const configFirst = /\b(?:terraform|dockerfile|docker\s+compose|compose\s+file|github\s+actions?|makefile|homebrew|formula|helm|kustomize|ansible)\b/i.test(t);
+  const tinyOk = /\b(?:tauri|capacitor|ionic|react\s+native|expo|flutter)\b/i.test(t);
+  const paths = Object.keys(files || {}).map((p) => p.replace(/\\/g, '/'));
+  for (const p of paths) {
+    if (DOCS_OR_META.test(p)) continue;
+    const raw = String(files[p] || files[p.replace(/\//g, '\\')] || '');
+    const stripped = stripSourceNoise(raw);
+    if (configFirst && /(?:^|\/)(?:Dockerfile|Makefile|makefile)|\.(?:tf|hcl|ya?ml)$|(?:^|\/)\.github\//i.test(p)) {
+      if (raw.replace(/\s+/g, '').length >= 20) return true;
+    }
+    if (MANIFEST_ONLY_RE.test(p)) continue;
+    if (tinyOk && stripped.length >= 1) return true;
+    if (stripped.length >= 40) return true;
+  }
+  return false;
+}
+
+/** True when the agent loop reported a non-docs write (updated paths or step labels with a code path). */
+export function loopWroteNonMetaCode(lastLoop: {
+  updated?: string[];
+  steps?: Array<{ tool?: string; ok?: boolean; detail?: string; label?: string }>;
+} | null | undefined): boolean {
+  const isCodePath = (p: string) => {
+    const n = String(p).replace(/\\/g, '/');
+    return Boolean(n) && !DOCS_OR_META.test(n) && !MANIFEST_ONLY_RE.test(n);
+  };
+  if ((lastLoop?.updated || []).some((p) => isCodePath(String(p)))) {
+    return true;
+  }
+  return (lastLoop?.steps || []).some((s) => {
+    if (!/^(?:write|patch)$/i.test(String(s.tool || '')) || s.ok === false) return false;
+    return isCodePath(pathOfWriteHint(String(s.detail || s.label || '')));
+  });
+}
 
 /**
  * Structure-first: scaffold UI before heavy design assets.
@@ -114,10 +211,50 @@ export function blankWhitePageFiles(): Record<string, string> {
 
 /** Exported for smokes — create tool-loop system brief. */
 export function buildCreateBrief(opts: NovaBuildLoopOpts): string {
-  const targets = novaCreateWriteTargets(opts.files).join(', ');
+  const kind = resolveLoopKind(opts);
+  const nonWeb = isCodingLoopNonWeb(opts);
   const must = (opts.mustHaves || []).slice(0, 10).map((m, i) => `${i + 1}. ${m}`).join('\n');
+
+  if (nonWeb) {
+    const unknownKind = kind === 'unknown';
+    const paths = Object.keys(opts.files || {})
+      .map((p) => p.replace(/\\/g, '/'))
+      .filter((p) => !p.startsWith('.__') && !p.endsWith('/'));
+    const targets = (
+      paths.filter((p) =>
+        /^(?:bin\/|src\/|tests?\/|extension\.js|manifest\.json|package\.json|requirements\.txt|app\/)/i.test(p)
+      ).slice(0, 12).join(', ')
+      || paths.slice(0, 8).join(', ')
+      || 'project files from the scaffold'
+    );
+    const kindLabel = unknownKind ? 'non-web (stack inferred from the brief)' : kind;
+    return [
+      `Build **${opts.productName}** as a **${kindLabel}** artifact (CODING CREATE — not a website).`,
+      'Nova is free — ship working code for THIS ask. No Vite React App.jsx unless the brief explicitly needs a web UI.',
+      '',
+      '## Brief',
+      opts.brief.slice(0, 3500),
+      '',
+      must ? `## Must-haves\n${must}` : '',
+      '',
+      '## CODING CREATE',
+      `- Artifact kind: **${kindLabel}** — do NOT invent a storefront, landing, hero, CTA, or marketing site.`,
+      unknownKind
+        ? '- No scaffold entry exists for this stack. TOOL: write the real source/config files the brief implies (e.g. main.go + go.mod, Cargo.toml + src/main.rs, *.tf, Dockerfile, build.gradle, *.swift). Never put code in README.md.'
+        : '- Prefer TOOL: write / TOOL: patch on the scaffold entry points already present.',
+      unknownKind ? '' : `- Prefer editing: ${targets}`,
+      '- Then TOOL: ready and TOOL: done. Skip TOOL: assets (no Live preview for this kind).',
+      '',
+      unknownKind
+        ? 'Start with TOOL: list, then TOOL: write the real stack files for this brief.'
+        : 'Start with TOOL: list, then read/edit the real entry file for this artifact.',
+    ].filter(Boolean).join('\n');
+  }
+
+  const targets = novaCreateWriteTargets(opts.files).join(', ');
   const briefLower = String(opts.brief || '').toLowerCase();
-  const isGame = /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino|runner)\b/.test(briefLower);
+  const isGame = kind === 'game'
+    || /\b(?:game|playable|arcade|fps|shooter|canvas\s+game|pong|snake|pac-?man|dino|runner)\b/.test(briefLower);
   const is3d = /\b(?:3d|three\.?js|webgl|modeler|viewport|mesh\s+editor|babylon)\b/.test(briefLower);
   const structureFirst = wantsStructureFirstCreate(opts.brief, opts.productName);
   const tinyStep = /\b(?:blank|plain\s+white|white\s+page|empty\s+page|just\s+a\s+(?:page|background)|nothing\s+else\s+yet|for\s+now)\b/i.test(opts.brief);
@@ -193,12 +330,51 @@ export function buildCreateBrief(opts: NovaBuildLoopOpts): string {
   ].filter(Boolean).join('\n');
 }
 
-async function runReadyAndAssetsCheck(
+/** Exported for smokes — unknown coding workspaces must never hit the website Ready gate. */
+export async function runReadyAndAssetsCheck(
   files: Record<string, string>,
   productName: string,
   brief: string,
   _mustHaves: string[],
+  artifactKind?: ArtifactKind | null,
 ): Promise<{ ok: boolean; reasons: string[] }> {
+  const kind = artifactKind && artifactKind !== 'unknown'
+    ? artifactKind
+    : resolveArtifactKind(brief);
+  // Every unknown artifact is code-only in this loop (isCodingLoopNonWeb / buildCreateBrief).
+  if (isNonWebArtifactKind(kind) || kind === 'unknown') {
+    if (kind === 'unknown') {
+      // Detect website invent BEFORE strip so polluted Acc fails with the right reason.
+      const paths = Object.keys(files || {}).map((p) => p.replace(/\\/g, '/'));
+      const hasSite = paths.some((p) => /^(?:src\/App\.[jt]sx?|index\.html)$/i.test(p));
+      // Tauri / Capacitor / Ionic / RN / Flutter legitimately ship index.html or App entry.
+      const allowSiteShell = /\b(?:tauri|capacitor|ionic|react\s+native|expo|flutter)\b/i.test(brief);
+      const cleaned = stripWebShellFromNonWebFiles(files, kind, brief);
+      const hasCode = unknownHasRealSource(cleaned, brief);
+      const ok = (!hasSite || allowSiteShell) && hasCode;
+      return {
+        ok,
+        reasons: ok
+          ? []
+          : [hasSite && !allowSiteShell
+            ? 'coding workspace grew a website shell — keep it code-only'
+            : 'README-only / manifest-only seed — write real source or config for this stack'],
+      };
+    }
+    const cleaned = stripWebShellFromNonWebFiles(files, kind, brief);
+    const { verifyArtifactFiles } = await import('@/lib/artifactEvidence');
+    const ev = verifyArtifactFiles(cleaned, kind, { requireImplementation: true });
+    return {
+      ok: Boolean(ev.runOk),
+      reasons: ev.runOk ? [] : [ev.runDetail || `${kind} evidence failed`],
+    };
+  }
+  // Electron still uses the Vite renderer Ready gate, but main-process IPC must be real first.
+  if (kind === 'electron') {
+    const { verifyArtifactFiles } = await import('@/lib/artifactEvidence');
+    const ev = verifyArtifactFiles(files, kind, { requireImplementation: true });
+    if (!ev.runOk) return { ok: false, reasons: [ev.runDetail || 'electron evidence failed'] };
+  }
   const {
     previewReadyForBrief,
     looksLikeFillerStubAppSource,
@@ -245,8 +421,11 @@ async function healCreateFiles(
     projectId: string;
     diskRoot?: string | null;
     pushStatus: NovaBuildLoopHost['pushStatus'];
+    artifactKind?: ArtifactKind | null;
   },
 ): Promise<Record<string, string>> {
+  // Non-web / unknown coding artifacts must never get App.css/logo/marketing heals.
+  if (isCodingLoopNonWeb(opts)) return { ...files };
   const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
   const { ensureStylesLinked, createBriefSpecFromAsk } = await import('@/lib/createIdentity');
   const { ensureReactImportForNamespace, ensureJsxHasNoTypeScript } = await import('@/lib/createBuildQuality');
@@ -306,7 +485,16 @@ async function healCreateFiles(
       opts.pushStatus(modeStatusLabel('fix', 'Wiring assets + atmosphere'));
       next = wired.files;
     }
-    if (cssBlobIsThin(next, 1600) && !next['src/App.css']?.includes('novaCompanionSweep') && !next['src/App.css']?.includes('novaAtmosSweep')) {
+    // Modern atelier shells ship their own App.css + section CSS — never paste the
+    // shared companion stamp (same green sweep + horizontal sticky nav on every Latch).
+    const modernShell = /data-nova-shell=["'](?:lookbook|rail|feature|strip|commission)["']/i
+      .test(Object.values(next).join('\n'));
+    if (
+      !modernShell
+      && cssBlobIsThin(next, 1600)
+      && !next['src/App.css']?.includes('novaCompanionSweep')
+      && !next['src/App.css']?.includes('novaAtmosSweep')
+    ) {
       const appBody = String(next[appKey] || '');
       const isStubSplash = appBody.replace(/\s+/g, '').length < 1800
         && !/<(?:section|main|footer|form)\b/i.test(appBody);
@@ -344,20 +532,26 @@ async function healCreateFiles(
 export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<NovaBuildLoopResult> {
   const prefs = getLocalPrefs();
   const maxFix = Math.max(0, Math.min(5, opts.maxFixRounds ?? 2));
-  const packed = packNovaBuildContext(opts.files);
+  const loopKind0 = resolveLoopKind(opts);
+  const nonWeb0 = isCodingLoopNonWeb(opts);
+  // Web pack drops bin/, app/, tests/, manifest — keep full tree for coding artifacts.
+  const packed = nonWeb0 ? { ...opts.files } : packNovaBuildContext(opts.files);
   const allSteps: AgentLoopStep[] = [];
   let files = { ...opts.files, ...packed };
   let observations = [...(opts.priorObservations || [])];
   let lastLoop: AgentLoopResult | null = null;
+  let wroteCodeEver = false;
   let reasons: string[] = [];
 
   const { briefNeedsCreateUiPolish, briefLooksLikeMarketingLanding } = await import('@/lib/createBuildQuality');
   const { looksLikePlayableCanvasGame, looksLikeSpatialApp } = await import('@/lib/freshSpaFromBrief');
-  const richBrief = briefNeedsCreateUiPolish(opts.brief)
+  const richBrief = !nonWeb0 && (
+    briefNeedsCreateUiPolish(opts.brief)
     || briefLooksLikeMarketingLanding(opts.brief)
     || looksLikePlayableCanvasGame(opts.brief)
     || looksLikeSpatialApp(opts.brief)
-    || (opts.mustHaves || []).length >= 3;
+    || (opts.mustHaves || []).length >= 3
+  );
 
   const { arkRoute, routerProviderLabel } = await import('@/lib/novaRouter');
 
@@ -408,19 +602,25 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       };
     }
 
-    const structureFirst = wantsStructureFirstCreate(opts.brief, opts.productName);
+    const loopKind = resolveLoopKind(opts);
+    const nonWeb = isCodingLoopNonWeb(opts);
+    const structureFirst = !nonWeb && wantsStructureFirstCreate(opts.brief, opts.productName);
     const brief = round === 0
       ? buildCreateBrief({ ...opts, files })
       : [
           buildCreateBrief({ ...opts, files }),
           '',
-          structureFirst
-            ? '## Fix round — structure still incomplete'
-            : '## Fix round — Preview Ready / assets failed',
+          nonWeb
+            ? '## Fix round — coding evidence failed'
+            : structureFirst
+              ? '## Fix round — structure still incomplete'
+              : '## Fix round — Preview Ready / assets failed',
           ...reasons.map((r) => `- ${r}`),
-          structureFirst
-            ? 'Patch the missing structure only. Then TOOL: ready and TOOL: done. Skip TOOL: assets.'
-            : 'Patch the failing issues. Then TOOL: ready and TOOL: assets again. Finish with TOOL: done.',
+          nonWeb
+            ? 'Fix the evidence failures above. Then TOOL: ready and TOOL: done. Skip TOOL: assets.'
+            : structureFirst
+              ? 'Patch the missing structure only. Then TOOL: ready and TOOL: done. Skip TOOL: assets.'
+              : 'Patch the failing issues. Then TOOL: ready and TOOL: assets again. Finish with TOOL: done.',
         ].join('\n');
 
     if (round > 0) {
@@ -429,20 +629,24 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
 
     lastLoop = await runNovaAgentLoop({
       brief,
-      files: packNovaBuildContext(files),
+      files: nonWeb ? files : packNovaBuildContext(files),
       projectId: opts.projectId,
       projectName: opts.productName,
       diskRoot: opts.diskRoot,
-      maxSteps: structureFirst
-        ? Math.min(14, Math.max(8, Number(prefs.agentLoopMaxSteps) || 12))
-        : Math.min(
-          richBrief ? 22 : 12,
-          Math.max(richBrief ? 12 : 6, Number(prefs.agentLoopMaxSteps) || (richBrief ? 16 : 8)),
-        ),
+      maxSteps: nonWeb
+        ? codingLoopMaxSteps(loopKind, prefs)
+        : structureFirst
+          ? Math.min(14, Math.max(8, Number(prefs.agentLoopMaxSteps) || 12))
+          : Math.min(
+            richBrief ? 22 : 12,
+            Math.max(richBrief ? 12 : 6, Number(prefs.agentLoopMaxSteps) || (richBrief ? 16 : 8)),
+          ),
       shouldAbort: () => Boolean(opts.host.shouldAbort?.()),
       priorObservations: observations,
       autoRunAllowlisted: true,
-      createCraftMode: true,
+      // Web App Ready/Live gate is wrong for CLI/API/library/extension — release it.
+      createCraftMode: !nonWeb,
+      artifactKind: loopKind,
       maxIdleListRead: 2,
       thinAppBytes: 2000,
       callModel,
@@ -468,7 +672,11 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       },
     });
 
+    wroteCodeEver = wroteCodeEver || loopWroteNonMetaCode(lastLoop);
     files = { ...files, ...lastLoop.files };
+    if (nonWeb) {
+      files = stripWebShellFromNonWebFiles(files, loopKind, opts.brief);
+    }
     observations = [
       ...observations,
       ...lastLoop.observations.slice(-6),
@@ -502,6 +710,7 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       projectId: opts.projectId,
       diskRoot: opts.diskRoot,
       pushStatus: opts.host.pushStatus,
+      artifactKind: loopKind,
     });
 
     const check = await runReadyAndAssetsCheck(
@@ -509,9 +718,40 @@ export async function runNovaCreateBuildLoop(opts: NovaBuildLoopOpts): Promise<N
       opts.productName,
       opts.brief,
       opts.mustHaves || [],
+      loopKind,
     );
     reasons = check.reasons;
     if (check.ok) {
+      if (nonWeb) {
+        // Unknown Ready itself rejects README-only; other kinds still need a real write.
+        if (loopKind !== 'unknown') {
+          const wrote = wroteCodeEver;
+          if (!wrote) {
+            reasons = [
+              ...reasons,
+              'Scaffold evidence matched — implement the entry before Ready',
+            ];
+            if (round < maxFix) continue;
+            return {
+              ok: false,
+              files,
+              reasons,
+              steps: allSteps,
+              usedAgentLoop: true,
+              replySummary: 'Craft did not write the artifact.',
+            };
+          }
+        }
+        opts.host.pushStatus(modeStatusLabel('build', `Ready · ${loopKind}`));
+        return {
+          ok: true,
+          files,
+          reasons: [],
+          steps: allSteps,
+          usedAgentLoop: true,
+          replySummary: lastLoop.reply || `Built **${opts.productName}** as a **${loopKind}**.`,
+        };
+      }
       // Structure-first / create craft: static Ready is enough here. create.ts owns Live
       // evidence — getOrAttachPreview + collectLiveEvidence can hang for tens of minutes
       // while status still shows the prior "Linking App.css" beat.

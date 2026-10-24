@@ -1,378 +1,117 @@
 /**
  * AIChat send preamble — setup, gates, disk/greenfield before owned dispatch.
  */
-// @ts-nocheck — ctx bag mirrors AIChat closures; keep in sync when wiring.
-import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, type ClipboardEvent as ReactClipboardEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { useRouter, type ChatMode } from '@/context/RouterContext';
-import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { saveChatMessage } from '@/lib/api';
-import { getLocalPrefs, getProviderApiKeys, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
-import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { resolvePreferredCloudProvider, hasAnyCloudChatKey } from '@/lib/cloudChat';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
+import 'react';
+import '@/context/AuthContext';
+import '@/context/RouterContext';
+import '@/context/RecentProjectsContext';
+import '@/lib/api';
+import { getLocalPrefs } from '@/lib/localPrefs';
+import '@/lib/cloudSources';
+import '@/lib/cloudChat';
+import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/novaCapacity';
 import { tipAt, tipStartIndex } from '@/lib/novaTips';
-import {
-  BACKUP_DOWNLOAD_EVENT,
-} from '@/lib/novaHuntBootstrap';
-import {
-  chatThreadKey,
-  mediaMessageMarkdown,
-  extractVisionImages,
-  rememberThumb,
-  getMemoryThumb,
-  resolveCreationDataUrl,
-  slimChatContent,
-  titleFromPrompt,
-  loadRecentProjects,
-  loadRecentChats,
-} from '@/lib/recentStore';
-import { looksLikeCodeAsk, looksLikeCopyPasteCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
-import {
-  formatChatInspectReply,
-  formatRepoCatalog,
-  handoffPrompt,
-  isGithubPullAsk,
-  listAccountRepos,
-  looksLikeBuildStart,
-  pickGithubRepo,
-  shouldInspectInChat,
-  wantsGithubCatalog,
-} from '@/lib/chatStudio';
-import {
-  type StudioIntent,
-} from '@/lib/studioAnswerEngine';
-import {
-  attachKey,
-  encodeChatAttaches,
-  parseChatAttach,
-  parseChatAttaches,
-  type ChatAttachMeta,
-} from '@/lib/chatAttach';
-import { allowWindowFileDrop, dropHasFiles, imagesFromClipboardData, resolveChatDrop } from '@/lib/chatDrop';
-import {
-  describeProjectFromFiles,
-  isExplainAsk,
-  isInspectAsk,
-  type InspectFinding,
-} from '@/lib/projectInspect';
-import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
-import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/novaGitClient';
-import { verifyGitHubToken, type GitHubRepo } from '@/lib/github';
-import {
-  MEDIA_GEN_STAGES,
-  rewriteImagePrompt,
-  rewriteVideoPrompt,
-  runMediaGenStages,
-} from '@/lib/mediaPrompt';
-import {
-  buildImageBriefMessage,
-  mergeImageBrief,
-  needsImageBrief,
-  parseImageRequest,
-} from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
-import {
-  executionModeLabel,
-  getAgentExecutionMode,
-} from '@/lib/agentExecution';
-import {
-  looksLikeFolderPathAsk,
-  parseFolderPathAsk,
-  GRANT_OFF_FOLDER_MSG,
-  looksLikeInstallDepsAsk,
-} from '@/lib/folderPathAsk';
-import {
-  buildFolderCatalogData,
-  encodeCatalogMessage,
-  isCatalogMessage,
-  looksLikeFolderCatalogAsk,
-  looksLikeProjectsInventoryAsk,
-  resolveCatalogFolderRef,
-  looksLikeStartWorkOnFolderAsk,
-  parseWorkOnFolderName,
-  shouldFullImportFolderAsk,
-} from '@/lib/folderCatalog';
-import {
-  buildPcExploreData,
-  classifyPcExploreMode,
-  encodePcExploreMessage,
-  isPcExploreMessage,
-  looksLikePcExploreAsk,
-  pcExploreStatusStages,
-} from '@/lib/pcExplore';
-import { isTraceMessage, encodeTraceMessage, nextTraceStepId, traceThoughtFromAsk, countLineDiff, wrapReplyWithFileChanges, type AgentFileChange, type AgentTracePayload, type AgentTraceStep } from '@/lib/agentTrace';
-import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
-import { runCodeStudioCommand } from '@/lib/studioCommands';
-import { applyChatReplyEdits } from '@/lib/chatAgentApply';
-import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
-import {
-  formatSkillsForPrompt,
-  resolveSkillsForBrief,
-  skillNamesLabel,
-  type NovaSkillPack,
-} from '@/lib/novaSkills';
-import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/novaQuickEdit';
-import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
-import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
-import {
-  arkSelfHarmBlockedReply,
-  isArkProtectedPathOnDisk,
-  looksLikeArkSelfHarmAsk,
-} from '@/lib/novaSelfGuard';
+import '@/lib/novaHuntBootstrap';
+import { chatThreadKey, titleFromPrompt } from '@/lib/recentStore';
+import '@/lib/chatIntent';
+import '@/lib/chatStudio';
+import '@/lib/studioAnswerEngine';
+import { parseChatAttach, parseChatAttaches } from '@/lib/chatAttach';
+import '@/lib/chatDrop';
+import '@/lib/projectInspect';
+import '@/lib/projectThread';
+import '@/lib/novaGitClient';
+import '@/lib/github';
+import { MEDIA_GEN_STAGES } from '@/lib/mediaPrompt';
+import '@/lib/mediaBrief';
+import '@/lib/novaRouter';
+import '@/lib/agentExecution';
+import '@/lib/folderPathAsk';
+import { isCatalogMessage, parseWorkOnFolderName } from '@/lib/folderCatalog';
+import '@/lib/pcExplore';
+import { stripAgentTrace } from '@/lib/agentTrace';
+import { hasFolderAccessGrant, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
+import { loadChatStudio, setLastListedFolder, getLastListedFolder, setLastDiskTarget, getLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, studioPathBasename } from '@/lib/chatStudioStore';
+import '@/lib/studioCommands';
+import '@/lib/chatAgentApply';
+import '@/lib/novaMultiAgent';
+import '@/lib/novaSkills';
+import '@/lib/novaQuickEdit';
+import { beginChatInflight, endChatInflight } from '@/lib/chatInflight';
+import '@/lib/nsfwGate';
+import { arkSelfHarmBlockedReply, looksLikeArkSelfHarmAsk } from '@/lib/novaSelfGuard';
 import {
   harmfulContentBlockedReply,
   looksLikeHarmfulContentAsk,
 } from '@/lib/novaContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
-import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
-import { voiceChatRoute } from '@/lib/voiceRoute';
-import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
-import type { VoiceSessionPhase } from '@/lib/voiceMode';
-import {
-  looksLikeVoiceBuildOrEditAsk,
-  voiceBuildEditRefuseReply,
-} from '@/lib/voiceMode';
-import {
-  formatMcpToolsHelp,
-  parseMcpCallIntent,
-  resolveMcpToolServer,
-  callMcpTool,
-  runMcpAutoToolLoop,
-  looksLikeArkCapabilityAsk,
-  formatArkCapabilitiesHelp,
-} from '@/lib/novaMcp';
-import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
-import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
-import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
-import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest, handleRenameFileChatRequest } from '@/lib/chatDiskOps';
-import {
-  buildRestorePointCommand,
-  extractWriteFileContent,
-  looksLikeReadFileAsk,
-  looksLikeRestorePointAsk,
-  parseReadFileTarget,
-} from '@/lib/chatPcTasks';
-import {
-  looksLikeProjectDebugAsk,
-  parseProjectDebugTarget,
-  folderPathFromDebugTarget,
-} from '@/lib/chatProjectDebug';
-import { resolveDiskParentPath } from '@/lib/diskPathResolve';
-import {
-  inferAgentCommand,
-  looksLikeRuntimeInstallAsk,
-  proposeRuntimeInstall,
-  runAgentCommand,
-} from '@/lib/chatAgentExec';
-import {
-  detectProjectKind,
-  extractProjectName,
-  fallbackCreateProjectName,
-  findBestProductBrief,
-  parseNewProjectIntent,
-  recoverOriginalUserBrief,
-  resolveCreateIntentFromThread,
-  resolveProjectKindForCreate,
-  slugifyProjectName,
-  type ProjectKind,
-} from '@/lib/createProjectIntent';
-import {
-  shouldSkipWeakModelCodingHop,
-  weakModelMicroEditReply,
-  runSurgicalEditTurn,
-  isWeakCoderModel,
-  FIRST_RUN_KIND_CHIPS,
-  runEditTurn,
-} from '@/lib/chatTurnHandlers';
-import {
-  pushApplySnapshot,
-  getApplySnapshot,
-  clearApplySnapshot,
-  snapshotToRevertBlocks,
-} from '@/lib/chatApplySnapshotStore';
-import { projectUsesNpm, mergeBriefNpmDependencies } from '@/lib/projectScaffolds';
-import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint, keepBuildingConversationHint } from '@/lib/chatPlanMode';
-import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
+import '@/lib/voiceSession';
+import '@/lib/voiceRoute';
+import '@/lib/voiceAudio';
+
+import '@/lib/voiceMode';
+import '@/lib/novaMcp';
+import { isUiShellAsk } from '@/lib/webProjectCanon';
+import '@/lib/deleteProjectFlow';
+import { classifyDiskIntent } from '@/lib/chatDiskIntent';
+import { handleAddFileChatRequest, handleRenameFileChatRequest } from '@/lib/chatDiskOps';
+import { buildRestorePointCommand, extractWriteFileContent, looksLikeRestorePointAsk } from '@/lib/chatPcTasks';
+import '@/lib/chatProjectDebug';
+import '@/lib/diskPathResolve';
+import { runAgentCommand } from '@/lib/chatAgentExec';
+import { parseNewProjectIntent } from '@/lib/createProjectIntent';
+import '@/lib/chatTurnHandlers';
+import '@/lib/chatApplySnapshotStore';
+import '@/lib/projectScaffolds';
+import { looksLikeImplementGo } from '@/lib/chatPlanMode';
+import { looksLikeInPlaceRebuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
-import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeDirectJudgmentAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
-import {
-  chatTurnAllowsExec,
-  chatTurnAllowsFileEdits,
-  hasActiveWorkspace,
-  isChatPlanTurn,
-  looksLikeCodeEditAsk,
-  looksLikeKeepBuildingAsk,
-  NO_WORKSPACE_MSG,
-  normalizeComposerMode,
-  stripComposerPrefix,
-  workspacePathLabel,
-} from '@/lib/chatAgentTurn';
-import { isCreateTurn, planningHoldAllowed, type ClassifyTurnResult } from '@/lib/classifyTurn';
+import { detectPlanFocus, extractGreenfieldName, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
+import { hasActiveWorkspace, looksLikeCodeEditAsk, stripComposerPrefix } from '@/lib/chatAgentTurn';
+import { isCreateTurn, planningHoldAllowed } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
   forgetFinishedChatTurnStatus,
   setChatTurnStatus,
   pushChatTurnStatus,
 } from '@/lib/chatTurnStatusStore';
-import { consumePendingStudioBind, readPendingStudioBind } from '@/lib/pendingStudioBind';
+import { consumePendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
-import { useCreateJob } from '@/hooks/useCreateJob';
-import {
-  buildStudioTraceMessage,
-  finalizeCodingChatBubble,
-  liveCodingStatusText,
-} from '@/lib/chatCodeReply';
-import {
-  composeVisionToCoderBrief,
-  hasVisionCapability,
-  looksLikeScreenshotFixAsk,
-  messageHasImages,
-  multiModelStatusLabel,
-  runVisionDescribeHop,
-  visionCapabilityGapReply,
-} from '@/lib/chatMultiModel';
-import { githubToken } from '@/lib/codeGitHubWorkflow';
-import {
-  cloudKeyNudgeAfterEmptyBuild,
-  cloudKeyNudgeReply,
-  markCloudKeyNudgeShown,
-  shouldOfferCloudKeyNudge,
-} from '@/lib/cloudKeyNudge';
-import {
-  planMultiModelWebsiteTeam,
-  formatMultiModelAttribution,
-  multiModelStatusLine,
-  type MultiModelPartPlan,
-  type MultiModelPartResult,
-} from '@/lib/chatMultiModelBuild';
-import {
-  createProgressLabel,
-  startProgressHeartbeat,
-  type CreateProgressPhase,
-} from '@/lib/createProgressCopy';
-import {
-  formatHybridAttribution,
-  normalizeHybridAiMode,
-  pickForRole,
-  preferCloudForCreate,
-} from '@/lib/hybridRoleRouting';
-import { smokeCheckPreviewUrl } from '@/lib/previewBrowserSmoke';
-import {
-  briefLooksLikeMarketingLanding,
-  briefRequiresInteractiveApp,
-  ensureViteReactProjectFiles,
-  isPreviewReady,
-  isPlayableGameReady,
-  isPlayableArcadeGameReady,
-  looksLikeFillerStubAppSource,
-  restaurantBriefBuiltAsCoffeeShop,
-  stripModelProseFromSource,
-  ensureProductBrandInApp,
-} from '@/lib/createBuildQuality';
-import { pickLocalCoderModel } from '@/lib/enginePick';
-import { isChatTurnDead, shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
-import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
-import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
+import '@/hooks/useCreateJob';
+import '@/lib/chatCodeReply';
+import { messageHasImages } from '@/lib/chatMultiModel';
+import '@/lib/codeGitHubWorkflow';
+import { cloudKeyNudgeReply, markCloudKeyNudgeShown, shouldOfferCloudKeyNudge } from '@/lib/cloudKeyNudge';
+import '@/lib/chatMultiModelBuild';
+import '@/lib/createProgressCopy';
+import '@/lib/hybridRoleRouting';
+import '@/lib/previewBrowserSmoke';
+import '@/lib/createBuildQuality';
+import '@/lib/enginePick';
+import { isChatTurnDead } from '@/lib/chatTurnIsolation';
+import '@/lib/errors';
+import { isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
-import { formatReplyElapsed } from '@/lib/speedTest';
+import '@/lib/speedTest';
 
 import { getTokenUsageRatio, recordTokenUsage, syncTokenUsage, estimateTokens } from '@/lib/tokenUsage';
-import { getModelHealthRatio, recordModelTurn } from '@/lib/modelHealth';
-import { prepareBrainRotation } from '@/lib/modelRotation';
-import {
-  buildRouterHistory,
-  looksLikePromptEcho,
-  looksLikeThreadSummaryAsk,
-  threadSummarySystemHint,
-  buildThreadSummaryFromMessages,
-  sanitizeAssistantReply,
-  usableAssistantText,
-  isCannedGreetingReply,
-  historyWasCompacted,
-} from '@/lib/chatHistory';
-import {
-  looksLikeWebGroundedAsk,
-  looksLikeSideQuestAsk,
-  looksLikeLyricsAsk,
-  looksLikeInventedLyricsDump,
-  looksLikeLinkDirectoryReply,
-  looksLikeBuildBleedReply,
-  looksLikeThinSideQuestReply,
-  honestLyricsUnavailableReply,
-  sideQuestAnswerHint,
-  scrubSideQuestBleed,
-  fallbackAnswerFromLookup,
-  webSearchForChat,
-  formatWebLookupForPrompt,
-  webLookupUnavailableNote,
-} from '@/lib/webSearch';
-import {
-  autoEquippedCaption,
-  autoPillLabel,
-  autoRingDetail,
-  brainKindForChatMode,
-  clearThreadBrain,
-  loadThreadBrain,
-  saveAutoThreadBrain,
-  type ThreadBrain,
-} from '@/lib/threadBrain';
-import {
-  detectPluginIntent,
-  getChatEnabledPlugins,
-  getConnectedPlugins,
-  getPluginById,
-  getPluginRuntime,
-  loadPluginState,
-  runPluginAction,
-  type PluginDef,
-} from '@/lib/plugins';
+import { getModelHealthRatio } from '@/lib/modelHealth';
+import '@/lib/modelRotation';
+import { looksLikeThreadSummaryAsk, buildThreadSummaryFromMessages } from '@/lib/chatHistory';
+import '@/lib/webSearch';
+import '@/lib/threadBrain';
+import { detectPluginIntent, getChatEnabledPlugins, getConnectedPlugins, getPluginById, getPluginRuntime, loadPluginState } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
-import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/novaEngine';
-import { runMediaChatTurn } from '@/lib/chatMediaTurn';
-import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
-import { cleanProductTitle, looksLikeSpatialApp, looksLikePlayableCanvasGame, looksLikeFpsGame } from '@/lib/freshSpaFromBrief';
-import { classifyMobileTarget, isNativeMobileTree } from '@/lib/mobileTarget';
-import { classifyNamedDevice, defaultDeviceForTarget } from '@/lib/mobileDevices';
-import {
-  briefWantsSiteHeroImagery,
-  hasCloudImageKey,
-  listReadyLocalImageModels,
-  repairBrokenSiteImageSrcs,
-  siteImageCapabilityGapReply,
-  siteImageGuidanceForBrief,
-} from '@/lib/siteHeroImages';
-import {
-  applyAttachedChatImageAsAsset,
-  applyAttachedChatImagesAsAssets,
-  extractExplicitAssetUrls,
-  formatBrandAssetsForPrompt,
-  looksLikeAssetLinkAsk,
-  looksLikeUseAttachedAsset,
-  materializeBrandAssets,
-  planBrandAssets,
-} from '@/lib/brandAssets';
+import { engineGenerateCancel } from '@/lib/novaEngine';
+import '@/lib/chatMediaTurn';
+import '@/lib/projectPreview';
+import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
+import '@/lib/mobileTarget';
+import '@/lib/mobileDevices';
+import '@/lib/siteHeroImages';
+import { applyAttachedChatImagesAsAssets, extractExplicitAssetUrls, looksLikeAssetLinkAsk, looksLikeUseAttachedAsset, materializeBrandAssets, planBrandAssets } from '@/lib/brandAssets';
 
-import {
-  COMPOSER_MODE_PREFIX,
-  composerModeFromContent,
-  previewFromText,
-  CHAT_MODELS,
-  CLOUD_CHAT_WHEN_KEYED,
-  kindForMode,
-  defaultModelForKind,
-  failoverChipText,
-  PLACEHOLDERS,
-  GREETINGS,
-  resolveStudioFiles,
-  persistModeThread,
-  deletePrepareErrorReply,
-  focusComposerIfSafe,
-  type ChatModelOption,
-} from '@/views/aichat/aiChatHelpers';
-
-
+import '@/views/aichat/aiChatHelpers';
 
 export type AIChatSendCtx = Record<string, any>;
 
@@ -383,6 +122,9 @@ export type AIChatSendPrepResult =
       content: string;
       mode: string;
       activeChatId: string;
+      routeChatIdAtTurnStart?: string | null;
+      backgroundAllowed?: boolean;
+      regenerating?: boolean;
       assistantId: string;
       mySeq: number;
       replyStartedAt: number;
@@ -397,7 +139,17 @@ export type AIChatSendPrepResult =
       resolvedStudio: any;
       userId: string;
       finishPlainReply: (text: string, provider?: string) => Promise<void>;
-      pushAssistantStatus: (label: string, writingPath?: string | null) => void;
+      pushAssistantStatus: (
+        label: string,
+        writingPath?: string | null,
+        activity?: {
+          kind?: import('@/lib/chatTurnActivity').ChatActivityKind;
+          summary?: string;
+          detail?: string;
+          runStatus?: import('@/lib/chatTurnActivity').ChatActivityRunStatus;
+          paths?: string[];
+        },
+      ) => void;
       stopIfSuperseded: () => Promise<boolean>;
       clearGeneratingIfMineEarly: () => void;
       commitStudioForChat: (...args: any[]) => void;
@@ -464,6 +216,8 @@ export type AIChatSendPrepResult =
       setIpcFallbackDev: (...args: any[]) => void;
       addCreation: (...args: any[]) => void;
       failoverChipText: any;
+      setDropHint?: (...args: any[]) => void;
+      setComposerMode?: (...args: any[]) => void;
       relPathFromDisk?: (filePath: string) => string | null;
     };
 
@@ -473,89 +227,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     const { scrubDictationTranscript } = await import('@/lib/voiceSession');
     content = scrubDictationTranscript(content);
   } catch { /* ignore */ }
-  const {
-    activeGenChatIdRef,
-    activeModelRef,
-    addChat,
-    addCreation,
-    capacity,
-    chatPlugins,
-    chatRouteSeedRef,
-    chatStudioDiskRoot,
-    chatStudioDiskRootRef,
-    chatStudioFilesRef,
-    chatStudioProjectIdRef,
-    chatTurnCtlRef,
-    chats,
-    commitStudioForChat,
-    composerMode,
-    composerModeFromContent,
-    endTurnAndFlush,
-    engineInstallingModels,
-    failoverChipText,
-    flushQueuedSend,
-    genSeqRef,
-    genSeqByChatRef,
-    stopRequestedByChatRef,
-    generating,
-    generatingRef,
-    handleSend,
-    imageBriefRef,
-    lastFolderLocateNoteRef,
-    lastStudioIntentRef,
-    messages,
-    messagesChatIdRef,
-    messagesRef,
-    mode,
-    navigate,
-    openFolderInChat,
-    pendingFileDeleteRef,
-    pendingFolderClarifyRef,
-    pendingProjectDeleteRef,
-    persistChatIdRef,
-    persistModeThread,
-    persistStudioSnapshot,
-    persistTimerRef,
-    placeholder,
-    previewFromText,
-    previewUrlRef,
-    pushLivePreview,
-    renameChat,
-    touchRecentProject,
-    resolveStudioFiles,
-    route,
-    routeChatIdRef,
-    runEphemeralVoiceTurn,
-    setCapacity,
-    setChatStudioDiskRoot,
-    setChatStudioFiles,
-    setChatStudioProjectId,
-    setCodePillSticky,
-    setDeleteFilePrompt,
-    setDeleteFolderClarifyPrompt,
-    setDeleteProjectPrompt,
-    setFailoverNote,
-    setGenerating,
-    setIpcFallbackDev,
-    setMessages,
-    setModelRatio,
-    setPreviewUrl,
-    setThreadBrain,
-    setCreateLiveModelLabel,
-    setActiveModel,
-    setDropHint,
-    setTokenRatio,
-    skipChatLoadIdsRef,
-    stickToBottomRef,
-    stopRequestedRef,
-    studioBoundChatIdRef,
-    threadBrainRef,
-    threadKind,
-    user,
-    userDetachScrollRef,
-    videoDurationSec,
-    setComposerMode,
-  } = ctx;
+  const { activeGenChatIdRef, activeModelRef, addChat, addCreation, capacity, chatPlugins, chatRouteSeedRef, chatStudioDiskRoot, chatStudioDiskRootRef, chatStudioFilesRef, chatStudioProjectIdRef, chatTurnCtlRef, chats, commitStudioForChat, composerMode, endTurnAndFlush, engineInstallingModels, failoverChipText, flushQueuedSend, genSeqRef, genSeqByChatRef, stopRequestedByChatRef, generatingRef, imageBriefRef, lastFolderLocateNoteRef, lastStudioIntentRef, messagesChatIdRef, messagesRef, mode, navigate, openFolderInChat, pendingFileDeleteRef, pendingFolderClarifyRef, pendingProjectDeleteRef, persistChatIdRef, persistModeThread, persistStudioSnapshot, persistTimerRef, previewFromText, previewUrlRef, pushLivePreview, renameChat, touchRecentProject, resolveStudioFiles, route, routeChatIdRef, runEphemeralVoiceTurn, setCapacity, setChatStudioDiskRoot, setChatStudioFiles, setChatStudioProjectId, setCodePillSticky, setDeleteFilePrompt, setDeleteFolderClarifyPrompt, setDeleteProjectPrompt, setFailoverNote, setGenerating, setIpcFallbackDev, setMessages, setModelRatio, setPreviewUrl, setThreadBrain, setCreateLiveModelLabel, setActiveModel, setDropHint, setTokenRatio, skipChatLoadIdsRef, stickToBottomRef, stopRequestedRef, studioBoundChatIdRef, threadBrainRef, threadKind, user, userDetachScrollRef, videoDurationSec, setComposerMode } = ctx;
 
   // Guest hydrate lag must not silent-drop Enter (Grok audit).
   const userId = user?.id || 'guest-local';
@@ -569,6 +241,99 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     return { status: 'done' };
   }
   if (!content.trim()) return { status: 'done' };
+  // Wave 4/5 — slash skills, @mentions, session start, path rules, /map, /architect, grep.
+  try {
+    const studioFiles = chatStudioFilesRef.current || {};
+    const {
+      parseSlashSkill,
+      resolveSlashSkillBody,
+      expandAtMentions,
+      loadSessionStartContext,
+    } = await import('@/lib/inventWave4Pack');
+    const w5 = await import('@/lib/inventWave5Pack');
+    const slash = parseSlashSkill(content);
+    if (slash) {
+      if (slash.skill === 'map') {
+        content = `${w5.buildRepoMapLite(studioFiles)}\n\n${slash.rest || 'Use this map for the next edit.'}`;
+      } else if (slash.skill === 'grep' && slash.rest) {
+        content = `${w5.formatInstantGrep(w5.instantGrepAcc(studioFiles, slash.rest))}\n\nQuery: ${slash.rest}`;
+      } else if (slash.skill === 'architect') {
+        const pair = w5.formatArchitectPair(slash.rest || content, 'project');
+        content = `Architect mode.\n\n## Architect\n${pair.architect}\n\n## Editor\n${pair.editor}`;
+      } else if (slash.skill === 'advisor') {
+        content = w5.formatAdvisorPrompt(slash.rest || content, loadSessionStartContext(studioFiles));
+      } else if (slash.skill === 'diff') {
+        const key = String(chatStudioDiskRootRef.current || 'default');
+        content = `${w5.diffSinceSnapshot(key, studioFiles)}\n\n${slash.rest || ''}`.trim();
+      } else if (slash.skill === 'approvals') {
+        const key = String(chatStudioDiskRootRef.current || 'default');
+        if (/\bapprove\b/i.test(slash.rest || '')) {
+          const n = w5.approveAll(key);
+          content = `Approved ${n} pending invent/edit steps.`;
+        } else {
+          const list = w5.listApprovals(key);
+          content = list.length
+            ? ['Pending approvals:', ...list.map((a) => `- ${a.kind}: ${a.detail}`)].join('\n')
+            : 'No pending approvals. Say `/approvals approve` after queuing.';
+        }
+      } else if (slash.skill === 'share') {
+        const turns = (messagesRef.current || []).slice(-12).map((m: { role?: string; content?: string }) => ({
+          role: String(m.role || 'user'),
+          text: String(m.content || ''),
+        }));
+        const share = w5.shareConversationStub({ brand: 'project', turns });
+        const next = { ...studioFiles, ...share };
+        setChatStudioFiles(next);
+        chatStudioFilesRef.current = next;
+        content = 'Share transcript written to .nova/share-transcript.json (secrets redacted).';
+      } else if (slash.skill === 'rewind' || slash.skill === 'undo') {
+        content = slash.skill === 'undo'
+          ? 'undo last invent git commit / rollback checkpoint'
+          : 'rollback to last craft checkpoint';
+      } else {
+        const body = resolveSlashSkillBody(studioFiles, slash.skill);
+        if (body) {
+          content = [
+            `Skill /${slash.skill} active.`,
+            body.slice(0, 2000),
+            slash.rest && `User follow-up: ${slash.rest}`,
+          ].filter(Boolean).join('\n\n');
+        }
+      }
+    }
+    const perm = w5.parsePermissionMode(content);
+    if (perm && studioFiles) {
+      const next = { ...studioFiles, ...w5.permissionModeFiles(perm) };
+      setChatStudioFiles(next);
+      chatStudioFilesRef.current = next;
+    }
+    const style = w5.parseOutputStyle(content);
+    if (style) {
+      const next = { ...chatStudioFilesRef.current, ...w5.outputStyleFiles(style) };
+      setChatStudioFiles(next);
+      chatStudioFilesRef.current = next;
+    }
+    if (/@[\w./"\\-]/.test(content) && Object.keys(studioFiles).length) {
+      const expanded = expandAtMentions(content, studioFiles);
+      if (expanded.attached.length) {
+        content = expanded.text;
+      }
+    }
+    if (
+      Object.keys(studioFiles).length
+      && /\b(?:create|invent|build|edit|redesign|fix)\b/i.test(content)
+      && !/Session start context/i.test(content)
+    ) {
+      const boot = loadSessionStartContext(studioFiles);
+      const rules = w5.loadPathScopedRules(studioFiles, [
+        'src/App.jsx',
+        'src/App.css',
+        'public/logo.svg',
+      ]);
+      const inject = [boot, rules].filter(Boolean).join('\n\n').slice(0, 3500);
+      if (inject) content = `${content}\n\n${inject}`;
+    }
+  } catch { /* optional */ }
   // New send → follow the reply; history scroll stays free until the user scrolls up again.
   stickToBottomRef.current = true;
   userDetachScrollRef.current = false;
@@ -636,7 +401,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       });
     }
   } else {
-    const existing = chats.find(c => c.id === activeChatId);
+    const existing = chats.find((c: any) => c.id === activeChatId);
     addChat({
       id: activeChatId,
       mode,
@@ -659,7 +424,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   let turnDiskRoot = chatStudioDiskRootRef.current;
   let turnProjectId = chatStudioProjectIdRef.current;
   let turnStudioFiles = { ...chatStudioFilesRef.current };
-  // Bind any pending folder attach to this chat id for follow-ups.
+  // Bind unknown pending folder attach to this chat id for follow-ups.
   if (chatStudioDiskRootRef.current || Object.keys(chatStudioFilesRef.current).length) {
     const meta = parseChatAttach(content) || parseChatAttaches(content)[0];
     persistStudioSnapshot(activeChatId, {
@@ -697,12 +462,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     return getChatEnabledPlugins(map);
   })();
   const enabledIds = livePlugins.length
-    ? livePlugins.map(p => p.id)
-    : chatPlugins.map(p => p.id);
+    ? livePlugins.map((p: any) => p.id)
+    : chatPlugins.map((p: any) => p.id);
   const pluginId = detectPluginIntent(content, enabledIds);
   const pluginState = pluginId ? getPluginRuntime(pluginId, loadPluginState()) : null;
   const pluginMeta = pluginId
-    ? (livePlugins.find(p => p.id === pluginId) || chatPlugins.find(p => p.id === pluginId) || getPluginById(pluginId))
+    ? (livePlugins.find((p: any) => p.id === pluginId) || chatPlugins.find((p: any) => p.id === pluginId) || getPluginById(pluginId))
     : null;
   const providerLabel = pluginId
     ? `${pluginMeta?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
@@ -718,7 +483,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     || /!\[[^\]]*\]\(nova-media:/.test(content)
     || /!\[[^\]]*\]\(data:image\//.test(content);
   const statusLabel = isMediaMode
-    ? MEDIA_GEN_STAGES[mode][0].label
+    ? MEDIA_GEN_STAGES[String() as keyof typeof MEDIA_GEN_STAGES][0].label
     : readingAttach
       ? 'Reading…'
       : 'Thinking…';
@@ -735,18 +500,18 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   };
 
   // Sync ref immediately so history / queue flushes don't see a stale thread.
-  const normalized = messagesRef.current.map(m => (
+  const normalized = messagesRef.current.map((m: any) => (
     m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
       ? { ...m, content: '(no response)' }
       : m
   ));
-  const priorForHistory = normalized.filter(m => {
+  const priorForHistory = normalized.filter((m: any) => {
     const c = String(m.content || '');
     if (!c || c.startsWith('__progress__:')) return false;
     if (c === '(no response)') return false;
     return true;
   });
-  const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
+  const previousAssistant = [...priorForHistory].reverse().find((m: any) => m.role === 'assistant')?.content || '';
   // Try-again: last bubble is already this user prompt — do not append a duplicate.
   const lastMsg = normalized[normalized.length - 1];
   const sameUserOpen =
@@ -831,7 +596,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     });
   }
 
-  const histPrefs = getLocalPrefs();
+  getLocalPrefs();
   const replyStartedAt = Date.now();
 
   const clearGeneratingIfMineEarly = () => {
@@ -913,7 +678,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     const threadChatId = activeChatId;
     const routeChat = routeChatIdRef.current;
     const viewingThisThread = Boolean(routeChat && threadChatId && routeChat === threadChatId);
-    const patch = (list: ChatMessage[]) => list.map(m => (m.id === assistantId ? reply : m));
+    const patch = (list: ChatMessage[]) => list.map((m: any) => (m.id === assistantId ? reply : m));
     let next = viewingThisThread
       ? patch(messagesRef.current)
       : (() => {
@@ -937,10 +702,11 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       setMessages(next);
     }
     persistModeThread(mode, next, { chatId: threadChatId });
+    // Ring tracks spoken reply pressure — not the embedded nova-trace JSON (file lists).
     setTokenRatio(syncTokenUsage(threadChatId, estimateTokens(
       isCatalogMessage(replyText)
         ? 'folder catalog summary'
-        : replyText,
+        : (stripAgentTrace(replyText) || replyText),
     )));
     clearGeneratingIfMineEarly();
     notifyChatDone(threadChatId);
@@ -967,7 +733,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     if (!turnDead) return false;
     try {
       const job = getCreateJobForChat(activeChatId);
-      if (job && (job.status === 'queued' || job.status === 'writing' || job.status === 'npm' || job.status === 'verifying')) {
+      if (job && (job.status === 'writing' || job.status === 'npm' || job.status === 'verifying')) {
         const { markCreateJobFailed } = await import('@/lib/createJobStore');
         markCreateJobFailed(job.id, 'Stopped');
       }
@@ -996,14 +762,14 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
 
   // Summarize-this-chat must never fall into folder/debug/create routing.
   if (looksLikeThreadSummaryAsk(content)) {
-    let threadMsgs = messagesRef.current.filter(m => m.id !== assistantId);
+    let threadMsgs = messagesRef.current.filter((m: any) => m.id !== assistantId);
     if (activeChatId) {
       try {
         const raw = localStorage.getItem(chatThreadKey(activeChatId));
         if (raw) {
           const parsed = JSON.parse(raw) as ChatMessage[];
           if (Array.isArray(parsed) && parsed.length >= threadMsgs.length) {
-            threadMsgs = parsed.filter(m => m.id !== assistantId);
+            threadMsgs = parsed.filter((m: any) => m.id !== assistantId);
           }
         }
       } catch { /* keep threadMsgs */ }
@@ -1042,7 +808,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     }
   }
 
-  // Recover folder files from every source before any model call.
+  // Recover folder files from every source before unknown model call.
   let resolvedStudio: Awaited<ReturnType<typeof resolveStudioFiles>>;
   try {
     resolvedStudio = await Promise.race([
@@ -1095,7 +861,17 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     });
   }
 
-  const pushAssistantStatus = (label: string, writingPath?: string | null) => {
+  const pushAssistantStatus = (
+    label: string,
+    writingPath?: string | null,
+    activity?: {
+      kind?: import('@/lib/chatTurnActivity').ChatActivityKind;
+      summary?: string;
+      detail?: string;
+      runStatus?: import('@/lib/chatTurnActivity').ChatActivityRunStatus;
+      paths?: string[];
+    },
+  ) => {
     const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) ?? genSeqRef.current;
     const stopped = Boolean(
       stopRequestedByChatRef?.current?.[activeChatId]
@@ -1108,108 +884,23 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       assistantId,
       label: String(label || '').trim() || 'Thinking…',
       writingPath,
+      kind: activity?.kind,
+      summary: activity?.summary,
+      detail: activity?.detail,
+      runStatus: activity?.runStatus,
+      paths: activity?.paths,
     });
   };
   // Rolldown drops the IIFE closure on this name — call via ref inside the async turn.
   chatTurnCtlRef.current.pushStatus = pushAssistantStatus;
 
-  const runFolderCatalog = async (opts: {
-    targetPath: string;
-    displayName: string;
-    resolvedFromDesktop: boolean;
-  }) => {
-    pushAssistantStatus('Thinking…');
-    await new Promise<void>(r => { window.setTimeout(r, 120); });
-    if (await stopIfSuperseded()) return;
+  
 
-    if (opts.resolvedFromDesktop) {
-      pushAssistantStatus('Exploring your Desktop…');
-      await new Promise<void>(r => { window.setTimeout(r, 80); });
-    } else {
-      pushAssistantStatus(`Exploring ${opts.displayName}…`);
-    }
-    if (await stopIfSuperseded()) return;
-
-    pushAssistantStatus(`Found ${opts.displayName}. ${opts.targetPath}`);
-    await new Promise<void>(r => { window.setTimeout(r, 100); });
-    if (await stopIfSuperseded()) return;
-
-    pushAssistantStatus('Reading project summaries…');
-    const roots = await window.novaDesktop?.browseRoots?.();
-    const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path || null;
-    const built = await buildFolderCatalogData(opts.targetPath, opts.displayName, {
-      desktopPath,
-      showDesktopSiblings: opts.resolvedFromDesktop,
-    });
-    if (await stopIfSuperseded()) return;
-
-    pushAssistantStatus('Preparing answer…');
-    await new Promise<void>(r => { window.setTimeout(r, 60); });
-    setLastListedFolder(activeChatId, {
-      path: opts.targetPath,
-      name: opts.displayName,
-    });
-    setLastDiskTarget(activeChatId, {
-      path: opts.targetPath,
-      name: opts.displayName,
-      kind: 'folder',
-    });
-    if (built.data.projects.length === 1) {
-      const only = built.data.projects[0];
-      const onlyPath = `${opts.targetPath.replace(/[/\\]+$/, '')}${opts.targetPath.includes('\\') ? '\\' : '/'}${only.name}`;
-      setLastListedFolder(activeChatId, {
-        path: onlyPath,
-        name: only.name,
-      });
-      setLastDiskTarget(activeChatId, {
-        path: onlyPath,
-        name: only.name,
-        kind: 'folder',
-      });
-    }
-    await finishPlainReply(encodeCatalogMessage(built.data));
-  };
-
-  const runPcExplore = async (userMessage: string) => {
-    const mode = classifyPcExploreMode(userMessage);
-    if (!mode) return;
-
-    const stages = pcExploreStatusStages(mode);
-    // One status label only — cycling many labels mid-reply looked like flickering messages.
-    pushAssistantStatus(stages[0] || 'Looking around…');
-    await new Promise<void>(r => { window.setTimeout(r, 80); });
-    if (await stopIfSuperseded()) return;
-
-    if (mode === 'installed_apps' || mode === 'games') {
-      await syncWorkspaceGrantsFromPrefs();
-    } else {
-      await syncWorkspaceGrantsFromPrefs();
-    }
-    if (await stopIfSuperseded()) return;
-
-    const data = await buildPcExploreData(userMessage, mode);
-    if (await stopIfSuperseded()) return;
-
-    pushAssistantStatus(stages[stages.length - 1] || 'Preparing answer…');
-    await new Promise<void>(r => { window.setTimeout(r, 50); });
-    const listedSection = data.sections.find(s => s.path && s.items.length > 0) || data.sections.find(s => s.path);
-    if (listedSection?.path) {
-      setLastListedFolder(activeChatId, {
-        path: listedSection.path,
-        name: listedSection.title || listedSection.path.split(/[/\\]/).pop() || data.headline,
-      });
-      setLastDiskTarget(activeChatId, {
-        path: listedSection.path,
-        name: listedSection.title || listedSection.path.split(/[/\\]/).pop() || data.headline,
-        kind: 'folder',
-      });
-    }
-    await finishPlainReply(encodePcExploreMessage(data));
-  };
+  
 
   const recentUserLines = messagesRef.current
-    .filter(m => m.role === 'user')
-    .map(m => String(m.content || ''));
+    .filter((m: any) => m.role === 'user')
+    .map((m: any) => String(m.content || ''));
   const stickyDiskTarget = getLastDiskTarget(activeChatId);
   const { normalizeMessyUserAsk } = await import('@/lib/editAskResolve');
   const intentText = normalizeMessyUserAsk(
@@ -1217,6 +908,42 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
       .replace(/!\[[^\]]*]\(nova-media:[^)]+\)/gi, ' '),
   );
+  // Step-ladder / New Chat miss: UI edit with no Folder bind → reuse latest create on disk
+  // so Code / Live / Folder pills return and the turn actually writes (not teach-mode chat).
+  if (!(resolvedStudio.diskRoot || chatStudioDiskRootRef.current) && looksLikeCodeEditAsk(intentText)) {
+    try {
+      const { getLatestReusableCreateJob } = await import('@/lib/createJobStore');
+      // Chat-owned only — never steal another chat's project (App↔VoltCore misbind).
+      const job = getLatestReusableCreateJob({ chatId: activeChatId });
+      if (job?.path) {
+        const files = { ...(job.files || {}) };
+        resolvedStudio = {
+          files,
+          projectId: job.projectId || null,
+          diskRoot: job.path,
+          name: job.name,
+        };
+        setChatStudioFiles(files);
+        chatStudioFilesRef.current = files;
+        turnStudioFiles = { ...files };
+        if (job.projectId) {
+          setChatStudioProjectId(job.projectId);
+          chatStudioProjectIdRef.current = job.projectId;
+          turnProjectId = job.projectId;
+        }
+        setChatStudioDiskRoot(job.path);
+        chatStudioDiskRootRef.current = job.path;
+        turnDiskRoot = job.path;
+        persistStudioSnapshot(activeChatId, {
+          files,
+          projectId: job.projectId || null,
+          name: job.name,
+          diskRoot: job.path,
+        });
+        pushAssistantStatus(`Bound · ${job.name || 'project'} (continuing on disk)…`);
+      }
+    } catch { /* best-effort */ }
+  }
   const diskIntent = classifyDiskIntent(intentText, {
     recentUserMessages: recentUserLines,
     pendingAddFile: getLastPendingAddFile(activeChatId)?.fileName || null,
@@ -1347,6 +1074,10 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     }
 
     if (diskIntent.type === 'add_file' && !isProjectCreateBrief(intentText) && !looksLikeUseAttachedAsset(content)) {
+      // UI shells (upload drop zone, etc.) are never loose Desktop file creates.
+      if (isUiShellAsk(intentText) || looksLikeCodeEditAsk(intentText) && /\b(?:upload|drop\s+zone)\b/i.test(intentText)) {
+        /* fall through to studio / agent apply */
+      } else {
       // Pure create-file (esp. .md) must hit disk — don't divert to code-edit when it's clearly a new file.
       const pureCreateFile =
         !looksLikeCodeEditAsk(intentText)
@@ -1370,7 +1101,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
         stickyTarget: stickyDiskTarget,
         lastListedFolder: getLastListedFolder(activeChatId),
       });
-      if (await stopIfSuperseded()) return;
+      if (await stopIfSuperseded()) return { status: 'done' };
 
       if (addOutcome.kind === 'reply') {
         if (diskIntent.name) {
@@ -1414,6 +1145,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
         return { status: 'done' };
       }
       }
+      }
     }
   }
 
@@ -1438,7 +1170,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
           await finishPlainReply('Restore point canceled.');
           return { status: 'done' };
         }
-        setMessages(prev => prev.map(m => (
+        setMessages((prev: any) => prev.map((m: any) => (
           m.id === assistantId ? { ...m, content: '__generating__:chat:Creating restore point…' } : m
         )));
         const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
@@ -1485,7 +1217,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     if (!pending) {
       const prior = [...messagesRef.current]
         .reverse()
-        .find(m => m.role === 'user' && (
+        .find((m: any) => m.role === 'user' && (
           parseGreenfieldIdea(String(m.content || ''))
           || parseNewProjectIntent(String(m.content || ''))
         ));
@@ -1527,8 +1259,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     } else {
       // Never dead-end with “I lost the brief.” Rebuild a sticky idea from this thread and keep talking.
       const recentUsers = [...messagesRef.current]
-        .filter(m => m.role === 'user')
-        .map(m => String(m.content || '').replace(/<!--[\s\S]*?-->/g, '').trim())
+        .filter((m: any) => m.role === 'user')
+        .map((m: any) => String(m.content || '').replace(/<!--[\s\S]*?-->/g, '').trim())
         .filter(Boolean)
         .slice(-8);
       const summary = [...recentUsers, intentText].filter(Boolean).join('\n').slice(0, 1600) || intentText;
@@ -1598,7 +1330,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     if (!pending) {
       const prior = [...messagesRef.current]
         .reverse()
-        .find(m => m.role === 'user' && parseGreenfieldIdea(String(m.content || '')));
+        .find((m: any) => m.role === 'user' && parseGreenfieldIdea(String(m.content || '')));
       const fromThread = prior ? parseGreenfieldIdea(String(prior.content || '')) : null;
       if (fromThread) setLastPendingGreenfield(activeChatId, fromThread);
     }

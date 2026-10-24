@@ -627,7 +627,7 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
   const [ollamaOn, setOllamaOn] = useState(() => isOllamaEnabled());
   const [ollamaOnline, setOllamaOnline] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
-  const [ollamaNote, setOllamaNote] = useState('');
+  const [, setOllamaNote] = useState('');
   const [hunted, setHunted] = useState<HuntedModel[]>([]);
   const [queryHunted, setQueryHunted] = useState<HuntedModel[]>([]);
   const [queryHuntBusy, setQueryHuntBusy] = useState(false);

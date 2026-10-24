@@ -9,7 +9,11 @@ import { looksLikeTruncatedUiSource, isBrokenReactAppSource, jsxSourceHasTypeScr
 import { blankSolidColorFromAsk } from '@/lib/webProjectCanon';
 import { wantsChatAppScaffold } from '@/lib/webLandingFromBrief';
 import type { CreateIdentity, CreatePalette } from '@/lib/createIdentity';
-import { createIdentityFromBrief } from '@/lib/createIdentity';
+import {
+  briefWantsLightPaperGround,
+  createIdentityFromBrief,
+  productGlyphDataUrl,
+} from '@/lib/createIdentity';
 import {
   buildProductSpec,
   briefLooksLikeStorefront,
@@ -31,6 +35,12 @@ import {
 } from '@/lib/createThinPath';
 import { CREATE_QUALITY_RUBRIC_PREFIX } from '@/lib/createQualityRubric';
 import { brandLogoSvgFor, logoIconifyFor } from '@/lib/brandAssets';
+import { healModernAtelierCompanionStomp } from '@/lib/atelierInventShells';
+import {
+  briefWantsProductLadder,
+  gradeProductQuality,
+} from '@/lib/createProductLadder';
+import { isProductSiteAsk, resolveArtifactKind } from '@/lib/createArtifactKind';
 
 const PROSE_MARKERS = [
   /the updated file should/i,
@@ -146,7 +156,7 @@ export function countUnclosedCssBlocks(css: string): number {
  */
 /** Inject `const COVER_HREFS = […]` when App uses it without a declaration (blank Live / ReferenceError). */
 export function healUndeclaredCoverHrefs(app: string, heroes: string[] = []): string {
-  let s = String(app || '');
+  const s = String(app || '');
   if (!s || !/\bCOVER_HREFS\b/.test(s)) return s;
   if (/\b(?:const|let|var)\s+COVER_HREFS\b/.test(s)) return s;
   const list = heroes.length
@@ -624,6 +634,15 @@ export function looksLikeFillerStubAppSource(body: string): boolean {
   const tags = s.match(/<[A-Za-z]/g) || [];
   const hasBrandTitle = /<h1\b/i.test(s);
   const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(s);
+  // Step-ladder brand-only shell (center-word / put-name) is intentional — not filler.
+  if (
+    hasBrandTitle
+    && /className=["']center-word["']/i.test(s)
+    && !hasStructure
+    && tags.length <= 4
+  ) {
+    return false;
+  }
   if (hasBrandTitle && !hasStructure && s.length < 700 && tags.length <= 6) {
     return true;
   }
@@ -1017,12 +1036,14 @@ export function briefLooksLikeMarketingLanding(brief: string): boolean {
       && /\b(?:website|landing|homepage|product|shop|store|DPI|polling)\b/i.test(t))) {
     return true;
   }
-  // Specialty food / fruit / liquor / shop brand sites — never booking Core/Day/Reserve stubs.
-  if (/\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|varieties|liquor|spirits?|whiskey|whisky|bottle\s+shop)\b/i.test(t)
+  // Specialty food / fruit / liquor / shop / delivery brand sites — never booking Core/Day/Reserve stubs.
+  if (/\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|food\s+delivery|meal\s+delivery|delivery\s+(?:app|service|company)|varieties|liquor|spirits?|whiskey|whisky|bottle\s+shop)\b/i.test(t)
     || (/\b(?:dates?|fruit|honey|olive|chocolate|tea|spice|bourbon|vodka|gin|tequila)\b/i.test(t)
       && /\b(?:brand|shop|store|website|landing|homepage|varieties|cultivar|cart|checkout)\b/i.test(t))
     || (/\b(?:shop|store|boutique)\b/i.test(t)
-      && /\b(?:website|landing|homepage|brand|featured|story|cart|buy)\b/i.test(t))) {
+      && /\b(?:website|landing|homepage|brand|featured|story|cart|buy)\b/i.test(t))
+    || (/\b(?:food|meal|restaurant)\b/i.test(t) && /\bdelivery\b/i.test(t)
+      && /\b(?:website|landing|homepage|app|company|brand|order)\b/i.test(t))) {
     return true;
   }
   // One-page brand website with Shop/Story/hero structure.
@@ -1099,8 +1120,31 @@ export function briefLooksLikeChatApp(brief: string): boolean {
 }
 
 /**
+ * Point main.* at the kept App file with an explicit extension.
+ * Bare `./App` + deleting App.jsx leaves Vite serving index.html for /src/App.jsx
+ * (SPA fallback) → "React never mounted".
+ */
+export function syncMainAppImport(
+  files: Record<string, string>,
+  kept: 'src/App.jsx' | 'src/App.tsx',
+): void {
+  const ext = kept.endsWith('.tsx') ? 'tsx' : 'jsx';
+  const target = `./App.${ext}`;
+  for (const mainKey of ['src/main.tsx', 'src/main.jsx']) {
+    const body = files[mainKey];
+    if (typeof body !== 'string' || !body.trim()) continue;
+    const next = body.replace(
+      /from\s+['"]\.\/App(?:\.(?:jsx|tsx))?['"]/g,
+      `from '${target}'`,
+    );
+    if (next !== body) files[mainKey] = next;
+  }
+}
+
+/**
  * #6 — When both App.jsx and App.tsx exist, keep exactly one real App.*.
  * Prefer the higher-scoring product UI; on a tie keep App.jsx (Vite resolves `./App` there first).
+ * When the winner is App.tsx, move it to App.jsx so bare `./App` imports keep working.
  */
 export function cleanupAppTwins(
   files: Record<string, string>,
@@ -1109,10 +1153,15 @@ export function cleanupAppTwins(
   const jsx = next['src/App.jsx'];
   const tsx = next['src/App.tsx'];
   if (jsx == null || tsx == null) {
+    const keptSole = (jsx != null ? 'src/App.jsx' : tsx != null ? 'src/App.tsx' : null) as
+      | 'src/App.jsx'
+      | 'src/App.tsx'
+      | null;
+    if (keptSole) syncMainAppImport(next, keptSole);
     return {
       files: next,
       removed: [],
-      kept: jsx != null ? 'src/App.jsx' : tsx != null ? 'src/App.tsx' : null,
+      kept: keptSole,
     };
   }
   const hasMainJsx = next['src/main.jsx'] != null;
@@ -1120,24 +1169,46 @@ export function cleanupAppTwins(
   const jsxScore = scoreAppSource(jsx);
   const tsxScore = scoreAppSource(tsx);
   let keep: 'src/App.jsx' | 'src/App.tsx';
+  const hasBrandWord = (body: string) =>
+    /className=["']center-word["']/i.test(body) && /<h1\b/i.test(body);
+  const hasCafeNav = (body: string) =>
+    /<nav[\s>]/i.test(body) && /\bMenu\b/.test(body) && /\bRewards\b/.test(body);
   // Always keep the real UI. Entry-file preference is only a tie-breaker —
   // never discard a centered brand / nav App.tsx just because main.jsx exists.
   if (isEmptyOrStubAppSource(jsx) && !isEmptyOrStubAppSource(tsx)) {
     keep = 'src/App.tsx';
   } else if (isEmptyOrStubAppSource(tsx) && !isEmptyOrStubAppSource(jsx)) {
     keep = 'src/App.jsx';
+  } else if ((hasBrandWord(tsx) || hasCafeNav(tsx)) && !(hasBrandWord(jsx) || hasCafeNav(jsx))) {
+    // Twin blank shell vs put-name / café-nav ladder — never drop the named App.
+    keep = 'src/App.tsx';
+  } else if ((hasBrandWord(jsx) || hasCafeNav(jsx)) && !(hasBrandWord(tsx) || hasCafeNav(tsx))) {
+    keep = 'src/App.jsx';
   } else if (Math.abs(jsxScore - tsxScore) < 800 && hasMainJsx && !hasMainTsx) {
     keep = 'src/App.jsx';
   } else if (Math.abs(jsxScore - tsxScore) < 800 && hasMainTsx && !hasMainJsx) {
-    keep = 'src/App.tsx';
+    // Still prefer .jsx for Vite bare-resolve safety when content is equivalent.
+    keep = jsxScore >= tsxScore ? 'src/App.jsx' : 'src/App.tsx';
   } else if (jsxScore >= tsxScore) {
     keep = 'src/App.jsx';
   } else {
     keep = 'src/App.tsx';
   }
-  const drop = keep === 'src/App.jsx' ? 'src/App.tsx' : 'src/App.jsx';
-  delete next[drop];
-  return { files: next, removed: [drop], kept: keep };
+  const removed: string[] = [];
+  if (keep === 'src/App.tsx') {
+    // Move winner into App.jsx — Vite resolves bare `./App` to .jsx before .tsx.
+    // Deleting App.jsx while main still imports it serves index.html as a module
+    // → blank Live ("React never mounted").
+    next['src/App.jsx'] = next['src/App.tsx'];
+    delete next['src/App.tsx'];
+    removed.push('src/App.tsx');
+    keep = 'src/App.jsx';
+  } else {
+    delete next['src/App.tsx'];
+    removed.push('src/App.tsx');
+  }
+  syncMainAppImport(next, keep);
+  return { files: next, removed, kept: keep };
 }
 export function looksLikeReactEntrypointSource(appSource: string | undefined | null): boolean {
   const s = String(appSource || '');
@@ -1222,270 +1293,14 @@ export function briefWantsUtilityFloorKind(
  * Used so Live can paint for todo / tip / coffee stress scenarios.
  * NEVER call for premium/product-homepage asks — “Forbidden: tip calculator” must not match.
  */
-export function buildUtilityFloorFromBrief(projectName: string, brief = ''): { app: string; css: string; kind: string } {
-  const title = String(projectName || 'App').replace(/[`$\\]/g, '').trim().slice(0, 48) || 'App';
-  const t = stripUtilityFloorNoise(`${title}\n${brief}`);
-  if (briefWantsUtilityFloorKind(t, 'tip')) {
-    return {
-      kind: 'tip',
-      app: `import { useMemo, useState } from 'react';
-import './App.css';
-
-export default function App() {
-  const [bill, setBill] = useState('42.50');
-  const [pct, setPct] = useState('18');
-  const { tip, total } = useMemo(() => {
-    const b = Math.max(0, Number(bill) || 0);
-    const p = Math.max(0, Number(pct) || 0);
-    const tipAmt = Math.round(b * p) / 100;
-    return { tip: tipAmt, total: b + tipAmt };
-  }, [bill, pct]);
-  return (
-    <main className="app">
-      <header>
-        <h1>${title}</h1>
-        <p className="lede">Tip calculator — enter bill and tip percent.</p>
-      </header>
-      <label>Bill amount
-        <input type="number" min="0" step="0.01" value={bill} onChange={(e) => setBill(e.target.value)} aria-label="Bill amount" />
-      </label>
-      <label>Tip percent
-        <input type="number" min="0" step="1" value={pct} onChange={(e) => setPct(e.target.value)} aria-label="Tip percent" />
-      </label>
-      <p className="out">Tip: <strong>{'$'}{tip.toFixed(2)}</strong></p>
-      <p className="out">Total: <strong>{'$'}{total.toFixed(2)}</strong></p>
-    </main>
-  );
-}
-`,
-      css: `:root{--bg:#0f1412;--ink:#eef6f1;--muted:#9db5a8;--accent:#7dcea0;--line:rgba(255,255,255,.12)}
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",sans-serif;background:radial-gradient(1200px 600px at 10% -10%,#1b2a22,#0f1412);color:var(--ink)}
-.app{min-height:100vh;max-width:28rem;margin:0 auto;padding:2rem 1.25rem;display:grid;gap:.9rem}
-h1{margin:0;font-size:clamp(1.8rem,4vw,2.4rem)}.lede{color:var(--muted);margin:.35rem 0 0}
-label{display:grid;gap:.35rem;font-size:.92rem;color:var(--muted)}
-input{padding:.7rem .8rem;border-radius:.55rem;border:1px solid var(--line);background:#0c1110;color:var(--ink);font:inherit}
-.out{margin:0;font-size:1.05rem}strong{color:var(--accent)}`,
-    };
-  }
-  if (briefWantsUtilityFloorKind(t, 'kiln')) {
-    return {
-      kind: 'kiln',
-      app: `import { useState } from 'react';
-import './App.css';
-
-export default function App() {
-  const [firings, setFirings] = useState([]);
-  const [clay, setClay] = useState('');
-  const [cone, setCone] = useState('6');
-  const [glaze, setGlaze] = useState('');
-  const [result, setResult] = useState('pass');
-
-  const addFiring = (e) => {
-    e.preventDefault();
-    if (!clay.trim()) return;
-    setFirings((prev) => [
-      {
-        id: Date.now(),
-        clay: clay.trim(),
-        cone: cone.trim() || '6',
-        glaze: glaze.trim() || '—',
-        result,
-      },
-      ...prev,
-    ].slice(0, 12));
-    setClay('');
-    setGlaze('');
-    setResult('pass');
-  };
-
-  return (
-    <main className="app">
-      <header className="brand">
-        <h1>${title}</h1>
-        <p className="tag">Log every kiln run.</p>
-      </header>
-      <form className="firing-form" onSubmit={addFiring}>
-        <label>
-          Clay body
-          <input value={clay} onChange={(e) => setClay(e.target.value)} placeholder="e.g. stoneware" required />
-        </label>
-        <label>
-          Cone
-          <input value={cone} onChange={(e) => setCone(e.target.value)} placeholder="6 or 10" />
-        </label>
-        <label>
-          Glaze notes
-          <textarea value={glaze} onChange={(e) => setGlaze(e.target.value)} rows={2} placeholder="Crawled? Color?" />
-        </label>
-        <fieldset className="result">
-          <legend>Result</legend>
-          <label><input type="radio" name="result" checked={result === 'pass'} onChange={() => setResult('pass')} /> Pass</label>
-          <label><input type="radio" name="result" checked={result === 'fail'} onChange={() => setResult('fail')} /> Fail</label>
-        </fieldset>
-        <button type="submit">Save firing</button>
-      </form>
-      <section className="list" aria-label="Saved firings">
-        <h2>Recent firings</h2>
-        {firings.length === 0 ? (
-          <p className="empty">No firings yet — log your first kiln run above.</p>
-        ) : (
-          <ul>
-            {firings.map((f) => (
-              <li key={f.id}>
-                <strong>{f.clay}</strong>
-                <span>Cone {f.cone}</span>
-                <span>{f.glaze}</span>
-                <span className={f.result}>{f.result}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
-  );
-}
-`,
-      css: `:root{--bg:#1a1410;--ink:#f5f0e8;--muted:#b9a894;--accent:#964b0c;--line:rgba(245,240,232,.14)}
-*{box-sizing:border-box}body{margin:0;font-family:Georgia,"Iowan Old Style",serif;background:radial-gradient(900px 520px at 20% -10%,#3a2a1c,#1a1410);color:var(--ink)}
-.app{min-height:100vh;max-width:28rem;margin:0 auto;padding:2.25rem 1.25rem 3rem;display:grid;gap:1.25rem}
-.brand h1{margin:0;font-size:clamp(2.2rem,6vw,3rem);letter-spacing:-.02em}
-.tag{margin:.35rem 0 0;color:var(--muted);font-size:1.05rem}
-.firing-form{display:grid;gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:.85rem;background:rgba(0,0,0,.22)}
-label{display:grid;gap:.3rem;font-size:.9rem;color:var(--muted)}
-input,textarea,button{font:inherit}
-input,textarea{padding:.65rem .75rem;border-radius:.5rem;border:1px solid var(--line);background:#120e0b;color:var(--ink)}
-.result{border:none;margin:0;padding:0;display:flex;gap:1rem;align-items:center;color:var(--muted)}
-.result legend{padding:0;margin:0 .5rem 0 0}
-.result label{display:flex;align-items:center;gap:.35rem;flex-direction:row}
-button{padding:.75rem 1rem;border:none;border-radius:.55rem;background:var(--accent);color:#fff8f0;font-weight:600;cursor:pointer}
-.list h2{margin:0 0 .6rem;font-size:1rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.empty{color:var(--muted);margin:0}
-ul{list-style:none;margin:0;padding:0;display:grid;gap:.45rem}
-li{display:grid;grid-template-columns:1.2fr .7fr 1fr auto;gap:.5rem;padding:.7rem .8rem;border-radius:.55rem;border:1px solid var(--line);background:rgba(0,0,0,.18);font-size:.92rem}
-.pass{color:#9dcea0;text-transform:uppercase;font-size:.75rem;font-weight:700}
-.fail{color:#e0a090;text-transform:uppercase;font-size:.75rem;font-weight:700}
-@media (max-width:520px){li{grid-template-columns:1fr 1fr}}`,
-    };
-  }
-  if (briefWantsUtilityFloorKind(t, 'coffee')) {
-    return {
-      kind: 'coffee',
-      app: `import { useState } from 'react';
-import './App.css';
-
-const DRINKS = [
-  { name: 'House Drip', price: '$3.50' },
-  { name: 'Cortado', price: '$4.25' },
-  { name: 'Oat Latte', price: '$5.00' },
-  { name: 'Mocha', price: '$5.25' },
-  { name: 'Cold Brew', price: '$4.75' },
-  { name: 'Espresso', price: '$3.00' },
-];
-
-export default function App() {
-  const [selected, setSelected] = useState(DRINKS[0].name);
-  return (
-    <main className="app">
-      <header className="hero">
-        <h1>${title}</h1>
-        <p className="lede">Small-batch coffee, roasted for everyday rituals.</p>
-        <p className="hours">Hours: Mon–Fri 7am–6pm · Sat–Sun 8am–4pm</p>
-      </header>
-      <section className="menu" aria-label="Drink menu">
-        <h2>Menu</h2>
-        <ul>
-          {DRINKS.map((d) => (
-            <li key={d.name}>
-              <button type="button" onClick={() => setSelected(d.name)} aria-label={d.name + ' - ' + d.price + ' per cup'}>
-                <span>{d.name}</span>
-                <span>{d.price}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        <p className="pick">Selected drink: <strong>{selected}</strong></p>
-      </section>
-    </main>
-  );
-}
-`,
-      css: `:root{--bg:#1a1410;--ink:#f6efe6;--muted:#c4b2a0;--accent:#d4a574;--line:rgba(255,255,255,.1)}
-*{box-sizing:border-box}body{margin:0;font-family:"Iowan Old Style",Georgia,serif;background:radial-gradient(900px 500px at 80% 0%,#3a2418,#1a1410);color:var(--ink)}
-.app{min-height:100vh;max-width:40rem;margin:0 auto;padding:2.5rem 1.25rem}
-.hero h1{margin:0;font-size:clamp(2.4rem,6vw,3.4rem);letter-spacing:-.02em}
-.lede{color:var(--muted);font-size:1.1rem}.hours{color:var(--accent);font-size:.95rem}
-.menu h2{margin:2rem 0 .8rem;font-size:1.1rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-ul{list-style:none;padding:0;margin:0;display:grid;gap:.45rem}
-button{width:100%;display:flex;justify-content:space-between;gap:1rem;padding:.85rem 1rem;border-radius:.55rem;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ink);font:inherit;cursor:pointer}
-button:hover{border-color:var(--accent)}.pick{margin-top:1rem;color:var(--muted)}strong{color:var(--ink)}`,
-    };
-  }
-  if (briefWantsUtilityFloorKind(t, 'todo')) {
-    const interactive = buildLastResortInteractiveApp(title);
-    return { kind: 'todo', app: interactive.app, css: interactive.css };
-  }
-  // No positive utility ask — callers must NOT apply a stub (kind: none).
+export function buildUtilityFloorFromBrief(_projectName: string, _brief = ''): { app: string; css: string; kind: string } {
+  // REMOVED: tip/todo/coffee/kiln host floors — no look-back recreate.
   return { kind: 'none', app: '', css: '' };
 }
 
-export function buildLastResortInteractiveApp(projectName: string): { app: string; css: string } {
-  const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
-  return {
-    app: `import { useState } from 'react';
-import './App.css';
-
-export default function App() {
-  const [items, setItems] = useState([{ id: '1', text: 'First item', done: false }]);
-  const [draft, setDraft] = useState('');
-  return (
-    <main className="app">
-      <header className="hero">
-        <h1>${title}</h1>
-        <p className="lede">Working shell — add items and toggle them.</p>
-      </header>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const text = draft.trim();
-          if (!text) return;
-          setItems((prev) => [{ id: String(Date.now()), text, done: false }, ...prev]);
-          setDraft('');
-        }}
-      >
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add item" aria-label="Add item" />
-        <button type="submit">Add</button>
-      </form>
-      <ul className="list">
-        {items.map((item) => (
-          <li key={item.id}>
-            <button type="button" onClick={() => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, done: !x.done } : x))}>
-              {item.done ? 'Done' : 'Open'}
-            </button>
-            <span className={item.done ? 'done' : ''}>{item.text}</span>
-            <button type="button" onClick={() => setItems((prev) => prev.filter((x) => x.id !== item.id))}>Remove</button>
-          </li>
-        ))}
-      </ul>
-    </main>
-  );
-}
-`,
-    css: `:root { --bg:#12151c; --ink:#eef2f7; --muted:#9aa6b8; --accent:#6ee0c4; --line:rgba(255,255,255,.12); }
-* { box-sizing: border-box; }
-body { margin: 0; font-family: "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
-.app { min-height: 100vh; padding: 2rem 1.25rem; max-width: 40rem; margin: 0 auto; }
-.hero h1 { margin: 0 0 .5rem; font-size: clamp(2rem,5vw,3rem); }
-.lede { color: var(--muted); }
-.row { display: grid; grid-template-columns: 1fr auto; gap: .5rem; margin: 1rem 0; }
-input, button { font: inherit; }
-input { padding: .7rem .8rem; border-radius: .6rem; border: 1px solid var(--line); background: #0e1218; color: var(--ink); }
-button { padding: .7rem .9rem; border-radius: .6rem; border: 0; background: var(--accent); color: #10221c; font-weight: 700; cursor: pointer; }
-.list { list-style: none; padding: 0; margin: 0; display: grid; gap: .45rem; }
-.list li { display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; align-items: center; padding: .65rem .7rem; border: 1px solid var(--line); border-radius: .6rem; }
-.done { text-decoration: line-through; color: var(--muted); }
-`,
-  };
+export function buildLastResortInteractiveApp(_projectName: string): { app: string; css: string } {
+  // REMOVED — no look-back interactive twin.
+  return { app: '', css: '' };
 }
 
 /**
@@ -2284,7 +2099,11 @@ export function isPreviewReady(
         const norm = p.replace(/\\/g, '/');
         if (!/public\/heroes\/.+\.(?:jpe?g|png|webp)$/i.test(norm)) continue;
         const b = String(body || '');
-        if (b && b.length < 400 && (/on-disk asset|\/\* binary|ASSET:/i.test(b) || !/[\x00-\x08\x80-\xff]/.test(b))) {
+        const containsBinaryByte = Array.from(b).some((character) => {
+          const code = character.charCodeAt(0);
+          return code <= 8 || (code >= 0x80 && code <= 0xff);
+        });
+        if (b && b.length < 400 && (/on-disk asset|\/\* binary|ASSET:/i.test(b) || !containsBinaryByte)) {
           // Empty string is OK (presence marker). Non-empty tiny ASCII means overwrite corruption.
           if (b.trim()) reasons.push('hero image was overwritten with placeholder text');
         }
@@ -2662,7 +2481,7 @@ export function healProductMarketingStructure(
     .find((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p));
   const heroHref = heroFromDisk
     ? `/${heroFromDisk.replace(/^public\//i, '')}`
-    : (app.match(/COVER_HREFS\s*=\s*\[['\"]([^'\"]+)/i)?.[1]
+    : (app.match(/COVER_HREFS\s*=\s*\[['"]([^'"]+)/i)?.[1]
       || `/heroes/${slug}-hero.jpg`);
 
   if (hasPhoneColumnShell(css, app)) {
@@ -2745,6 +2564,47 @@ export function healProductMarketingStructure(
  * When craft left a real App but Ready fails on thin CSS / missing brand, heal those
  * two gaps without replacing the App with a canned template.
  */
+/**
+ * True when App.css still carries the dark SaaS near-ready atmosphere on a light brief.
+ */
+export function cssHasDarkTechStomp(css: string): boolean {
+  const c = String(css || '');
+  if (!c.trim()) return false;
+  if (/linear-gradient\(\s*165deg[^;]*#0c0f14/i.test(c)) return true;
+  if (/#0c0f14/.test(c) && /NOVA near-ready|softOrbDrift/i.test(c) && /--paper|#f4efe6|#f3eee4/i.test(c)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Strip dark-tech atmosphere / forced --bg:#0f1419 when the brief wants parchment grounds.
+ * Safe no-op for dark product asks.
+ */
+export function healAtelierPaletteCss(css: string, brief: string): string {
+  if (!briefWantsLightPaperGround(brief)) return String(css || '');
+  let next = String(css || '');
+  next = next.replace(
+    /\.app,\s*\.hero\s*\{\s*background-image:\s*[\s\S]*?#0c0f14[\s\S]*?\}\s*/gi,
+    '',
+  );
+  next = next.replace(
+    /background-image:\s*[\s\S]{0,280}linear-gradient\(\s*165deg,\s*#0c0f14[\s\S]{0,120}\)\s*;/gi,
+    'background-image: linear-gradient(165deg, #f4efe6, #efe8dc 55%, #f7f2ea);',
+  );
+  if (/--paper\s*:|#f4efe6|#f3eee4|#faf7f0|#f7f2ea/i.test(next)) {
+    next = next
+      .replace(/--bg:\s*#0f1419\s*;/gi, '--bg: #f4efe6;')
+      .replace(/--panel:\s*#1a222c\s*;/gi, '--panel: #faf7f0;');
+  }
+  // Sticky-nav defaults that hard-code charcoal over parchment tokens.
+  next = next.replace(
+    /var\(--bg,\s*#0f1419\)/gi,
+    'var(--bg, #f4efe6)',
+  );
+  return next;
+}
+
 export function healNearReadyCreateUi(
   files: Record<string, string>,
   productName: string,
@@ -2770,11 +2630,15 @@ export function healNearReadyCreateUi(
   const css = String(next['src/App.css'] || '');
   const cssLen = css.replace(/\s+/g, '').length;
   const marketing = briefLooksLikeMarketingLanding(brief) && !briefLooksLikeMicroWebToy(brief);
+  const accBlob = Object.values(next).join('\n');
+  const modernAtelierShell = /data-nova-shell=["'](?:lookbook|rail|feature|strip|commission)["']/i.test(accBlob);
   // Cafe/landing Ready wants ~900–2000 CSS + gradients. Small models often leave 400–800
   // chars of flat CSS — still fail "too thin" / "premium depth". Floor those too.
+  // Never replace modern atelier shell App.css with the shared companion stamp (Prism Latch).
   const cssFloorAt = marketing ? 2000 : 400;
   if (
-    app.length >= 200
+    !modernAtelierShell
+    && app.length >= 200
     && cssLen < cssFloorAt
     && !/getContext\s*\(\s*['"]2d['"]|canvas|requestAnimationFrame/i.test(app)
   ) {
@@ -2783,10 +2647,21 @@ export function healNearReadyCreateUi(
       : buildUtilityCompanionCss(productName, brief);
     actions.push('css-floor');
   }
+  if (modernAtelierShell) {
+    const healedShell = healModernAtelierCompanionStomp(next, productName);
+    if (String(healedShell['src/App.css'] || '') !== String(next['src/App.css'] || '')
+      || String(healedShell['src/sections/HeroSection.jsx'] || '') !== String(next['src/sections/HeroSection.jsx'] || '')) {
+      next = healedShell;
+      actions.push('atelier-shell-companion-stomp');
+    }
+  }
   // Premium landings: thick but flat CSS still fails Ready — inject motion + atmosphere in place.
-  if (marketing && app.length >= 200) {
+  // Never stamp dark SaaS #0c0f14 onto parchment / cream atelier briefs (Fern Latch stomp).
+  // Never stamp shared motion/atmosphere onto modern atelier shells (owns section CSS).
+  if (marketing && app.length >= 200 && !modernAtelierShell) {
     let cssNow = String(next['src/App.css'] || '');
     const beforeAtmos = cssNow;
+    const lightPaper = briefWantsLightPaperGround(brief);
     if (!/@keyframes/i.test(cssNow)) {
       cssNow += `
 
@@ -2806,7 +2681,16 @@ export function healNearReadyCreateUi(
       actions.push('css-motion');
     }
     if (!/radial-gradient|linear-gradient/i.test(cssNow)) {
-      cssNow += `
+      cssNow += lightPaper
+        ? `
+.app, .hero {
+  background-image:
+    radial-gradient(ellipse 55% 45% at 18% 22%, rgba(176,141,87,0.16), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 82% 18%, rgba(20,32,51,0.06), transparent 58%),
+    linear-gradient(165deg, #f4efe6, #efe8dc 55%, #f7f2ea);
+}
+`
+        : `
 .app, .hero {
   background-image:
     radial-gradient(ellipse 55% 45% at 18% 22%, rgba(126,184,255,0.22), transparent 60%),
@@ -2817,6 +2701,14 @@ export function healNearReadyCreateUi(
       actions.push('css-atmosphere');
     }
     if (cssNow !== beforeAtmos) next['src/App.css'] = cssNow;
+  }
+  // Permanent: strip prior dark-tech stomps when this brief wants parchment grounds.
+  if (next['src/App.css'] && briefWantsLightPaperGround(brief)) {
+    const healedCss = healAtelierPaletteCss(String(next['src/App.css'] || ''), brief);
+    if (healedCss !== next['src/App.css']) {
+      next['src/App.css'] = healedCss;
+      actions.push('atelier-palette-heal');
+    }
   }
   // Marketing / brand: designed hero visual so hero preflight passes without Pollinations or /heroes files.
   if (briefLooksLikeMarketingLanding(brief) && appKey && next[appKey]) {
@@ -2851,7 +2743,6 @@ export function healNearReadyCreateUi(
     && /(?:from\s+['"]three|OrbitControls|\bTHREE\b|WebGLRenderer)/i.test(next[appKey])
     && !looksLikeSpatialApp(brief)
   ) {
-    let stripped = false;
     const src = next[appKey];
     const returnIdx = src.search(/\breturn\s*\(/);
     let jsx = '';
@@ -2885,7 +2776,6 @@ export function healNearReadyCreateUi(
         );
       }
       actions.push('strip-three-marketing');
-      stripped = true;
     }
     // Never paste a Design Spine template when Three.js strip fails — leave craft
     // source and let originality lint / craft retry handle quality.
@@ -3032,6 +2922,19 @@ export function previewReadyForBrief(
   // Strip "Do not ship a tip/todo…" before ladder/utility detection — otherwise premium
   // homepages false-route into requireInteractive and fail with "no interactive handlers".
   const brief = stripUtilityFloorNoise(rawBrief);
+  // Product invent only: Preview/Ready aligns with Premium — never for CLI/API/dashboard.
+  if (isProductSiteAsk(rawBrief) && briefWantsProductLadder(rawBrief)) {
+    const graded = gradeProductQuality(files, rawBrief, opts?.productName || '');
+    if (!graded.okPremium) {
+      return {
+        ok: false,
+        reasons: [
+          `product invent below Premium (${graded.label})`,
+          ...graded.reasons.slice(0, 4),
+        ],
+      };
+    }
+  }
   // Product / marketing homepages first — never treat forbid-tip text as a todo ladder ask.
   if (briefLooksLikeAppleStyleHomepage(rawBrief) || briefLooksLikeMarketingLanding(rawBrief)) {
     const bookingCommerce = /\b(?:book|reserv|appointment|time\s*slot|cart|checkout|borrow)\b/i.test(brief);
@@ -3181,18 +3084,20 @@ function inlineShelfSvgDataUri(label: string, hue: number): string {
 }
 
 const REMOTE_PLACEHOLDER_HOST =
-  /via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com/i;
+  /via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com|images\.unsplash\.com|unsplash\.com|pexels\.com|i\.imgur\.com/i;
 
 /**
- * Replace fake / broken remote placeholder image hosts with offline-safe data URIs.
- * via.placeholder.com / placehold.co break Electron Live and leave overlapping alt text.
+ * Replace fake / placeholder image hosts with offline-safe generated glyphs.
+ * Only known placeholder/stock demo hosts — never blanket-wipe every https URL
+ * (that destroyed real CDN product art, brand assets, and general-app images).
+ * User-uploaded local paths (/heroes/, nova-media:, data:) are left alone.
  */
 export function sanitizeCreatePolishPlaceholders(app: string): string {
   let next = String(app || '');
   let n = 0;
   const swap = (label?: string) => {
     n += 1;
-    return inlineShelfSvgDataUri(label || `Item ${n}`, 28 + (n * 37) % 300);
+    return productGlyphDataUrl(label || `Item ${n}`, { role: 'thumb', brief: String(label || '') });
   };
 
   next = next.replace(/src=(["'])\/path\/to\/[^"']+\1/gi, (_m, q) => `src=${q}${swap('Item')}${q}`);
@@ -3200,6 +3105,10 @@ export function sanitizeCreatePolishPlaceholders(app: string): string {
 
   next = next.replace(/<img\b[^>]*>/gi, (tag) => {
     const src = tag.match(/src=(["'])([^"']*)\1/i)?.[2] ?? '';
+    // Keep same-origin / local public assets / data / nova-media / localhost.
+    if (/^\/(?:heroes|icons|logo|brand|media)\//i.test(src)) return tag;
+    if (/^data:/i.test(src)) return tag;
+    if (/nova-media:|localhost|127\.0\.0\.1/i.test(src)) return tag;
     const needsFix = !src
       || REMOTE_PLACEHOLDER_HOST.test(src)
       || /\/path\/to\//i.test(src);
@@ -3213,7 +3122,7 @@ export function sanitizeCreatePolishPlaceholders(app: string): string {
   });
 
   next = next.replace(
-    /url\((['"]?)https?:\/\/(?:via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com)[^)"']*\1\)/gi,
+    /url\((['"]?)https?:\/\/(?:via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com|images\.unsplash\.com|[^)"']*unsplash\.com|[^)"']*pexels\.com)[^)"']*\1\)/gi,
     () => `url(${swap('Item')})`,
   );
   return next;
@@ -3227,9 +3136,29 @@ export function sanitizeCreatePolishPlaceholders(app: string): string {
 export function assembleCreateAppFromParts(
   files: Record<string, string>,
   productName = 'App',
+  opts?: { artifactKind?: string; brief?: string },
 ): { files: Record<string, string>; changed: string[] } {
   const next = { ...files };
   const changed: string[] = [];
+  // Never flatten CLI / Python / library Acc into a quiet-luxury marketing landing.
+  const paths = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
+  const looksNonWebAcc = paths.some((p) =>
+    /^(?:bin\/|src\/cli\.|cli\.js$|main\.py$|app\.py$|server\.js$|index\.js$)/i.test(p)
+    || /\.(?:py|go|rs)$/i.test(p),
+  ) && !paths.some((p) => /^src\/App\.(jsx|tsx)$/i.test(p));
+  if (looksNonWebAcc) return { files: next, changed };
+  // Only product-site / thin web shells may be assembled into a landing — not dashboards/games mid-edit.
+  try {
+    const kind = String(opts?.artifactKind || '');
+    // Fail closed: missing kind + non-product brief → never assemble marketing shell.
+    if (!kind || kind === 'unknown') {
+      if (opts?.brief && !isProductSiteAsk(opts.brief)) {
+        return { files: next, changed };
+      }
+    } else if (kind !== 'product-site' && kind !== 'static-web') {
+      return { files: next, changed };
+    }
+  } catch { /* keep legacy path */ }
   const appKey = next['src/App.jsx']
     ? 'src/App.jsx'
     : (next['src/App.tsx'] ? 'src/App.tsx' : '');
@@ -3438,9 +3367,10 @@ export function wireCreatePublicAssets(
   const compositionalShell = thinWantsCompositionalShell(briefText)
     || hasSectionFiles
     || appLooksLikeCompositionalShell(appEarly);
+  const assembleKind = briefText ? resolveArtifactKind(briefText) : undefined;
   const assembled = compositionalShell
     ? { files: { ...files }, changed: [] as string[] }
-    : assembleCreateAppFromParts(files, productName);
+    : assembleCreateAppFromParts(files, productName, { brief: briefText, artifactKind: assembleKind });
   const importHeal = healMissingLocalImports(assembled.files, productName);
   const next = { ...importHeal.files };
   const changed: string[] = [...assembled.changed];
@@ -3489,9 +3419,17 @@ export function wireCreatePublicAssets(
     : wantFamily === 'lucide:coffee' ? /M10 2v2|M16 8a1 1 0 0 1 1 1v8/i.test(existingLogo)
       : wantFamily === 'lucide:leaf' ? /M11 20A7 7 0 0 1 9\.8/i.test(existingLogo) || /leaf/i.test(existingLogo)
         : wantFamily === 'lucide:utensils' ? /M3 2v7c0 1\.1/i.test(existingLogo)
-          : !logoIsSparkles;
+          : wantFamily === 'nova:desk' ? /viewBox="0 0 64 64"[\s\S]*width="48" height="8"/i.test(existingLogo)
+            : !logoIsSparkles;
+  // Invent-demo owns its logo — never stomp with Lucide family marks (speakers→package race).
+  const inventOwnsLogo = /data-nova-invent-demo\s*=\s*["']1["']/.test(
+    String(next['src/App.jsx'] || next['src/App.tsx'] || ''),
+  ) || /data-nova-invent-logo\s*=\s*["']1["']/i.test(existingLogo)
+    || (/viewBox=["']0 0 64 64["']/i.test(existingLogo)
+      && /<text\b/i.test(existingLogo)
+      && !/viewBox=["']0 0 24 24["']/i.test(existingLogo));
   // Always stomp sparkles (and mismatched family marks) for F&B / brand creates.
-  const shouldWriteLogo = wantsBrandLogo && (
+  const shouldWriteLogo = wantsBrandLogo && !inventOwnsLogo && (
     !hasLogo
     || (logoIsSparkles && wantFamily !== 'lucide:sparkles')
     || (wantFamily !== 'lucide:sparkles' && !logoMatchesFamily)
@@ -3540,12 +3478,16 @@ export function wireCreatePublicAssets(
     const appSrc = appKey ? String(next[appKey] || '') : '';
     const hasHeroStage = /className=["'][^"']*\bhero-photo\b|COVER_HREFS|src=["'][^"']*\/heroes\//i.test(appSrc)
       || /\.hero-photo\b|url\(\s*['"]?\/heroes\//i.test(css);
+    const bgFallback = briefWantsLightPaperGround(briefText) ? '#f4efe6' : '#0f1419';
+    const lineFallback = briefWantsLightPaperGround(briefText)
+      ? 'rgba(26, 31, 28, 0.12)'
+      : 'rgba(232,238,244,0.14)';
     if (heroes[0] && !hasHeroStage && !/url\(\s*['"]?\/heroes\//i.test(css)) {
-      css += `\n.app-shell, .app { background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg, #0f1419) 88%, transparent), color-mix(in srgb, var(--bg, #0f1419) 94%, transparent)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
+      css += `\n.app-shell, .app { background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg, ${bgFallback}) 88%, transparent), color-mix(in srgb, var(--bg, ${bgFallback}) 94%, transparent)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
     }
     if ((hasLogo || hasSearch || hasBag) && !/\.sticky-nav\b/.test(css)) {
       css += `
-.sticky-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.25rem; position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg, #0f1419) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line, rgba(232,238,244,0.14)); }
+.sticky-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.25rem; position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg, ${bgFallback}) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line, ${lineFallback}); }
 .nav-left, .nav-right { display: flex; align-items: center; gap: 0.75rem; }
 .nav-logo, .nav-icon { display: block; object-fit: contain; }
 .nav-brand { font-weight: 700; letter-spacing: -0.03em; }
@@ -3681,24 +3623,44 @@ export function wireCreatePublicAssets(
     const needsIconWire = !compositionalShell && unusedIcons.length > 0;
     if (compositionalShell && hasLogo && navSectionKey && !logoInNavSection) {
       // Prefer wiring /logo.svg into the nav section file, not App.jsx.
+      // Rail / minimal / centered shells: put logo beside brand — never as first child of <nav> links.
       let nav = String(next[navSectionKey] || '');
-      if (/<nav\b/i.test(nav) || /nav-brand|nav-header|role=["']banner["']/i.test(nav)) {
+      const brandAlt = String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48);
+      const logoTag = `<img className="nav-logo" src="/logo.svg" alt="${brandAlt}" width="36" height="36" />`;
+      if (/nav-rail|nav-minimal|nav-centered|nav-under|nav-dock|data-nova-shell/i.test(nav)) {
+        if (/nav-brand/i.test(nav) && !/nav-logo/i.test(nav)) {
+          nav = nav.replace(
+            /(<span[^>]*className=["'][^"']*\bnav-brand\b[^"']*["'][^>]*>)/i,
+            `${logoTag}\n      $1`,
+          );
+          next[navSectionKey] = nav;
+          if (!changed.includes(navSectionKey)) changed.push(navSectionKey);
+        }
+      } else if (/<nav\b/i.test(nav) || /nav-brand|nav-header|role=["']banner["']/i.test(nav)) {
         if (/<nav\b/i.test(nav)) {
           nav = nav.replace(
             /(<nav\b[^>]*>)/i,
-            `$1\n      <img className="nav-logo" src="/logo.svg" alt="${String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48)}" width="36" height="36" />`,
+            `$1\n      ${logoTag}`,
           );
         } else if (/nav-brand/i.test(nav)) {
           nav = nav.replace(
             /(className=["'][^"']*\bnav-brand\b[^"']*["'][^>]*>)/i,
-            `$1\n        <img className="nav-logo" src="/logo.svg" alt="${String(productName || 'Brand').replace(/[<>&'"`]/g, '').slice(0, 48)}" width="36" height="36" />`,
+            `$1\n        ${logoTag}`,
           );
         }
         next[navSectionKey] = nav;
         if (!changed.includes(navSectionKey)) changed.push(navSectionKey);
       }
     }
-    if (needsLogoWire || needsIconWire) {
+    const landingHeroShellEarly = /className=["'][^"']*\bapp\s+(?:vibe|product)\b/i.test(app)
+      || (/aria-label=["']Hero["']/i.test(app) && /className=["'][^"']*\bbrand\b/i.test(app));
+    // Copper Loom: never stamp sticky-nav onto Bare Vite / root-app before invent
+    // writes real sections — nav-only Acc looked "started" and Live opened empty.
+    const bareViteMount = (/Bare Vite mount|id=["']root-app["']/i.test(app)
+      || (app.replace(/\s+/g, '').length < 500 && !/<(?:section|main|h1)\b/i.test(app)))
+      && !/from\s+['"]\.\/sections\//i.test(app)
+      && !/<(?:Hero|HeroSection|Catalog|ProductGrid|Story)\b/i.test(app);
+    if ((needsLogoWire || needsIconWire) && !landingHeroShellEarly && !bareViteMount) {
       const prefer = ['search', 'bag', 'user', 'settings', 'mail', 'grid', 'clock', 'more'];
       const ordered = [
         ...prefer.filter((id) => unusedIcons.includes(id) || (iconFiles.includes(id) && !new RegExp(`/icons/${id}\\.svg`, 'i').test(app))),
@@ -3766,7 +3728,10 @@ export function wireCreatePublicAssets(
 
     // Final brand law: hasLogo ⇒ UI must reference /logo.svg.
     // Compositional: already wired into NavHeaderSection above — do not inject into App shell.
-    if (!compositionalShell && hasLogo && !/\/logo\.svg/i.test(app)) {
+    // Vibe / product landing shells keep brand in the hero — never prepend sticky-nav chrome.
+    const landingHeroShell = /className=["'][^"']*\bapp\s+(?:vibe|product)\b/i.test(app)
+      || (/aria-label=["']Hero["']/i.test(app) && /className=["'][^"']*\bbrand\b/i.test(app));
+    if (!compositionalShell && !landingHeroShell && !bareViteMount && hasLogo && !/\/logo\.svg/i.test(app)) {
       const logo = `<img className="nav-logo" src="/logo.svg" alt="${brand}" width="36" height="36" />`;
       if (/className=["'][^"']*\bsticky-nav\b[^"']*["']/i.test(app)) {
         app = app.replace(
@@ -3780,6 +3745,12 @@ export function wireCreatePublicAssets(
         );
       } else {
         app = `${logo}\n${app}`;
+      }
+    } else if (landingHeroShell && hasLogo && !/\/logo\.svg/i.test(app)) {
+      // Quiet logo in hero — no sticky-nav strip.
+      const logo = `<img className="nav-logo" src="/logo.svg" alt="${brand}" width="40" height="40" />`;
+      if (/aria-label=["']Hero["'][^>]*>/i.test(app)) {
+        app = app.replace(/(aria-label=["']Hero["'][^>]*>)/i, `$1\n        ${logo}`);
       }
     }
 
@@ -3863,10 +3834,12 @@ export function wireCreatePublicAssets(
     }
   }
 
-  // Never inject cream/sage/gold apple-home atmosphere as a Ready heal.
+  // Never inject cream/sage/gold apple-home atmosphere as a Ready heal —
+  // unless THIS brief explicitly wants parchment/cream paper grounds.
   // Layout Contract / Design hop owns palette; thin CSS stays honest for the gate.
   if (cssKey) {
     const css = healUnbalancedCssBraces(String(next[cssKey] || ''));
+    const keepLightPaper = briefWantsLightPaperGround(briefText);
     // Strip legacy atmospheric injects left from older builds.
     let cleaned = css
       .replace(/\/\*\s*Prefer cream atmosphere[\s\S]*?(?=\n\/\*|\n\.|\n@media|$)/gi, '')
@@ -3875,9 +3848,15 @@ export function wireCreatePublicAssets(
       .replace(/@keyframes\s+novaCompanionSweep\s*\{[\s\S]*?\}\s*/gi, '')
       .replace(/@keyframes\s+novaGoldSheen\s*\{[\s\S]*?\}\s*/gi, '')
       .replace(/body\s*\{\s*background-color:\s*#f3eee4\s*!important;[\s\S]*?color:\s*#14181c;\s*\}\s*/gi, '')
-      .replace(/body::before\s*\{[\s\S]*?z-index:\s*0;\s*\}\s*/gi, '')
-      .replace(/--bg:\s*#f3eee4\s*;/gi, '--bg: #0f1419;')
-      .replace(/--panel:\s*#faf7f0\s*;/gi, '--panel: #1a222c;');
+      .replace(/body::before\s*\{[\s\S]*?z-index:\s*0;\s*\}\s*/gi, '');
+    // Only force cream→dark when the brief is NOT a parchment/atelier ask.
+    if (!keepLightPaper) {
+      cleaned = cleaned
+        .replace(/--bg:\s*#f3eee4\s*;/gi, '--bg: #0f1419;')
+        .replace(/--panel:\s*#faf7f0\s*;/gi, '--panel: #1a222c;');
+    } else {
+      cleaned = healAtelierPaletteCss(cleaned, briefText);
+    }
     cleaned = healUnbalancedCssBraces(cleaned);
     if (cleaned !== String(next[cssKey] || '')) {
       next[cssKey] = cleaned;
@@ -3947,12 +3926,28 @@ body { font-family: ${p.font}; }
   border-radius: ${shopish ? '12px' : '999px'}; padding: 0.55rem 1rem; min-width: min(240px, 70vw);
 }
 .cart-count { color: var(--muted); font-size: 0.95rem; }
-.hero { min-height: 48vh; display: grid; place-items: center; text-align: center; padding: 3.5rem 1.25rem 2.5rem; }
-.hero img, .hero-photo { max-width: min(920px, 92vw); width: 100%; border-radius: ${shopish ? '16px' : '20px'}; border: 1px solid var(--line); object-fit: cover; }
+/* Centered card hero for simple pages — never fight compositional full-bleed. */
+.hero:not(.hero-section):not(.hero-fullbleed) { min-height: 48vh; display: grid; place-items: center; text-align: center; padding: 3.5rem 1.25rem 2.5rem; }
+.hero:not(.hero-section):not(.hero-fullbleed) img,
+.hero:not(.hero-section):not(.hero-fullbleed) .hero-photo { max-width: min(920px, 92vw); width: 100%; border-radius: ${shopish ? '16px' : '20px'}; border: 1px solid var(--line); object-fit: cover; }
+.hero-section.hero-fullbleed { position: relative; min-height: 88vh; display: grid; align-items: end; padding: 0; overflow: hidden; }
+.hero-section.hero-fullbleed .hero-stage { position: absolute; inset: 0; z-index: 0; opacity: 0.45; pointer-events: none; }
+.hero-section.hero-fullbleed .hero-art { width: 100%; height: 100%; object-fit: cover; border: 0; border-radius: 0; max-width: none; }
+.hero-section.hero-fullbleed .hero-veil { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.hero-section.hero-fullbleed .hero-copy { position: relative; z-index: 2; padding: 5.5rem 8vw 4.25rem; max-width: 40rem; text-align: left; }
 .hero-title, .hero h1 { margin: 0 0 0.75rem; font-size: clamp(2.2rem, 5vw, 3.6rem); letter-spacing: -0.04em; line-height: 1.05; }
-.product-grid, .product-cards {
+.product-swatch { width: 100%; aspect-ratio: 4/3; border-radius: 12px; background:
+  linear-gradient(145deg, color-mix(in srgb, var(--accent) 35%, #c4a574), color-mix(in srgb, var(--panel) 40%, #8b6914));
+  border: 1px solid var(--line); }
+/* Scope to bare product grids — never fight section.catalog-section layouts (Ivory Latch). */
+.product-grid:not(.catalog-section), .product-cards {
   display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   max-width: 1100px; margin: 0 auto 3rem; padding: 0 1.25rem; width: 100%;
+}
+section.catalog-section { display: block; max-width: none; width: 100%; }
+header.nav-header.sticky-nav {
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
+  max-width: none; width: 100%; margin: 0; padding: 0.9rem 8vw;
 }
 .product-card {
   background: var(--panel); border: 1px solid var(--line); border-radius: ${shopish ? '14px' : '18px'};
@@ -3969,7 +3964,8 @@ body { font-family: ${p.font}; }
 .cta-button:hover, .purchase-button:hover, .add-to-cart:hover, button:hover { filter: brightness(1.06); }
 .footer, footer { margin-top: auto; border-top: 1px solid var(--line); padding: 1.5rem 1.25rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
 @media (max-width: 640px) {
-  .hero { min-height: 36vh; padding-top: 2.5rem; }
+  .hero:not(.hero-section):not(.hero-fullbleed) { min-height: 36vh; padding-top: 2.5rem; }
+  .hero-section.hero-fullbleed { min-height: 72vh; }
 }
 `;
 }
@@ -4122,251 +4118,9 @@ h1, h2, .mark { font-family: var(--display); }
  * (hero + item grid + hours + confirm form) using CreateIdentity palette —
  * never cream luxury companion or Veopx stock copy.
  */
-export function buildBriefInteractiveFloor(productName: string, brief = ''): { app: string; css: string; files?: Record<string, string> } {
-  const identity = createIdentityFromBrief(productName, brief);
-  const title = String(identity.name || productName || 'Product').replace(/[*/\\<>]/g, '').slice(0, 48) || 'Product';
-  const p = identity.palette;
-  const t = String(brief || identity.brief || '');
-  // Prefer marketing/shop when the ask is clearly that — never a silent default for utility asks.
-  // (create fail-closed no longer injects this floor for empty crafts; research-first owns those.)
-  // Boat rentals only — do not treat brand words like "Harbor Loom" as marina booking.
-  const boatish = /\b(?:boat\s*rental|day-?boat|skiff\s+rental|sailboat\s+rent|marina\s+rent|book\s+a\s+(?:boat|skiff))\b/i.test(t)
-    || (/\b(?:skiff|clipper|dock\s+runner)\b/i.test(t) && /\b(?:reserv|rental|book)\b/i.test(t));
-  const machineish = /\b(?:machine|laser|cnc|makerspace|forge|printer)\b/i.test(t)
-    && /\b(?:book|bay|station|slot)\b/i.test(t);
-  const reefish = /\b(?:aquarium|saltwater|reef|coral|fish\s+shop|livestock)\b/i.test(t);
-  const foodish = /\b(?:dried[- ]?dates?|medjool|deglet|fruit\s+brand|specialty[- ]food|food\s+brand|varieties|honey\s+dates)\b/i.test(t)
-    || (/\b(?:dates?|fruit|olive|chocolate|tea|spice|honey)\b/i.test(t)
-      && /\b(?:brand|shop|store|website|landing|varieties|cultivar)\b/i.test(t));
-  const commerce = /\b(?:cart|checkout|purchase|buy\b|add\s+to\s+cart|online\s+store|e-?commerce)\b/i.test(t)
-    || /\b(?:liquor|spirits?|whiskey|whisky|vodka|gin|tequila|bourbon|rum|bottle\s+shop|wine\s+shop)\b/i.test(t);
-  // App / tool asks must never fall into shop/marketing recovery floors.
-  const appOrTool = /\b(?:habit\s+tracker|habit\s+app|todo|task\s*list|notes?\s+app|dashboard|sidebar|app\s+chrome|workspace|checklist|calculator|tracker)\b/i.test(t)
-    && !/\b(?:shop|store|cart|checkout|landing\s+page|marketing\s+site|product\s+homepage)\b/i.test(
-      t.replace(/\b(?:not|never|no|without|don'?t|avoid|skip)\s+(?:a\s+|an\s+)?(?:marketing|landing(?:\s+page)?)\b/gi, ' '),
-    );
-  if (appOrTool && !commerce && !boatish && !machineish) {
-    const app = `import { useState } from 'react';
-import './App.css';
-
-export default function App() {
-  const [items, setItems] = useState([{ id: '1', title: 'Welcome to ${title}', body: 'Your starting board is ready.' }]);
-  const [draft, setDraft] = useState('');
-  const add = () => {
-    const v = draft.trim();
-    if (!v) return;
-    setItems((prev) => [...prev, { id: String(Date.now()), title: v, body: 'New item' }]);
-    setDraft('');
-  };
-  return (
-    <div className="app-shell">
-      <aside className="sidebar" aria-label="Sidebar">
-        <strong>${title}</strong>
-        <button type="button" onClick={() => setDraft('New item')}>New</button>
-      </aside>
-      <main className="workspace" id="main">
-        <header className="workspace-head">
-          <h1>${title}</h1>
-          <form onSubmit={(e) => { e.preventDefault(); add(); }}>
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Add item" placeholder="Add something" />
-            <button type="submit">Add</button>
-          </form>
-        </header>
-        {items.length === 0 ? <p className="empty">Nothing here yet — add your first item.</p> : (
-          <ul className="item-list">{items.map((it) => (
-            <li key={it.id}><strong>{it.title}</strong><span>{it.body}</span></li>
-          ))}</ul>
-        )}
-      </main>
-    </div>
-  );
-}
-`;
-    const css = `html,body,#root{min-height:100%}
-.app-shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh;font-family:"Source Sans 3",Georgia,serif;background:radial-gradient(circle at 18% 12%,#243044,#0b1020);color:#e8eef8}
-.sidebar{padding:1.1rem;border-right:1px solid rgba(255,255,255,.12);display:flex;flex-direction:column;gap:.75rem}
-.workspace{padding:1.35rem}
-.workspace-head{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}
-.workspace-head h1{margin:0;font-family:Fraunces,Georgia,serif;font-size:clamp(1.8rem,3vw,2.8rem)}
-.item-list{list-style:none;padding:0;margin:1rem 0 0;display:grid;gap:.7rem}
-.item-list li{padding:.9rem 1rem;border:1px solid rgba(255,255,255,.12);border-radius:14px;display:flex;flex-direction:column;gap:.2rem}
-.empty{opacity:.75}
-@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.item-list li{animation:rise .35s ease both}
-`;
-    return { app, css };
-  }
-  // Booking floor ONLY for boat/machine asks. Everything else that hits this
-  // recovery path gets a full-bleed shop/marketing page — never Core/Day/Reserve.
-  if (!boatish && !machineish) {
-    if (commerce) return buildCommerceCartFloor(title, t, p);
-    const kind = reefish ? 'reef' : foodish ? 'food' : 'shop';
-    return buildMarketingShopFloor(title, t, p, kind);
-  }
-  const items = boatish
-    ? [
-        { name: 'Harbor Skiff', blurb: 'Weekend day-boat for 4.', status: 'Open' },
-        { name: 'Clipper 18', blurb: 'Steady for foggy mornings.', status: 'Open' },
-        { name: 'Dock Runner', blurb: 'Quick loops around the bay.', status: 'Hold' },
-      ]
-    : [
-        { name: 'Laser bay', blurb: 'Open until 9pm.', status: 'Free' },
-        { name: 'CNC table', blurb: 'Book a 2-hour slot.', status: 'Free' },
-        { name: '3D printers', blurb: 'Three stations online.', status: 'Busy' },
-      ];
-  const hours = boatish
-    ? 'Sat-Sun 8am-6pm | Dock C'
-    : 'Tonight 5pm-10pm | Shop floor';
-  const cta = boatish ? 'Reserve' : 'Book slot';
-  const itemsLit = JSON.stringify(items, null, 2);
-  const app = `import { useState } from 'react';
-import './App.css';
-
-const ITEMS = ${itemsLit};
-
-export default function App() {
-  const [name, setName] = useState('');
-  const [note, setNote] = useState('');
-  const [picked, setPicked] = useState(ITEMS[0].name);
-  const [confirmed, setConfirmed] = useState('');
-  return (
-    <div className="app">
-      <header className="sticky-nav" role="banner">
-        <div className="nav-left">
-          <img className="nav-logo" src="/logo.svg" alt="${title}" width="36" height="36" />
-          <div className="brand-wordmark">${title}</div>
-        </div>
-        <nav className="nav-links" aria-label="Primary">
-          <a href="#fleet">Browse</a>
-          <a href="#hours">Hours</a>
-          <a href="#reserve">${cta}</a>
-        </nav>
-        <div className="nav-right" aria-label="Tools">
-          <img className="nav-icon" data-icon="user" src="/icons/user.svg" alt="profile" width="20" height="20" />
-          <img className="nav-icon" data-icon="settings" src="/icons/settings.svg" alt="settings" width="20" height="20" />
-          <img className="nav-icon" data-icon="mail" src="/icons/mail.svg" alt="mail" width="20" height="20" />
-        </div>
-      </header>
-      <section className="hero" id="top">
-        <p className="eyebrow">${title}</p>
-        <h1>${boatish ? 'Boats ready for the weekend.' : machineish ? 'Machines free tonight.' : `${title} - ready when you are.`}</h1>
-        <p className="lede">${boatish ? 'See open skiffs, weekend hours, and reserve a boat without an account.' : machineish ? 'Check open bays, tonight hours, and book a slot without calling.' : 'Browse what is open, check hours, and confirm without an account.'}</p>
-      </section>
-      <section className="hours-strip" id="hours">${hours}</section>
-      <section className="product-grid" id="fleet" aria-label="Available">
-        {ITEMS.map((item) => (
-          <article className="product-card" key={item.name}>
-            <h3>{item.name}</h3>
-            <p>{item.blurb}</p>
-            <span className="chip">{item.status}</span>
-            <button type="button" onClick={() => setPicked(item.name)}>Select</button>
-          </article>
-        ))}
-      </section>
-      <section className="reserve" id="reserve">
-        <h2>${cta}</h2>
-        <p className="dim">Selected: {picked}</p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setConfirmed(name.trim() ? \`Saved for \${name.trim()} - \${picked}\` : \`Saved - \${picked}\`);
-          }}
-        >
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-          </label>
-          <label>
-            Note
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" />
-          </label>
-          <button type="submit">${cta}</button>
-        </form>
-        {confirmed ? <p className="confirm" role="status">{confirmed}</p> : null}
-      </section>
-      <footer className="footer">${title}</footer>
-    </div>
-  );
-}
-`;
-  const css = `/* NOVA brief floor - ${title} */
-:root {
-  --bg: ${p.bg};
-  --panel: ${p.panel};
-  --text: ${p.text};
-  --muted: ${p.muted};
-  --accent: ${p.accent};
-  --line: ${p.line};
-}
-* { box-sizing: border-box; }
-html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
-body { font-family: ${p.font}; }
-.app {
-  min-height: 100vh; display: flex; flex-direction: column;
-  background:
-    radial-gradient(900px 480px at 15% -10%, ${p.glow} 0%, transparent 55%),
-    linear-gradient(160deg, ${p.bg}, ${p.panel});
-  color: var(--text);
-}
-.sticky-nav {
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  padding: 1rem 1.35rem; position: sticky; top: 0; z-index: 20;
-  background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--line);
-}
-.nav-left { display: flex; align-items: center; gap: 0.65rem; }
-.brand-wordmark { font-weight: 750; letter-spacing: -0.03em; font-size: 1.15rem; }
-.nav-links { display: flex; gap: 1.1rem; }
-.nav-links a { color: var(--muted); text-decoration: none; }
-.nav-links a:hover { color: var(--text); }
-.nav-right { display: flex; align-items: center; gap: 0.75rem; }
-.nav-icon, .nav-logo { display: block; object-fit: contain; }
-.hero { padding: 3.5rem 1.35rem 2rem; max-width: 920px; margin: 0 auto; }
-.eyebrow { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; color: var(--accent); margin: 0 0 0.75rem; }
-.hero h1 { margin: 0 0 0.85rem; font-size: clamp(2rem, 5vw, 3.4rem); letter-spacing: -0.04em; line-height: 1.05; }
-.lede { margin: 0; color: var(--muted); max-width: 42rem; line-height: 1.55; font-size: 1.05rem; }
-.hours-strip {
-  margin: 0 1.35rem 1.5rem; padding: 0.85rem 1.1rem; border-radius: 12px;
-  border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 80%, transparent);
-  color: var(--muted); max-width: 1100px; width: calc(100% - 2.7rem);
-}
-.product-grid {
-  display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  max-width: 1100px; margin: 0 auto 2rem; padding: 0 1.35rem; width: 100%;
-}
-.product-card {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-  padding: 1.1rem; display: flex; flex-direction: column; gap: 0.45rem;
-}
-.product-card h3 { margin: 0; font-size: 1.05rem; }
-.product-card p { margin: 0; color: var(--muted); line-height: 1.45; font-size: 0.92rem; }
-.chip {
-  align-self: flex-start; font-size: 0.75rem; letter-spacing: 0.04em;
-  padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--accent);
-}
-.product-card button, .reserve button {
-  appearance: none; border: 0; border-radius: 10px; padding: 0.65rem 1rem;
-  background: var(--accent); color: ${p.btnInk}; font-weight: 700; cursor: pointer; margin-top: auto;
-}
-.reserve {
-  max-width: 560px; margin: 0 auto 3rem; padding: 0 1.35rem; width: 100%;
-  display: flex; flex-direction: column; gap: 0.75rem;
-}
-.reserve h2 { margin: 0; letter-spacing: -0.03em; }
-.dim { color: var(--muted); margin: 0; }
-.reserve form { display: flex; flex-direction: column; gap: 0.75rem; }
-.reserve label { display: flex; flex-direction: column; gap: 0.35rem; color: var(--muted); font-size: 0.9rem; }
-.reserve input {
-  background: var(--panel); border: 1px solid var(--line); color: var(--text);
-  border-radius: 10px; padding: 0.65rem 0.85rem;
-}
-.confirm { color: var(--accent); font-weight: 600; }
-.footer { margin-top: auto; border-top: 1px solid var(--line); padding: 1.25rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
-@media (max-width: 640px) {
-  .hero { padding-top: 2.5rem; }
-}
-`;
-  return { app, css };
+export function buildBriefInteractiveFloor(_productName: string, _brief = ''): { app: string; css: string; files?: Record<string, string> } {
+  // REMOVED — no look-back commerce/marketing floor twin.
+  return { app: '', css: '', files: {} };
 }
 
 export function cssBlobIsThin(files: Record<string, string>, minLen = 1500): boolean {
@@ -4383,7 +4137,7 @@ export function createPolishMissingLocalImports(
   const re = /from\s+['"](\.\/[^'"]+)['"]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(app))) {
-    let rel = m[1].replace(/^\.\//, 'src/');
+    const rel = m[1].replace(/^\.\//, 'src/');
     if (!/\.(tsx|ts|jsx|js|css)$/i.test(rel)) {
       const candidates = [`${rel}.tsx`, `${rel}.jsx`, `${rel}.ts`, `${rel}.js`, `${rel}/index.tsx`, `${rel}/index.jsx`];
       if (!candidates.some((c) => files[c] != null || files[c.replace(/\\/g, '/')] != null)) {
@@ -4403,6 +4157,7 @@ export function createPolishMissingLocalImports(
 export function healMissingLocalImports(
   files: Record<string, string>,
   productName = 'Item',
+  opts?: { brief?: string; artifactKind?: string },
 ): { files: Record<string, string>; healed: string[] } {
   const missing = createPolishMissingLocalImports(files);
   if (!missing.length) return { files, healed: [] };
@@ -4410,11 +4165,43 @@ export function healMissingLocalImports(
     /components\//i.test(s)
     || /\/(?:Navbar|Nav|Header|Hero|Footer|FeatureBand|Feature|Banner)\b/i.test(s),
   );
+  const brief = String(opts?.brief || '');
+  const kind = opts?.artifactKind || (brief ? resolveArtifactKind(brief) : '');
+  const allowAssemble = kind === 'product-site'
+    || kind === 'static-web'
+    || (!kind && isProductSiteAsk(brief));
   if (missingUi) {
-    const assembled = assembleCreateAppFromParts(files, productName);
-    if (assembled.changed.length && !createPolishMissingLocalImports(assembled.files).length) {
-      return { files: assembled.files, healed: missing };
+    // Never flatten dashboards/games/CLI into a marketing assemble shell.
+    if (allowAssemble) {
+      const assembled = assembleCreateAppFromParts(files, productName, {
+        brief,
+        artifactKind: kind || undefined,
+      });
+      if (assembled.changed.length && !createPolishMissingLocalImports(assembled.files).length) {
+        return { files: assembled.files, healed: missing };
+      }
+    } else {
+      // Stub missing local components so App structure survives (dashboard/game/Electron).
+      const nextStub = { ...files };
+      const healedStub: string[] = [];
+      for (const spec of missing) {
+        const rel = String(spec || '').replace(/^\.\//, '').replace(/\\/g, '/');
+        if (!rel || /node_modules/.test(rel)) continue;
+        const path = rel.endsWith('.jsx') || rel.endsWith('.tsx') || rel.endsWith('.js') || rel.endsWith('.ts')
+          ? (rel.startsWith('src/') ? rel : `src/${rel}`)
+          : (rel.startsWith('src/') ? `${rel}.jsx` : `src/${rel}.jsx`);
+        if (nextStub[path]) continue;
+        const base = path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'Comp';
+        const comp = base.replace(/(^\w|-\w)/g, (m) => m.replace('-', '').toUpperCase());
+        nextStub[path] = `export default function ${comp}() {\n  return <div className="${base.toLowerCase()}" />;\n}\n`;
+        healedStub.push(spec);
+      }
+      if (healedStub.length) return { files: nextStub, healed: healedStub };
     }
+  }
+  // Non-product Acc: do not strip App imports into an empty <main/> — leave for model repair.
+  if (!allowAssemble && missingUi) {
+    return { files, healed: [] };
   }
   const next = { ...files };
   const appKey = next['src/App.tsx'] && !next['src/App.jsx']

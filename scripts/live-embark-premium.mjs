@@ -117,7 +117,7 @@ const SNAP = `(() => {
   const foots = [...body.matchAll(/Responded in [\\d.]+\\s*(?:ms|s|m)[^\\n]*/gi)].map((m) => m[0]);
   const footer = foots[foots.length - 1] || '';
   // Prefer the live status store line — avoid matching user ask / code dumps.
-  const statusNodes = [...document.querySelectorAll('[aria-live], .nova-status-dots, button[aria-label]')];
+  const statusNodes = [...document.querySelectorAll('[aria-live], .nova-build-signal, .nova-status-dots, button[aria-label]')];
   const statusText = statusNodes.map((n) => n.getAttribute('aria-label') || n.textContent || '').join(' | ');
   const liveStatus = (statusText.match(/(?:Ensemble|Plan hop|Verify hop|Final pass|Coding|Building|Writing|Using|Creating|Installing|Done)[^|]{0,80}/gi) || []).slice(-4);
   const generating = /(?:Coding…|Thinking…|Creating folder|Building UI|messages queued|Installing dependencies|Plan hop|Verify hop|Final pass:|Writing src|Coding src)/i.test(statusText)

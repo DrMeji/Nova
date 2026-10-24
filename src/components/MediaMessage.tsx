@@ -100,12 +100,11 @@ export function GeneratingPlaceholder({
     return (
       <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
         {webSearch ? (
-          <Globe className="w-3.5 h-3.5 shrink-0 text-content-tertiary" aria-hidden />
+          <Globe className="w-[22px] h-3.5 shrink-0 text-content-tertiary" aria-hidden />
         ) : (
-          <span className="inline-flex items-center gap-1.5" aria-hidden>
-            <span className="nova-status-dot nova-status-dot-1" />
-            <span className="nova-status-dot nova-status-dot-2" />
-            <span className="nova-status-dot nova-status-dot-3" />
+          <span className="nova-build-signal" aria-hidden>
+            <span className="nova-build-signal-rail" />
+            <span className="nova-build-signal-point" />
           </span>
         )}
         <span className="min-w-0 flex-1 text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere] text-content-secondary">{shown}</span>

@@ -17,16 +17,98 @@ const LLAMA_TAG = 'b9992';
 
 /** Keep in sync with src/lib/ggufContext.ts resolveGgufCtx. */
 const GGUF_CTX_MAX = 65536;
+/** Create / share-GPU ceiling — never open 65k KV on a gaming GPU. */
+const GGUF_CTX_CREATE_CAP = 16384;
+const GGUF_CTX_SHARE_GPU_CAP = 12288;
+/** Idle unload so 14B+KV does not sit on VRAM for hours after create. */
+const IDLE_UNLOAD_MS = 90_000;
+/** Faster reclaim after create so gaming VRAM returns sooner. */
+const IDLE_UNLOAD_AFTER_CREATE_MS = 45_000;
+/** Leave this much free VRAM (MB) before allowing GPU layers. */
+const VRAM_HEADROOM_MB = 3500;
 
-function resolveGgufCtx(ramGb) {
+/**
+ * Runtime performance policy (set from renderer / generate opts).
+ * shareGpu: leave VRAM for games / compositor (adaptive or zero ngl).
+ * createInflight: tighter threads + ctx during create jobs.
+ */
+let perfPolicy = {
+  shareGpu: true,
+  createInflight: false,
+};
+/** Wall clock of last createInflight=true — shortens idle unload. */
+let lastCreateInflightAt = 0;
+
+function setGgufPerfPolicy(partial = {}) {
+  if (!partial || typeof partial !== 'object') return { ...perfPolicy };
+  const prevShare = perfPolicy.shareGpu;
+  if (typeof partial.shareGpu === 'boolean') perfPolicy.shareGpu = partial.shareGpu;
+  if (typeof partial.createInflight === 'boolean') {
+    perfPolicy.createInflight = partial.createInflight;
+    if (partial.createInflight) lastCreateInflightAt = Date.now();
+  }
+  // Ctx cache depends on policy — invalidate so next bind picks the capped size.
+  cachedGgufCtx = null;
+  // Share-GPU flip: re-probe VRAM so ngl does not reuse a stale free-MB reading.
+  if (prevShare !== perfPolicy.shareGpu) {
+    cachedFreeVram = { at: 0, mb: null };
+  }
+  return { ...perfPolicy };
+}
+
+function getGgufPerfPolicy() {
+  return { ...perfPolicy };
+}
+
+/** Best-effort free VRAM (MB). null when nvidia-smi unavailable. */
+let cachedFreeVram = { at: 0, mb: null };
+function probeFreeVramMb() {
+  if (Date.now() - cachedFreeVram.at < 8_000) return cachedFreeVram.mb;
+  cachedFreeVram.at = Date.now();
+  try {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(
+      'nvidia-smi',
+      ['--query-gpu=memory.free', '--format=csv,noheader,nounits'],
+      { encoding: 'utf8', windowsHide: true, timeout: 2500 },
+    );
+    if (r.status !== 0) {
+      cachedFreeVram.mb = null;
+      return null;
+    }
+    const line = String(r.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+    const n = Number(line);
+    cachedFreeVram.mb = Number.isFinite(n) ? n : null;
+    return cachedFreeVram.mb;
+  } catch {
+    cachedFreeVram.mb = null;
+    return null;
+  }
+}
+
+function ggufFileMb(ggufPath) {
+  try {
+    return Math.round(fs.statSync(ggufPath).size / (1024 * 1024));
+  } catch {
+    return 0;
+  }
+}
+
+function resolveGgufCtx(ramGb, opts = {}) {
   const g = Number(ramGb);
   const ram = Number.isFinite(g) && g > 0 ? g : 8;
-  if (ram < 8) return 8192;
-  if (ram < 12) return 16384;
-  if (ram < 20) return 24576;
-  if (ram < 28) return 32768;
-  if (ram < 40) return 49152;
-  return GGUF_CTX_MAX;
+  let ctx = 8192;
+  if (ram < 8) ctx = 8192;
+  else if (ram < 12) ctx = 16384;
+  else if (ram < 20) ctx = 24576;
+  else if (ram < 28) ctx = 32768;
+  else if (ram < 40) ctx = 49152;
+  else ctx = GGUF_CTX_MAX;
+  const share = opts.shareGpu != null ? opts.shareGpu : perfPolicy.shareGpu;
+  const create = opts.createInflight != null ? opts.createInflight : perfPolicy.createInflight;
+  if (share) ctx = Math.min(ctx, GGUF_CTX_SHARE_GPU_CAP);
+  else if (create) ctx = Math.min(ctx, GGUF_CTX_CREATE_CAP);
+  return ctx;
 }
 
 function installedRamGb() {
@@ -34,8 +116,9 @@ function installedRamGb() {
 }
 
 let cachedGgufCtx = null;
+let idleUnloadTimer = null;
 
-/** RAM-scaled llama.cpp context size for this machine. */
+/** RAM-scaled llama.cpp context size, capped under share-GPU / create policy. */
 function getGgufCtx() {
   if (cachedGgufCtx != null) return cachedGgufCtx;
   cachedGgufCtx = resolveGgufCtx(installedRamGb());
@@ -45,25 +128,83 @@ function getGgufCtx() {
 /**
  * Cap llama threads so local inference cannot pin every logical core
  * (that freezes YouTube / the desktop while chat or create polish runs).
- * Leave UI headroom; scale the cap up on strong multi-core PCs.
- *
- * Hybrid use: CUDA builds still pass -ngl 99 (layers on GPU). Threads here
- * keep CPU + system RAM busy for prompt eval, batching, and any layers that
- * do not fit in VRAM — GPU is not the only worker.
+ * Create / share-GPU modes leave more cores free for games and the shell.
  */
 function getGgufThreads() {
   const n = Math.max(1, (os.cpus() || []).length || 1);
   const cuda = (() => {
     try { return Boolean(llamaLooksCuda()); } catch { return false; }
   })();
-  // Leave more cores for Windows UI / Electron so create does not freeze the desktop.
-  const leaveFree = cuda
+  const tight = perfPolicy.shareGpu || perfPolicy.createInflight;
+  const leaveFree = tight
+    ? (n >= 16 ? 8 : n >= 8 ? 5 : 3)
+    : cuda
+      ? (n >= 16 ? 4 : n >= 8 ? 3 : 2)
+      : (n >= 16 ? 4 : n >= 8 ? 2 : 1);
+  const hardCap = tight
     ? (n >= 16 ? 4 : n >= 8 ? 3 : 2)
-    : (n >= 16 ? 4 : n >= 8 ? 2 : 1);
-  const hardCap = cuda
-    ? (n >= 16 ? 10 : n >= 8 ? 6 : 4)
-    : (n >= 16 ? 8 : n >= 8 ? 6 : 4);
+    : cuda
+      ? (n >= 16 ? 10 : n >= 8 ? 6 : 4)
+      : (n >= 16 ? 8 : n >= 8 ? 6 : 4);
   return Math.max(2, Math.min(n - leaveFree, hardCap));
+}
+
+/**
+ * GPU layer offload. Blind -ngl 99 steals the gaming GPU (240→50 FPS).
+ * Heuristic: shareGpu → 0; else scale by GGUF size + free VRAM headroom.
+ * Compatible targets: create ≈ 32, everyday ≈ 48 (lowered for huge / tight VRAM).
+ * @param {string | null} [ggufPath]
+ */
+function getGgufNgl(ggufPath) {
+  if (!llamaLooksCuda()) return 0;
+  if (perfPolicy.shareGpu) return 0;
+
+  const mb = ggufPath ? ggufFileMb(ggufPath) : 0;
+  const free = probeFreeVramMb();
+  // Create: prefer modest offload; huge coders stay low so games keep headroom.
+  if (perfPolicy.createInflight) {
+    if (mb >= 7500) return free != null && free < VRAM_HEADROOM_MB + 4000 ? 0 : 16;
+    if (mb >= 4000) return 24;
+    return 32;
+  }
+  // Everyday chat — still leave headroom vs blind 99.
+  if (free != null && free < VRAM_HEADROOM_MB) return 0;
+  if (mb >= 7500) return 24;
+  if (mb >= 4000) return 40;
+  return 48;
+}
+
+/** Descending ngl ladder for VRAM recovery when a bind dies mid-load. */
+function nglRecoveryLadder(preferred) {
+  const p = Math.max(0, Number(preferred) || 0);
+  const ladder = [p];
+  if (p > 16) ladder.push(Math.floor(p / 2));
+  if (p > 8) ladder.push(8);
+  if (p > 0) ladder.push(0);
+  return [...new Set(ladder)];
+}
+
+function clearIdleUnloadTimer() {
+  if (idleUnloadTimer) {
+    clearTimeout(idleUnloadTimer);
+    idleUnloadTimer = null;
+  }
+}
+
+function scheduleIdleUnload() {
+  clearIdleUnloadTimer();
+  const recentCreate = lastCreateInflightAt > 0 && (Date.now() - lastCreateInflightAt) < 5 * 60_000;
+  const delay = recentCreate || perfPolicy.createInflight
+    ? IDLE_UNLOAD_AFTER_CREATE_MS
+    : IDLE_UNLOAD_MS;
+  idleUnloadTimer = setTimeout(() => {
+    idleUnloadTimer = null;
+    if (generateBusy || activeChild || activeAbort) {
+      scheduleIdleUnload();
+      return;
+    }
+    try { stopServer(); } catch { /* ignore */ }
+  }, delay);
 }
 
 function lowerChildPriority(pid) {
@@ -668,6 +809,8 @@ let serverChild = null;
 let serverGguf = null;
 let serverMmproj = null;
 let serverCtx = 0;
+/** Last bound -ngl; -1 = unbound. */
+let serverNgl = -1;
 const SERVER_PORT_BASE = require('./novaConfig.cjs').GGUF_SERVER_PORT_BASE;
 const SERVER_PORT_MAX = SERVER_PORT_BASE + require('./novaConfig.cjs').GGUF_SERVER_PORT_MAX_TRIES;
 let serverPort = SERVER_PORT_BASE;
@@ -793,12 +936,14 @@ function cancelGguf(jobIdOrOpts) {
 }
 
 function stopServer() {
+  clearIdleUnloadTimer();
   if (serverChild) {
     killLlamaChild(serverChild);
     serverChild = null;
     serverGguf = null;
     serverMmproj = null;
     serverCtx = 0;
+    serverNgl = -1;
   }
 }
 
@@ -837,63 +982,86 @@ async function pingServer(port = serverPort) {
 
 async function bindLlamaServer(bin, gguf, modelId) {
   lastServerError = null;
+  clearIdleUnloadTimer();
+  // Ctx depends on share-GPU / create policy — never reuse a fat server under a tight cap.
+  cachedGgufCtx = null;
   const mmproj = findMmprojForModel(modelId);
+  const wantCtx = getGgufCtx();
+  const preferredNgl = getGgufNgl(gguf);
   // Item 14: stick to a healthy server for the same GGUF — avoid multi-second reload churn.
   if (
     serverChild
     && serverGguf === gguf
     && serverMmproj === mmproj
-    && serverCtx === getGgufCtx()
+    && serverCtx === wantCtx
+    && serverNgl === preferredNgl
     && !serverChild.killed
     && await pingServer(serverPort)
   ) {
     return true;
   }
-  for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_MAX; candidate += 1) {
-    stopServer();
-    const args = [
-      '-m', gguf,
-      '--host', '127.0.0.1',
-      '--port', String(candidate),
-      '-c', String(getGgufCtx()),
-      '-t', String(getGgufThreads()),
-      '--parallel', '1',
-    ];
-    // Offload layers to GPU when CUDA llama-server is present — cuts mid-reply freezes on 7B/14B.
-    if (llamaLooksCuda()) args.push('-ngl', '99');
-    if (mmproj) args.push('--mmproj', mmproj);
-    const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    lowerChildPriority(child.pid);
-    serverChild = child;
-    serverGguf = gguf;
-    serverMmproj = mmproj;
-    serverCtx = getGgufCtx();
-    serverPort = candidate;
-    child.on('exit', () => {
-      if (serverChild === child) {
-        serverChild = null;
-        serverGguf = null;
-        serverMmproj = null;
-        serverCtx = 0;
+  const ggufMb = ggufFileMb(gguf);
+  const bindWaitMs = ggufMb >= 12000 ? 180_000 : ggufMb >= 4000 ? 90_000 : 45_000;
+  // Try preferred ngl, then step down — recovers from VRAM OOM without abandoning the GGUF.
+  for (const tryNgl of nglRecoveryLadder(preferredNgl)) {
+    for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_MAX; candidate += 1) {
+      stopServer();
+      const args = [
+        '-m', gguf,
+        '--host', '127.0.0.1',
+        '--port', String(candidate),
+        '-c', String(wantCtx),
+        '-t', String(getGgufThreads()),
+        '--parallel', '1',
+      ];
+      if (tryNgl > 0) args.push('-ngl', String(tryNgl));
+      if (mmproj) args.push('--mmproj', mmproj);
+      const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      lowerChildPriority(child.pid);
+      serverChild = child;
+      serverGguf = gguf;
+      serverMmproj = mmproj;
+      serverCtx = wantCtx;
+      serverNgl = tryNgl;
+      serverPort = candidate;
+      child.on('exit', () => {
+        if (serverChild === child) {
+          serverChild = null;
+          serverGguf = null;
+          serverMmproj = null;
+          serverCtx = 0;
+          serverNgl = -1;
+        }
+      });
+      let diedEarly = false;
+      const deadline = Date.now() + bindWaitMs;
+      while (Date.now() < deadline) {
+        if (cancelRequested) {
+          stopServer();
+          return false;
+        }
+        if (child.killed || child.exitCode != null) {
+          diedEarly = true;
+          break;
+        }
+        if (await pingServer(candidate)) {
+          if (tryNgl !== preferredNgl) {
+            try {
+              console.log(`[NOVA-gguf] bound with ngl=${tryNgl} after preferred ${preferredNgl} failed`);
+            } catch { /* ignore */ }
+          }
+          return true;
+        }
+        await wait(250);
       }
-    });
-    // Large GGUFs (14B/32B) often need >20s to load into llama-server.
-    const ggufMb = (() => {
-      try { return Math.round(fs.statSync(gguf).size / (1024 * 1024)); } catch { return 0; }
-    })();
-    const bindWaitMs = ggufMb >= 12000 ? 180_000 : ggufMb >= 4000 ? 90_000 : 45_000;
-    const deadline = Date.now() + bindWaitMs;
-    while (Date.now() < deadline) {
-      if (cancelRequested) {
-        stopServer();
-        return false;
+      stopServer();
+      if (cancelRequested) return false;
+      // Process died early — likely VRAM OOM; drop ngl instead of cycling ports.
+      if (diedEarly) {
+        cachedFreeVram = { at: 0, mb: null };
+        break;
       }
-      if (child.killed || child.exitCode != null) break;
-      if (await pingServer(candidate)) return true;
-      await wait(250);
     }
-    stopServer();
-    if (cancelRequested) return false;
   }
   lastServerError = 'llama-server failed to start — NOVA will use one-shot CLI instead';
   return false;
@@ -907,11 +1075,15 @@ async function ensureLlamaServer(modelId) {
   const mmproj = findMmprojForModel(modelId);
   const bin = findLlamaServer();
   if (!gguf || !bin) return false;
+  clearIdleUnloadTimer();
+  const wantCtx = getGgufCtx();
+  const wantNgl = getGgufNgl(gguf);
   if (
     serverChild
     && serverGguf === gguf
     && serverMmproj === mmproj
-    && serverCtx === getGgufCtx()
+    && serverCtx === wantCtx
+    && serverNgl === wantNgl
     && !serverChild.killed
     && await pingServer()
   ) {
@@ -1002,6 +1174,11 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
       modelId,
       gguf: path.basename(findGgufForModel(modelId) || ''),
       via: 'llama-server',
+      kind,
+      timeoutMs,
+      nPredict,
+      nCtx: getGgufCtx(),
+      promptChars: String(prompt || '').length,
       cancelled: Boolean(cancelRequested),
       outLen: out.length,
       cleanedLen: text.length,
@@ -1291,6 +1468,65 @@ function cleanGgufReply(prompt, text) {
   return stripPromptEcho(prompt, noNoise);
 }
 
+/**
+ * Line-buffer filter so streaming clients (Cline / Ollama compat) never see
+ * llama-cli load banners, slash-command help, or "Exiting...".
+ */
+function createCliStreamFilter(onChunk) {
+  if (typeof onChunk !== 'function') {
+    return { push() {}, flush() {} };
+  }
+  let buf = '';
+  let sawCommands = false;
+  let stopped = false;
+  const pushLine = (line) => {
+    if (stopped) return;
+    const trimmed = line.trim();
+    if (/^exiting\.\.\.?$/i.test(trimmed)) {
+      stopped = true;
+      return;
+    }
+    if (/^>\s+\S/.test(trimmed)) return;
+    if (/^\s*User\s*:/i.test(trimmed)) return;
+    if (/^available commands/i.test(trimmed)) {
+      sawCommands = true;
+      return;
+    }
+    if (sawCommands && (/^\s*\/\w+/.test(trimmed) || trimmed === '')) {
+      if (/^\s*\/\w+/.test(trimmed)) return;
+      if (trimmed === '') return;
+      sawCommands = false;
+    } else {
+      sawCommands = false;
+    }
+    if (NOISE_LINE.test(trimmed)) return;
+    if (/^[A-Za-z]:\\.*\.gguf\b/i.test(trimmed) || /^\/.*\.gguf\b/i.test(trimmed)) return;
+    if (/nova-engine[\\/]+models/i.test(trimmed)) return;
+    if (/\[\s*Prompt:/i.test(trimmed)) return;
+    try { onChunk(line.endsWith('\n') ? line : `${line}\n`); } catch { /* ignore */ }
+  };
+  return {
+    push(piece) {
+      if (stopped || !piece) return;
+      buf += String(piece).replace(/\r\n/g, '\n');
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx + 1);
+        buf = buf.slice(idx + 1);
+        pushLine(line.replace(/\n$/, ''));
+      }
+    },
+    flush() {
+      if (stopped || !buf.trim()) {
+        buf = '';
+        return;
+      }
+      pushLine(buf);
+      buf = '';
+    },
+  };
+}
+
 function writeGgufDebug(payload) {
   try {
     const file = path.join(app.getPath('userData'), 'nova-engine', 'last-gguf-chat.log');
@@ -1365,6 +1601,8 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
     } finally {
       generateBusy = false;
       clearGgufJob(jobId);
+      // Drop resident weights+KV after idle so create does not leave the GPU hot.
+      scheduleIdleUnload();
     }
   })();
 }
@@ -1407,6 +1645,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     }
     const images = normalizeVisionImages(visionImages);
     const tempImages = images.length ? writeTempVisionImages(images) : [];
+    const cliNgl = getGgufNgl(gguf);
     const args = [
       '-m', gguf,
       '-f', promptFile,
@@ -1419,6 +1658,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       '--no-display-prompt',
       '--simple-io',
     ];
+    if (cliNgl > 0) args.push('-ngl', String(cliNgl));
     if (mmproj) args.push('--mmproj', mmproj);
     for (const imgPath of tempImages) args.push('--image', imgPath);
     const child = spawn(bin, args, { windowsHide: true });
@@ -1432,6 +1672,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     if (jobEntry) jobEntry.child = child;
     let out = '';
     let err = '';
+    const streamFilter = createCliStreamFilter(onChunk);
     const cleanupPrompt = () => {
       try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
       for (const p of tempImages) {
@@ -1446,11 +1687,9 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     child.stdout.on('data', (d) => {
       const piece = d.toString();
       out += piece;
-      // Stream raw deltas — full-buffer cleanGgufReply on every chunk is quadratic on main.
-      // Final clean runs once on close below.
-      if (typeof onChunk === 'function' && piece) {
-        try { onChunk(piece); } catch { /* ignore */ }
-      }
+      // Filter load banners / slash-help so Cline & Ollama clients don't show CLI junk.
+      // Final cleanGgufReply still runs once on close below.
+      streamFilter.push(piece);
     });
     child.stderr.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
@@ -1465,12 +1704,18 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       cleanupPrompt();
       if (activeChild === child) activeChild = null;
       if (jobEntry && jobEntry.child === child) jobEntry.child = null;
+      streamFilter.flush();
       const text = restoreCodingPrefill(kind, prompt, cleanGgufReply(promptStr, out), modelId);
       writeGgufDebug({
         at: new Date().toISOString(),
         ms: Date.now() - started,
         modelId,
         gguf: path.basename(gguf),
+        kind,
+        timeoutMs,
+        nPredict,
+        nCtx: getGgufCtx(),
+        promptChars: String(prompt || '').length,
         code,
         cancelled: Boolean(cancelRequested),
         outLen: out.length,
@@ -1533,5 +1778,10 @@ module.exports = {
   stripLlamaCliNoise,
   getGgufCtx,
   resolveGgufCtx,
+  setGgufPerfPolicy,
+  getGgufPerfPolicy,
+  getGgufNgl,
+  getGgufThreads,
+  scheduleIdleUnload,
   get GGUF_CTX() { return getGgufCtx(); },
 };

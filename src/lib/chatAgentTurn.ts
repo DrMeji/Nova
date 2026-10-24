@@ -72,13 +72,15 @@ export function stripComposerPrefix(text: string): string {
     .replace(/<!--nova-plan-mode-->\s*/gi, '')
     .replace(/<!--nova-agent-mode-->\s*/gi, '')
     .replace(/<!--nova-multi-agent-->\s*/gi, '')
+    .replace(/<!--nova-ladder:[^>]*-->\s*/gi, '')
+    .replace(/\s*\[(?:CL|TW|RL|GL|NW|MK)[a-z0-9]+\]/gi, '')
     .replace(/^\[Multi-agent\]\s*/i, '')
     .replace(PLAN_PREFIX, '')
     .replace(AGENT_PREFIX, '')
     .replace(DEBUG_PREFIX, '')
     .replace(new RegExp(`^${DEBUG_PREFIX_ALT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '')
     .replace(TASKS_PREFIX, '')
-    .replace(/^[\[](?:Plan|Ask|Agent|Debug|Tasks|Multi-agent)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Agent|Debug|Tasks|Multi-agent)[\]]\s*/i, '')
     .trim();
 }
 
@@ -141,7 +143,20 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   // Explicit disk-apply asks always count as edits (even when phrasing is feature-heavy).
   if (/\bapply\b[\s\S]{0,80}\b(?:edits?|changes?|this|them|it)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t)) return true;
   if (/\b(?:edits?|changes?)\s+on\s+disk\b/i.test(t) && /\b(?:apply|save|write|patch)\b/i.test(t)) return true;
-  if (/\b(add|put|place|move|insert|create|drop|fold|nudge|shift|lower)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero|badge|avatar|chip|bar|indicator|card|cards|cart|headline|heading|row|grid)\b/i.test(t)
+  if (/\b(add|put|place|move|insert|create|drop|fold|nudge|shift|lower)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero|badge|avatar|chip|bar|indicator|card|cards|cart|headline|heading|row|grid|name|text|words?|wording|label|copy)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Upload / drop-zone UI controls (not "create a file on disk").
+  if (/\b(?:add|create|make|put|place)\b/i.test(t)
+    && /\b(?:drop\s+zone|file\s+upload|upload\s+drop|drag-and-drop)\b/i.test(t)) {
+    return true;
+  }
+  // "put … in the top left corner" / "name up in the top left"
+  if (
+    /\b(?:add|put|place|move|insert)\b/i.test(t)
+    && /\b(?:top\s*left|top\s*right|bottom\s*left|bottom\s*right|corner|top|left|right)\b/i.test(t)
+    && /\b(?:name|text|words?|wording|title|label|logo|brand)\b/i.test(t)
   ) {
     return true;
   }
@@ -177,6 +192,13 @@ export function looksLikeCodeEditAsk(text: string): boolean {
     return true;
   }
   if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab|footer|copyright|line|text|link|icon|panel|clutter|sidebar|hud|indicator)\b/i.test(t)) {
+    return true;
+  }
+  // "remove Welcome to my app" / "remove what you just added" — disk edit, never tutor.
+  if (
+    /\b(?:remove|delete|get rid of|take\s+(?:off|away)|clear)\b/i.test(t)
+    && /\b(?:welcome|hello|goodbye|words?|sentence|title|name|phrase|that|it|what\s+you\s+(?:just\s+)?added)\b/i.test(t)
+  ) {
     return true;
   }
   if (/\bedit\s+this\s+(?:same\s+)?(?:project|app|game|site|folder)\b/i.test(t)) return true;

@@ -85,6 +85,8 @@ const novaDesktopApi = {
   engineGenerateStream: (message, modelId, kind, opts) =>
     ipcRenderer.invoke('NOVA:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
   engineGenerateCancel: (opts) => ipcRenderer.invoke('NOVA:engine-generate-cancel', opts || {}),
+  engineSetPerfPolicy: (policy) => ipcRenderer.invoke('NOVA:engine-set-perf-policy', policy || {}),
+  engineGetPerfPolicy: () => ipcRenderer.invoke('NOVA:engine-get-perf-policy'),
   webSearch: (query) => ipcRenderer.invoke('NOVA:web-search', { query }),
   imageSearch: (query) => ipcRenderer.invoke('NOVA:image-search', { query }),
   onEngineChunk: (handler) => {
@@ -196,6 +198,7 @@ const novaDesktopApi = {
   projectSearch: (payload) => ipcRenderer.invoke('NOVA:project-search', payload),
   projectDeleteFiles: (projectId) => ipcRenderer.invoke('NOVA:project-delete-files', projectId),
   gitStatus: (projectId) => ipcRenderer.invoke('NOVA:git-status', projectId),
+  gitInit: (projectId) => ipcRenderer.invoke('NOVA:git-init', projectId),
   gitClone: (payload) => ipcRenderer.invoke('NOVA:git-clone', payload),
   gitCommit: (payload) => ipcRenderer.invoke('NOVA:git-commit', payload),
   gitPush: (payload) => ipcRenderer.invoke('NOVA:git-push', payload),

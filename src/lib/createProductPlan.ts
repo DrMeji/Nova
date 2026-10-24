@@ -250,10 +250,17 @@ export function formatProductPlanBlock(plan: ProductPlan): string {
 function appBlob(files: Record<string, string>): string {
   return `${files['src/App.tsx'] || files['src/App.jsx'] || ''}\n${files['src/App.css'] || ''}\n${
     Object.entries(files)
-      .filter(([k]) => /src\/(?:data|components)\//i.test(k))
+      .filter(([k]) => /src\/(?:data|components|sections)\//i.test(k))
       .map(([, v]) => v)
       .join('\n')
   }`;
+}
+
+/** Compositional invent: thin App shell + real sections — score the surface, not App alone. */
+function isCompositionalSurface(files: Record<string, string>): boolean {
+  const app = files['src/App.tsx'] || files['src/App.jsx'] || '';
+  if (/from\s+['"]\.\/sections\//i.test(app)) return true;
+  return Object.keys(files).some((k) => /src\/sections\/[^/]+\.jsx$/i.test(k));
 }
 
 export function scorePlanContract(
@@ -266,15 +273,25 @@ export function scorePlanContract(
   const css = files['src/App.css'] || '';
   const blob = appBlob(files);
   const compact = app.replace(/\s+/g, '').length;
+  const compositional = isCompositionalSurface(files);
+  const sectionCssLen = Object.entries(files)
+    .filter(([k]) => /src\/sections\/.+\.css$/i.test(k))
+    .reduce((n, [, v]) => n + String(v || '').replace(/\s+/g, '').length, 0);
 
-  if (compact < 500) {
+  // Compositional shells keep App thin on purpose — sections carry the page.
+  if (compact < 500 && !(compositional && /NavHeader|Hero|Catalog|Story|Footer/i.test(blob))) {
     reasons.push('starting App too thin for a professional first version');
     score -= 30;
   }
-  if (css.replace(/\s+/g, '').length < 300) {
+  if (css.replace(/\s+/g, '').length < 300 && sectionCssLen < 400) {
     reasons.push('CSS too thin — missing intentional design depth');
     score -= 15;
   }
+
+  // Compositional leather/atelier invents keep catalog in CatalogSection — not products.ts.
+  const compositionalCatalog = compositional
+    && /CatalogSection|const\s+PRODUCTS\s*=/i.test(blob)
+    && /src\/sections\/CatalogSection\.jsx/i.test(Object.keys(files).join('\n'));
 
   for (const path of plan.mustHaveFiles) {
     if (path.includes('App.tsx')) {
@@ -282,6 +299,9 @@ export function scorePlanContract(
         reasons.push(`missing required ${path}`);
         score -= 20;
       }
+    } else if (path === 'src/data/products.ts' && compositionalCatalog) {
+      // Bay Latch 2026-10-23: Ready soft on products.ts while CatalogSection PRODUCTS painted Live.
+      continue;
     } else if (!files[path]) {
       reasons.push(`missing required ${path}`);
       score -= 20;
@@ -290,25 +310,27 @@ export function scorePlanContract(
 
   const family = plan.compositionFamily;
   if (family === 'marketing-bands') {
-    if (!/<(?:nav|header)\b/i.test(app)) { reasons.push('marketing: missing nav'); score -= 15; }
-    if (!/className=["'][^"']*\bhero\b|<(?:section)[^>]*hero/i.test(app)) {
+    const surface = compositional ? blob : app;
+    if (!/<(?:nav|header)\b/i.test(surface)) { reasons.push('marketing: missing nav'); score -= 15; }
+    if (!/className=["'][^"']*\bhero\b|<(?:section)[^>]*hero|HeroSection|function Hero\b/i.test(surface)) {
       reasons.push('marketing: missing hero');
       score -= 15;
     }
-    if ((app.match(/<(?:section|main)\b/gi) || []).length < 2) {
+    if ((surface.match(/<(?:section|main|footer)\b/gi) || []).length < 2
+      && !(/HeroSection|CatalogSection|StorySection/i.test(surface) && /FooterSection|Footer\b/i.test(surface))) {
       reasons.push('marketing: need multiple content sections');
       score -= 15;
     }
-    if (!/<footer\b|className=["'][^"']*\bfoot/i.test(app)) {
+    if (!/<footer\b|className=["'][^"']*\bfoot|FooterSection|function Footer\b/i.test(surface)) {
       reasons.push('marketing: missing footer');
       score -= 10;
     }
   } else if (family === 'catalog-store') {
-    if (!/product-grid|product-card|Add to cart/i.test(blob)) {
+    if (!/product-grid|product-card|Add to cart|CatalogSection|const\s+PRODUCTS\s*=/i.test(blob)) {
       reasons.push('storefront: missing catalog/cart starting shape');
       score -= 25;
     }
-    if (!files['src/data/products.ts']) {
+    if (!files['src/data/products.ts'] && !compositionalCatalog) {
       reasons.push('storefront: missing src/data/products.ts');
       score -= 20;
     }
@@ -399,11 +421,19 @@ export function scoreStartingDesignQuality(
     reasons.push('design: missing atmosphere / depth');
     score -= 10;
   }
-  if (app.replace(/\s+/g, '').length < 600) {
+  const designBlob = appBlob(files);
+  const compositionalDesign = isCompositionalSurface(files);
+  if (
+    app.replace(/\s+/g, '').length < 600
+    && !(compositionalDesign && designBlob.replace(/\s+/g, '').length >= 1200)
+  ) {
     reasons.push('design: App too sparse to feel built');
     score -= 15;
   }
-  if ((family === 'marketing-bands' || family === 'catalog-store') && !/<(?:nav|header)\b/i.test(app)) {
+  if (
+    (family === 'marketing-bands' || family === 'catalog-store')
+    && !/<(?:nav|header)\b/i.test(compositionalDesign ? designBlob : app)
+  ) {
     reasons.push('design: missing header hierarchy');
     score -= 12;
   }

@@ -404,6 +404,24 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
   return queued;
 }
 
+function projectTerminalDenied(command, cwd) {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const policyPath = path.join(String(cwd || ''), '.nova', 'terminal-policy.json');
+    if (!fs.existsSync(policyPath)) return null;
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    const low = String(command || '').toLowerCase();
+    const deny = Array.isArray(policy?.deny) ? policy.deny : [];
+    for (const d of deny) {
+      if (d && low.includes(String(d).toLowerCase())) {
+        return { ok: false, error: `Denied by .nova/terminal-policy.json (${d})` };
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 async function agentRun(payload) {
   const command = String(payload?.command || '').trim();
   // Never trust renderer-supplied mode.
@@ -419,6 +437,8 @@ async function agentRun(payload) {
 
   const cwdRes = resolveCwd(payload?.cwd, command);
   if (!cwdRes.ok) return cwdRes;
+  const denied = projectTerminalDenied(command, cwdRes.path);
+  if (denied) return denied;
 
   // Heavy package installs can take longer on cold cache / Defender PCs.
   const timeoutMs = typeof payload?.timeoutMs === 'number' && payload.timeoutMs > 0
@@ -597,8 +617,9 @@ function resolveSystemNodeBin() {
 /**
  * Prebundle React as ESM for Live Preview. Vite's optimizeDeps crashes on many
  * vite-plugin-electron trees (depsInfo.imports), and raw CJS react has no default export.
+ * Async so esbuild never blocks Electron main via buildSync.
  */
-function ensureLiveReactVendor(cwd) {
+async function ensureLiveReactVendor(cwd) {
   const vendorDir = path.join(cwd, '.nova-live-vendor');
   const reactOut = path.join(vendorDir, 'react.js');
   const reactDomOut = path.join(vendorDir, 'react-dom.js');
@@ -648,7 +669,7 @@ function ensureLiveReactVendor(cwd) {
     const toPosix = (p) => String(p || '').replace(/\\/g, '/');
 
     // One shared bundle = one React instance (split+external CJS require breaks hooks).
-    esbuild.buildSync({
+    await esbuild.build({
       stdin: {
         contents: [
           `import __ReactMod from "${toPosix(reactEntry)}";`,
@@ -715,8 +736,8 @@ function ensureLiveReactVendor(cwd) {
  * Writes a project-local config + ESM React vendor so JSX always transforms
  * (Electron-as-Node / broken optimizeDeps were serving raw TSX or CJS React → blank + crash sound).
  */
-function spawnHiddenWebOnlyVite(cwd, port) {
-  const vendor = ensureLiveReactVendor(cwd);
+async function spawnHiddenWebOnlyVite(cwd, port) {
+  const vendor = await ensureLiveReactVendor(cwd);
   if (!vendor.ok) {
     const err = new Error(vendor.error || 'Live React vendor prep failed');
     err.code = 'NOVA_LIVE_VENDOR';
@@ -967,7 +988,7 @@ async function agentStartDevServer(payload) {
         };
       }
       try {
-        const webChild = spawnHiddenWebOnlyVite(cwdRes.path, webPort);
+        const webChild = await spawnHiddenWebOnlyVite(cwdRes.path, webPort);
         const webUrl = await waitForDevServerUrl(webPort, 45_000);
         if (!(await vitePreviewLooksHealthy(webUrl))) {
           try { killProcessTree(webChild.pid); } catch { /* ignore */ }
@@ -1129,7 +1150,7 @@ async function agentStartFolderPreview(payload) {
         return { ok: false, error: 'No free port in 5200–5350 for the project preview server.' };
       }
       try {
-        const child = spawnHiddenWebOnlyVite(cwd, port);
+        const child = await spawnHiddenWebOnlyVite(cwd, port);
         const url = await waitForDevServerUrl(port, 45_000);
         await waitForViteDepsReady(cwd, 20_000);
         if (!(await vitePreviewLooksHealthy(url))) {

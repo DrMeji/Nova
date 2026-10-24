@@ -1,45 +1,23 @@
 import { useMemo } from 'react';
-import {
-  SettingsSection,
-  Field,
-  InfoCard,
-  ToggleRow,
-  ThemeCard,
-  SettingsGroup,
-  GgufSliderRow,
-  StorageBar,
-  OAuthClientRow,
-  AUTO_LOCK_OPTIONS,
-  AI_MODES,
-  DEFAULT_MODELS,
-  PROVIDER_ROWS,
-  ACCENTS,
-} from '@/components/SettingsShared';
-import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
-import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { NovaMark } from '@/components/NovaMark';
-import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatNovaId } from '@/lib/novaUserId';
-import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import { clearSetupCompleted } from '@/lib/setup';
+import { SettingsSection, OAuthClientRow, DEFAULT_MODELS, PROVIDER_ROWS, type SettingsSharedCtx } from '@/components/SettingsShared';
+import '@/components/VoiceSettingsPanel';
+import '@/components/SettingsSystemHealth';
+import '@/components/NovaMark';
+import { BrandMark } from '@/components/BrandMark';
+import '@/lib/changelog';
+import '@/lib/novaUserId';
+import '@/lib/novaDevAccount';
+import '@/lib/setup';
 import { getAccurateHardware } from '@/lib/api';
-import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
+import '@/lib/ggufContext';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { probeProviderKey } from '@/lib/providerSpeed';
-import { setProviderApiKey, getProviderApiKeys, getLocalPrefs, type DensityPref, type AiModePref } from '@/lib/localPrefs';
-import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
-import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
-import {
-  getEnabledSkillIds,
-  listBuiltinSkillPacks,
-  toggleSkillEnabled,
-  type BuiltinNovaSkillId,
-} from '@/lib/novaSkills';
-import { isNovaDevSession } from '@/lib/novaRuntime';
-import {
-  Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
-} from 'lucide-react';
+import { setProviderApiKey, getProviderApiKeys } from '@/lib/localPrefs';
+import '@/lib/pinLock';
+import '@/lib/twoFactor';
+import '@/lib/novaSkills';
+import '@/lib/novaRuntime';
+import { KeyRound, RefreshCw, Cloud } from 'lucide-react';
 
 type SettingsModelRow = {
   id: string;
@@ -70,24 +48,8 @@ function modelReadyRank(opts: {
   return 3; // local not installed
 }
 
-export function SettingsModels({ ctx }: { ctx: any }) {
-  const {
-    activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
-    flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
-    signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
-    engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
-    allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
-    keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
-    setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
-    brainProfileReason, setBrainProfileReason, userDataProfile, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
-    installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
-    deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
-    pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
-    checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion,
-    checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose,
-    settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked,
-  } = ctx;
+export function SettingsModels({ ctx }: { ctx: SettingsSharedCtx }) {
+  const { activeSection, setSavedFlash, prefs, patchPrefs, featureTick, engineStatus, secretsEncrypted, providerKeys, setProviderKeys, editingProvider, setEditingProvider, keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders, setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash, brainProfileReason, setBrainProfileReason, userDataProfile, setLocalReports, installedModels, navigate, onClose, refreshBlocked } = ctx;
 
   void featureTick;
   void setLocalReports;
@@ -135,8 +97,8 @@ export function SettingsModels({ ctx }: { ctx: any }) {
   const providerRowsSorted = useMemo(() => {
     const rows = PROVIDER_ROWS.filter((p: { id: string }) => p.id !== 'github-models' || showLegacyProviders);
     return [...rows].sort((a, b) => {
-      const aOn = Boolean(providerKeys[a.id]) ? 0 : 1;
-      const bOn = Boolean(providerKeys[b.id]) ? 0 : 1;
+      const aOn = providerKeys[a.id] ? 0 : 1;
+      const bOn = providerKeys[b.id] ? 0 : 1;
       return aOn - bOn || a.name.localeCompare(b.name);
     });
   }, [providerKeys, showLegacyProviders]);
@@ -227,7 +189,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {providerRowsSorted.map((p: any) => {
+                  {providerRowsSorted.map((p) => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
                     return (
@@ -372,7 +334,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                 <button
                   type="button"
                   className="text-[11px] text-content-tertiary hover:text-content-secondary"
-                  onClick={() => setShowLegacyProviders((v: any) => !v)}
+              onClick={() => setShowLegacyProviders((v: boolean) => !v)}
                 >
                   {showLegacyProviders ? 'Hide retired sources' : 'Show retired (GitHub Models)'}
                 </button>
@@ -390,7 +352,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                     </button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {(['github', 'google'] as const).map((id: any) => (
+                    {(['github', 'google'] as const).map((id) => (
                       <div key={id} className="rounded-lg border border-surface-border/80 bg-nova-navy-950/40 p-2.5">
                         <OAuthClientRow pluginId={id} onSaved={(msg) => {
                           setSavedFlash(msg);
@@ -472,8 +434,8 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                       setHw(info);
                       setHwScanning(false);
                       setHwFlash(info.accurate ? 'Updated' : 'Approximate scan');
-                      void import('@/lib/brainProfile').then((m: any) =>
-                        m.getBrainProfile(true).then((p: any) => setBrainProfileReason(p.reason)),
+                      void import('@/lib/brainProfile').then((m) =>
+                        m.getBrainProfile(true).then((p) => setBrainProfileReason(p.reason)),
                       );
                       window.dispatchEvent(new Event('NOVA:hardware-rescanned'));
                       window.setTimeout(() => setHwFlash(''), 2000);

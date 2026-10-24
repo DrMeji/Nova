@@ -301,11 +301,11 @@ function looksLikeCodeLine(line: string): boolean {
     return false;
   }
   if (/^(stalls|products|items|data|users)\s*=\s*\[/.test(t)) return true;
-  if (/^[{}\[\],]$/.test(t)) return true;
-  if (/^["']?\w+["']?\s*:\s*/.test(t) && /[,{\[]\s*$/.test(t)) return true;
+  if (/^[{}[\],]$/.test(t)) return true;
+  if (/^["']?\w+["']?\s*:\s*/.test(t) && /[,{[]\s*$/.test(t)) return true;
   if (/^\s{2,}(".+"\s*:|\{|\}|\[|\])/.test(line)) return true;
   // Control-flow only when it looks like real JS/Python, not "return home".
-  if (/^(if\s*\(|for\s*\(|while\s*\(|return\s+[\[{'"0-9]|print\(|console\.|await\s+\w|async\s+function)/i.test(t)) {
+  if (/^(if\s*\(|for\s*\(|while\s*\(|return\s+[[{'"0-9]|print\(|console\.|await\s+\w|async\s+function)/i.test(t)) {
     return true;
   }
   // CSS selectors / rules / property dumps (margin-bottom: 20px; etc.)
@@ -370,7 +370,7 @@ function promoteUnfencedCode(blocks: Block[]): Block[] {
         buf.push(line);
         continue;
       }
-      if (looksLikeCodeLine(line) || (codeBuf.length > 0 && (/^\s{2,}\S/.test(line) || /^[{}\[\],]/.test(line.trim())))) {
+      if (looksLikeCodeLine(line) || (codeBuf.length > 0 && (/^\s{2,}\S/.test(line) || /^[{}[\],]/.test(line.trim())))) {
         if (buf.length) flushText();
         codeBuf.push(line);
       } else {
@@ -411,7 +411,6 @@ function renderInlinePlain(text: string): ReactNode[] {
   const re = /(\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|`[^`\n]+`)/g;
   let last = 0;
   let match: RegExpExecArray | null;
-  let key = 0;
   while ((match = re.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
     const token = match[0];
@@ -420,7 +419,6 @@ function renderInlinePlain(text: string): ReactNode[] {
     else if (token.startsWith('`')) parts.push(token.slice(1, -1));
     else parts.push(token);
     last = match.index + token.length;
-    key += 1;
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts.length ? parts : [text];
@@ -637,15 +635,16 @@ function renderCodeWithChips(code: string): ReactNode[] {
 
 function CodeCopyBox({ lang, code }: { lang: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  const label = (lang || 'code').trim() || 'code';
   return (
-    <div className="relative rounded-xl border border-surface-border bg-nova-navy-950/90 overflow-hidden my-1.5">
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-surface-border/80 bg-surface-hover/30">
-        <span className="text-[10px] uppercase tracking-wide text-content-tertiary font-medium">
-          {lang || 'code'}
+    <div className="relative rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden my-1.5 shadow-sm">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-400 font-semibold">
+          {label}
         </span>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
           title={copied ? 'Copied' : 'Copy code'}
           aria-label={copied ? 'Copied' : 'Copy code'}
           onClick={() => {
@@ -659,8 +658,8 @@ function CodeCopyBox({ lang, code }: { lang: string; code: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="m-0 max-h-[min(28rem,50vh)] overflow-auto px-3 py-2.5 text-[0.75rem] leading-relaxed font-mono text-content-primary whitespace-pre">
-        {renderCodeWithChips(code)}
+      <pre className="m-0 max-h-[min(28rem,50vh)] overflow-auto px-3 py-2.5 text-[0.75rem] leading-relaxed font-mono text-zinc-100 whitespace-pre">
+        {renderHighlightedCode(code, label)}
       </pre>
     </div>
   );
@@ -673,8 +672,127 @@ const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
   4: 'text-[0.8125rem] font-medium text-content-primary mt-0.5',
 };
 
+/**
+ * Models often paste HTML/CSS as a wall of unfenced text. Promote those dumps into
+ * fenced code blocks so CodeCopyBox (terminal-style) can render them.
+ */
+export function promoteLooseCodeFences(text: string): string {
+  let t = String(text || '');
+  if (!t.trim()) return t;
+
+  // Already well-fenced with a real body — leave alone.
+  if (/```[\w+-]*\n[\s\S]{40,}?```/.test(t)) return t;
+
+  // 1) Full CSS rules first (selector { props… }) so we don't slice the brace body apart.
+  t = t.replace(
+    /\b([.#]?[a-zA-Z][\w-]*)\s*\{\s*((?:[^}]|\/\*[\s\S]*?\*\/){20,}?)\}/g,
+    (full, sel, body) => {
+      const props = String(body || '');
+      if ((props.match(/:/g) || []).length < 2) return full;
+      if (!/(?:background|color|padding|margin|position|display|width|height|font|text-align|border|top|left)\s*:/i.test(props)) {
+        return full;
+      }
+      return `\n\`\`\`css\n${String(sel).trim()} {\n  ${props.trim().replace(/;\s*/g, ';\n  ').replace(/\n\s*$/, '\n')}}\n\`\`\`\n`;
+    },
+  );
+
+  // 2) HTML document / fragment dumps.
+  if (/<!DOCTYPE\s+html\b|<html\b/i.test(t) && !/```html/i.test(t)) {
+    t = t.replace(
+      /(<!DOCTYPE\s+html\b[\s\S]*?<\/html\s*>|<html\b[\s\S]*?<\/html\s*>)/i,
+      (block) => `\n\`\`\`html\n${String(block).trim()}\n\`\`\`\n`,
+    );
+  }
+
+  // 3) Glued property list with no selector (only when we still have no css fence).
+  if (!/```css/i.test(t)) {
+    t = t.replace(
+      /((?:(?:background(?:-color)?|color|padding|margin|position|display|width|height|top|left|right|bottom|font(?:-size|-weight|-family)?|text-align|border(?:-radius)?)\s*:\s*[^;{]{1,80};\s*){3,})/gi,
+      (block) => `\n\`\`\`css\n${String(block).trim()}\n\`\`\`\n`,
+    );
+  }
+
+  return t;
+}
+
+/** Lightweight VS-Code-ish token colors for chat Code boxes (no Prism dependency). */
+function highlightCodeLine(line: string, lang: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let key = 0;
+  const push = (text: string, className?: string) => {
+    if (!text) return;
+    parts.push(className
+      ? <span key={key++} className={className}>{text}</span>
+      : <span key={key++}>{text}</span>);
+  };
+
+  if (/^html?$/i.test(lang)) {
+    const re = /(<\/?[a-zA-Z][\w:-]*\b[^>]*>)|(&#?[a-zA-Z0-9]+;)|(<!--[\s\S]*?-->)/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      if (m.index > last) push(line.slice(last, m.index));
+      if (m[1]) push(m[1], 'text-sky-300');
+      else if (m[3]) push(m[3], 'text-content-tertiary italic');
+      else push(m[0]);
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) push(line.slice(last));
+    return parts.length ? parts : [line];
+  }
+
+  if (/^css$/i.test(lang)) {
+    const re = /(#[0-9A-Fa-f]{3,8}\b)|(\b(?:background(?:-color)?|color|padding|margin|position|display|width|height|top|left|right|bottom|font(?:-size|-weight|-family)?|text-align|border(?:-radius)?|min-height|max-width)\b)|(:)|(\b[\d.]+(?:px|rem|em|%|vh|vw)?\b)|([.#]?[a-zA-Z][\w-]*)|([{};])/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      if (m.index > last) push(line.slice(last, m.index));
+      if (m[1]) {
+        parts.push(<HexColorChip key={key++} hex={m[1]} />);
+      } else if (m[2]) push(m[2], 'text-fuchsia-300');
+      else if (m[3]) push(m[3], 'text-content-tertiary');
+      else if (m[4]) push(m[4], 'text-amber-300');
+      else if (m[5]) push(m[5], 'text-sky-300');
+      else if (m[6]) push(m[6], 'text-content-tertiary');
+      else push(m[0]);
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) push(line.slice(last));
+    return parts.length ? parts : [line];
+  }
+
+  // js / jsx / ts / default — keywords + strings + comments
+  const re = /(\/\/.*$|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b(?:const|let|var|function|return|import|export|from|class|if|else|for|while|new|async|await|true|false|null|undefined)\b)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)/gm;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) push(line.slice(last, m.index));
+    if (m[1]) push(m[1], 'text-content-tertiary italic');
+    else if (m[2]) push(m[2], 'text-emerald-300');
+    else if (m[3]) push(m[3], 'text-violet-300');
+    else if (m[4]) push(m[4], 'text-amber-300');
+    else if (m[5]) push(m[5], 'text-sky-200');
+    else push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) push(line.slice(last));
+  return parts.length ? parts : [line];
+}
+
+function renderHighlightedCode(code: string, lang: string): ReactNode {
+  const lines = String(code || '').split('\n');
+  const useHighlight = /^(html?|css|js|jsx|ts|tsx|javascript|typescript)?$/i.test(lang || 'js');
+  if (!useHighlight) return renderCodeWithChips(code);
+  return lines.map((line, i) => (
+    <span key={i} className="block">
+      {highlightCodeLine(line, lang || 'js')}
+      {i < lines.length - 1 ? '\n' : null}
+    </span>
+  ));
+}
+
 export function ChatMarkdown({ text, tone = 'assistant' }: { text: string; tone?: 'user' | 'assistant' }) {
-  const cleaned = normalizeAssistantLists(tidyMarkdownStars(text)).trim();
+  const cleaned = promoteLooseCodeFences(normalizeAssistantLists(tidyMarkdownStars(text))).trim();
   if (!cleaned) return null;
   const splitTone = tone !== 'user';
   const inline = (s: string) => renderInline(s, { splitTone });

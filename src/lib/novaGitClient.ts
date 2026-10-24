@@ -81,6 +81,11 @@ export async function gitStatus(projectId: string): Promise<GitStatus> {
   return res || { ok: false, error: 'Git is only available in the NOVA desktop app.' };
 }
 
+export async function gitInit(projectId: string): Promise<GitStatus & { created?: boolean }> {
+  const res = await window.novaDesktop?.gitInit?.(projectId);
+  return res || { ok: false, error: 'Git init needs the NOVA desktop app.' };
+}
+
 export async function gitClone(projectId: string, url: string, token?: string): Promise<GitStatus> {
   const res = await window.novaDesktop?.gitClone?.({ projectId, url, token });
   return res || { ok: false, error: 'Git clone needs the NOVA desktop app.' };

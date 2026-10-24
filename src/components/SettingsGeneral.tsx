@@ -1,61 +1,30 @@
-import {
-  SettingsSection,
-  InfoCard,
-  ToggleRow,
-  ThemeCard,
-  SettingsGroup,
-  GgufSliderRow,
-  StorageBar,
-  OAuthClientRow,
-  AUTO_LOCK_OPTIONS,
-  AI_MODES,
-  DEFAULT_MODELS,
-  PROVIDER_ROWS,
-  ACCENTS,
-} from '@/components/SettingsShared';
+import { SettingsSection, InfoCard, ToggleRow, ThemeCard, SettingsGroup, GgufSliderRow, AI_MODES, ACCENTS, type SettingsSharedCtx } from '@/components/SettingsShared';
 import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { NOVA_CHANGELOG } from '@/lib/changelog';
+import '@/components/BrandMark';
+import '@/lib/changelog';
 import { formatNovaId } from '@/lib/novaUserId';
 import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import { clearSetupCompleted } from '@/lib/setup';
-import { getHardwareClass, getAccurateHardware } from '@/lib/api';
-import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
-import { setCloudProviderEnabled } from '@/lib/cloudSources';
-import { probeProviderKey } from '@/lib/providerSpeed';
-import { setProviderApiKey, getProviderApiKeys, getLocalPrefs, type DensityPref, type AiModePref } from '@/lib/localPrefs';
-import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
-import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
+import '@/lib/setup';
+import '@/lib/api';
+import { ggufCtxCapacityLabel } from '@/lib/ggufContext';
+import '@/lib/cloudSources';
+import '@/lib/providerSpeed';
+import { type DensityPref, type AiModePref } from '@/lib/localPrefs';
+import '@/lib/pinLock';
+import '@/lib/twoFactor';
 import {
   getEnabledSkillIds,
   listBuiltinSkillPacks,
   toggleSkillEnabled,
   type BuiltinNovaSkillId,
 } from '@/lib/novaSkills';
-import { isNovaDevSession } from '@/lib/novaRuntime';
-import {
-  Check, Cpu, KeyRound, Sparkles, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
-} from 'lucide-react';
+import '@/lib/novaRuntime';
+import { Check, Cpu, Sparkles, BadgeCheck, Copy, Github } from 'lucide-react';
 
 
-export function SettingsGeneral({ ctx }: { ctx: any }) {
-  const {
-    activeSection, user, profile, setArkCopied, arkCopied,
-    setSavedFlash,
-    signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
-    engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
-    allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
-    keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
-    setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
-    brainProfileReason, setBrainProfileReason, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
-    installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
-    deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
-    pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
-    checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion,
-    checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose,
-    settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked,
-  } = ctx;
+export function SettingsGeneral({ ctx }: { ctx: SettingsSharedCtx }) {
+  const { activeSection, user, profile, setArkCopied, arkCopied, setSavedFlash, signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick, engineStatus, diskSpace, brainUrl, aiMode, setLocalReports, navigate, onClose, settings, updateSettings, refreshBlocked } = ctx;
 
   void featureTick;
   void setLocalReports;
@@ -142,16 +111,18 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
               <div className="space-y-6">
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
-                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
-                    <ThemeCard label="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
-                    <ThemeCard label="Light" active={theme === 'light'} onClick={() => setTheme('light')} />
+                  <div className="grid grid-cols-2 min-[520px]:grid-cols-4 gap-3">
+                    <ThemeCard label="Fun" variant="fun" active={theme === 'fun'} onClick={() => setTheme('fun')} />
+                    <ThemeCard label="Dark" variant="dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
+                    <ThemeCard label="Light" variant="light" active={theme === 'light'} onClick={() => setTheme('light')} />
+                    <ThemeCard label="Gray" variant="gray" active={theme === 'gray'} onClick={() => setTheme('gray')} />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Accent</label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-0">
-                    {ACCENTS.map((a: any) => (
+                    {ACCENTS.map((a) => (
                       <button
                         key={a.id}
                         type="button"
@@ -175,7 +146,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                     {([
                       { id: 'comfortable' as DensityPref, label: 'Comfortable' },
                       { id: 'compact' as DensityPref, label: 'Compact' },
-                    ]).map((d: any) => (
+                    ]).map((d) => (
                       <button
                         key={d.id}
                         type="button"
@@ -257,7 +228,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Routing brain</p>
                     <p className="text-xs text-content-secondary">
-                      {AI_MODES.find((m: any) => m.value === aiMode)?.label ?? 'Automatic'}
+                      {AI_MODES.find((m) => m.value === aiMode)?.label ?? 'Automatic'}
                     </p>
                   </div>
                   <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
@@ -286,7 +257,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                 {/* Routing mode */}
                 <SettingsGroup title="Routing mode">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {AI_MODES.map((mode: any) => (
+                    {AI_MODES.map((mode) => (
                       <button
                         key={mode.value}
                         type="button"
@@ -358,7 +329,7 @@ export function SettingsGeneral({ ctx }: { ctx: any }) {
                     Preview contract stays on for every create/build.
                   </p>
                   <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
-                    {listBuiltinSkillPacks().map((pack: any) => {
+                    {listBuiltinSkillPacks().map((pack) => {
                       const locked = Boolean(pack.alwaysOnCreate);
                       const on = locked || enabledSkills.includes(pack.id as BuiltinNovaSkillId);
                       return (

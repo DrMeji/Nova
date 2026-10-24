@@ -85,7 +85,7 @@ export async function runDriveLive(
   const perms = opts?.permissions || [];
 
   const uploadMatch = userText.match(
-    /(?:upload\s+note|save\s+to\s+drive)\s*[:\-]?\s*(.+)$/i,
+    /(?:upload\s+note|save\s+to\s+drive)\s*[:-]?\s*(.+)$/i,
   );
   if (uploadMatch) {
     if (perms.length > 0 && !perms.includes('write')) {

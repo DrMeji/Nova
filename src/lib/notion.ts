@@ -197,7 +197,7 @@ export async function runNotionLive(
       ].join('\n');
     }
     const renameMatch = userText.match(
-      /(?:update|rename|edit)\s+(?:(?:the|a)\s+)?(?:page|note|doc)\s+(?:titled|called|named)?\s*[\"“]?(.+?)[\"”]?\s+(?:to|as|:)\s*[\"“]?(.+?)[\"”]?\s*$/i,
+      /(?:update|rename|edit)\s+(?:(?:the|a)\s+)?(?:page|note|doc)\s+(?:titled|called|named)?\s*["“]?(.+?)["”]?\s+(?:to|as|:)\s*["“]?(.+?)["”]?\s*$/i,
     );
     if (renameMatch?.[1] && renameMatch?.[2]) {
       const searchTitle = renameMatch[1].replace(/[?.!]+$/, '').trim().slice(0, 120);
@@ -236,7 +236,7 @@ export async function runNotionLive(
       ].join('\n');
     }
     const titleMatch = userText.match(
-      /(?:create|add|new|write)\s+(?:a\s+)?(?:page|note|doc)\s*[:\-]?\s*(.+)$/i,
+      /(?:create|add|new|write)\s+(?:a\s+)?(?:page|note|doc)\s*[:-]?\s*(.+)$/i,
     );
     const title = (titleMatch?.[1] || 'Note from NOVA').replace(/[?.!]+$/, '').trim().slice(0, 120);
     const account = await verifyNotionToken(token);

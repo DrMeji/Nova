@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { isBypassEnabled } from '@/lib/authFlags';
+import '@/lib/authFlags';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   supabase,
@@ -338,8 +338,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Dev/HMR only — Vite can remount AppContent against a stale AuthContext module. */
+const HMR_GUEST_AUTH: AuthContextValue = {
+  session: null,
+  user: GUEST_USER,
+  profile: guestProfile(),
+  settings: null,
+  loading: false,
+  bypass: true,
+  signInWithGitHub: async () => ({ error: 'HMR auth fallback — reload' }),
+  signIn: async () => ({ error: 'HMR auth fallback — reload' }),
+  signUp: async () => ({ error: 'HMR auth fallback — reload' }),
+  resetPassword: async () => ({ error: 'HMR auth fallback — reload' }),
+  signOut: async () => {},
+  deleteAccountPermanently: async () => ({ ok: true }),
+  bypassLogin: () => {},
+  refreshProfile: async () => {},
+  updateSettings: async () => {},
+};
+
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) {
+    // Vite HMR: AuthProvider still wraps the tree, but AppContent imported a different
+    // AuthContext instance → context reads undefined and white-screens the shell.
+    if (import.meta.env.DEV) {
+      console.warn('[NOVA] useAuth: AuthProvider context missing (often HMR). Guest fallback.');
+      return HMR_GUEST_AUTH;
+    }
+    throw new Error('useAuth must be used within AuthProvider');
+  }
   return ctx;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    import.meta.hot?.invalidate();
+  });
 }

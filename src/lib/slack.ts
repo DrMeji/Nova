@@ -83,8 +83,8 @@ export async function runSlackLive(
     }
     const chMatch = userText.match(/#([\w-]+)/);
     const channelName = chMatch?.[1];
-    const textMatch = userText.match(/(?:post|send|message|write)\s+(?:to\s+)?#[\w-]+\s*[:\-]?\s*(.+)$/i)
-      || userText.match(/#([\w-]+)\s*[:\-]\s*(.+)$/i);
+    const textMatch = userText.match(/(?:post|send|message|write)\s+(?:to\s+)?#[\w-]+\s*[:-]?\s*(.+)$/i)
+      || userText.match(/#([\w-]+)\s*[:-]\s*(.+)$/i);
     const body = (textMatch?.[textMatch.length - 1] || '').trim();
     if (!channelName || !body) {
       return [

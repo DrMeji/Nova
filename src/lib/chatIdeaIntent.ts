@@ -189,6 +189,12 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
   const hardGo = looksLikeHardCreateGo(t)
     || /\b(?:create|scaffold|spin\s+up)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\s+(?:on\s+disk|now|here)\b/i.test(t)
     || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t)
+    // Ladder: "could you just start a new project with a plain white blank page?"
+    || /\bstart\s+(?:a\s+)?new\s+project\b/i.test(t)
+    || (
+      /\b(?:blank|plain\s+white)\s+(?:page|canvas|shell)\b/i.test(t)
+      && /\b(?:new\s+project|on\s+disk|nothing else)\b/i.test(t)
+    )
     // Imperative greenfield: "Build a brand-new … website/site/app" (not "help me build…").
     || (
       /^(?:please\s+)?(?:build|create|make|scaffold)(?:\s+me)?\b/i.test(t)
@@ -198,6 +204,18 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
     );
 
   if (hardGo) return false;
+
+  // "I'm trying to build a game, need your help" / "need help making a game" = soft explore:
+  // talk first. Without this the classifyTurn soft-need-coding-create branch (need + game) auto-creates.
+  if (
+    (
+      /\b(?:(?:need|want)\s+(?:your\s+|some\s+|a\s+little\s+)?help\b|(?:i['’]?m|i\s+am|we['’]?re)\s+(?:trying|attempting|hoping|looking)\s+to\s+(?:build|make|create|develop))/i.test(t)
+      && /\b(?:build|building|create|creating|make|making|develop|developing|game|app|bot|cli|api|tool)\b/i.test(t)
+    )
+    || /\b(?:want|need)\s+(?:a|an|some)\s+[\w\s-]{0,40}\bideas?\b/i.test(t)
+  ) {
+    return true;
+  }
 
   // Soft “build me…” — talk first when exploratory; short concrete product asks create.
   // e.g. “Build me a website” → create · “Build me a coffee shop? what features?” → talk
@@ -233,6 +251,22 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
       /\b(?:can\s+you\s+please|could\s+you\s+please)\b/i.test(t)
       && /\b(?:build|create|make|develop)\b/i.test(t)
       && !/\b(?:on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+    )
+    // "Can you build an API?" / "Can you implement a rate limiter?" — soft explore, not create.
+    // Keep micro UI ("Can you make the background purple?") out of talk-first.
+    || (
+      /\?/.test(t)
+      && /\b(?:can|could|would)\s+you\b/i.test(t)
+      && /\b(?:build|create|develop|make|implement|write|convert|refactor|rewrite|migrate)\b/i.test(t)
+      && !/\b(?:make\s+the\s+background|background\s+\w+|on\s+disk|right\s+now|start\s+building|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
+      && !/\b(?:color|purple|blue|red|green|font|button|title|header|footer|icon|logo)\b/i.test(t)
+    )
+    // "How do I write a Cloudflare Worker?" — howto question, not greenfield create.
+    || (
+      /\?/.test(t)
+      && /\bhow\s+(?:do|can|would|should)\s+i\b/i.test(t)
+      && /\b(?:build|create|write|implement|make|convert|structure)\b/i.test(t)
+      && !/\b(?:on\s+disk|right\s+now|scaffold\s+now|build\s+it\s+now)\b/i.test(t)
     )
   ) {
     return true;
@@ -275,24 +309,34 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
   }
   // Layout sketch without a create command — nav / hero / bands / footer described.
   // Never steal imperative "Build a … website" briefs that list sections (Maskline etc.).
+  // Never steal bound-folder UI edits: "Below the hero, add a Shop section with … names:"
+  // (hero+section+"product cards" used to false-positive on bare "product").
   if (
     t.length >= 60
     && t.length < 1200
     && !/^(?:please\s+)?(?:build|create|make|scaffold)\b/i.test(t)
     && !/\b(?:build\s+it|create\s+(?:a\s+)?(?:new\s+)?(?:project|files)|scaffold|go\s+build|on\s+disk|start\s+building|get\s+it\s+live)\b/i.test(t)
+    && !(
+      /\b(?:add|put|include|place)\b/i.test(t)
+      && /\b(?:section|nav|headline|tagline|button|form|links?)\b/i.test(t)
+    )
     && /\b(?:nav|navigation|hero|footer)\b/i.test(t)
     && /\b(?:band|section|white\s+space|motion|cta|button)\b/i.test(t)
-    && /\b(?:homepage|home\s*page|landing|apple\.com|product)\b/i.test(t)
+    && /\b(?:homepage|home\s*page|landing|apple\.com|product\s+(?:page|site|homepage))\b/i.test(t)
   ) {
     return true;
   }
 
   // "…like Twitch/Discord…" plus a question mark → talk, not scaffold.
+  // Do NOT steal ladder creates: "Discord-like … start a new project … blank page?"
   if (
     /\b(?:app|website|site|platform)\b/i.test(t)
     && /\b(?:like|similar\s+to)\b/i.test(t)
     && (/\?/.test(t) || /\b(?:streaming|clone|inspired)\b/i.test(t))
     && !/\b(?:build|make)\s+me\b/i.test(t)
+    && !/\bstart\s+(?:a\s+)?new\s+project\b/i.test(t)
+    && !/\b(?:blank|plain\s+white)\s+(?:page|canvas|shell)\b/i.test(t)
+    && !/\bon\s+disk\b/i.test(t)
   ) {
     return true;
   }

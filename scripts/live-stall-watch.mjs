@@ -232,14 +232,20 @@ while (Date.now() - t0 < timeoutMs) {
           path,
           currentFileMs,
           currentFileLabel: elapsed(currentFileMs),
-          stalled: Boolean(path && !snap.endedAt && currentFileMs >= 8000),
+          // Stall = idle since lastActivityAt (same as getBuildLiveClock), not file-open duration.
+          stalled: Boolean(
+            path
+            && !snap.endedAt
+            && snap.lastActivityAt != null
+            && (now - Number(snap.lastActivityAt)) >= 14_000,
+          ),
           ended: Boolean(snap.endedAt),
           ready: snap.ready,
           product: snap.productName,
           softBind: snap.softBindCount,
           topFiles: fileList.slice(0, 6).map((f) => {
             const name = String(f.path || '').split('/').pop();
-            return name + ':' + (f.ms / 1000).toFixed(1) + 's' + (f.ms >= 8000 ? '⚠' : '');
+            return name + ':' + (f.ms / 1000).toFixed(1) + 's';
           }),
         };
       }

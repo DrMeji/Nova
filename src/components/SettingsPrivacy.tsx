@@ -1,64 +1,27 @@
-import {
-  SettingsSection,
-  Field,
-  InfoCard,
-  ToggleRow,
-  ThemeCard,
-  SettingsGroup,
-  GgufSliderRow,
-  StorageBar,
-  OAuthClientRow,
-  AUTO_LOCK_OPTIONS,
-  AI_MODES,
-  DEFAULT_MODELS,
-  PROVIDER_ROWS,
-  ACCENTS,
-} from '@/components/SettingsShared';
-import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
-import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { NovaMark } from '@/components/NovaMark';
-import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { NOVA_CHANGELOG } from '@/lib/changelog';
+import { SettingsSection, ToggleRow, AUTO_LOCK_OPTIONS, type SettingsSharedCtx } from '@/components/SettingsShared';
+import '@/components/VoiceSettingsPanel';
+import '@/components/SettingsSystemHealth';
+import '@/components/NovaMark';
+import '@/components/BrandMark';
+import '@/lib/changelog';
 import { formatNovaId } from '@/lib/novaUserId';
-import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import { clearSetupCompleted } from '@/lib/setup';
-import { getHardwareClass, getAccurateHardware } from '@/lib/api';
-import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
-import { setCloudProviderEnabled } from '@/lib/cloudSources';
-import { probeProviderKey } from '@/lib/providerSpeed';
-import { setProviderApiKey, getProviderApiKeys, getLocalPrefs, type DensityPref, type AiModePref } from '@/lib/localPrefs';
+import '@/lib/novaDevAccount';
+import '@/lib/setup';
+import '@/lib/api';
+import '@/lib/ggufContext';
+import '@/lib/cloudSources';
+import '@/lib/providerSpeed';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
-import {
-  getEnabledSkillIds,
-  listBuiltinSkillPacks,
-  toggleSkillEnabled,
-  type BuiltinNovaSkillId,
-} from '@/lib/novaSkills';
-import { isNovaDevSession } from '@/lib/novaRuntime';
-import {
-  Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
-} from 'lucide-react';
+import type { BlockedUser } from '@/lib/novaSocial';
+import '@/lib/novaSkills';
+import '@/lib/novaRuntime';
+import { Trash2, Lock as LockIcon } from 'lucide-react';
 
 
-export function SettingsPrivacy({ ctx }: { ctx: any }) {
-  const {
-    activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
-    flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
-    signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
-    engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
-    allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
-    keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
-    setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
-    brainProfileReason, setBrainProfileReason, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
-    installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
-    deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
-    pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
-    checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion,
-    checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose,
-    settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked,
-  } = ctx;
+export function SettingsPrivacy({ ctx }: { ctx: SettingsSharedCtx }) {
+  const { activeSection, prefs, patchPrefs, featureTick, keepLocal, allowSync, diagnostics, localReports, setLocalReports, cacheBusy, runClearChatCache, pinNew, setPinNew, pinConfirm, setPinConfirm, pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg, settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked } = ctx;
 
   void featureTick;
   void setLocalReports;
@@ -70,6 +33,17 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
           {activeSection === 'privacy' && (
             <SettingsSection title="Privacy">
               <div className="space-y-3">
+                <div
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-50/95 leading-relaxed"
+                  data-nova-secrets-banner="1"
+                  role="status"
+                >
+                  <p className="font-semibold text-amber-100 mb-0.5">Secrets are never echoed</p>
+                  <p className="text-content-secondary">
+                    API keys, tokens, and <code className="text-[11px]">.env</code> values stay on this device.
+                    Nova redacts them from chat replies and traces — they are not pasted back into the thread.
+                  </p>
+                </div>
                 <ToggleRow
                   label="Keep project files on this device"
                   value={keepLocal}
@@ -119,7 +93,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     <p className="text-xs text-content-tertiary">No blocked users.</p>
                   ) : (
                     <ul className="space-y-2">
-                      {blockedUsers.map((b: any) => (
+                  {blockedUsers.map((b: BlockedUser) => (
                         <li
                           key={b.novaId}
                           className="flex items-center gap-2 rounded-xl border border-white/10 bg-nova-navy-950/40 px-3 py-2"
@@ -157,7 +131,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     <p className="text-xs text-content-tertiary">No local reports yet.</p>
                   ) : (
                     <ul className="text-xs text-content-secondary space-y-1 max-h-32 overflow-auto">
-                      {localReports.slice(0, 8).map((r: any) => (
+                  {localReports.slice(0, 8).map((r: { name: string; mtime?: string }) => (
                         <li key={r.name}>{r.name}</li>
                       ))}
                     </ul>
@@ -310,7 +284,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                     onChange={e => patchPrefs({ autoLockMinutes: Number(e.target.value) })}
                     className="rounded-lg border border-surface-border bg-nova-navy-950 px-2 py-1.5 text-xs text-content-primary disabled:opacity-45"
                   >
-                    {AUTO_LOCK_OPTIONS.map((opt: any) => (
+                    {AUTO_LOCK_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
@@ -402,15 +376,44 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                   onChange={v => patchPrefs({ agentLoopEnabled: v })}
                 />
                 <p className="text-[11px] text-content-tertiary mb-2 px-0.5 leading-snug">
-                  Create uses one locked brain (craft + Live evidence). Multimodal ensemble Auto is parked — code stays, seats stay off. The multi-step create tool loop is not offered here.
+                  Master switch for Nova’s coding tool loop (read / patch / run). On by default — this is how code and create builds land on disk.
                 </p>
                 <ToggleRow
                   label="Edit with Nova tool loop"
-                  value={prefs.agentLoopOnEdit === true}
+                  value={prefs.agentLoopOnEdit !== false}
                   onChange={v => patchPrefs({ agentLoopOnEdit: v })}
                 />
                 <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
-                  Off by default for reliability. Turn on for multi-file / “fix all” edits that need the tool loop.
+                  On by default. After a surgical miss, edits use the tool loop; invent is only a fallback.
+                </p>
+                <ToggleRow
+                  label="Create with Nova tool loop"
+                  value={prefs.agentLoopOnCreate !== false}
+                  onChange={v => patchPrefs({ agentLoopOnCreate: v })}
+                />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  On by default. Scaffold then tool loop builds the project. Turn off only to force legacy invent craft.
+                </p>
+                <ToggleRow
+                  label="Share GPU (gaming / low impact)"
+                  value={prefs.shareGpuMode !== false}
+                  onChange={v => {
+                    patchPrefs({ shareGpuMode: v });
+                    try {
+                      void window.novaDesktop?.engineSetPerfPolicy?.({ shareGpu: v });
+                    } catch { /* ignore */ }
+                  }}
+                />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  On by default. Keeps llama on CPU with a smaller context so games and YouTube stay smooth during create. Turn off for max GPU speed when nothing else needs the card.
+                </p>
+                <ToggleRow
+                  label="Design brain CSS polish after create"
+                  value={prefs.specialtyStyleHop !== false}
+                  onChange={v => patchPrefs({ specialtyStyleHop: v })}
+                />
+                <p className="text-[11px] text-content-tertiary -mt-2 mb-2 px-0.5 leading-snug">
+                  After craft, optionally swap once to your design GGUF (e.g. UIGEN) for CSS only — never concurrent multi-model load.
                 </p>
                 <ToggleRow
                   label="Approve plan before create"
@@ -462,7 +465,7 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                         value: 'run_all' as const,
                         title: 'Run everything',
                       },
-                    ]).map((opt: any) => {
+                    ]).map((opt) => {
                       const active = prefs.agentExecutionMode === opt.value;
                       return (
                         <button

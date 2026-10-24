@@ -46,19 +46,9 @@ import {
   probeConnectedApis,
   type ProviderProbe,
 } from '@/lib/providerSpeed';
-import {
-  Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
-  Power, Activity, Check, Download, Shield,
-  Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Globe, Trash2, Eye, Sparkles,
-} from 'lucide-react';
+import { Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog, Power, Activity, Check, Download, Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox, Code, Brain, Globe, Trash2, Eye, Sparkles } from 'lucide-react';
 
-import {
-  categoryDisplayLabel,
-  DEFAULT_ENGINE_MODEL_ID,
-  LOCAL_CATEGORY_ORDER,
-  sortModelsByCategoryThenSizeDesc,
-} from '@/lib/modelSort';
+import { categoryDisplayLabel, LOCAL_CATEGORY_ORDER, sortModelsByCategoryThenSizeDesc } from '@/lib/modelSort';
 import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/novaModelHunt';
 import {
   assessModelDownloadFit,

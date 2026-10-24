@@ -39,8 +39,8 @@ import {
   runVisionDescribeHop,
   visionCapabilityGapReply,
 } from '@/lib/chatMultiModel';
-import { cloudGenerateImage } from '@/lib/cloudMedia';
-import { getLocalPrefs, getProviderApiKeys, type AiModePref } from '@/lib/localPrefs';
+import '@/lib/cloudMedia';
+import { getLocalPrefs, type AiModePref } from '@/lib/localPrefs';
 import {
   isOllamaEnabled,
   ollamaChat,
@@ -225,7 +225,7 @@ async function tryLocalChat(
         : await genQuiet(prompt, id);
       // Freeze what the live stream painted BEFORE quiet retries (one-paint rule).
       const livePaintedDraft = live ? String(result.reply || '').trim() : '';
-      let frozenChatPaint = kind === 'chat'
+      const frozenChatPaint = kind === 'chat'
         ? scrubUnexpectedForeignScript(livePaintedDraft, message).trim()
         : '';
       const chatQuietMayAdopt = (candidate: string, fallbackBaseline = ''): boolean => {
@@ -1195,6 +1195,27 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     };
   }
 
+  // Specialty seat for Auto: chat → chat brain, coding → coder (sequential; one GGUF at a time).
+  // Soft prefer only — skip seats that are not ready so we never stall on a missing GGUF.
+  if (isAuto && !pinnedCloud && !pinnedOllama && (!preferredId || preferredId === 'NOVA-auto')) {
+    try {
+      const { getActiveBrainId } = await import('@/lib/brainRoles');
+      const { getEngineStatus } = await import('@/lib/novaEngine');
+      const seat = brainKind === 'coding' ? getActiveBrainId('coder') : getActiveBrainId('chat');
+      if (seat && seat !== 'NOVA-auto') {
+        const status = await getEngineStatus();
+        const hit = (status.models || []).find((m) => m.id === seat);
+        const ready = hit && hit.status === 'ready';
+        const alreadyActive = String(status.activeModelId || '') === seat;
+        // Prefer ready seats; also accept already-loaded (warm) even if status laggy.
+        if (ready || alreadyActive) {
+          preferredId = seat;
+          preferredName = String(hit?.name || seat);
+        }
+      }
+    } catch { /* keep Auto cascade */ }
+  }
+
   // ── NOVA Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto || (brainKind === 'chat' && !pinnedCloud && !pinnedOllama && !pinnedLocalEngine)) {
     // Track live paint so a sticky miss → next model does not stream a second answer over the first.
@@ -1535,362 +1556,15 @@ function hitSource(provider: string) {
   return provider.toLowerCase().replace(/\s+/g, '-');
 }
 
-function isAutoRoute(opts: ArkRouteOpts) {
-  return opts.preferredModelId === 'NOVA-auto' || opts.preferredSource === 'auto';
-}
 
-async function tryStickyImage(
-  opts: ArkRouteOpts,
-  attempted: string[],
-  mode: AiModePref,
-): Promise<ArkRouterResult | null> {
-  if (!opts.stickyModelId || !opts.stickyPinnedSource) return null;
-  attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
 
-  if (opts.stickyPinnedSource === 'cloud' && modeAllowsCloud(mode)) {
-    try {
-      const cloud = await cloudGenerateImage(opts.message);
-      if (!cloud?.dataUrl && !cloud?.url) return null;
-      return {
-        reply: cloud.reply,
-        media: {
-          kind: 'image',
-          dataUrl: cloud.dataUrl || cloud.url || '',
-          libraryId: `cloud-${Date.now()}`,
-          real: true,
-        },
-        modelName: cloud.provider,
-        modelId: opts.stickyModelId,
-        source: hitSource(cloud.provider),
-        tier: cloud.tier === 'free-key' ? 'free-key' : 'paid',
-        attempted,
-      };
-    } catch {
-      return null;
-    }
-  }
 
-  const modelId = opts.stickyModelId || 'NOVA-image-core';
-  try {
-    const result = await brainGenerate(opts.message, modelId, 'image', {
-      mediaDurationSec: opts.mediaDurationSec,
-      referenceImageDataUrl: opts.referenceImageDataUrl,
-    });
-    if (!result.media?.dataUrl) {
-      return result.reply
-        ? {
-          reply: result.reply,
-          modelName: result.modelName || 'NOVA Image Core',
-          modelId,
-          source: result.source || 'ark-media',
-          tier: 'no-key-free',
-          attempted,
-        }
-        : null;
-    }
-    return {
-      reply: result.reply,
-      media: result.media,
-      modelName: result.modelName || 'NOVA Image Core',
-      modelId,
-      source: result.source || 'ark-media',
-      tier: result.media.real ? 'no-key-free' : 'local-free',
-      attempted,
-    };
-  } catch {
-    return null;
-  }
-}
 
-async function tryStickyVideo(
-  opts: ArkRouteOpts,
-  attempted: string[],
-): Promise<ArkRouterResult | null> {
-  if (!opts.stickyModelId || !opts.stickyPinnedSource) return null;
-  attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
-  const modelId = opts.stickyModelId || 'NOVA-video-core';
-  try {
-    const result = await brainGenerate(opts.message, modelId, 'video', {
-      mediaDurationSec: opts.mediaDurationSec,
-    });
-    const source = result.source || 'ark-media';
-    const isMp4 = Boolean(
-      result.media?.dataUrl?.startsWith('data:video/')
-      || source.includes('mp4')
-      || source.includes('huggingface-video'),
-    );
-    const isFallback = Boolean(
-      source.includes('motion-still')
-      || source.includes('fallback')
-      || (!isMp4 && result.media?.dataUrl?.startsWith('data:image/svg')),
-    );
-    let reply = result.reply;
-    if (isFallback && result.media?.dataUrl) {
-      reply = [
-        'Video preview · motion still (MP4 hosts were busy or need credits).',
-        '',
-        result.reply,
-      ].join('\n');
-    }
-    return {
-      reply,
-      media: result.media,
-      modelName: result.modelName || 'NOVA Video Core',
-      modelId,
-      source,
-      tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
-      attempted,
-    };
-  } catch {
-    return null;
-  }
-}
 
-async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
-  const prefs = getLocalPrefs();
-  const mode = prefs.aiMode;
-  const failover = prefs.autoFailover;
-  const attempted: string[] = [];
-  const isAuto = isAutoRoute(opts);
 
-  if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
-    const sticky = await tryStickyImage(opts, attempted, mode);
-    // Only keep sticky when it actually produced a real image. otherwise free hosts never run
-    // and users see "busy / couldn't generate" from a failed local SD sticky.
-    if (sticky?.media?.dataUrl && sticky.media.real) return sticky;
-  }
 
-  const wantsCloud =
-    (!isAuto && opts.preferredSource === 'cloud')
-    || Boolean(opts.preferredModelId?.includes('dall'))
-    || Boolean(opts.preferredModelId?.includes('hf-flux'))
-    || Boolean(opts.preferredModelId?.includes('flux'))
-    || (isAuto ? false : modePrefersCloud(mode));
 
-  const tryCloud = async (): Promise<ArkRouterResult | null> => {
-    if (!modeAllowsCloud(mode)) return null;
-    attempted.push('Cloud image (HF / OpenAI)');
-    try {
-      const cloud = await cloudGenerateImage(opts.message);
-      if (!cloud?.dataUrl && !cloud?.url) return null;
-      const dataUrl = cloud.dataUrl || cloud.url || '';
-      const libraryId = `cloud-${Date.now()}`;
-      const cloudModelId = opts.preferredModelId?.includes('dall') ? 'dall-e-3' : 'cloud-image';
-      return {
-        reply: cloud.reply,
-        media: {
-          kind: 'image',
-          dataUrl,
-          libraryId,
-          real: true,
-        },
-        modelName: cloud.provider,
-        modelId: cloudModelId,
-        source: hitSource(cloud.provider),
-        tier: cloud.tier === 'free-key' ? 'free-key' : 'paid',
-        attempted,
-      };
-    } catch {
-      return null;
-    }
-  };
 
-  const tryLocalMedia = async (modelId?: string): Promise<ArkRouterResult | null> => {
-    const mid = modelId || opts.preferredModelId || 'NOVA-image-core';
-    const label = mid === 'NOVA-image-core' ? 'NOVA Image Core' : mid;
-    attempted.push(label);
-    try {
-      const result = await brainGenerate(opts.message, mid, 'image', {
-        mediaDurationSec: opts.mediaDurationSec,
-        referenceImageDataUrl: opts.referenceImageDataUrl,
-      });
-      if (!result.media?.dataUrl) {
-        return {
-          reply: result.reply,
-          modelName: result.modelName || label,
-          modelId: mid,
-          source: result.source || 'ark-media',
-          tier: 'no-key-free',
-          attempted,
-        };
-      }
-      return {
-        reply: result.reply,
-        media: result.media,
-        modelName: result.modelName || label,
-        modelId: mid,
-        source: result.source || 'ark-media',
-        tier: result.media.real ? 'no-key-free' : 'local-free',
-        attempted,
-      };
-    } catch {
-      return null;
-    }
-  };
-
-  // Prefer Hugging Face when keyed (auto + explicit cloud) — Pollinations is disabled.
-  const preferKeyedCloud = wantsCloud
-    || (isAuto && modeAllowsCloud(mode) && Boolean(getProviderApiKeys().huggingface));
-
-  if (preferKeyedCloud) {
-    const cloud = await tryCloud();
-    if (cloud) return cloud;
-    if (!failover && opts.preferredSource === 'cloud') {
-      return {
-        reply: 'Cloud image failed. Check your Hugging Face key in Models → Cloud, or switch to a local image model.',
-        modelName: opts.preferredModelName || 'Cloud image',
-        source: 'none',
-        tier: 'paid',
-        attempted,
-      };
-    }
-  }
-
-  const local = await tryLocalMedia();
-  if (local?.media?.dataUrl && local.media.real) return local;
-
-  // Cascade: keyed cloud after local if failover is on.
-  if ((!preferKeyedCloud || !local?.media?.real) && failover && modeAllowsCloud(mode)) {
-    const cloud = await tryCloud();
-    if (cloud) {
-      if (local && attempted.length > 1) {
-        return { ...cloud, attempted: [...attempted, ...(cloud.attempted || [])] };
-      }
-      return cloud;
-    }
-  }
-
-  if (local?.media?.dataUrl && local.media.real) return local;
-
-  // Last resort: labeled preview only. never treat SVG fallback as finished art.
-  // Never invent “use Canva / Photoshop” text. hosts failed; tell the user to retry or add a key.
-  if (local?.media?.dataUrl && !local.media.real) {
-    queueHuntBootstrap({
-      kind: 'image',
-      reason: 'media',
-      currentModelId: opts.preferredModelId,
-    });
-    return {
-      ...local,
-      reply: [
-        'Image preview · offline fallback (not a finished generation).',
-        '',
-        'Add a Hugging Face key in Models → Cloud (or install a local image model), then retry.',
-        '',
-        local.reply,
-      ].join('\n'),
-    };
-  }
-
-  if (local) return local;
-
-  queueHuntBootstrap({
-    kind: 'image',
-    reason: 'media',
-    currentModelId: opts.preferredModelId,
-  });
-
-  return {
-    reply: [
-      'Image generation failed. No Hugging Face / OpenAI key answered and no local image weights are ready.',
-      'Open Models → Cloud to confirm your Hugging Face key, or Local AI to install image weights.',
-    ].join(' '),
-    modelName: 'NOVA Router',
-    source: 'none',
-    tier: 'no-key-free',
-    attempted,
-  };
-}
-
-async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
-  const attempted: string[] = [];
-  const isAuto = isAutoRoute(opts);
-
-  if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
-    const sticky = await tryStickyVideo(opts, attempted);
-    if (sticky && sticky.source !== 'none') return sticky;
-  }
-
-  const modelId = opts.preferredModelId && opts.preferredModelId !== 'NOVA-auto'
-    ? opts.preferredModelId
-    : 'NOVA-video-core';
-  attempted.push(modelId === 'NOVA-video-core' ? 'NOVA Video Core' : modelId);
-  try {
-    const result = await brainGenerate(opts.message, modelId, 'video', {
-      mediaDurationSec: opts.mediaDurationSec,
-    });
-    const source = result.source || 'ark-media';
-    const isMp4 = Boolean(
-      result.media?.dataUrl?.startsWith('data:video/')
-      || source.includes('mp4')
-      || source.includes('huggingface-video'),
-    );
-    const isFallback = Boolean(
-      result.source?.includes('motion-still')
-      || result.source?.includes('fallback')
-      || (!isMp4 && result.media?.dataUrl?.startsWith('data:image/svg')),
-    );
-    let reply = result.reply;
-    if (isFallback && result.media?.dataUrl) {
-      reply = [
-        'Video preview · motion still (MP4 hosts were busy or need credits).',
-        '',
-        result.reply,
-      ].join('\n');
-      queueHuntBootstrap({
-        kind: 'video',
-        reason: 'media',
-        currentModelId: modelId,
-      });
-    }
-    return {
-      reply,
-      media: result.media,
-      modelName: result.modelName || 'NOVA Video Core',
-      modelId,
-      source,
-      tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
-      attempted,
-    };
-  } catch (err) {
-    if (modelId !== 'NOVA-video-core') {
-      try {
-        attempted.push('NOVA Video Core');
-        const retry = await brainGenerate(opts.message, 'NOVA-video-core', 'video', {
-          mediaDurationSec: opts.mediaDurationSec,
-        });
-        if (retry?.media?.dataUrl) {
-          return {
-            reply: retry.reply,
-            media: retry.media,
-            modelName: retry.modelName || 'NOVA Video Core',
-            modelId: 'NOVA-video-core',
-            source: retry.source || 'ark-media',
-            tier: retry.media.real ? 'no-key-free' : 'local-free',
-            attempted,
-          };
-        }
-      } catch {
-        /* fall through */
-      }
-    }
-    queueHuntBootstrap({
-      kind: 'video',
-      reason: 'media',
-      currentModelId: modelId,
-    });
-    return {
-      reply: [
-        err instanceof Error ? err.message : 'Video generation failed',
-        'Open Local AI to install video weights, or add a key in Models → Cloud.',
-      ].join(' '),
-      modelName: 'NOVA Video Core',
-      source: 'none',
-      tier: 'no-key-free',
-      attempted,
-    };
-  }
-}
 
 /**
  * Single entry for Chat / Image / Video (and coding = chat path).

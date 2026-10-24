@@ -2,12 +2,7 @@
  * Per-turn studio binding — hydrate disk/files before edit/chat handlers.
  */
 
-import {
-  loadChatStudio,
-  resolveChatProjectRoot,
-  getBoundStudio,
-  type BoundStudio,
-} from '@/lib/chatStudioStore';
+import { resolveChatProjectRoot, getBoundStudio, type BoundStudio } from '@/lib/chatStudioStore';
 
 export type { BoundStudio };
 
@@ -76,7 +71,7 @@ export async function hydrateStudio(opts: {
   const content = String(opts.content || '');
   const mode = String(opts.mode || 'general');
 
-  let bound = chatId ? getBoundStudio(chatId) : null;
+  const bound = chatId ? getBoundStudio(chatId) : null;
   let diskRoot = bound?.diskRoot || opts.fallbackDiskRoot || null;
   let files = { ...(bound?.files || opts.fallbackFiles || {}) };
   let projectId = bound?.projectId ?? opts.fallbackProjectId ?? null;

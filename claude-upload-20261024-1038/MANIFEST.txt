@@ -1,0 +1,12 @@
+NOVA CURRENT PACK — 2026-10-24 10:38
+If you see 0 hits for these markers, you have the STALE pack — stop and ask for re-upload.
+
+REQUIRED MARKERS (must be >0):
+- createThinPath.ts → codingUnknown
+- novaBuildLoop.ts → wroteCodeEver
+- artifactEvidence.ts → rendererReal
+- createArtifactKind.ts → tracker|planner|finder (web-app fallback)
+
+Matrix: smoke-coding-fidelity-matrix.mjs (302 asks)
+
+Do NOT use any folder named only "claude-upload" without this stamp.

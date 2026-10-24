@@ -2,12 +2,8 @@
  * Add / delete single files on disk from Chat.
  */
 
-import {
-  cleanDiskTargetName,
-  namesRoughlyMatch,
-  normalizeDiskFileName,
-} from './projectNames';
-import { resolveNamedFolderOnDisk, resolveDesktopProjectsFolderOnDisk } from './deleteProjectFlow';
+import { namesRoughlyMatch, normalizeDiskFileName } from './projectNames';
+import { resolveDesktopProjectsFolderOnDisk } from './deleteProjectFlow';
 import { resolveDiskParentPath } from './diskPathResolve';
 import type { LastListedFolder } from './chatStudioStore';
 

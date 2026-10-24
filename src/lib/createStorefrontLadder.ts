@@ -1,7 +1,7 @@
 /**
- * Compose-first storefront ladder — primary path for cart/catalog creates.
- * Invent may polish; spine owns catalog + cart + chrome + mark + hero.
- * Mirrors product/lounge ladders: spine before invent thrash, not salvage-after-fail.
+ * Storefront helpers — invent-first create owns the look.
+ * `composeStorefrontSpine` / `runStorefrontCreateLadder` are LAST-RESORT salvage only
+ * (after invent + tool-loop miss). Happy path: model writes unique App + catalog.
  */
 
 import { createIdentityFromBrief } from '@/lib/createIdentity';
@@ -15,6 +15,80 @@ import { appHasCommerceCart } from '@/lib/createBuildQuality';
 import { brandLogoSvgFor } from '@/lib/brandAssets';
 
 export const STOREFRONT_LADDER_WALL_MS = 8 * 60_000;
+
+/** Create path must invent before any floor paste. */
+export const STOREFRONT_INVENT_FIRST = true;
+
+/**
+ * Invent owns a unique storefront from the brief — never ship the compose floor as Ready.
+ */
+export function formatStorefrontInventOwnLookPrompt(opts: {
+  brand: string;
+  brief: string;
+  salt?: string;
+  /** From understandCreateBrief — peers put the contract in the invent prompt. */
+  goal?: string;
+  audience?: string;
+  primaryAction?: string;
+  assumptions?: string[];
+  mustHave?: string[];
+  outOfScope?: string[];
+  verifyChecks?: string[];
+  craftOrder?: string[];
+}): string {
+  const brand = String(opts.brand || 'Shop').trim() || 'Shop';
+  const brief = String(opts.brief || '').trim();
+  const salt = String(opts.salt || '').slice(-6);
+  const n = wantedProductCount(brief);
+  const must = (opts.mustHave || []).filter(Boolean).slice(0, 10);
+  const out = (opts.outOfScope || []).filter(Boolean).slice(0, 6);
+  const verify = (opts.verifyChecks || []).filter(Boolean).slice(0, 8);
+  const assumptions = (opts.assumptions || []).filter(Boolean).slice(0, 6);
+  const order = (opts.craftOrder || []).filter(Boolean).slice(0, 6);
+  return [
+    `Invent a one-of-one storefront for **${brand}** from the brief (salt ${salt || 'new'}).`,
+    opts.goal ? `GOAL: ${opts.goal}` : '',
+    opts.audience ? `AUDIENCE: ${opts.audience}` : '',
+    opts.primaryAction ? `PRIMARY ACTION: ${opts.primaryAction}` : '',
+    'Do NOT reuse a generic shop shell, twin catalog names, or a hardcoded commerce floor.',
+    `Catalog: ≥${n} real products matching the brief (names, prices, variants the ask implies).`,
+    'Working add-to-cart, quantity, and purchase — state-backed, not decorative.',
+    'Brand mark + hero must match the product category in the brief (not a wrong genre icon).',
+    'Full page: nav, hero, catalog, cart affordance, about/help as the brief asks.',
+    'Write unique classNames and copy for this brand — shipping an unchanged seed/floor fails Ready.',
+    order.length
+      ? `CRAFT ORDER:\n${order.map((m, i) => `${i + 1}. ${m}`).join('\n')}`
+      : '',
+    must.length
+      ? `MUST-HAVES (implement every item — Ready fails if any missing):\n${must.map((m, i) => `${i + 1}. ${m}`).join('\n')}`
+      : '',
+    out.length
+      ? `OUT OF SCOPE (do not build):\n${out.map((m) => `- ${m}`).join('\n')}`
+      : '',
+    assumptions.length
+      ? `ASSUMPTIONS:\n${assumptions.map((m) => `- ${m}`).join('\n')}`
+      : '',
+    verify.length
+      ? `DONE CHECKS (your App must satisfy):\n${verify.map((m) => `- ${m}`).join('\n')}`
+      : '',
+    brief ? `Brief:\n${brief.slice(0, 1600)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/** True when disk still looks like the compose/hard-guarantee floor (invent must rewrite). */
+export function appLooksLikeStorefrontFloor(
+  app: string,
+  files?: Record<string, string>,
+): boolean {
+  const t = String(app || '');
+  const blob = `${t}\n${String(files?.['src/data/products.ts'] || '')}\n${String(files?.['src/App.css'] || '')}`;
+  if (!t.trim() && !blob.trim()) return false;
+  // Markers from composeStorefrontSpine / commerce floors
+  if (/nova-storefront-spine/i.test(blob)) return true;
+  if (/className=["'][^"']*storefront-floor/i.test(t)) return true;
+  if (/\/\*\s*storefront\s+commerce\s+floor/i.test(blob)) return true;
+  return false;
+}
 
 export function briefWantsStorefrontLadder(brief: string, productName = ''): boolean {
   const t = String(brief || '');
@@ -281,7 +355,7 @@ export async function runStorefrontCreateLadder(opts: {
     };
   }
 
-  opts.host.pushStatus('Ladder · storefront compose spine (catalog → cart → chrome)…');
+  opts.host.pushStatus('Ladder · storefront salvage spine (last resort — invent missed)…');
   let files = {
     ...opts.files,
     ...composeStorefrontSpine(brand, brief, opts.salt || String(Date.now()).slice(-6)),

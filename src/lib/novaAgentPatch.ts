@@ -2,6 +2,9 @@
  * Targeted search/replace patches for the agent loop (prefer over full-file rewrite).
  */
 
+import { agentWritesBlocked } from '@/lib/homeControlRuntime';
+import { formatPatchConfidenceChip, scorePatchConfidence } from '@/lib/patchConfidence';
+
 export type AgentPatch = {
   path: string;
   search: string;
@@ -15,6 +18,9 @@ export type AgentPatchResult = {
   error?: string;
   /** Unified-ish diff snippet for UI. */
   diff?: string;
+  /** 0..100 apply-patch confidence (Missing-tab meter). */
+  confidence?: number;
+  confidenceLabel?: string;
 };
 
 /** Parse TOOL: patch / SEARCH|REPLACE / JSON patch objects. */
@@ -123,6 +129,10 @@ export function applyAgentPatch(
   files: Record<string, string>,
   patch: AgentPatch,
 ): AgentPatchResult {
+  // Explore / dry-run home controls — no writes while On.
+  if (agentWritesBlocked()) {
+    return { ok: false, path: String(patch.path || ''), error: 'Writes blocked (Explore / dry-run On)' };
+  }
   const want = String(patch.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
   if (!want) return { ok: false, path: want, error: 'Missing path' };
   const flat = { ...files };
@@ -138,13 +148,23 @@ export function applyAgentPatch(
   if (body == null) return { ok: false, path: want, error: 'File not found' };
 
   const search = String(patch.search);
-  if (!search) return { ok: false, path, error: 'Empty search' };
+  const conf = scorePatchConfidence({
+    path,
+    search,
+    replace: String(patch.replace || ''),
+    fileBefore: body,
+  });
+  const confFields = {
+    confidence: conf.score,
+    confidenceLabel: formatPatchConfidenceChip(conf),
+  };
+  if (!search) return { ok: false, path, error: 'Empty search', ...confFields };
   if (!body.includes(search)) {
     // Try normalized line endings
     const normBody = body.replace(/\r\n/g, '\n');
     const normSearch = search.replace(/\r\n/g, '\n');
     if (!normBody.includes(normSearch)) {
-      return { ok: false, path, error: 'Search text not found in file' };
+      return { ok: false, path, error: 'Search text not found in file', ...confFields };
     }
     const next = (() => {
       const replaceOnce = (hay: string, needle: string, rep: string) => {
@@ -159,19 +179,20 @@ export function applyAgentPatch(
       return replaceOnce(normBody, normSearch, String(patch.replace).replace(/\r\n/g, '\n'));
     })();
     if (next == null) {
-      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique' };
+      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique', ...confFields };
     }
     return {
       ok: true,
       path,
       content: next,
       diff: buildDiffSnippet(path, normBody, next),
+      ...confFields,
     };
   }
   {
     const count = body.split(search).length - 1;
     if (count > 1) {
-      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique' };
+      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique', ...confFields };
     }
     const idx = body.indexOf(search);
     const next = body.slice(0, idx) + String(patch.replace) + body.slice(idx + search.length);
@@ -180,6 +201,7 @@ export function applyAgentPatch(
       path,
       content: next,
       diff: buildDiffSnippet(path, body, next),
+      ...confFields,
     };
   }
 }
@@ -188,7 +210,7 @@ export function applyAgentPatches(
   files: Record<string, string>,
   patches: AgentPatch[],
 ): { files: Record<string, string>; results: AgentPatchResult[]; updated: string[] } {
-  let next = { ...files };
+  const next = { ...files };
   const results: AgentPatchResult[] = [];
   const updated: string[] = [];
   for (const patch of patches) {

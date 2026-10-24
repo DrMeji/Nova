@@ -37,7 +37,21 @@ const PROJECT_FOLDER_RE = /\b(projects?|workspaces?|repos?|repositories|folders?
 function detectProjectKind(text: string): ProjectKind {
   const t = String(text || '').toLowerCase();
   if (/\b(python|flask|fastapi|pip|\.py)\b/.test(t)) return 'python';
-  if (/\b(html|landing\s+page|static\s+site)\b/.test(t)) return 'static-web';
+  // Product / brand landings need Vite + npm — never collapse to static-web just because
+  // the user said "landing page" (that left RidgeDesk with no package.json → Unavailable).
+  const wantsProductVite = (
+    /\b(?:gaming\s+desk|standing\s+desk|desk\s+brand|product\s+landing|hardware\s+brand)\b/.test(t)
+    || (
+      /\blanding\s+page\b/.test(t)
+      && /\b(?:brand|gaming|desk|shop|website|site)\b/.test(t)
+    )
+  );
+  if (wantsProductVite) return 'vite-react';
+  if (/\b(html|static\s+site)\b/.test(t) && !/\b(?:react|vite|website|web\s+app)\b/.test(t)) {
+    return 'static-web';
+  }
+  // Bare "landing page" without product/brand cues still prefers Vite so Live can install.
+  if (/\blanding\s+page\b/.test(t)) return 'vite-react';
   if (/\b(node\s+cli|cli\s+tool)\b/.test(t)) return 'node-cli';
   if (/\b(react|vite|web\s+app|website|site)\b/.test(t)) return 'vite-react';
   return 'vite-react';
@@ -112,6 +126,18 @@ function parseRenameFileTarget(text: string): {
   return { fromName: null, toName: null, parentHint };
 }
 
+/** UI upload / drop-zone controls — never "create a loose .txt on disk". */
+function looksLikeUiFileControlAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // Real disk creates name an extension or "called/named".
+  if (/\b(?:called|named)\b/i.test(t)) return false;
+  if (/\b[A-Za-z0-9_-]+\.(?:md|txt|json|csv|html|css|js|jsx|ts|tsx|py)\b/i.test(t)) return false;
+  if (/\b(?:drop\s+zone|file\s+upload|upload\s+drop|drag-and-drop)\b/i.test(t)) return true;
+  if (/\bupload\b/i.test(t) && /\b(?:zone|widget|component|input|control|area|field)\b/i.test(t)) return true;
+  return false;
+}
+
 function looksLikeAddFileAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (isProjectCreateBrief(t)) return false;
@@ -123,6 +149,7 @@ function looksLikeAddFileAsk(text: string): boolean {
   }
   if (/\b(?:real|full|actual|component)\s+files\b/i.test(t)) return false;
   if (/\bwith\s+real\s+files\b/i.test(t)) return false;
+  if (looksLikeUiFileControlAsk(t)) return false;
   if (/\bedit files\b/i.test(t) && !/\b(?:add|create|make|write|put)\s+(?:a\s+|the\s+|new\s+)?files?\b/i.test(t)) {
     return false;
   }
@@ -207,6 +234,14 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
   if (
     /\b(?:remove|delete)\b[\s\S]{0,80}\b(?:panel|sidebar|clutter|hud|ui|section|button|text|header|footer|nav|menu|indicator|label)\b/i.test(t)
     && !/\b(?:delete|remove|trash|wipe)\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)
+  ) {
+    return false;
+  }
+  // "remove what you just added / clear those words" — UI copy, never disk delete.
+  if (
+    /\b(?:remove|clear|delete|get rid of)\b/i.test(t)
+    && /\b(?:words?|sentence|welcome|hello|goodbye|what\s+you\s+(?:just\s+)?added|on-page|text)\b/i.test(t)
+    && !/\b(?:project|folder|workspace|directory|file)\b/i.test(t)
   ) {
     return false;
   }

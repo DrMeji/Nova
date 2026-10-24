@@ -27,7 +27,12 @@ const {
   thinBlocksLivePreview,
   thinMeetsLiveVisualFloor,
   seedCompositionalBrandVisuals,
+  seedCompositionalSectionScaffolds,
+  thinGenreSeedClearsLive,
   thinLiveVisualDeficits,
+  THIN_LIVE_VISUAL_MIN_LANDED_SECTIONS,
+  THIN_LIVE_VISUAL_MIN_CHARS,
+  THIN_LIVE_VISUAL_MIN_CSS,
   thinDepthReplyGrew,
   thinDepthDeficits,
   thinDepthSameRejectStalled,
@@ -45,6 +50,7 @@ const {
   assembleCompositionalAppShell,
   nextCompositionalDepthTarget,
   compositionalSectionFileSubstantial,
+  compositionalDepthIsComplete,
   thinCreateLocksAppJsx,
   thinBriefIsGameFamily,
   THIN_CREATE,
@@ -65,6 +71,9 @@ const { canUnlockCreateLive, askSectionHardMisses } = await import('../src/lib/c
 const { judgeCreateVerified } = await import('../src/lib/createPassSpine.ts');
 const { emptyCreateEvidence, finalizeCreateEvidence } = await import('../src/lib/createEvidence.ts');
 const { previewReadyForBrief } = await import('../src/lib/createBuildQuality.ts');
+const { buildProductPlan } = await import('../src/lib/createProductPlan.ts');
+const { buildAskContract } = await import('../src/lib/createAskContract.ts');
+const { createV2StagedWriteInstructions } = await import('../src/lib/createV2.ts');
 
 assert.equal(THIN_CREATE, true);
 assert.equal(isThinCreatePath(), true);
@@ -90,10 +99,44 @@ assert.match(brandRules, /Required regions:/i, 'brand thin craft includes region
 assert.doesNotMatch(brandRules, /@@@FILE\s+src\/App\.tsx|REQUIRED @@@FILE:[^\n]*App\.tsx/i, 'thin brand plan must not require App.tsx');
 assert.match(brandRules, /REQUIRED @@@FILE:[^\n]*src\/App\.jsx/i, 'thin brand plan requires App.jsx');
 assert.match(brandRules, /\/logo\.svg|wordmark/i, 'thin brand craft requires nav brand mark law');
-assert.match(brandRules, /COMPOSITIONAL SHELL/i, 'brand thin craft uses compositional shell');
+assert.match(brandRules, /COMPOSITIONAL PAGE.*staged generation/i, 'brand craft uses bounded section generation');
+assert.match(brandRules, /blocks Ready until every required section has real authored content/i, 'brand craft cannot pass with partial sections');
 assert.match(brandRules, /src\/sections\//i, 'brand thin craft lists section files');
+const compositionalCraftContract = createV2StagedWriteInstructions(false, true);
+assert.match(compositionalCraftContract, /complete page shell: import and render every required section/i);
+assert.match(compositionalCraftContract, /depth passes generate the section component files/i);
+assert.doesNotMatch(compositionalCraftContract, /put the full page UI inline/i, 'craft and depth prompts must describe the same staged ownership');
 assert.equal(thinWantsCompositionalShell('Build a tip calculator'), false);
 assert.equal(thinWantsCompositionalShell('Build a matcha brand website'), true);
+{
+  const mossBrief = 'Build a polished neighborhood plant shop website with a featured collection, care tips, store hours, and location.';
+  const mossPlan = buildProductPlan(mossBrief, 'Moss & Morning');
+  const mossAsk = buildAskContract(mossBrief, 'Moss & Morning');
+  assert.equal(mossPlan.compositionFamily, 'marketing-bands', 'local retail website must not be misrouted to generic app chrome');
+  assert.ok(mossAsk.wantsShop, 'plant shop website must preserve the requested collection/shop content');
+  assert.ok(mossAsk.wantsVisit, 'local retail website must preserve visit/location content');
+  assert.doesNotMatch(mossAsk.requiredAnchors.join(' '), /workspace/i, 'shop website must not inherit workspace anchor');
+
+const genericReferencePlan = buildProductPlan(
+  'Build a website for a neighborhood vacuum repair studio. Use apple.com as a visual reference only.',
+  'Northline Vacuum Co.',
+);
+assert.equal(genericReferencePlan.compositionFamily, 'marketing-bands', 'a general public website must not fall through to an app shell');
+const taskAppPlan = buildProductPlan('Build a task tracker app for a small repair team.', 'Benchlist');
+assert.equal(taskAppPlan.compositionFamily, 'app-chrome', 'an explicit task app must retain app composition');
+const toolPlan = buildProductPlan('Build an interactive tip calculator.', 'TipWise');
+assert.equal(toolPlan.compositionFamily, 'tool-panel', 'an explicit tool must retain tool composition');
+}
+{
+  const brief = 'Build a matcha brand website with origin story, tasting notes, and shop';
+  const specs = formatCompositionalSectionSpecs(brief, 'Verdigris');
+  assert.equal(compositionalDepthIsComplete({}, brief, 'Verdigris'), false, 'missing authored sections keep composition incomplete');
+  const files = Object.fromEntries(specs.map((spec) => [
+    spec.filePath,
+    `export default function ${spec.componentName}(){return <section><h2>${spec.slotLabel}</h2><p>${'Original product copy '.repeat(24)}</p></section>;}`,
+  ]));
+  assert.equal(compositionalDepthIsComplete(files, brief, 'Verdigris'), true, 'current authored section files complete composition');
+}
 assert.doesNotMatch(rules, /REQUIRED @@@FILE:[^\n]*App\.tsx/i, 'thin tip plan must not require App.tsx');
 assert.match(rules, /REQUIRED @@@FILE:[^\n]*src\/App\.jsx/i, 'thin tip plan requires App.jsx');
 
@@ -140,6 +183,18 @@ assert.match(gameRules, /App\.tsx or src\/App\.jsx/i, 'game thin craft allows ts
   const step = thin + 'y'.repeat(Math.max(120, THIN_DEPTH_ABS_STEP_CHARS));
   assert.equal(thinDepthReplyGrew(thin, thin), false, 'identical App is not growth');
   assert.equal(thinDepthReplyGrew(thin, step), true, 'compact ledger gain accepts without landmarks');
+  const sectionPrior = {
+    'src/App.jsx': 'export default function App(){return <div className="app"/>}',
+    'src/sections/NavHeaderSection.jsx': `export default function NavHeaderSection(){return <nav>${'Brand '.repeat(60)}</nav>}`,
+  };
+  const sectionNext = {
+    ...sectionPrior,
+    'src/sections/CatalogSection.jsx': `export default function CatalogSection(){return <div className="shop-grid">${'Plant '.repeat(160)}</div>}`,
+  };
+  assert.equal(thinDepthReplyGrew(sectionPrior['src/App.jsx'], sectionNext['src/App.jsx'], {
+    priorFiles: sectionPrior,
+    nextFiles: sectionNext,
+  }), true, 'substantial model-authored shop section is retained even when generic landmark count does not rise');
   assert.equal(thinDepthReplyGrew(thin, thin.slice(0, 2000)), false, 'shrink is not growth');
   const landmarked = `${thin}\n${Array.from({ length: 6 }, (_, i) => `<section className="section">Block ${i}</section>`).join('\n')}\n${'y'.repeat(Math.max(200, THIN_DEPTH_ABS_STEP_CHARS))}`;
   assert.equal(thinDepthReplyGrew(thin, landmarked), true, 'landmark climb accepts');
@@ -265,6 +320,15 @@ export default function App(){return <div className="app"><h1>Hi</h1></div>;}`,
   assert.ok(retiredTwo);
   assert.notEqual(retiredTwo.filePath, nextAfterNav.filePath, 'retired set skips first reject');
   assert.notEqual(retiredTwo.filePath, avoidNext.filePath, 'retired set skips second reject');
+  // Phase C — when every remaining thin target is retired, stop (no thin[0] thrash fallback).
+  const allThinPaths = formatCompositionalSectionSpecs(brandBrief, 'Verdigris')
+    .filter((s) => !compositionalSectionFileSubstantial(String(withNav[s.filePath] || '')))
+    .map((s) => s.filePath);
+  assert.equal(
+    nextCompositionalDepthTarget(withNav, brandBrief, 'Verdigris', allThinPaths),
+    null,
+    'all-retired targets return null instead of thin[0]',
+  );
   // Freebuff F — compositional depth never feeds Prior App outline (even with fat prior).
   const fatPriorPrompt = formatDepthContinuePrompt({
     brief: brandBrief,
@@ -443,9 +507,9 @@ export default function HeroSection(){
     'Brinecove',
   );
   assert.ok(
-    !askSectionHardMisses(ginSeeded, motionBrief, 'Brinecove')
-      .some((m) => /#notes|#shop|#subscribe|tasting notes|shop path|subscribe path|band purpose/i.test(m)),
-    'seeded gin tree clears the brief-required bands',
+    askSectionHardMisses(ginSeeded, motionBrief, 'Brinecove')
+      .some((m) => /#notes|#shop|tasting notes|shop path/i.test(m)),
+    'visual repair cannot invent brief-required bands',
   );
   const staticOnly = {
     'src/App.jsx': 'import "./App.css";\nexport default function App(){return (<div className="app"><header className="nav"><h1>Brinecove</h1></header><section className="hero"><h1>Brinecove</h1></section><footer>© Brinecove</footer></div>);}',
@@ -528,29 +592,26 @@ export default function App(){return(<div className="app"><header className="sti
   assert.equal(ready.ok, false, 'Ready cannot be true while visual floor is open');
   assert.ok(ready.reasons.some((r) => /thin visual floor open/i.test(r)), 'Ready cites visual floor');
   const seeded = seedCompositionalBrandVisuals(thinBrand, brief, 'Verdigris');
-  assert.equal(thinMeetsLiveVisualFloor(seeded, brief), true, 'seed clears visual Live floor');
-  assert.equal(thinBlocksLivePreview(seeded, brief), false, 'seeded brand does not block Live');
+  assert.equal(thinMeetsLiveVisualFloor(seeded, brief), false, 'visual repair cannot invent a complete page');
+  assert.equal(thinBlocksLivePreview(seeded, brief), true, 'missing model-authored sections block Live');
   // Wave B — stop invent thrash once Live visual + genre honesty clear (9k soft only).
   assert.equal(
     thinNeedsDepthPass(seeded, brief),
-    false,
-    'seed that clears Live+genre must stop invent depth thrash',
+    true,
+    'visual repair must not stop model-authored depth work',
   );
   // Graphics v1 — seeded hero must paint product SVG art (model-agnostic).
   const heroBody = Object.entries(seeded)
     .filter(([k]) => /Hero/i.test(k))
     .map(([, v]) => String(v || ''))
     .join('\n');
-  assert.ok(/\bHERO_VISUAL\b/.test(heroBody), 'seed hero declares HERO_VISUAL');
-  assert.ok(/data:image\/svg\+xml/i.test(heroBody), 'seed hero embeds SVG data URL');
-  assert.ok(/className=["']hero-art["']/.test(heroBody), 'seed hero renders hero-art img');
-  assert.ok(/\.hero-art\b/.test(String(seeded['src/App.css'] || '')), 'seed CSS styles hero-art');
+  assert.equal(heroBody, '', 'visual repair does not invent a hero section');
   // previewReadyForBrief still scores App-only landmarks; Live unlock uses visual floor.
   const readySeeded = previewReadyForBrief(seeded, { brief, productName: 'Verdigris' });
   assert.equal(
     readySeeded.reasons.some((r) => /thin visual floor open/i.test(r)),
-    false,
-    'Ready must not cite visual floor after seed',
+    true,
+    'Ready still reports an open visual floor after non-destructive repair',
   );
   const unlock = canUnlockCreateLive(
     {
@@ -569,7 +630,7 @@ export default function App(){return(<div className="app"><header className="sti
     thinBrand,
     brief,
   );
-  assert.equal(unlock.ok, false, 'canUnlockCreateLive refuses craft blocked + visual floor');
+  assert.equal(unlock.ok, false, 'canUnlockCreateLive refuses craft blocked');
   const unlockSeeded = canUnlockCreateLive(
     {
       id: 'j2',
@@ -587,7 +648,8 @@ export default function App(){return(<div className="app"><header className="sti
     seeded,
     brief,
   );
-  assert.equal(unlockSeeded.ok, true, 'canUnlockCreateLive ok after visual seed');
+  // Coding foundation: URL Live unlocks; thin sections remain soft notes.
+  assert.equal(unlockSeeded.ok, true, 'Live unlocks with URL even without full authored sections');
   assert.ok(thinLiveVisualDeficits(thinBrand, brief).length > 0, 'visual deficits before seed');
 }
 
@@ -748,13 +810,9 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
     'Brinecove',
   );
   const ginHero = Object.entries(ginSeed).filter(([k]) => /Hero/i.test(k)).map(([, v]) => String(v)).join('\n');
-  assert.ok(/data:image\/svg\+xml/i.test(ginHero), 'gin seed embeds hero SVG');
-  assert.ok(
-    /0a1628|12233a|6ec8b8/i.test(String(ginSeed['src/App.css'] || '')),
-    'gin seed uses maritime palette (not olive coffee defaults)',
-  );
-  assert.ok(Object.keys(ginSeed).some((k) => /NotesSection/i.test(k)), 'ask contract seeds NotesSection');
-  assert.ok(Object.keys(ginSeed).some((k) => /CatalogSection/i.test(k)), 'ask contract seeds CatalogSection');
+  assert.equal(ginHero, '', 'visual repair does not invent a gin hero');
+  assert.equal(ginSeed['src/sections/NotesSection.jsx'], undefined, 'visual repair does not invent notes copy');
+  assert.equal(ginSeed['src/sections/CatalogSection.jsx'], undefined, 'visual repair does not invent shop copy');
   // Wave E — subscribe only when brief asks; gin+shop must not force newsletter band.
   assert.equal(ask.wantsSubscribe, false, 'gin shop brief does not wantSubscribe');
   assert.equal(
@@ -764,8 +822,8 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
   );
   const notes = String(ginSeed['src/sections/NotesSection.jsx'] || '');
   const shop = String(ginSeed['src/sections/CatalogSection.jsx'] || '');
-  assert.ok(/useState/.test(notes) && /id=["']notes["']/.test(notes), 'notes interact stub');
-  assert.ok(/useState/.test(shop) && /Add to bag/.test(shop), 'shop interact stub');
+  assert.equal(notes, '', 'notes implementation must come from model output');
+  assert.equal(shop, '', 'shop implementation must come from model output');
   const withSubBrief = `${ginBrief} and a newsletter subscribe club`;
   const subAsk = buildAskContract(withSubBrief, 'Brinecove');
   assert.equal(subAsk.wantsSubscribe, true);
@@ -774,12 +832,11 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
     withSubBrief,
     'Brinecove',
   );
-  assert.ok(Object.keys(subSeed).some((k) => /SubscribeSection/i.test(k)), 'subscribe cue seeds SubscribeSection');
-  assert.ok(/type=["']email["']/.test(String(subSeed['src/sections/SubscribeSection.jsx'] || '')), 'subscribe interact stub');
+  assert.equal(subSeed['src/sections/SubscribeSection.jsx'], undefined, 'subscribe implementation must come from model output');
   assert.ok(/ember-rise|stage-in/i.test(String(ginSeed['src/App.css'] || '')), 'motion v1 keyframes present');
   const match = scoreAskMatch(ginSeed, ginBrief, 'Brinecove');
-  assert.equal(match.ok, true, `ask match should pass after seed: ${match.reasons.join('; ')}`);
-  assert.ok(!/band purpose/i.test(match.reasons.join('; ')), 'seeded tree has no band-purpose deficits');
+  assert.equal(match.ok, false, 'missing model-authored content fails the ask match gate');
+  assert.ok(/ask anchor missing|shop path missing|tasting notes missing/.test(match.reasons.join('; ')), 'gate reports missing requested content');
   assert.ok(!/coffee brand|careful roasting/i.test(Object.values(ginSeed).join('\n')), 'no coffee leak on gin seed');
   // UI-ready §G — band purpose: copy under the wrong anchor is a soft judge reason;
   // promoted to a hard Live miss for notes/shop on compositional asks only.
@@ -790,14 +847,14 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
   };
   const misplacedMatch = scoreAskMatch(misplaced, ginBrief, 'Brinecove');
   assert.ok(
-    misplacedMatch.reasons.some((r) => /band purpose: notes copy lives under #shop/.test(r)),
-    `purpose mismatch surfaces as a soft judge reason: ${misplacedMatch.reasons.join('; ')}`,
+    /ask anchor missing|shop path missing/.test(misplacedMatch.reasons.join('; ')),
+    `missing model-authored shop remains visible: ${misplacedMatch.reasons.join('; ')}`,
   );
-  assert.equal(misplacedMatch.ok, true, 'purpose alone never flips scoreAskMatch.ok (soft first)');
+  assert.equal(misplacedMatch.ok, false, 'missing requested content fails ask match');
   const purposeHard = askSectionHardMisses(misplaced, ginBrief, 'Brinecove');
   assert.ok(
-    purposeHard.some((m) => /band purpose: notes/.test(m)),
-    `notes purpose mismatch hard-fails a compositional ask: ${purposeHard.join('; ')}`,
+    purposeHard.some((m) => /ask section:.*shop path missing/.test(m)),
+    `missing requested shop blocks Live: ${purposeHard.join('; ')}`,
   );
   assert.deepEqual(
     askSectionHardMisses(misplaced, 'Build a tip calculator called TipWise', 'TipWise'),
@@ -812,8 +869,8 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
     'src/sections/CatalogSection.jsx': `${String(subSeed['src/sections/CatalogSection.jsx'] || shop)}\n<div id="news-form"><form className="subscribe-form"><input type="email" /></form></div>`,
   };
   assert.ok(
-    scoreAskMatch(subMoved, withSubBrief, 'Brinecove').reasons.some((r) => /band purpose: subscribe/.test(r)),
-    'subscribe purpose mismatch is reported',
+    /ask anchor missing|subscribe/.test(scoreAskMatch(subMoved, withSubBrief, 'Brinecove').reasons.join('; ')),
+    'missing model-authored subscribe content remains visible',
   );
   assert.ok(
     !askSectionHardMisses(subMoved, withSubBrief, 'Brinecove').some((m) => /band purpose: subscribe/.test(m)),
@@ -833,17 +890,11 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
   assert.match(ginSvg, /COASTAL/, 'brief word lands as an offline prop chip');
   assert.doesNotMatch(ginSvg, /\bCOFFEE\b/i, 'negated brief word never reaches the gin plate');
   // UI-ready §E — Interact v2: bag + subscribe persist in localStorage (no checkout).
-  assert.match(shop, /const BAG_KEY = "nova\.bag\./, 'seed bag key is brand-namespaced');
-  assert.match(shop, /localStorage\.getItem\(BAG_KEY\)/, 'seed bag restores from localStorage');
-  assert.match(shop, /localStorage\.setItem\(BAG_KEY/, 'seed bag persists to localStorage');
-  assert.match(shop, /useState\(loadBag\)/, 'seed bag hydrates lazily from storage');
   const subBody = String(subSeed['src/sections/SubscribeSection.jsx'] || '');
-  assert.match(subBody, /const SUB_KEY = "nova\.subscribed\./, 'seed subscribe key is brand-namespaced');
-  assert.match(subBody, /localStorage\.getItem\(SUB_KEY\)/, 'seed subscribe restores from localStorage');
-  assert.match(subBody, /localStorage\.setItem\(SUB_KEY/, 'seed subscribe persists to localStorage');
-  assert.ok(/useState/.test(subBody) && /onClick/.test(shop), 'stubs stay interactive after v2');
+  assert.equal(shop, '', 'shop content must come from the model');
+  assert.equal(subBody, '', 'subscribe content must come from the model');
   const gateSeeded = runCreateSyntaxGate(ginSeed);
-  assert.equal(gateSeeded.ok, true, `seeded tree passes the syntax gate: ${gateSeeded.reasons.join('; ')}`);
+  assert.equal(gateSeeded.ok, false, 'missing page content keeps preflight blocked');
   // Patch 4 — brief-faithful copy: sentence cues land in seed story/notes.
   const cues = briefPhrases(
     'Build Harborstill. Coastal gin with juniper clarity. Small-batch stills by the cove. Not coffee.',
@@ -870,13 +921,87 @@ assert.equal(repairOwned.qualityReady, false, 'repairOwnedProduct must never qua
   assert.ok(lotionAsk.extraSlots.some((s) => /shop|catalog/i.test(s)), 'lotion gets shop extra slot');
   // Depth status: stripped interactivity reports a clear Studio reason (not generic ledger).
   const { compositionalDepthDropsDeliveredMarkers, formatCompositionalDepthDropReason } = await import('../src/lib/createThinPath.ts');
-  const priorNotes = { 'src/sections/NotesSection.jsx': notes };
+  const priorNotes = { 'src/sections/NotesSection.jsx': `import { useState } from 'react'; export default function NotesSection(){const [open,setOpen]=useState(0); return <section id="notes"><button onClick={()=>setOpen(1)}>Open</button><p>{open}</p></section>;}` };
   const staticClone = {
     'src/sections/NotesSection.jsx': `export default function NotesSection(){return(<section id="notes">${'note '.repeat(200)}</section>);}`,
   };
   const drops = compositionalDepthDropsDeliveredMarkers(priorNotes, staticClone);
   assert.ok(drops.some((d) => /interactive/.test(d)), 'guard detects stripped interactive notes');
   assert.match(formatCompositionalDepthDropReason(drops), /stripped delivered/i, 'Studio reason names the drop');
+}
+
+// Phase A/B — visual floor (3 sections) vs full composition vs scaffolds.
+{
+  const brief = 'Build a polished gin brand website with tasting notes, shop, and subscribe for Harbor & Oak Distilling';
+  const name = 'Harbor & Oak';
+  const specs = formatCompositionalSectionSpecs(brief, name);
+  assert.ok(specs.length > THIN_LIVE_VISUAL_MIN_LANDED_SECTIONS, 'gin brief needs more than visual-floor sections');
+  const sectionBody = (comp, label) => (
+    `export default function ${comp}(){return (<section id="${label}"><h2>${label}</h2><p>${'Original product copy for this brand. '.repeat(24)}</p><p>${'More authored detail. '.repeat(12)}</p></section>);}`
+  );
+  const three = specs.slice(0, THIN_LIVE_VISUAL_MIN_LANDED_SECTIONS);
+  let partial = {
+    'src/App.css': `.app{min-height:100dvh;${'c'.repeat(THIN_LIVE_VISUAL_MIN_CSS + 40)}}`,
+    'public/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 22h8M12 2v4"/></svg>',
+  };
+  for (const s of three) partial[s.filePath] = sectionBody(s.componentName, s.slotLabel);
+  partial = assembleCompositionalAppShell(partial, brief, name);
+  partial['src/App.jsx'] = `${partial['src/App.jsx'] || ''}\n/* ${' '.repeat(Math.max(0, THIN_LIVE_VISUAL_MIN_CHARS - 200))} */\n`;
+  assert.equal(thinMeetsLiveVisualFloor(partial, brief), true, '3 rich sections clear visual floor');
+  assert.equal(compositionalDepthIsComplete(partial, brief, name), false, 'missing Notes/Shop/Subscribe keep composition incomplete');
+  assert.equal(thinGenreSeedClearsLive(partial, brief, name), false, 'invent must not stop on floor alone');
+  assert.equal(thinNeedsDepthPass(partial, brief), true, 'incomplete composition still needs depth');
+  const unlockPartial = canUnlockCreateLive(
+    {
+      id: 'phase-b-partial',
+      chatId: 'c',
+      path: '',
+      projectId: 'p',
+      name,
+      files: partial,
+      status: 'verifying',
+      previewUrl: 'http://127.0.0.1:5173/',
+      craftBlocked: false,
+      blockedReasons: [],
+      updatedAt: Date.now(),
+    },
+    partial,
+    brief,
+  );
+  // Coding foundation: Live chrome unlocks with URL; composition is a soft note only.
+  assert.equal(unlockPartial.ok, true, 'Live unlocks with preview URL even if composition incomplete');
+  assert.ok(
+    unlockPartial.reasons.some((r) => /compositional content incomplete/i.test(r)),
+    'soft notes still cite missing compositional sections',
+  );
+  // Section scaffolds are REMOVED (no look-back twin / data-nova-scaffold stamps).
+  // Model invent owns sections — seed must stay a no-op and leave composition incomplete.
+  const scaffolded = seedCompositionalSectionScaffolds(partial, brief, name);
+  assert.equal(
+    compositionalDepthIsComplete(scaffolded, brief, name),
+    false,
+    'section scaffold no-op — must not fake complete composition',
+  );
+  assert.equal(
+    Object.keys(scaffolded).filter((k) => /^src\/sections\//i.test(k)).length,
+    Object.keys(partial).filter((k) => /^src\/sections\//i.test(k)).length,
+    'section scaffold must not inject new section twins',
+  );
+  assert.equal(
+    /data-nova-scaffold="1"/.test(JSON.stringify(scaffolded)),
+    false,
+    'no data-nova-scaffold twin markers',
+  );
+  // brandLogo seed alone still invents no hero — invent owns sections.
+  const seedOnly = seedCompositionalBrandVisuals(
+    {
+      'src/App.jsx': 'export default function App(){return <main><h1>Harbor & Oak</h1></main>;}',
+      'src/App.css': '.app{padding:1rem}',
+    },
+    brief,
+    name,
+  );
+  assert.equal(compositionalDepthIsComplete(seedOnly, brief, name), false, 'brand visual seed does not invent sections');
 }
 
 console.log('smoke-thin-create-path: ok');

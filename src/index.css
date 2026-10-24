@@ -38,6 +38,68 @@
     --color-accent-fg: 0 0 0;
   }
 
+  /* Gray = calm solid IDE; base #141414 — no frosted / smoky glass. */
+  .gray {
+    --nova-navy-950: 20 20 20;
+    --nova-navy-900: 22 22 22;
+    --nova-navy-800: 28 28 28;
+    --nova-navy-700: 42 42 42;
+    --nova-navy-600: 58 58 58;
+
+    --nova-accent-50: 250 250 250;
+    --nova-accent-100: 245 245 245;
+    --nova-accent-200: 229 229 229;
+    --nova-accent-300: 212 212 212;
+    --nova-accent-400: 163 163 163;
+    --nova-accent-500: 228 228 228;
+    --nova-accent-600: 212 212 212;
+    --nova-accent-700: 163 163 163;
+    --nova-accent-800: 82 82 82;
+    --nova-accent-900: 38 38 38;
+
+    --color-surface: 22 22 22;
+    --color-surface-hover: 30 30 30;
+    --color-surface-active: 38 38 38;
+    --color-surface-panel: 26 26 26;
+    --color-surface-border: 44 44 44;
+    --color-surface-border-light: 58 58 58;
+    --color-content-primary: 230 230 230;
+    --color-content-secondary: 170 170 170;
+    --color-content-tertiary: 130 130 130;
+    --color-bg-primary: 20 20 20;
+    --color-accent: 228 228 228;
+    --color-accent-fg: 20 20 20;
+  }
+
+  /* Kill liquid-glass blur/glow in Gray — solid edges only (composer, Chat/Voice pill, panels). */
+  .gray .nova-glass,
+  .gray .nova-glass-composer,
+  .gray .nova-glass-tabs {
+    background: rgb(var(--color-surface-panel)) !important;
+    border-color: rgb(var(--color-surface-border)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+  .gray .nova-glass-tabs [data-active='true'] {
+    background: rgb(var(--color-surface-active)) !important;
+    box-shadow: none !important;
+  }
+  /* Settings / modals — no frosted scrim in Gray */
+  .gray .backdrop-blur-md,
+  .gray .backdrop-blur-sm,
+  .gray .backdrop-blur {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .gray .shadow-2xl,
+  .gray .shadow-xl,
+  .gray .shadow-lg {
+    --tw-shadow: 0 0 #0000 !important;
+    --tw-shadow-colored: 0 0 #0000 !important;
+    box-shadow: none !important;
+  }
+
   .light {
     /* Light = soft cream (not pure white) */
     --nova-navy-950: 250 245 235;
@@ -179,7 +241,9 @@
 
   .nova-nav-item {
     @apply flex items-center gap-2 rounded-none font-medium transition-colors duration-150 cursor-pointer min-w-0 pl-0 pr-2;
+    /* Inactive readable; active brighter (no circle / pill). */
     color: rgb(var(--color-content-secondary));
+    opacity: 0.88;
     font-size: 0.875rem; /* 14px — tighter labels on the slim rail */
     line-height: 1.25;
     /* Lock row height so hover/active paint never reflows icons */
@@ -195,45 +259,26 @@
   }
   .nova-nav-item:hover {
     color: rgb(var(--color-content-primary));
+    opacity: 0.95;
     background-color: transparent;
   }
-  /* Hover uses the same inset rounded pill as the selected Chat item — not a full-width bar. */
-  .nova-nav-item:not(.active):hover::before {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    left: 0.35rem;
-    right: 0.35rem;
-    top: 0.2rem;
-    bottom: 0.2rem;
-    background-color: rgb(var(--color-surface-active));
-    border-radius: 0.45rem;
+  /* No hover pill / circle — text and icon alone show state. */
+  .nova-nav-item:not(.active):hover::before,
+  .nova-nav-item.active::before {
+    content: none;
+    display: none;
   }
   .nova-nav-item.active {
-    /* Inset active fill — soft rounded corners (no hard chamfer slash). */
     background-color: transparent;
     color: rgb(var(--color-content-primary));
+    opacity: 1;
     position: relative;
     z-index: 0;
   }
-  .nova-nav-item.active::before {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    left: 0.35rem;
-    right: 0.35rem;
-    top: 0.2rem;
-    bottom: 0.2rem;
-    background-color: rgb(var(--color-surface-active));
-    border-radius: 0.45rem;
+  .nova-nav-item.active:hover {
+    color: rgb(var(--color-content-primary));
+    opacity: 1;
   }
-  .nova-nav-item.active:hover::before {
-    background-color: rgb(var(--color-surface-active));
-  }
-  /* Collapsed pill: circular icon hit — never a stretching stadium during expand. */
-  .nova-sidebar-panel.is-collapsed .nova-nav-item:not(.active):hover::before,
-  .nova-sidebar-panel.is-collapsed .nova-nav-item.active::before,
-  .nova-sidebar-panel.is-collapsed .nova-nav-item.active:hover::before,
   .nova-sidebar-panel.is-collapsed .nova-nav-item.nova-nav-working-away::after {
     left: 50%;
     right: auto;
@@ -274,6 +319,7 @@
   /* Single attention color: sky. Lit icon means unread / finished / needs a look. */
   .nova-nav-item.nova-nav-attention {
     color: rgb(56 189 248);
+    opacity: 0.95;
   }
   .nova-nav-item.nova-nav-attention .nova-nav-icon,
   .nova-nav-item.nova-nav-attention .nova-nav-icon svg {
@@ -296,9 +342,15 @@
     width: 3.25rem;
     height: 2.4rem;
   }
+  /* Lock every nav glyph to the same box — mixed Lucide / Iconify viewBoxes stay aligned */
   .nova-nav-icon svg {
-    width: 1.15rem;
-    height: 1.15rem;
+    width: 1.15rem !important;
+    height: 1.15rem !important;
+    min-width: 1.15rem;
+    min-height: 1.15rem;
+    max-width: 1.15rem;
+    max-height: 1.15rem;
+    display: block;
     @apply shrink-0;
   }
   .nova-nav-item-rail {
@@ -361,6 +413,54 @@
     flex-direction: column;
     gap: 0.55rem;
   }
+
+  /*
+   * Fit mode: compact centered stack.
+   * - Fixed row height (icons never jump when the rail widens on hover)
+   * - Icon plate always 3.25rem (matches collapsed width)
+   * - Slightly larger glyphs
+   */
+  .nova-sidebar-panel.nova-sidebar-fit nav.nova-nav-flat {
+    /* Even gap between every row; parent my-auto keeps equal space above/below the stack */
+    gap: 0.55rem !important;
+    padding: 0 !important;
+    overflow: visible;
+    flex: none;
+    height: auto;
+  }
+  .nova-sidebar-panel.nova-sidebar-fit nav.nova-nav-flat > .nova-nav-item {
+    flex: none !important;
+    min-height: 1.85rem !important;
+    height: 1.85rem !important;
+    max-height: 1.85rem !important;
+    font-size: 0.8125rem;
+    overflow: hidden;
+  }
+  .nova-sidebar-panel.nova-sidebar-fit nav.nova-nav-flat > .nova-nav-flat-rule {
+    flex: none;
+    height: 1px;
+    margin: 0.15rem 0.7rem;
+    background: rgb(var(--color-surface-border) / 0.7);
+    pointer-events: none;
+  }
+  .nova-sidebar-panel.nova-sidebar-fit .nova-nav-icon {
+    width: 3.25rem;
+    height: 1.85rem;
+    max-height: none;
+  }
+  .nova-sidebar-panel.nova-sidebar-fit .nova-nav-icon svg {
+    width: 1.05rem !important;
+    height: 1.05rem !important;
+    min-width: 1.05rem;
+    min-height: 1.05rem;
+    max-width: 1.05rem;
+    max-height: 1.05rem;
+  }
+  .nova-sidebar-panel.nova-sidebar-fit .nova-nav-item-rail {
+    min-height: 1.85rem !important;
+    height: 1.85rem !important;
+    max-height: 1.85rem !important;
+  }
   .nova-sidebar-panel {
     width: 13.5rem;
     min-width: 13.5rem;
@@ -372,7 +472,7 @@
       max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .nova-sidebar-panel.is-collapsed {
-    /* Slim edge tab; height set in AppShell (70%). */
+    /* Slim edge tab — full height, no scroll. */
     width: 3.25rem;
     min-width: 3.25rem;
     max-width: 3.25rem;
@@ -385,6 +485,17 @@
     border-bottom: 1px solid rgb(var(--color-surface-border));
     border-radius: 0 0.75rem 0.75rem 0;
   }
+  /* Icon rail only — no frosted panel / outer box; hover expand + labels stay. */
+  .nova-sidebar-panel.nova-sidebar-bare,
+  .nova-sidebar-edge.nova-sidebar-bare {
+    background: transparent !important;
+    border-color: transparent !important;
+    border-width: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 
   /*
    * Composer width: keep Stop / mic / model fully visible when Verifying + Code chips appear.
@@ -394,6 +505,13 @@
     width: 100%;
     max-width: 44rem;
     min-width: min(100%, 18rem);
+  }
+  /* Mic / model / Stop inside glass; timer + % sit on the outer rail beside the box. */
+  [data-nova-composer-controls="1"] {
+    flex-shrink: 0 !important;
+  }
+  [data-nova-composer-rail="1"] {
+    flex-shrink: 0;
   }
   html[data-density='compact'] .nova-composer-column,
   html[data-density='comfortable'] .nova-composer-column {
@@ -468,6 +586,37 @@
     box-shadow:
       0 4px 16px rgba(0, 0, 0, 0.18),
       inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  /*
+   * Message stream fades out under Chat/Voice — mask only (no gray bar / overlay box).
+   * Content soft-blurs away at the top instead of clipping through the mode tabs.
+   */
+  /* Reply body grows with the thread — main chat scroll owns vertical motion.
+   * (Nested max-height scroll made long replies feel “collapsed” inside a box.) */
+  .nova-msg-body-cap {
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* Composer: ~4 lines, then scroll inside the textarea — never grow the dock. */
+  .nova-composer-textarea {
+    max-height: 6.2rem; /* ~4 lines at 15px / 1.55 */
+    overflow-y: auto !important;
+  }
+
+  .nova-chat-scroll-mask {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 0.35rem,
+      #000 2.4rem
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 0.35rem,
+      #000 2.4rem
+    );
   }
   .nova-glass-tabs [data-active='true'] {
     background: rgba(255, 255, 255, 0.1) !important;
@@ -1001,51 +1150,106 @@
 /* Legacy queue panel styles kept inert if unused */
 .nova-queue-panel { display: none; }
 
-/* Chat status dots — smooth overlapping wave (not one-at-a-time pops) */
-@keyframes nova-status-dot {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: translate3d(0, 0, 0) scale(0.88);
-    background-color: rgb(115 115 115);
+/*
+ * Nova build signal — clean light + ghost trail (no containment box / glow rectangle).
+ * Point travels left→right; trail exists only behind it and fades out.
+ */
+@keyframes nova-build-point {
+  0% {
+    left: 0%;
+    opacity: 0;
   }
-  50% {
+  8% {
     opacity: 1;
-    transform: translate3d(0, -3px, 0) scale(1.15);
-    background-color: rgb(226 232 240);
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
   }
 }
+@keyframes nova-build-trail {
+  0% {
+    width: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.95;
+  }
+  86% {
+    width: 100%;
+    opacity: 0.85;
+  }
+  100% {
+    width: 100%;
+    opacity: 0;
+  }
+}
+.nova-build-signal {
+  position: relative;
+  display: inline-block;
+  width: 24px;
+  height: 8px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  overflow: visible;
+  /* Never use CSS contain here — it paints a visible clip box around the glow. */
+}
+.nova-build-signal-rail {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0%;
+  height: 1px;
+  margin-top: -0.5px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    rgba(248, 250, 252, 0) 0%,
+    rgba(226, 232, 240, 0.2) 45%,
+    rgba(248, 250, 252, 0.75) 100%
+  );
+  transform-origin: left center;
+  animation: nova-build-trail 1.55s cubic-bezier(0.45, 0.05, 0.4, 1) infinite;
+  will-change: width, opacity;
+  pointer-events: none;
+  box-shadow: none;
+  filter: none;
+}
+/* Kept in DOM for older markup — intentionally invisible (was the “box” artifact). */
+.nova-build-signal-glow {
+  display: none !important;
+}
+.nova-build-signal-point {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: 0;
+  border-radius: 9999px;
+  background: rgb(248 250 252);
+  /* Soft round halo only — no rectangular bloom layer. */
+  box-shadow: 0 0 5px 1.5px rgba(248, 250, 252, 0.55);
+  transform: translate3d(-50%, -50%, 0);
+  animation: nova-build-point 1.55s cubic-bezier(0.45, 0.05, 0.4, 1) infinite;
+  will-change: left, opacity;
+  z-index: 1;
+}
+
+/* Legacy alias — keep class names harmless if anything still references dots. */
 .nova-status-dots {
-  /* Keep animation timeline stable across React label updates */
   contain: layout style;
 }
 .nova-status-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background-color: rgb(115 115 115);
-  animation: nova-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-  will-change: transform, opacity;
-  backface-visibility: hidden;
-}
-.nova-status-dot-1,
-.nova-status-dot:nth-child(1) {
-  animation-delay: 0s;
-}
-.nova-status-dot-2,
-.nova-status-dot:nth-child(2) {
-  animation-delay: 0.18s;
-}
-.nova-status-dot-3,
-.nova-status-dot:nth-child(3) {
-  animation-delay: 0.36s;
+  display: none;
 }
 
-/* Kill UI motion, but leave ambient orbs + chat status dots alone. */
-html.reduce-motion *:not(.auth-orb):not(.nova-status-dot),
-html.reduce-motion *:not(.auth-orb):not(.nova-status-dot)::before,
-html.reduce-motion *:not(.auth-orb):not(.nova-status-dot)::after {
+/* Kill UI motion, but leave ambient orbs + build signal alone. */
+html.reduce-motion *:not(.auth-orb):not(.nova-build-signal-point):not(.nova-build-signal-rail),
+html.reduce-motion *:not(.auth-orb):not(.nova-build-signal-point):not(.nova-build-signal-rail)::before,
+html.reduce-motion *:not(.auth-orb):not(.nova-build-signal-point):not(.nova-build-signal-rail)::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
@@ -1056,21 +1260,12 @@ html.reduce-motion .auth-orb {
   animation-play-state: paused !important;
 }
 
-/* Status bubble must keep rippling even when Reduce motion is on. */
-html.reduce-motion .nova-status-dot {
-  animation: nova-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite !important;
+/* Build signal must keep constructing even when Reduce motion is on. */
+html.reduce-motion .nova-build-signal-point {
+  animation: nova-build-point 1.55s cubic-bezier(0.45, 0.05, 0.4, 1) infinite !important;
 }
-html.reduce-motion .nova-status-dot-1,
-html.reduce-motion .nova-status-dot:nth-child(1) {
-  animation-delay: 0s !important;
-}
-html.reduce-motion .nova-status-dot-2,
-html.reduce-motion .nova-status-dot:nth-child(2) {
-  animation-delay: 0.18s !important;
-}
-html.reduce-motion .nova-status-dot-3,
-html.reduce-motion .nova-status-dot:nth-child(3) {
-  animation-delay: 0.36s !important;
+html.reduce-motion .nova-build-signal-rail {
+  animation: nova-build-trail 1.55s cubic-bezier(0.45, 0.05, 0.4, 1) infinite !important;
 }
 
 /* (Show status bar toggle removed — footer with profile/settings always stays visible.) */

@@ -187,9 +187,29 @@ export async function ensureEngineRuntime() {
 
 function ggufNPredictForKind(kind?: 'image' | 'video' | 'chat' | 'coding') {
   const prefs = getLocalPrefs();
-  // Prefer long generations — rushed short answers looked "done" but were thin.
-  const min = kind === 'coding' ? 16384 : 8192;
+  // Share-GPU / gaming: shorter coding generations so VRAM+decode do not pin the card for minutes.
+  const share = prefs.shareGpuMode !== false;
+  const min = kind === 'coding'
+    ? (share ? 8192 : 16384)
+    : (share ? 4096 : 8192);
   return Math.max(Number(prefs.ggufNPredict) || 0, min);
+}
+
+/** Push share-GPU / create-inflight policy into the Electron GGUF runtime. */
+export async function syncEnginePerfPolicy(opts?: { createInflight?: boolean }): Promise<void> {
+  try {
+    const prefs = getLocalPrefs();
+    const api = window.novaDesktop as { engineSetPerfPolicy?: (p: {
+      shareGpu?: boolean;
+      createInflight?: boolean;
+    }) => Promise<unknown> } | undefined;
+    await api?.engineSetPerfPolicy?.({
+      shareGpu: prefs.shareGpuMode !== false,
+      createInflight: Boolean(opts?.createInflight),
+    });
+  } catch {
+    /* browser preview / older preload */
+  }
 }
 
 export async function engineGenerate(
@@ -220,6 +240,7 @@ export async function engineGenerate(
     chatId,
   };
   if (window.novaDesktop?.engineGenerate) {
+    await syncEnginePerfPolicy({ createInflight: kind === 'coding' });
     // Let Thinking… dots paint before a heavy local GGUF turn can stall the UI thread.
     // Hidden/minimized windows never fire rAF — race a timer so generation always starts.
     await new Promise<void>((resolve) => {
@@ -270,6 +291,7 @@ export async function engineGenerateStream(
     chatId,
   };
   if (window.novaDesktop?.engineGenerateStream) {
+    await syncEnginePerfPolicy({ createInflight: kind === 'coding' });
     const stop = window.novaDesktop.onEngineChunk?.((payload) => {
       if (payload?.text) onChunk(payload.text);
     });
@@ -277,6 +299,9 @@ export async function engineGenerateStream(
       return await window.novaDesktop.engineGenerateStream(message, modelId, kind, sampling);
     } finally {
       stop?.();
+      if (kind === 'coding') {
+        void syncEnginePerfPolicy({ createInflight: false });
+      }
     }
   }
   return engineGenerate(message, modelId, kind, { jobId, chatId });

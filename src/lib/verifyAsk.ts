@@ -122,7 +122,8 @@ export function verifyAsk(ask: string, files: Record<string, string>): VerifyAsk
     || (accentColor && !/\bbackground\b/i.test(t) ? '' : firstColor)
     || firstColor;
   // Name text-color asks ("from white to black") are verified below — don't require the "from" color.
-  if (colorWord && !looksLikeNameTextColorAsk(t)) {
+  // Button recolors ("change all buttons to green") are not page-canvas asks.
+  if (colorWord && !looksLikeNameTextColorAsk(t) && !/\bbuttons?\b/i.test(t)) {
     check();
     // Accent/glow asks need a real warm accent in CSS — any leftover #fff/#000 must not pass.
     if (/\b(?:glow|accent)\b/i.test(t) && /\bred\b/i.test(colorWord) && !bgColorExplicit) {
@@ -248,23 +249,83 @@ export function verifyAsk(ask: string, files: Record<string, string>): VerifyAsk
     }
   }
 
+  // Café text nav (Menu · Rewards · Gift Cards) — links, not hamburger icons.
+  const cafeTextNav = (
+    /\bMenu\b/i.test(t)
+    && /\bRewards\b/i.test(t)
+    && /\bGift\s*Cards?\b/i.test(t)
+  ) || (
+    /\bFind\s+a\s+caf[eé]\b/i.test(t)
+    && /\bSign\s*in\b/i.test(t)
+    && /\bJoin\s+now\b/i.test(t)
+  );
+  if (cafeTextNav && !/\b(?:menu|search|bag|cart|user)\s+icons?\b/i.test(t)) {
+    check();
+    if (!/<nav[\s>]/i.test(blob)) missing.push('nav');
+    if (/\bMenu\b/i.test(t) && !/>\s*Menu\s*</i.test(blob)) missing.push('Menu link');
+    if (/\bRewards\b/i.test(t) && !/>\s*Rewards\s*</i.test(blob)) missing.push('Rewards link');
+    if (/\bGift\s*Cards?\b/i.test(t) && !/>\s*Gift Cards\s*</i.test(blob)) missing.push('Gift Cards link');
+    if (/\bFind\s+a\s+caf[eé]\b/i.test(t) && !/>\s*Find a caf[eé]\s*</i.test(blob)) missing.push('Find a café link');
+    if (/\bSign\s*in\b/i.test(t) && !/>\s*Sign in\s*</i.test(blob)) missing.push('Sign in link');
+    if (/\bJoin\s+now\b/i.test(t) && !/>\s*Join now\s*</i.test(blob)) missing.push('Join now link');
+  }
+  // Café day banner / promos / footer ladder pieces.
+  if (/\b(?:day\s+banner|green\s+banner|Start\s+an\s+order|great\s+day\s+for\s+coffee)\b/i.test(t)
+    && /\b(?:add|put|include|with|under)\b/i.test(t)) {
+    check();
+    if (!/day-banner|Start an order/i.test(blob)) missing.push('day banner');
+    if (/\bStart\s+an\s+order\b/i.test(t) && !/Start an order/i.test(blob)) missing.push('Start an order');
+  }
+  if (/\bFall\s+is\s+here\b/i.test(t) && /\b(?:add|section|headed)\b/i.test(t)) {
+    check();
+    if (!/Fall is here/i.test(blob)) missing.push('Fall is here');
+  }
+  if (/\bFree\s+refills?\b/i.test(t) && /\b(?:add|section|about)\b/i.test(t)) {
+    check();
+    if (!/Free refills/i.test(blob)) missing.push('Free refills');
+  }
+  if (/\bfooter\b/i.test(t) && /\b(?:About\s*Us|Careers|Social\s+Impact)\b/i.test(t)) {
+    check();
+    if (!/<footer\b|site-footer/i.test(blob)) missing.push('footer');
+    if (/\bAbout\s*Us\b/i.test(t) && !/About Us/i.test(blob)) missing.push('About Us');
+    if (/\bCareers\b/i.test(t) && !/Careers/i.test(blob)) missing.push('Careers');
+    if (/\bSocial\s+Impact\b/i.test(t) && !/Social Impact/i.test(blob)) missing.push('Social Impact');
+  }
+
   // Premium / menu icons — require real <img> icons, and named icons must each land.
+  // Skip when the ask is café text-nav links (Menu ≠ menu icon).
   if (
-    /\b(?:menu|search|bag|cart|user)\s+icons?\b/i.test(t)
-    || (/\b(?:premium|professional)\s+icons?\b/i.test(t))
-    || (/\bicons?\b/i.test(t) && /\b(?:add|put|place)\b/i.test(t) && !/\b(?:add|put|place)\b[\s\S]{0,40}\blogo\b/i.test(t))
+    !cafeTextNav
+    && (
+      /\b(?:menu|search|bag|cart|user)\s+icons?\b/i.test(t)
+      || (/\b(?:premium|professional)\s+icons?\b/i.test(t))
+      || (/\bicons?\b/i.test(t) && /\b(?:add|put|place)\b/i.test(t) && !/\b(?:add|put|place)\b[\s\S]{0,40}\blogo\b/i.test(t))
+    )
   ) {
     check();
     const hasIcon = /className=["'][^"']*nav-icon["']|src=["']\/icons\/[\w-]+\.svg/i.test(blob);
     if (!hasIcon) missing.push('icon');
   }
-  {
+  // Contact footer / email line asks are copy — not mail icon rails.
+  const contactFooterAsk = (
+    /\bfooter\b/i.test(t)
+    && /\b(?:contact|help|email)\b/i.test(t)
+    && /\b(?:add|put|include)\b/i.test(t)
+  );
+  if (!cafeTextNav && !contactFooterAsk) {
     const icons = parseNamedUiIcons(t);
     for (const ic of icons) {
       check();
       const hit = new RegExp(`/icons/${ic.id}\\.svg`, 'i').test(blob);
       if (!hit) missing.push(`${ic.label} icon`);
     }
+  }
+  if (contactFooterAsk) {
+    check();
+    if (!/<footer\b|contact-footer/i.test(blob)) missing.push('contact footer');
+    const email = t.match(/\b([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i)?.[1];
+    if (email && !blob.toLowerCase().includes(email.toLowerCase())) missing.push(email);
+    if (/\bhelp\b/i.test(t) && !/\bHelp\b/.test(blob)) missing.push('Help');
   }
 
   // Brand name X / put the brand name APEX Gear / brand should say VOID Peripherals
@@ -440,6 +501,70 @@ export function verifyAsk(ask: string, files: Record<string, string>): VerifyAsk
   if (barName && /\b(?:top\s*bar|header|nav)\b/i.test(t)) {
     check();
     if (!blob.toLowerCase().includes(barName.toLowerCase())) missing.push(`name “${barName}”`);
+  }
+
+  // Tip calculator ladder — bill / tip% / tip$ / total must be real inputs, not brand-only.
+  if (
+    /\b(?:bill|tip\s*(?:percent|pct|amount|dollars?)?|tip\s*%)\b/i.test(t)
+    && /\b(?:input|total|percent|calculator|amount)\b/i.test(t)
+    && /\b(?:add|put|show|include|wire|build)\b/i.test(t)
+  ) {
+    check();
+    if (!/<input\b/i.test(blob)) missing.push('bill/tip inputs');
+    check();
+    if (!/\btotal\b/i.test(blob)) missing.push('total');
+    check();
+    if (!/\btip\b/i.test(blob) || !/(?:percent|pct|%|tip\s*(?:amount|dollars?))/i.test(blob)) {
+      // Accept tip dollars line or tip percent state even if wording varies.
+      if (!/(?:setTip|setPct|tip\s*[:=]|tipAmount|tipDollars|Tip:)/i.test(blob)) {
+        missing.push('tip amount');
+      }
+    }
+  }
+
+  // Discord/Relay composer — must actually post (not preventDefault-only)
+  if (
+    (/\b(?:message\s+)?composer\b/i.test(t) || (/\bSend\b/i.test(t) && /\b(?:input|textarea|bottom|post|wire|work|message)\b/i.test(t)))
+    && /\b(?:add|put|place|include|wire|fix|make)\b/i.test(t)
+  ) {
+    check();
+    if (!/composer|<input\b|<textarea\b/i.test(blob)) missing.push('composer input');
+    check();
+    if (!/\bSend\b/i.test(blob)) missing.push('Send button');
+    check();
+    if (
+      /onSubmit=\{\(e\)\s*=>\s*e\.preventDefault\(\)\}/i.test(blob)
+      || (!/useState/i.test(blob) && /type=["']submit["']/i.test(blob) && /composer/i.test(blob))
+    ) {
+      missing.push('wired Send (message state)');
+    }
+  }
+
+  // Channel switch must update header / thread when asked
+  if (
+    /\b(?:switch|click|select)\b[\s\S]{0,32}\bchannels?\b/i.test(t)
+    || /\bchannels?\b[\s\S]{0,40}\b(?:switch|update|header|thread)\b/i.test(t)
+  ) {
+    check();
+    if (!/setChannel|setActiveChannel|activeChannel|useState\s*\(\s*['"]general['"]/i.test(blob)) {
+      missing.push('channel switch state');
+    }
+  }
+
+  // Discord/Relay sample messages
+  if (/\bMaya\b/i.test(t) && /\bJordan\b/i.test(t) && /\b(?:add|put|place|include|message)\b/i.test(t)) {
+    check();
+    if (!/\bMaya\b/i.test(blob)) missing.push('Maya message');
+    check();
+    if (!/\bJordan\b/i.test(blob)) missing.push('Jordan message');
+  }
+
+  // Windowed Live white floor — dark html/body/#root + full height
+  if (/\b(?:white\s+(?:box|strip|bar|floor|gap)|fill\s+(?:the\s+)?(?:window|height)|no\s+white)\b/i.test(t)) {
+    check();
+    if (!/html,\s*body,\s*#root/i.test(blob) && !/height:\s*100%/i.test(blob)) {
+      missing.push('full-window dark fill');
+    }
   }
 
   return { ok: missing.length === 0, missing, checked };

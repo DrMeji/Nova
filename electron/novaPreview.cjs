@@ -350,17 +350,61 @@ function deviceWindowSize(device) {
   };
 }
 
-/** Scale web dashboards in the preview window only (CSS zoom — never Chromium host zoom). */
+/**
+ * Device frames may shrink-to-fit. Free Live windows must stay zoom=1 —
+ * CSS zoom < 1 letterboxes the window and shows a white/dark floor under
+ * solid page backgrounds (windowed brown/cream pages looked two-tone).
+ */
 function fitPreviewZoom(win) {
   if (!win || win.isDestroyed()) return;
   try {
-    const [cw] = win.getContentSize();
-    const designWidth = 1280;
-    const factor = Math.max(0.55, Math.min(1, (Number(cw) || designWidth) / designWidth));
-    void setPreviewCssZoom(win, factor);
+    if (win.__novaPreviewKind === 'device') {
+      const [cw] = win.getContentSize();
+      const designWidth = 1280;
+      const factor = Math.max(0.55, Math.min(1, (Number(cw) || designWidth) / designWidth));
+      void setPreviewCssZoom(win, factor);
+      return;
+    }
+    void setPreviewCssZoom(win, 1);
   } catch {
     /* ignore */
   }
+}
+
+/** Match BrowserWindow chrome to the page canvas so resize never flashes white. */
+async function syncPreviewWindowBackground(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const bg = await win.webContents.executeJavaScript(
+      `(() => {
+        const pick = (c) => {
+          const s = String(c || '').trim();
+          if (!s || s === 'transparent' || /^rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)$/i.test(s)) return '';
+          return s;
+        };
+        const body = pick(getComputedStyle(document.body).backgroundColor);
+        const root = pick(getComputedStyle(document.documentElement).backgroundColor);
+        const appEl = document.querySelector('.app, .App, #root > *');
+        const app = appEl ? pick(getComputedStyle(appEl).backgroundColor) : '';
+        return app || body || root || '';
+      })()`,
+      true,
+    );
+    const hex = cssColorToHex(bg);
+    if (hex) win.setBackgroundColor(hex);
+  } catch { /* ignore */ }
+}
+
+function cssColorToHex(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s.length === 4
+    ? `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`
+    : s.slice(0, 7);
+  const m = s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!m) return '';
+  const hex = (n) => Number(n).toString(16).padStart(2, '0');
+  return `#${hex(m[1])}${hex(m[2])}${hex(m[3])}`;
 }
 
 /**
@@ -730,7 +774,7 @@ async function probePreviewMounted(payload) {
         sample: (viteErr
           ? ((bodyText.match(/\\b([\\w.-]+\\.(?:tsx?|jsx?))\\b/i) || [])[1] || 'App')
             + ' compile error'
-          : text).slice(0, 240),
+          : text).slice(0, 1200),
       };
     })()`, true),
       6_000,
@@ -847,6 +891,7 @@ async function openPreviewWindow(payload) {
   const reveal = (win) => {
     if (!win || win.isDestroyed()) return;
     win.__novaLiveOwnerId = id;
+    win.__novaPreviewKind = kind;
     if (showWin) {
       win.__novaPreviewUserVisible = true;
       activeLiveOwnerId = id;
@@ -870,6 +915,7 @@ async function openPreviewWindow(payload) {
       try { existing.close(); } catch { /* ignore */ }
     } else {
       attachPreviewLoadGuards(existing);
+      existing.__novaPreviewKind = kind;
       if (kind === 'device' && device) {
         await loadDeviceIntoWindow(existing, id, url, device, title);
       } else {
@@ -885,6 +931,8 @@ async function openPreviewWindow(payload) {
         const sameProject = previewBaseUrl(cur) === previewBaseUrl(url);
         // Reuse without reload when evidence re-probes the same Live URL (stops flicker).
         if (!forceNavigate && sameProject && cur && !/^about:blank/i.test(cur)) {
+          try { fitPreviewZoom(existing); } catch { /* ignore */ }
+          void syncPreviewWindowBackground(existing);
           reveal(existing);
           return { ok: true, reused: true, navigated: false };
         }
@@ -899,6 +947,7 @@ async function openPreviewWindow(payload) {
         }
         scheduleBlankRootCheck(existing);
         try { fitPreviewZoom(existing); } catch { /* ignore */ }
+        void syncPreviewWindowBackground(existing);
       }
       reveal(existing);
       return { ok: true, reused: true, navigated: true };
@@ -911,6 +960,10 @@ async function openPreviewWindow(payload) {
     title,
     backgroundColor: '#050608',
     autoHideMenuBar: true,
+    // Always a real OS window (not modal/parented) so Live cannot trap the NOVA shell.
+    parent: undefined,
+    modal: false,
+    fullscreenable: true,
     resizable: kind !== 'device',
     maximizable: kind !== 'device',
     minimizable: true,
@@ -926,7 +979,28 @@ async function openPreviewWindow(payload) {
   });
   previewWindows.set(id, win);
   win.__novaPreviewUserVisible = showWin;
+  win.__novaPreviewKind = kind;
   attachPreviewLoadGuards(win);
+  // Escape must always leave Live — fullscreen trap forced users to kill NOVA entirely.
+  try {
+    win.webContents.on('before-input-event', (event, input) => {
+      if (win.isDestroyed()) return;
+      if (input.type !== 'keyDown') return;
+      if (input.key !== 'Escape' && input.code !== 'Escape') return;
+      event.preventDefault();
+      try {
+        if (typeof win.isFullScreen === 'function' && win.isFullScreen()) {
+          win.setFullScreen(false);
+          return;
+        }
+        if (typeof win.isMaximized === 'function' && win.isMaximized()) {
+          win.unmaximize();
+          return;
+        }
+        win.close();
+      } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
     restoreShellChromeZoom();
@@ -937,6 +1011,12 @@ async function openPreviewWindow(payload) {
       ::-webkit-scrollbar { width: 8px; height: 8px; }
       ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 8px; }
       html, body { max-width: 100%; overflow-x: auto; }
+      /* Full-bleed canvas: never leave a short #root / body band under Live. */
+      html, body, #root {
+        min-height: 100%;
+        min-height: 100dvh;
+        margin: 0;
+      }
       img, video, canvas, svg { max-width: 100%; height: auto; }
       vite-error-overlay {
         display: none !important;
@@ -950,6 +1030,7 @@ async function openPreviewWindow(payload) {
     } catch {
       /* ignore */
     }
+    void syncPreviewWindowBackground(win);
     // Vite React apps that never mount leave a silent black window — surface it.
     scheduleBlankRootCheck(win);
     restoreShellChromeZoom();
@@ -957,6 +1038,7 @@ async function openPreviewWindow(payload) {
   if (kind !== 'device') {
     win.on('resize', () => {
       try { fitPreviewZoom(win); } catch { /* ignore */ }
+      void syncPreviewWindowBackground(win);
       restoreShellChromeZoom();
     });
   }

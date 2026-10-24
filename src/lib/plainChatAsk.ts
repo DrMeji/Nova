@@ -21,7 +21,7 @@ export function looksLikePureGreeting(message: string): boolean {
   const t = String(message || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim()
     .replace(/[!?.…]+$/g, '')
     .trim();
@@ -55,7 +55,7 @@ export function looksLikeSoftCheckInAsk(message: string): boolean {
   const t = String(message || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
   if (!t || t.length < 8 || t.length > 120) return false;
   // Already a product / build ask — not a soft check-in.
@@ -71,7 +71,42 @@ export function looksLikeSoftCheckInAsk(message: string): boolean {
 export function looksLikeCapabilityOverviewAsk(message: string): boolean {
   const t = String(message || '').trim();
   if (!t || t.length > 160) return false;
-  return /\b(?:what\s+can\s+you\s+do(?:\s+for\s+me)?|what\s+(?:are\s+you\s+)?(?:able|capable)\s+(?:of|to)|what(?:'s|\s+is)\s+(?:your|nova(?:'s)?)\s+(?:job|purpose|role)|who\s+are\s+you)\b/i.test(t);
+  return /\b(?:what\s+can\s+you\s+do(?:\s+for\s+me)?|what\s+(?:are\s+you\s+)?(?:able|capable)\s+(?:of|to)|what\s+you(?:'re| are)\s+capable\s+of|see\s+what\s+you(?:'re| are)\s+capable\s+of|what(?:'s|\s+is)\s+(?:your|nova(?:'s)?)\s+(?:job|purpose|role)|who\s+are\s+you)\b/i.test(t);
+}
+
+/**
+ * Playful hangout / “let’s do something fun” — instant human reply, no GGUF, no coding pitch.
+ */
+export function looksLikeFunHangoutAsk(message: string): boolean {
+  const t = String(message || '')
+    .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--nova-auto-read-->/g, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .trim();
+  if (!t || t.length < 8 || t.length > 160) return false;
+  // Explicit create/build stays on studio.
+  if (/\b(?:create|scaffold|build\s+(?:me\s+)?(?:a|an|the)|@@@FILE)\b/i.test(t)
+    && /\b(?:app|website|page|screen|site)\b/i.test(t)) {
+    return false;
+  }
+  if (looksLikeCapabilityOverviewAsk(t)) return true;
+  return (
+    /\b(?:let'?s|lets)\s+do\s+(?:some\s+)?fun\b/i.test(t)
+    || /\b(?:something|stuff)\s+fun\b/i.test(t)
+    || /\bhave\s+some\s+fun\b/i.test(t)
+    || /\bsee\s+what\s+you(?:'re| are)\s+capable\b/i.test(t)
+    || /\bshow\s+me\s+what\s+you\s+can\s+do\b/i.test(t)
+  );
+}
+
+/** Instant hangout reply — avoids 10–20s local-model load + coding-project CTA. */
+export function instantFunHangoutReply(): string {
+  const opts = [
+    'I’m game. What sounds fun — a tiny idea, a quick challenge, or just riffing?',
+    'Let’s play. Tell me what you’re curious about and we’ll go from there.',
+    'Fun sounds good. Want a surprise demo, a silly challenge, or something you invent?',
+  ];
+  return opts[Math.floor(Math.random() * opts.length)]!;
 }
 
 /**
@@ -82,12 +117,13 @@ export function looksLikePlainChatAsk(message: string): boolean {
   const t = String(message || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
   if (!t || t.length < 2) return false;
 
   if (looksLikePureGreeting(t)) return true;
   if (looksLikeSoftCheckInAsk(t)) return true;
+  if (looksLikeFunHangoutAsk(t)) return true;
   if (looksLikeCapabilityOverviewAsk(t)) return true;
   if (isTalkFirstChatTurn(t)) return true;
 
@@ -535,7 +571,7 @@ export function scrubHelpVoice(text: string): string {
  * Pass `contextAsk` so wrap-up stays in the user’s domain (no stall/Apple bleed).
  */
 export function ensurePlanningExit(text: string, contextAsk?: string): string {
-  let body = String(text || '').trim();
+  const body = String(text || '').trim();
   if (!body || body.length < 120) return body;
   // Already has a closing question or overall wrap-up.
   if (/\?\s*$/.test(body)) return body;

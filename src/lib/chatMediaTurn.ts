@@ -229,7 +229,7 @@ export async function runMediaChatTurn(host: MediaTurnHost): Promise<void> {
     const stickyBrain = chatRouteSeedRef.current.sticky;
     let response = 'NOVA Router could not complete this request.';
     let usedPlugin = false;
-    let skipReplySanitize = false;
+    const skipReplySanitize = false;
     let lastLibraryId: string | undefined;
     let resolvedProvider = providerLabel;
     let streamedPartial = '';

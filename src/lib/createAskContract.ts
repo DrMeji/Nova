@@ -67,6 +67,12 @@ export function displayProductName(name: string): string {
     .replace(RUN_TOKEN_RE, ' ')
     // Trailing short run ids without digits (yyega, zdgj7 already covered above).
     .replace(/\s+[a-z]{4,6}$/i, (m, _o, s) => (/\s/.test(String(s).slice(0, -m.length)) ? '' : m))
+    // Harness salts like "zl02" / "j9yj" (3–5 alnum) — Wren Latch 2026-10-23: zl02
+    // survived RUN_TOKEN_RE (needs 2+ chars after the digit) and blocked Ready forever.
+    .replace(/\s+[a-z0-9]{3,5}$/i, (m, _o, s) => {
+      const core = String(s).slice(0, -m.length).trim();
+      return /[A-Z]/.test(core) && core.split(/\s+/).length >= 2 ? '' : m;
+    })
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || String(name || 'Brand').trim() || 'Brand';
@@ -74,13 +80,22 @@ export function displayProductName(name: string): string {
 
 export function inferAskGenre(name: string, brief: string): AskGenre {
   const blob = `${name} ${brief}`;
+  // Leather atelier / bags — never coffee just because the brief says "espresso navy type".
+  // Dune Latch 2026-10-23: coffee genre forced #notes/#visit + tasting notes → soft Ready forever.
+  if (/\b(?:leather[- ]?goods|leather\s+atelier|handcrafted\s+bags?|atelier|parchment|satchel|tote|messenger|weekender)\b/i.test(blob)
+    && !/\b(?:coffee\s+shop|coffee\s+brand|roaster|cafe|café)\b/i.test(blob)) {
+    return 'generic';
+  }
   if (/\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch)\b/i.test(blob)) {
     return 'spirits';
   }
   if (/\b(?:matcha|green\s+tea|ceremonial\s+tea)\b/i.test(blob)) return 'tea';
   if (/\b(?:tea|steep|tin)\b/i.test(blob) && !/\bcoffee\b/i.test(blob)) return 'tea';
-  if (/\b(?:coffee|espresso|roaster|roast)\b/i.test(blob) && !/\bnot\s+coffee\b/i.test(brief)) {
-    return 'coffee';
+  if (
+    /\b(?:coffee|roaster|roast)\b/i.test(blob)
+    || (/\bespresso\b/i.test(blob) && !/\bespresso\s+(?:navy|type|ink|text|color)\b/i.test(blob))
+  ) {
+    if (!/\bnot\s+coffee\b/i.test(brief)) return 'coffee';
   }
   if (/\b(?:chocolate|cacao|cocoa)\b/i.test(blob)) return 'chocolate';
   if (/\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|dinnerware|clay)\b/i.test(blob)) {
@@ -160,8 +175,11 @@ export function buildAskContract(brief: string, productName = ''): AskContract {
     || genre === 'chocolate'
     || genre === 'ceramic'
   );
+  const localRetailSite = compositionFamily === 'marketing-bands'
+    && /\b(?:plant\s+shop|flower\s+shop|bookshop|bookstore|gift\s+shop|hardware\s+store|bike\s+shop|pet\s+shop|record\s+shop|farm\s+stand|garden\s+center|neighborhood\s+(?:shop|store|business))\b/i.test(b);
   const wantsShop = !isToyFamily && (
     compositionFamily === 'catalog-store'
+    || localRetailSite
     || /\b(?:shop|store|collection|catalog|buy|purchase|cart|checkout)\b/i.test(b)
   );
   const wantsSubscribe = !isToyFamily && (
@@ -169,10 +187,10 @@ export function buildAskContract(brief: string, productName = ''): AskContract {
   );
   const wantsVisit = !isToyFamily && (
     /\b(?:visit|tasting\s+room|counter|open\s+days|location)\b/i.test(b)
+    || localRetailSite
     || genre === 'spirits'
     || genre === 'coffee'
   );
-
   const forbidCoffeeCopy = genre === 'spirits' || /\bnot\s+coffee\b/i.test(b);
 
   const requiredAnchors = ['top'];
@@ -191,6 +209,10 @@ export function buildAskContract(brief: string, productName = ''): AskContract {
     requiredAnchors.push('workspace');
   } else if (compositionFamily === 'game-stage') {
     requiredAnchors.push('play', 'hud');
+  }
+  if (localRetailSite) {
+    if (!requiredAnchors.includes('shop')) requiredAnchors.push('shop');
+    if (!requiredAnchors.includes('visit')) requiredAnchors.push('visit');
   }
 
   const extraSlots: string[] = [];
@@ -425,7 +447,7 @@ export function askSectionPurposeDeficits(
   productName = '',
 ): string[] {
   const contract = buildAskContract(brief, productName);
-  const rawBrief = String(brief || '');
+  String(brief || '');
   const wanted: AskBand[] = [];
   if (contract.wantsNotes) wanted.push('notes');
   if (contract.wantsShop) wanted.push('shop');
@@ -538,10 +560,12 @@ export function scoreAskMatch(
     else reasons.push('tasting notes missing');
   }
 
-  // Interactive stubs (Interact v1)
+  // Interactive stubs (Interact v1) — landing shop/nav CTAs count; leather invents
+  // often ship #shop + "Shop the collection" without useState.
   const interactHits = [
     /useState\s*\(/.test(blob),
     /onClick|onSubmit|type=["']email["']/i.test(blob),
+    /Shop the collection|id=["']shop["']|href=["']#shop["']|id=["']subscribe["']/i.test(blob),
   ].filter(Boolean).length;
   if (interactHits >= 1) score += 1;
   else if (contract.wantsShop || contract.wantsSubscribe) {

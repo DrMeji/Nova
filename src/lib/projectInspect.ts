@@ -44,7 +44,12 @@ export function isBuildArtifactPath(path: string): boolean {
   const p = path.replace(/\\/g, '/');
   return /(^|\/)(dist|dist-electron|build|release|out|node_modules|\.git|__pycache__|coverage|\.next|win-unpacked)(\/|$)/i.test(p)
     || /\.min\.(js|css)$/i.test(p)
-    || /\.map$/i.test(p);
+    || /\.map$/i.test(p)
+    // Invent Acc shards — never pack into model context or count as product source.
+    || /\.nova\/open-all\//i.test(p)
+    || /\.nova\/open-all-/i.test(p)
+    || /\.nova\/coding-audit\.jsonl$/i.test(p)
+    || /\.nova\/workers\//i.test(p);
 }
 
 /**

@@ -16,6 +16,13 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import { searchInFiles, formatSearchHits } from '@/lib/projectInspect';
 import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
 import {
+  CODING_QUALITY_WIN,
+  codingQualityFloorHit,
+  formatCodingPipelineProgress,
+} from '@/lib/codingQualityWinPack';
+import { verifyCraftFile, doomLoopGuard } from '@/lib/codingFileVerify';
+import { recordFileModelAttribution } from '@/lib/fileModelAttribution';
+import {
   filterAgentFiles,
   listAgentTree,
   readAgentFile,
@@ -31,6 +38,7 @@ import {
 import { applyAgentPatches, parseAgentPatches } from '@/lib/novaAgentPatch';
 import { agentKindGuidance, detectKindFromFiles } from '@/lib/novaAgentPrompts';
 import { callMcpTool, listRegisteredMcpTools, resolveMcpToolServer } from '@/lib/novaMcp';
+import { coerceHandbackParagraph, formatEditHandback } from '@/lib/taskHandbackReply';
 import type { AgentTraceStep } from '@/lib/agentTrace';
 import { nextTraceStepId } from '@/lib/agentTrace';
 
@@ -114,6 +122,8 @@ export type AgentLoopOpts = {
   createCraftMode?: boolean;
   maxIdleListRead?: number;
   thinAppBytes?: number;
+  /** When non-web, TOOL: ready uses artifact evidence instead of Vite App preflight. */
+  artifactKind?: import('@/lib/createArtifactKind').ArtifactKind | null;
 };
 
 const DEFAULT_MAX = 24;
@@ -267,18 +277,43 @@ function buildLoopSystemPrompt(opts: {
   observations: string[];
   kindHint: string;
   mcpTools: string;
+  repoMap?: string;
+  packRules?: string;
 }): string {
-  const obs = opts.observations.length
-    ? opts.observations.slice(-10).join('\n\n---\n\n')
+  // R7: rule-based elision before stuffing observations into the prompt.
+  let obsBlocks = opts.observations.slice(-14).map((t, i) => ({ id: `obs${i}`, text: t, keep: i >= opts.observations.length - 4 }));
+  try {
+    // sync import avoided — inline elision
+    const budget = 12_000;
+    let used = 0;
+    const kept: string[] = [];
+    for (let i = obsBlocks.length - 1; i >= 0; i--) {
+      const b = obsBlocks[i];
+      if (b.keep || used + b.text.length <= budget) {
+        kept.unshift(b.text);
+        used += b.text.length;
+      } else {
+        kept.unshift(`[elided obs ${b.id}]`);
+      }
+    }
+    obsBlocks = kept.map((text, i) => ({ id: `k${i}`, text, keep: true }));
+  } catch {
+    /* keep raw */
+  }
+  const obs = obsBlocks.length
+    ? obsBlocks.map((b) => b.text).join('\n\n---\n\n')
     : '(none yet — start with list or grep)';
   return [
     'You are NOVA Agent on a bound project. Use tools until the task is done.',
-    'Prefer grep/read before editing. Prefer TOOL: patch over full-file write.',
+    'READ-BEFORE-EDIT (hard): TOOL: read a file before TOOL: patch/write on that existing path.',
+    'Prefer TOOL: patch over full-file write. Prefer grep/read before editing.',
     'One primary tool per reply (you may include a second read/grep only if needed).',
     'Never touch files outside this workspace. Never invent paths you have not listed or read.',
     'Nova is free — never add paywalls, upgrade CTAs, or license gates in generated UI.',
+    'Done is evidence-only: TOOL: ready / TOOL: live must PASS before TOOL: done.',
     '',
     opts.kindHint,
+    opts.packRules || '',
     '',
     'Tool formats (pick ONE):',
     '',
@@ -330,6 +365,8 @@ function buildLoopSystemPrompt(opts: {
     '',
     `Project: ${opts.projectName}`,
     `Step ${opts.step}/${opts.maxSteps}`,
+    '',
+    opts.repoMap || '',
     '',
     '## File tree',
     opts.tree,
@@ -472,18 +509,45 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
   let verifyOk: boolean | undefined;
   let parseFails = 0;
   let idleSteps = 0;
+  /** Same TOOL+path streak → doom-loop breaker (coding-cli / OpenHands pattern). */
+  const doomCounts = new Map<string, number>();
+  let lastDoomKey = '';
+  const DOOM_LIMIT = createMode ? 3 : 4;
+  /** Paths successfully TOOL: read this loop (SWE-agent ACI). */
+  const readPaths = new Set<string>();
+  let sawReadyPass = false;
+  let sawLivePass = false;
+  let floorShipped = false;
   const appWritePath = files['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx';
   const appLenAtStart = String(files[appWritePath] || '').length;
   const projectName = opts.projectName || 'Project';
   const kind = detectKindFromFiles(files, opts.brief);
   const kindHint = agentKindGuidance(kind);
+  let codingNonWeb = false;
+  let codingEntryPath = '';
+  try {
+    const { isNonWebArtifactKind, codingCraftEntryPath } = await import('@/lib/createArtifactKind');
+    const ak = opts.artifactKind;
+    if (ak && (isNonWebArtifactKind(ak) || ak === 'unknown')) {
+      codingNonWeb = true;
+      codingEntryPath = codingCraftEntryPath(files, ak);
+    }
+  } catch { /* optional */ }
   const mcpList = listRegisteredMcpTools()
     .filter(t => t.status === 'registered' && t.name && !t.name.includes('(not probed)'))
     .slice(0, 24)
     .map(t => `- ${t.name}${t.serverName ? ` (${t.serverName})` : ''}: ${t.description}`)
     .join('\n');
 
-  if (appLenAtStart < thinBytes) {
+  if (codingNonWeb && codingEntryPath) {
+    const entryLen = String(files[codingEntryPath] || '').length;
+    if (entryLen < Math.min(thinBytes, 400)) {
+      observations.push(
+        `CODING CRAFT: implement PATH: ${codingEntryPath} (artifact=${opts.artifactKind}). `
+          + 'Do NOT write src/App.jsx, vite.config, or index.html — this is not a website.',
+      );
+    }
+  } else if (appLenAtStart < thinBytes) {
     observations.push(
       createMode
         ? `CREATE CRAFT: ${appWritePath} is thin (${appLenAtStart}B). Do NOT list .gitignore or lockfiles. Next reply MUST be TOOL: write PATH: ${appWritePath} with the full product UI, then TOOL: write PATH: src/App.css.`
@@ -505,6 +569,22 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
     }
 
     const tree = listAgentTree(files, { limit: 100 });
+    let repoMap = '';
+    let packRules = '';
+    try {
+      const pack = await import('@/lib/codingAgentPack');
+      repoMap = pack.formatAgentRepoMapBlock(files, opts.brief, { limit: createMode ? 14 : 20 });
+      packRules = [
+        pack.localCreateHonestMissRules(),
+        createMode
+          ? 'CREATE: invent unique UI from the brief — never Accept a hardcoded floor as Done.'
+          : '',
+      ].filter(Boolean).join('\n');
+      try {
+        const floor = pack.looksLikePlaceholderFloor(files);
+        floorShipped = floor.floor;
+      } catch { /* ignore */ }
+    } catch { /* pack optional */ }
     const prompt = buildLoopSystemPrompt({
       brief: opts.brief,
       tree,
@@ -514,6 +594,8 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
       observations,
       kindHint,
       mcpTools: mcpList,
+      repoMap,
+      packRules,
     });
 
     pushStep(steps, {
@@ -526,19 +608,86 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
       // Hard wall so one hung infer cannot pin create forever — but local GGUF
       // TOOL: write of a full App often needs 2–3+ minutes. 45s was aborting mid-write
       // (chat showed “(stopped)” + partial TOOL: write dumps).
-      const STEP_MS = createMode ? 210_000 : 180_000;
-      const routePromise = opts.callModel({ prompt }).then(
+      // Create craft: fail forward faster — long GGUF writes still get ~2m; invent polish can finish.
+      const STEP_MS = createMode ? 120_000 : 180_000;
+      // Create craft: also abort on stream idle so chat cannot sit on Thinking forever.
+      const { CREATE_V2_APP_IDLE_MS, CREATE_V2_FIRST_TOKEN_MS } = await import('@/lib/createV2');
+      const FIRST_TOKEN_MS = createMode ? CREATE_V2_FIRST_TOKEN_MS : 90_000;
+      const IDLE_MS = createMode ? CREATE_V2_APP_IDLE_MS : CREATE_V2_APP_IDLE_MS;
+      const stepStartedAt = Date.now();
+      let sawChunk = false;
+      let lastChunkAt = stepStartedAt;
+      const routePromise = opts.callModel({
+        prompt,
+        onChunk: (chunk) => {
+          if (String(chunk || '').trim().length >= 2) {
+            sawChunk = true;
+            lastChunkAt = Date.now();
+          }
+        },
+      }).then(
         (r) => ({ ok: true as const, routed: r }),
         (err) => ({ ok: false as const, error: err }),
       );
       let stepTimer: ReturnType<typeof setTimeout> | undefined;
+      let idleTimer: ReturnType<typeof setInterval> | undefined;
       const timed = await Promise.race([
         routePromise,
         new Promise<{ ok: false; timedOut: true }>((resolve) => {
           stepTimer = setTimeout(() => resolve({ ok: false, timedOut: true }), STEP_MS);
         }),
+        new Promise<{ ok: false; idleStall: true; detail: string }>((resolve) => {
+          idleTimer = setInterval(() => {
+            if (opts.shouldAbort?.()) {
+              clearInterval(idleTimer);
+              resolve({ ok: false, idleStall: true, detail: 'stopped' });
+              return;
+            }
+            const now = Date.now();
+            if (!sawChunk && now - stepStartedAt > FIRST_TOKEN_MS) {
+              clearInterval(idleTimer);
+              resolve({
+                ok: false,
+                idleStall: true,
+                detail: `no tokens in ${Math.round(FIRST_TOKEN_MS / 1000)}s`,
+              });
+              return;
+            }
+            if (sawChunk && now - lastChunkAt > IDLE_MS) {
+              clearInterval(idleTimer);
+              resolve({
+                ok: false,
+                idleStall: true,
+                detail: `stream idle ${Math.round(IDLE_MS / 1000)}s`,
+              });
+            }
+          }, 500);
+        }),
       ]);
       if (stepTimer !== undefined) clearTimeout(stepTimer);
+      if (idleTimer !== undefined) clearInterval(idleTimer);
+      if ('idleStall' in timed && timed.idleStall) {
+        try {
+          const { engineGenerateCancel } = await import('@/lib/novaEngine');
+          void engineGenerateCancel();
+        } catch { /* ignore */ }
+        const msg = `Craft stalled — ${timed.detail}`;
+        pushStep(steps, { tool: 'error', label: 'Craft stalled', detail: msg, ok: false }, opts.onStep);
+        observations.push(`Model error: ${msg}`);
+        idleSteps += 1;
+        // Create: one idle wall is enough — hand off so create.ts can finishPlainReply.
+        if (createMode || idleSteps >= 2 || appLenAtStart < 900) {
+          pushStep(steps, {
+            tool: 'status',
+            label: createMode
+              ? 'Craft stalled — handing off (honest create miss if polish also stalls)'
+              : 'Tool loop stalled — handing off to full UI polish',
+            ok: false,
+          }, opts.onStep);
+          break;
+        }
+        continue;
+      }
       if ('timedOut' in timed && timed.timedOut) {
         try {
           const { engineGenerateCancel } = await import('@/lib/novaEngine');
@@ -547,12 +696,20 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         const msg = `Agent step timed out after ${Math.round(STEP_MS / 1000)}s`;
         pushStep(steps, { tool: 'error', label: 'Model timed out', detail: msg, ok: false }, opts.onStep);
         observations.push(`Model error: ${msg}`);
-        observations.push(`Step timed out — next must be TOOL: write PATH: ${appWritePath} with the full file.`);
+        observations.push(
+          codingNonWeb && codingEntryPath
+            ? `Step timed out — next must be TOOL: write PATH: ${codingEntryPath} with real ${opts.artifactKind} code.`
+            : `Step timed out — next must be TOOL: write PATH: ${appWritePath} with the full file.`,
+        );
         idleSteps += 1;
-        if (idleSteps >= 2 || appLenAtStart < 900) {
+        // Create craft: one hard step wall is enough — hand off so create can finishPlainReply
+        // instead of burning 14 × 3.5m on Thinking steps.
+        if (createMode || idleSteps >= 2 || appLenAtStart < 900) {
           pushStep(steps, {
             tool: 'status',
-            label: 'Tool loop stalled — handing off to full UI polish',
+            label: createMode
+              ? 'Craft stalled — step wall (handing off for honest create miss if polish stalls)'
+              : 'Tool loop stalled — handing off to full UI polish',
             ok: false,
           }, opts.onStep);
           break;
@@ -594,6 +751,34 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
 
     let action = parseAgentToolReply(modelReply);
     if (!action) {
+      // P0 constrained TOOL decode — repair common GGUF free-text shapes.
+      try {
+        const { HARNESS_PACK, constrainToolDecode } = await import('@/lib/agentHarness');
+        if (HARNESS_PACK.constrainedToolDecode) {
+          const constrained = constrainToolDecode(modelReply);
+          if (constrained?.valid) {
+            action = {
+              tool: constrained.tool,
+              path: constrained.path,
+              query: constrained.query,
+              command: constrained.command,
+              content: constrained.content,
+              answer: constrained.answer,
+              mcpTool: constrained.mcpTool,
+              raw: modelReply,
+            };
+            if (constrained.repairs.length) {
+              observations.push(`Constrained TOOL decode repairs: ${constrained.repairs.join('; ')}`);
+            }
+          } else if (constrained && !constrained.valid) {
+            observations.push(`Constrained TOOL decode invalid: ${constrained.repairs.join('; ') || constrained.tool}`);
+          }
+        }
+      } catch {
+        /* harness optional */
+      }
+    }
+    if (!action) {
       parseFails += 1;
       if (modelReply.length > 120 && !/TOOL:|@@@FILE|"tool"\s*:/i.test(modelReply) && parseFails >= 2) {
         action = { tool: 'done', answer: modelReply, raw: modelReply };
@@ -615,6 +800,55 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
       }
     } else {
       parseFails = 0;
+    }
+
+    try {
+      const { HARNESS_PACK, runHooks } = await import('@/lib/agentHarness');
+      if (HARNESS_PACK.hooksBus) {
+        await runHooks('preToolUse', {
+          tool: action.tool,
+          path: action.path || '',
+          step: steps.length,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Doom-loop: repeating the same mutating tool+path without progress → hand off.
+    {
+      const pathKey = String(action.path || '').replace(/\\/g, '/') || '_';
+      const doomKey = `${action.tool}:${pathKey}`;
+      if (
+        action.tool === 'write'
+        || action.tool === 'patch'
+        || action.tool === 'list'
+        || action.tool === 'read'
+      ) {
+        if (doomKey === lastDoomKey) {
+          doomCounts.set(doomKey, (doomCounts.get(doomKey) || 1) + 1);
+        } else {
+          doomCounts.set(doomKey, 1);
+          lastDoomKey = doomKey;
+        }
+        const streak = doomCounts.get(doomKey) || 0;
+        if (streak >= DOOM_LIMIT) {
+          observations.push(
+            `Doom-loop: ${doomKey} repeated ${streak}× — stop thrashing; hand off or change approach.`,
+          );
+          pushStep(steps, {
+            tool: 'status',
+            label: createMode
+              ? 'Craft doom-loop — handing off (honest invent miss if polish stalls)'
+              : 'Tool loop doom-loop — handing off',
+            detail: doomKey,
+            ok: false,
+          }, opts.onStep);
+          break;
+        }
+      } else {
+        lastDoomKey = '';
+      }
     }
 
     if (action.tool === 'list') {
@@ -648,11 +882,17 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         detail: listing.slice(0, 500),
         ok: true,
       }, opts.onStep);
-      if (idleSteps >= maxIdle && appLenAtStart < thinBytes) {
-        observations.push(`Enough listing — next must be TOOL: write PATH: ${appWritePath} with full UI.`);
+      if (idleSteps >= maxIdle && (codingNonWeb ? String(files[codingEntryPath] || '').length < 400 : appLenAtStart < thinBytes)) {
+        observations.push(
+          codingNonWeb && codingEntryPath
+            ? `Enough listing — next must be TOOL: write PATH: ${codingEntryPath} (no App.jsx).`
+            : `Enough listing — next must be TOOL: write PATH: ${appWritePath} with full UI.`,
+        );
         pushStep(steps, {
           tool: 'status',
-          label: 'Tool loop stalled on list/read — handing off to full UI polish',
+          label: codingNonWeb
+            ? 'Tool loop stalled on list/read — hand off to coding craft'
+            : 'Tool loop stalled on list/read — handing off to full UI polish',
           ok: false,
         }, opts.onStep);
         break;
@@ -698,17 +938,26 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         continue;
       }
       observations.push(`read ${read.path}:\n\`\`\`\n${read.content}\n\`\`\``);
+      if (read.path) readPaths.add(String(read.path).replace(/\\/g, '/'));
       pushStep(steps, {
         tool: 'read',
         label: `Read ${read.path}`,
         detail: `${(read.content || '').length} chars`,
         ok: true,
       }, opts.onStep);
-      if (idleSteps >= maxIdle && String(files[appWritePath] || '').length < thinBytes) {
-        observations.push(`Enough reading — next must be TOOL: write PATH: ${appWritePath} with full UI.`);
+      if (idleSteps >= maxIdle && (codingNonWeb
+        ? String(files[codingEntryPath] || '').length < 400
+        : String(files[appWritePath] || '').length < thinBytes)) {
+        observations.push(
+          codingNonWeb && codingEntryPath
+            ? `Enough reading — next must be TOOL: write PATH: ${codingEntryPath} (no App.jsx).`
+            : `Enough reading — next must be TOOL: write PATH: ${appWritePath} with full UI.`,
+        );
         pushStep(steps, {
           tool: 'status',
-          label: 'Tool loop stalled on list/read — handing off to full UI polish',
+          label: codingNonWeb
+            ? 'Tool loop stalled on list/read — hand off to coding craft'
+            : 'Tool loop stalled on list/read — handing off to full UI polish',
           ok: false,
         }, opts.onStep);
         break;
@@ -744,6 +993,39 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
     }
 
     if (action.tool === 'patch') {
+      {
+        const patchPathGate = String(action.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+        if (
+          codingNonWeb
+          && /^(?:src\/App\.(?:jsx|tsx|css)|src\/main\.(?:jsx|tsx)|index\.html|vite\.config\.[cm]?[jt]s|public\/)/i.test(patchPathGate)
+        ) {
+          observations.push(
+            `patch blocked (${patchPathGate}) — ${opts.artifactKind} craft must not invent a website. `
+              + `Use PATH: ${codingEntryPath || 'the coding entry'}.`,
+          );
+          pushStep(steps, {
+            tool: 'patch',
+            label: `Skipped web shell patch · ${patchPathGate}`,
+            ok: false,
+          }, opts.onStep);
+          continue;
+        }
+      }
+      try {
+        const { readBeforeEditAllowed } = await import('@/lib/codingAgentPack');
+        const patchPath = String(action.path || '').replace(/\\/g, '/');
+        const gate = readBeforeEditAllowed(patchPath, readPaths, files, { createCraft: createMode });
+        if (!gate.ok) {
+          observations.push(gate.reason || 'read-before-edit blocked patch');
+          pushStep(steps, {
+            tool: 'patch',
+            label: 'Patch blocked — read first',
+            detail: gate.reason,
+            ok: false,
+          }, opts.onStep);
+          continue;
+        }
+      } catch { /* pack optional */ }
       const patches = parseAgentPatches(action.content || action.raw || '', action.path);
       if (action.path && action.search != null && !patches.length) {
         patches.push({
@@ -764,7 +1046,24 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
         }, opts.onStep);
         continue;
       }
-      const applied = applyAgentPatches(files, patches);
+      const safePatches = codingNonWeb
+        ? patches.filter((p) => {
+          const pp = String(p.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+          return !/^(?:src\/App\.(?:jsx|tsx|css)|src\/main\.(?:jsx|tsx)|index\.html|vite\.config\.[cm]?[jt]s|public\/)/i.test(pp);
+        })
+        : patches;
+      if (codingNonWeb && safePatches.length < patches.length) {
+        observations.push(
+          `patch dropped ${patches.length - safePatches.length} web-shell path(s) — ${opts.artifactKind} is not a website.`,
+        );
+      }
+      if (!safePatches.length) {
+        observations.push(
+          `patch blocked — all targets were website shell paths. Use PATH: ${codingEntryPath || 'the coding entry'}.`,
+        );
+        continue;
+      }
+      const applied = applyAgentPatches(files, safePatches);
       const okPatches = applied.results.filter(r => r.ok);
       for (const r of applied.results) {
         if (r.diff) diffs.push(r.diff);
@@ -798,6 +1097,24 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
       }
       observations.push(`patch ok: ${applied.updated.join(', ')}`);
 
+      if (CODING_QUALITY_WIN.verifyAfterEachFile) {
+        for (const p of applied.updated || []) {
+          const body = String(files[p] || '');
+          const fv = verifyCraftFile(p, body);
+          observations.push(
+            fv.ok
+              ? `file verify PASS ${p} premium=${fv.premiumScore}`
+              : `file verify FAIL ${p}: ${fv.reasons.join(', ')}`,
+          );
+          const doom = doomLoopGuard(p, body);
+          if (doom.break) {
+            observations.push(`DOOM-LOOP break on ${p} (thin rewrite x${doom.count})`);
+          }
+          try {
+            recordFileModelAttribution({ path: p, modelId: 'agent', seat: 'implement' });
+          } catch { /* */ }
+        }
+      }
       const verify = await verifyProjectAfterPatch({
         diskRoot: opts.diskRoot,
         files,
@@ -821,10 +1138,58 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
           ok: verify.ok,
         }, opts.onStep);
       }
+      try {
+        const { codingDiagnosticsLite, codingDiagnosticsFiles } = await import('@/lib/inventCodingPack');
+        const { codingSymbolsLite, appendCodingAuditEvent } = await import('@/lib/inventCloseAllPack');
+        const diag = codingDiagnosticsLite(files);
+        Object.assign(files, codingDiagnosticsFiles(diag));
+        Object.assign(files, codingSymbolsLite(files));
+        Object.assign(
+          files,
+          appendCodingAuditEvent(files, {
+            type: 'patch+verify',
+            detail: verify.ran ? `verify=${verify.ok ? 'pass' : 'fail'}` : 'no-verify',
+            path: applied.updated.join(','),
+            ok: verify.ran ? verify.ok : true,
+          }),
+        );
+        observations.push(`coding diagnostics: ${diag.ok ? 'OK' : `FAIL ${diag.issues.length}`}`);
+      } catch { /* optional */ }
       continue;
     }
 
     if (action.tool === 'write') {
+      {
+        const wPathGate = String(action.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+        if (
+          codingNonWeb
+          && /^(?:src\/App\.(?:jsx|tsx|css)|src\/main\.(?:jsx|tsx)|index\.html|vite\.config\.[cm]?[jt]s|public\/)/i.test(wPathGate)
+        ) {
+          observations.push(
+            `write blocked (${wPathGate}) — ${opts.artifactKind} craft must not invent a website. `
+              + `Use PATH: ${codingEntryPath || 'the coding entry'}.`,
+          );
+          pushStep(steps, {
+            tool: 'write',
+            label: `Skipped web shell write · ${wPathGate}`,
+            ok: false,
+          }, opts.onStep);
+          continue;
+        }
+        try {
+          const { readBeforeEditAllowed } = await import('@/lib/codingAgentPack');
+          const gate = readBeforeEditAllowed(wPathGate, readPaths, files, { createCraft: createMode });          if (!gate.ok) {
+            observations.push(gate.reason || 'read-before-edit blocked write');
+            pushStep(steps, {
+              tool: 'write',
+              label: 'Write blocked — read first',
+              detail: gate.reason,
+              ok: false,
+            }, opts.onStep);
+            continue;
+          }
+        } catch { /* pack optional */ }
+      }
       if (createMode) {
         const { isCreateCraftWritablePath } = await import('@/lib/createCraftPolicy');
         const wPath = String(action.path || '').replace(/\\/g, '/');
@@ -880,14 +1245,21 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
           ok: true,
         }, opts.onStep);
 
-        // Stall / thin-write recovery: if App is still a stub after a write, force a focused rewrite.
+        // Stall recovery: only retry empty stubs / truncated writes — never valid short
+        // ladder Apps (center-word / blank+label are often well under 900 chars).
         const appKey = files['src/App.tsx'] && !files['src/App.jsx']
           ? 'src/App.tsx'
           : (files['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
         const appBody = String(files[appKey] || '');
-        const thinApp = appBody.length < 900
-          || (/return\s*<div\s+className=["']app["']\s*\/>/.test(appBody) && appBody.length < 400)
-          || (!appBody.includes('</') && appBody.length > 80);
+        const hasUiNode = /<(?:h1|h2|h3|p|nav|main|section|header|footer|img|button|ul|ol|form)\b/i.test(appBody);
+        const emptyStub = (
+          /<div\s+className=["']app["']\s*\/>/i.test(appBody)
+          || (/aria-label=["']Blank page["']/i.test(appBody) && !hasUiNode)
+          || (/className=["']app["'][^>]*>\s*<\/div>/i.test(appBody) && !hasUiNode)
+        );
+        const truncated = appBody.length > 80 && !/<\/[a-zA-Z]/.test(appBody);
+        const thinApp = truncated || emptyStub
+          || (Boolean(createMode) && !hasUiNode && appBody.length < 400);
         if (wroteApp && thinApp) {
           pushStep(steps, {
             tool: 'status',
@@ -901,7 +1273,25 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
           idleSteps += 1;
         }
 
-        const verify = await verifyProjectAfterPatch({
+        if (CODING_QUALITY_WIN.verifyAfterEachFile) {
+          for (const p of applied.updated || []) {
+            const body = String(files[p] || '');
+            const fv = verifyCraftFile(p, body);
+            observations.push(
+              fv.ok
+                ? `file verify PASS ${p} premium=${fv.premiumScore}`
+                : `file verify FAIL ${p}: ${fv.reasons.join(', ')}`,
+            );
+            const doom = doomLoopGuard(p, body);
+            if (doom.break) {
+              observations.push(`DOOM-LOOP break on ${p} (thin rewrite x${doom.count})`);
+            }
+            try {
+              recordFileModelAttribution({ path: p, modelId: 'agent', seat: 'implement' });
+            } catch { /* */ }
+          }
+        }
+      const verify = await verifyProjectAfterPatch({
           diskRoot: opts.diskRoot,
           files,
           changedPaths: applied.updated,
@@ -984,8 +1374,30 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
     }
 
     if (action.tool === 'ready') {
-      pushStep(steps, { tool: 'ready', label: 'Checking Preview Ready…' }, opts.onStep);
+      pushStep(steps, { tool: 'ready', label: 'Checking Ready…' }, opts.onStep);
       try {
+        const { isNonWebArtifactKind } = await import('@/lib/createArtifactKind');
+        if (opts.artifactKind && isNonWebArtifactKind(opts.artifactKind)) {
+          const { verifyArtifactFiles } = await import('@/lib/artifactEvidence');
+          const ev = verifyArtifactFiles(files, opts.artifactKind, {
+            requireImplementation: true,
+          });
+          if (!ev.runOk) verifyOk = false;
+          if (ev.runOk) {
+            verifyOk = true;
+            sawReadyPass = true;
+          }
+          observations.push(`ready → ${ev.runOk ? 'PASS' : 'FAIL'}\n${ev.runDetail}`);
+          pushStep(steps, {
+            tool: 'ready',
+            label: ev.runOk
+              ? `Artifact Ready PASS · ${opts.artifactKind}`
+              : `Artifact Ready FAIL · ${opts.artifactKind}`,
+            detail: String(ev.runDetail || '').slice(0, 600),
+            ok: ev.runOk,
+          }, opts.onStep);
+          continue;
+        }
         const { previewReadyForBrief, looksLikeFillerStubAppSource } = await import('@/lib/createBuildQuality');
         const appBody = files['src/App.tsx'] || files['src/App.jsx'] || '';
         const ready = previewReadyForBrief(files, {
@@ -999,6 +1411,7 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
           : [...(ready.reasons || []), ...(filler ? ['filler stub App'] : [])].join('; ');
         // Static Ready alone is not verifyOk — Live evidence owns success.
         if (!ok) verifyOk = false;
+        if (ok) sawReadyPass = true;
         observations.push(`ready → ${ok ? 'PASS' : 'FAIL'}\n${detail}`);
         pushStep(steps, {
           tool: 'ready',
@@ -1053,6 +1466,7 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
           ...live,
         }));
         verifyOk = ev.pass;
+        if (ev.pass) sawLivePass = true;
         const detail = formatEvidenceForAgent(ev);
         observations.push(detail);
         pushStep(steps, {
@@ -1154,6 +1568,31 @@ export async function runNovaAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRe
 
     if (action.tool === 'done') {
       const answer = String(action.answer || modelReply || 'Done.').trim();
+
+      try {
+        const { doneEvidenceGate, looksLikePlaceholderFloor } = await import('@/lib/codingAgentPack');
+        const floor = looksLikePlaceholderFloor(files);
+        floorShipped = floor.floor;
+        const gate = doneEvidenceGate({
+          verifyOk,
+          sawLivePass,
+          sawReadyPass,
+          createCraft: createMode,
+          floorShipped,
+        });
+        if (!gate.ok) {
+          observations.push(
+            `${gate.reason || 'done blocked'}${floor.reasons.length ? ` (${floor.reasons.slice(0, 2).join('; ')})` : ''}`,
+          );
+          pushStep(steps, {
+            tool: 'done',
+            label: floor.floor ? 'Done blocked — placeholder floor' : 'Done blocked — need evidence',
+            detail: gate.reason,
+            ok: false,
+          }, opts.onStep);
+          continue;
+        }
+      } catch { /* pack optional — fall through to legacy gates */ }
 
       // Verify-before-success: refuse done when Ready/Live verify failed this loop.
       if (verifyOk === false) {
@@ -1269,49 +1708,62 @@ function buildPartialSummary(
   stopped: boolean,
   hitStepCap: boolean,
 ): string {
-  const lines = [
-    stopped ? '**Stopped.**' : hitStepCap ? '**Step limit reached.**' : '**Agent finished.**',
-    '',
-  ];
-  if (updated.length) {
-    lines.push('**Files changed:**');
-    for (const p of updated.slice(0, 20)) lines.push(`- \`${p}\``);
-    lines.push('');
+  // Spoken answer only — Write failed / step trails live under Thought via steps.
+  if (stopped) {
+    return formatEditHandback({
+      outcome: 'edit-partial',
+      summary: 'I stopped before finishing that pass.',
+      missing: updated.length ? 'any remaining asks you still want applied' : 'a fresh send when you are ready',
+      surface: 'chat',
+    });
   }
-  const trail = steps
-    .filter(s => s.tool !== 'thought' && s.tool !== 'status')
-    .slice(-8)
-    .map(s => `- ${s.label}${s.ok === false ? ' (failed)' : ''}`);
-  if (trail.length) {
-    lines.push('**Recent steps:**');
-    lines.push(...trail);
+  if (updated.length) {
+    return hitStepCap
+      ? formatEditHandback({
+        outcome: 'edit-partial',
+        summary: `I've updated ${updated.length} file${updated.length === 1 ? '' : 's'} and hit the step limit for this pass.`,
+        missing: 'another pass if you want more — tap **Continue agent**',
+        surface: 'chat',
+      })
+      : formatEditHandback({
+        outcome: 'edit-ok',
+        summary: `I've completed that change and updated ${updated.length} file${updated.length === 1 ? '' : 's'} on disk.`,
+        surface: 'chat',
+      });
   }
   if (hitStepCap) {
-    lines.push('', 'Send **Continue** in Agent mode (or use the Continue button) to resume.');
+    return formatEditHandback({
+      outcome: 'edit-partial',
+      summary: 'I hit the step limit before landing a change.',
+      missing: 'a resume — tap **Continue agent**',
+      surface: 'chat',
+    });
   }
-  return lines.join('\n');
+  void steps;
+  return formatEditHandback({
+    outcome: 'edit-ok',
+    summary: 'I finished that pass without needing to change files.',
+    surface: 'chat',
+  });
 }
 
 function formatAgentLoopReply(
   answer: string,
-  steps: AgentLoopStep[],
-  updated: string[],
-  diffs: string[],
+  _steps: AgentLoopStep[],
+  _updated: string[],
+  _diffs: string[],
 ): string {
-  const body = String(answer || '').trim();
-  const changed = updated.length
-    ? `\n\n---\nChanged: ${updated.slice(0, 12).map(p => `\`${p}\``).join(', ')}${updated.length > 12 ? '…' : ''}`
-    : '';
-  const trail = steps
-    .filter(s => ['read', 'grep', 'write', 'patch', 'run', 'list', 'mcp'].includes(s.tool))
-    .slice(-12)
-    .map(s => s.label)
-    .join(' → ');
-  const header = trail ? `_Agent: ${trail}_\n\n` : '';
-  const diffBlock = diffs.length
-    ? `\n\n<details><summary>Diffs (${diffs.length})</summary>\n\n\`\`\`diff\n${diffs.slice(0, 3).join('\n\n').slice(0, 3500)}\n\`\`\`\n\n</details>`
-    : '';
-  return `${header}${body}${changed}${diffBlock}`.trim();
+  // Never dump Agent: Write failed → … into the chat body (Thought panel owns that).
+  const cleaned = String(answer || '').trim()
+    .replace(/^_Agent:[\s\S]*?_\s*/i, '')
+    .replace(/\*\*Step limit reached\.\*\*[\s\S]*$/i, '')
+    .replace(/\*\*Recent steps:\*\*[\s\S]*$/i, '')
+    .replace(/\*\*Files changed:\*\*[\s\S]*?(?=\n\n|\*\*|$)/i, '')
+    .trim();
+  if (!cleaned) {
+    return formatEditHandback({ outcome: 'edit-ok', surface: 'chat' });
+  }
+  return coerceHandbackParagraph(cleaned);
 }
 
 /** Map loop steps into AgentTraceStep for existing chat UI. */

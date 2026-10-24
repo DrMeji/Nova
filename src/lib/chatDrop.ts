@@ -273,7 +273,7 @@ export async function resolveChatDrop(
     if (!isTextishName(f.name, f.type) && f.size > 0) {
       const rel = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
       const text = await readBrowserText(f);
-      if (text != null && text.length && !/[\u0000-\u0008]/.test(text.slice(0, 200))) {
+      if (text != null && text.length && !Array.from(text.slice(0, 200)).some((character) => character.charCodeAt(0) <= 8)) {
         seedFiles[rel] = text;
       } else {
         seedFiles[rel] = `[Attached file: ${f.name}, ${f.size} bytes]`;

@@ -3,6 +3,8 @@
  */
 
 import type { ProjectKind } from '@/lib/createProjectIntent';
+import type { ArtifactKind } from '@/lib/createArtifactKind';
+import { resolveArtifactKind } from '@/lib/createArtifactKind';
 import { buildScaffoldFiles } from '@/lib/projectScaffolds';
 
 export type ProjectFileMap = Record<string, string>;
@@ -29,10 +31,13 @@ export function wipeProjectUiFiles(opts: {
   name: string;
   summary: string;
   kind: ProjectKind;
+  artifactKind?: ArtifactKind;
 }): ProjectFileMap {
+  const artifactKind = opts.artifactKind ?? resolveArtifactKind(opts.summary || '');
   const scaffold = buildScaffoldFiles(opts.kind, {
     name: opts.name,
     summary: opts.summary,
+    artifactKind,
   });
   const next: ProjectFileMap = { ...opts.files };
   const scaffoldPaths = new Set(scaffold.map((f) => f.path.replace(/\\/g, '/')));

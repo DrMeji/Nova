@@ -10,10 +10,12 @@ type CodeEditorProps = {
   onSave?: () => void;
   /** When true (Live typing), keep the viewport pinned to the growing bottom. */
   followTail?: boolean;
+  /** Ghost / inline autocomplete hints (from .nova/ghost-hints.json). */
+  ghostHints?: string[];
 };
 
 export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
-  function CodeEditor({ path, value, onChange, readOnly, jumpLine, onSave, followTail }, ref) {
+  function CodeEditor({ path, value, onChange, readOnly, jumpLine, onSave, followTail, ghostHints }, ref) {
     const localRef = useRef<HTMLTextAreaElement | null>(null);
     const language = languageFromPath(path);
     const rawLineCount = Math.max(1, value.split('\n').length);
@@ -23,11 +25,18 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
     const paintValue = truncated
       ? `${value.split('\n').slice(0, MAX_PAINT_LINES).join('\n')}\n\n/* … ${rawLineCount - MAX_PAINT_LINES} more lines hidden — open the file in Explorer if you need the full lockfile */\n`
       : value;
-    // Always syntax-highlight (VS Code colors). Cap work via paintValue line limit above.
-    // Never fall back to plain escaped text — that looked like a Notes paste (all gray).
+    // Skip heavy highlight only while following a live craft stream (followTail).
+    // Manual Code pill open for reading/editing still gets full VS Code colors.
+    const streamPlain = Boolean(followTail);
     const highlighted = useMemo(() => {
+      if (streamPlain) {
+        return paintValue
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
       return highlightCode(paintValue, language);
-    }, [paintValue, language]);
+    }, [paintValue, language, streamPlain]);
     const lineCount = Math.max(1, paintValue.split('\n').length);
     const lines = useMemo(
       () => Array.from({ length: lineCount }, (_, i) => String(i + 1)),
@@ -117,6 +126,27 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
               const ta = e.currentTarget;
               const start = ta.selectionStart;
               const end = ta.selectionEnd;
+              // Ghost autocomplete: Tab completes matching hint when caret is on a word prefix.
+              const hints = ghostHints || [];
+              if (hints.length && start === end) {
+                const before = value.slice(0, start);
+                const m = before.match(/([A-Za-z_][A-Za-z0-9_-]*)$/);
+                const prefix = m?.[1] || '';
+                if (prefix.length >= 2) {
+                  const hit = hints.find(
+                    (h) => h.startsWith(prefix) && h.length > prefix.length,
+                  );
+                  if (hit) {
+                    const insert = hit.slice(prefix.length);
+                    const next = `${value.slice(0, start)}${insert}${value.slice(end)}`;
+                    onChange(next);
+                    requestAnimationFrame(() => {
+                      ta.selectionStart = ta.selectionEnd = start + insert.length;
+                    });
+                    return;
+                  }
+                }
+              }
               const insert = '  ';
               const next = `${value.slice(0, start)}${insert}${value.slice(end)}`;
               onChange(next);

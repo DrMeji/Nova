@@ -27,6 +27,7 @@ import {
   findBestProductBrief,
   parseNewProjectIntent,
   recoverOriginalUserBrief,
+  detectProjectKind,
   resolveProjectKindForCreate,
   slugifyProjectName,
   type NewProjectIntent,
@@ -807,7 +808,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     intent = parseNewProjectIntent(host.content) || {
       name,
       slug: slugifyProjectName(name),
-      kind: (pendingSeed?.kind as ProjectKind) || 'react',
+      // Never default to a fake 'react' kind — detect from the ask (CLI/API/python/…).
+      kind: (pendingSeed?.kind as ProjectKind)
+        || resolveProjectKindForCreate(host.content, detectProjectKind(host.content), detectProjectKind(host.content)),
       summary: pendingSeed?.summary || host.content,
       preferPlan: false,
     };
@@ -1151,6 +1154,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
   /** One salt per create job — rebuilds must invent a new look. */
   const { newDesignFreshnessKey, formatOriginalCraftRules } = await import('@/lib/createDesignSystem');
   const designFreshnessKey = newDesignFreshnessKey();
+  const { resolveArtifactKind: resolveCraftArtifactKind } = await import('@/lib/createArtifactKind');
+  const craftArtifactKind = resolveCraftArtifactKind(
+    [buildIntent.summary, richestBrief, host.content, lockedProductName].filter(Boolean).join('\n'),
+  );
   try {
     if (blankSolidFromUser) {
       /* blank pages are a solid shell, not a product story */
@@ -1164,6 +1171,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         brief: originalBrief,
         productName: lockedProductName,
         freshnessKey: designFreshnessKey,
+        artifactKind: craftArtifactKind,
       }).join('\n');
       const { announceCreatePhase } = await import('@/lib/createStatus');
       const { setEngineModel } = await import('@/lib/novaEngine');
@@ -1207,6 +1215,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           brief: originalBrief,
           productName: lockedProductName,
           freshnessKey: designFreshnessKey,
+          artifactKind: craftArtifactKind,
         }).join('\n');
       } catch { /* ignore */ }
     }
@@ -1249,6 +1258,16 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     await host.syncGrants();
     host.pushStatus('Writing project files one by one…');
     const newProjectId = `proj-${crypto.randomUUID().slice(0, 8)}`;
+    const {
+      resolveArtifactKind,
+      artifactWantsProductLadder,
+      artifactWantsVite,
+      isNonWebArtifactKind,
+      projectKindFromArtifactKind,
+    } = await import('@/lib/createArtifactKind');
+    const createArtifactKind = resolveArtifactKind(
+      [buildIntent.summary, richestBrief, host.content, lockedProductName].filter(Boolean).join('\n'),
+    );
     startCreateJob({
       id: jobId,
       chatId: host.chatId,
@@ -1257,10 +1276,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       name: lockedProductName,
       files: {},
       status: 'writing',
+      artifactKind: createArtifactKind,
       // Align with preamble: started on this chat → may continue after leave.
       backgroundAllowed: Boolean(host.routeChatId && host.routeChatId === host.chatId),
       routeChatIdAtStart: host.routeChatId || null,
     });
+    host.pushStatus(`Artifact · ${createArtifactKind}`);
 
     const { createFileBuildLabel } = await import('@/lib/createProgressCopy');
     let scaffoldAcc: Record<string, string> = {};
@@ -1322,17 +1343,29 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
       );
     } catch { /* optional */ }
-    // createV2 D: scaffold must always include a complete Vite shell before craft.
-    // Flush ALL repaired entry files (index.html/#root, main, vite.config) — package.json alone
-    // left static index.html on disk and blanked Live.
+    // createV2 D: Vite/React shell only when this create is actually a web SPA.
+    // CLI / Python / library asks must NOT be rewritten into vite-react (ask→wrong artifact).
     try {
+      const scaffoldKindNow = resolveProjectKindForCreate(
+        [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
+        buildIntent.kind,
+        buildIntent.kind,
+      );
+      const wantsViteShell = artifactWantsVite(createArtifactKind)
+        && (
+          scaffoldKindNow === 'vite-react'
+          || Boolean(createFilesAcc['vite.config.js'] || createFilesAcc['vite.config.ts'] || createFilesAcc['src/main.jsx'] || createFilesAcc['src/main.tsx'])
+        );
+      if (!wantsViteShell) {
+        host.pushStatus(`Scaffold · ${scaffoldKindNow} (skip Vite React inject)…`);
+      } else {
       const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
       const repaired = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
       createFilesAcc = repaired.files;
       if (repaired.repaired.length) {
         host.pushStatus('Scaffold · Vite entry files verified…');
       }
-      // Always flush Vite entry to disk — skipping when repaired=[] left stale static
+      // Flush Vite entry to disk — skipping when repaired=[] left stale static
       // index.html / missing package.json on disk and blanked Live (Glow ladder).
       if (originDiskRoot) {
         const flushKeys = [
@@ -1355,6 +1388,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
         }
       }
+      } // end wantsViteShell
     } catch { /* best-effort */ }
     // Yield before first studio paint so the chat shell stays interactive after send.
     await yieldToUi(16);
@@ -1471,7 +1505,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       if (
         originDiskRoot
         && createFilesAcc['package.json']
-        && (projectUsesNpm(earlyKind) || Boolean(createFilesAcc['package.json']))
+        && projectUsesNpm(earlyKind, createFilesAcc)
       ) {
         const viteFlush = [
           'package.json',
@@ -1578,26 +1612,38 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           ).catch(() => {});
         }
         // Blank shell only rewrites App.* — re-assert Vite entry so npm/Live never see a
-        // static html leftover without package.json.
+        // static html leftover without package.json. Skip for CLI/Python Acc.
         try {
-          const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
-          const healed = ensureViteReactProjectFiles(
-            createFilesAcc,
-            lockedProductName || buildIntent.name,
+          const blankKind = resolveProjectKindForCreate(
+            [buildIntent.summary, richestBrief, host.content].filter(Boolean).join('\n'),
+            buildIntent.kind,
+            buildIntent.kind,
           );
-          createFilesAcc = healed.files;
-          if (originDiskRoot) {
-            const keys = [
-              'package.json',
-              'index.html',
-              'vite.config.js',
-              'vite.config.ts',
-              'src/main.jsx',
-              'src/main.tsx',
-              'src/index.css',
-            ].filter((k) => createFilesAcc[k]);
-            if (keys.length) {
-              await persistAcceptedCreateFiles(originDiskRoot, createFilesAcc, keys).catch(() => {});
+          const blankWantsVite = artifactWantsVite(createArtifactKind)
+            && (
+              blankKind === 'vite-react'
+              || Boolean(createFilesAcc['vite.config.js'] || createFilesAcc['vite.config.ts'] || createFilesAcc['src/main.jsx'] || createFilesAcc['src/main.tsx'])
+            );
+          if (blankWantsVite) {
+            const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+            const healed = ensureViteReactProjectFiles(
+              createFilesAcc,
+              lockedProductName || buildIntent.name,
+            );
+            createFilesAcc = healed.files;
+            if (originDiskRoot) {
+              const keys = [
+                'package.json',
+                'index.html',
+                'vite.config.js',
+                'vite.config.ts',
+                'src/main.jsx',
+                'src/main.tsx',
+                'src/index.css',
+              ].filter((k) => createFilesAcc[k]);
+              if (keys.length) {
+                await persistAcceptedCreateFiles(originDiskRoot, createFilesAcc, keys).catch(() => {});
+              }
             }
           }
         } catch { /* best-effort */ }
@@ -1687,10 +1733,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
 
     // Coding foundation: scaffold + tool loop owns create when agentLoopOnCreate is on.
     // Invent polish is fallback only if the loop was skipped or returned empty.
+    // Hoisted so non-web Ready can detect zero-write / docs-only craft.
+    let usedNovaLoop = false;
+    let loopAttempted = false;
+    let loopWroteFiles = false;
+    let createSeedSnapshot: Record<string, string> = {};
     if (needsUiPolish && uiPolishOk !== true) {
-      let usedNovaLoop = false;
-      let loopAttempted = false;
-      let loopWroteFiles = false;
       const skipLegacyLoop = isCreateV2Active();
       // Step-ladder: blank white page is deterministic — never burn minutes on invent thrash.
       try {
@@ -1836,6 +1884,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             outOfScope: createBriefPlan.outOfScope,
             verifyChecks: createBriefPlan.verifyChecks,
             craftOrder: createBriefPlan.craftOrder,
+            artifactKind: createArtifactKind || craftArtifactKind,
           });
           try {
             const { emitCreatePipelineStep } = await import('@/lib/codingCreatePipeline');
@@ -2037,14 +2086,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       // Product ladder: seed rotated recipe + logo, then invent MUST own the look (seed ≠ Ready).
       try {
         const {
-          briefWantsProductLadder,
           materializeProductSpineFiles,
           parseProductBriefSlots,
           formatProductInventOwnLookPrompt,
           gradeProductQuality,
         } = await import('@/lib/createProductLadder');
         const productBrief = authoritativeOriginalBrief || briefForUi;
-        if (uiPolishOk !== true && !storefrontSpineLocked && briefWantsProductLadder(productBrief)) {
+        if (uiPolishOk !== true && !storefrontSpineLocked && artifactWantsProductLadder(createArtifactKind, productBrief)) {
           const salt = String(jobId || lockedProductName).slice(-6);
           const slots = parseProductBriefSlots(productBrief, lockedProductName, salt);
           host.pushStatus(
@@ -2060,11 +2108,11 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 css: 'background:#0b0f14',
               });
               if (!forced || /M9\.937 15\.5/i.test(forced) || /M9 18V5l12-2v13/i.test(forced)) {
-                const { productDeskLogoSvg } = await import('@/lib/createProductLadder');
+                const { productDeskLogoSvg, productNeutralLogoSvg } = await import('@/lib/createProductLadder');
                 forced = (
                   /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|battlestation|desk)\b/i.test(productBrief)
                     ? productDeskLogoSvg('#ffffff')
-                    : localIconifySvg('lucide:gamepad-2', '#ffffff')
+                    : productNeutralLogoSvg('#ffffff', lockedProductName)
                 ) || forced;
               }
               if (forced) {
@@ -2073,15 +2121,34 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               }
             } catch { /* logo best-effort */ }
           }
-          const spine = materializeProductSpineFiles(productBrief, lockedProductName, salt);
+          let spine = materializeProductSpineFiles(productBrief, lockedProductName, salt);
+          try {
+            const {
+              briefWantsHardwareShell,
+              writeHardwareInventShell,
+              hardwareInventShellId,
+              accHasHardwareShell,
+            } = await import('@/lib/hardwareInventShells');
+            if (briefWantsHardwareShell(productBrief) && !accHasHardwareShell(spine)) {
+              host.pushStatus('Ladder · hardware invent shell (not leather / not desk twin)…');
+              spine = writeHardwareInventShell(
+                spine,
+                productBrief,
+                lockedProductName,
+                hardwareInventShellId(lockedProductName),
+              );
+            }
+          } catch { /* keep spine */ }
           createFilesAcc = { ...createFilesAcc, ...spine };
           if (createFilesAcc['src/App.jsx'] && createFilesAcc['src/App.tsx']) {
             delete createFilesAcc['src/App.tsx'];
           }
           // Product write must keep a full Vite shell — missing package.json locked Live (RidgeDesk).
           try {
-            const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
-            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            if (artifactWantsVite(createArtifactKind)) {
+              const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
+              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            }
           } catch { /* best-effort */ }
           productSeedApp = String(createFilesAcc['src/App.jsx'] || '');
           productGenreGuard = true;
@@ -2171,6 +2238,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           const loopBrief = storefrontInventForLoop
             ? `${authoritativeOriginalBrief}\n\n## STOREFRONT INVENT (required — no floor paste)\n${storefrontInventForLoop}`
             : authoritativeOriginalBrief;
+          createSeedSnapshot = { ...createFilesAcc };
           const loopRes = await runNovaCreateBuildLoop({
             brief: loopBrief,
             productName: lockedProductName,
@@ -2183,6 +2251,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             coderSource: coderGate.source,
             stickyModelId: host.stickyModelId,
             stickyModelName: host.stickyModelName,
+            artifactKind: createArtifactKind,
             host: {
               pushStatus: host.pushStatus,
               shouldAbort: () => turnAborted(),
@@ -2284,7 +2353,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         } catch { /* ignore */ }
       }
       if (
-        uiPolishOk !== true
+        !isNonWebArtifactKind(createArtifactKind)
+        // Unknown coding (Go/Rust/mobile/Tauri/…) must never get App.jsx invent.
+        && createArtifactKind !== 'unknown'
+        && uiPolishOk !== true
         && (
           (!loopWroteFiles && (!usedNovaLoop || (loopAttempted && uiPolishOk === false)))
           || productInventQueued
@@ -3420,7 +3492,10 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               const miss0 = createPolishMissingLocalImports(createFilesAcc);
               if (miss0.length) {
                 host.pushStatus(`Repairing missing imports (${miss0.slice(0, 3).join(', ')})…`);
-                const healed = healMissingLocalImports(createFilesAcc, lockedProductName);
+                const healed = healMissingLocalImports(createFilesAcc, lockedProductName, {
+                  brief: briefForUi || authoritativeOriginalBrief || '',
+                  artifactKind: createArtifactKind,
+                });
                 createFilesAcc = healed.files;
               }
               const icons = healMissingIconPackImports(createFilesAcc);
@@ -5298,11 +5373,15 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     // Bind studio only when Preview-ready — fail-closed leaves chat unbound.
     updateCreateJob(jobId, { files: createFilesAcc });
 
-    const scaffoldKind = resolveProjectKindForCreate(
-      buildIntent.summary || host.content,
-      buildIntent.kind,
-      buildIntent.kind,
-    );
+    const scaffoldKind = (() => {
+      const fromArtifact = projectKindFromArtifactKind(createArtifactKind);
+      if (fromArtifact !== 'unknown') return fromArtifact;
+      return resolveProjectKindForCreate(
+        buildIntent.summary || host.content,
+        buildIntent.kind,
+        buildIntent.kind,
+      );
+    })();
     const grantNote = created.grantHint ? `\n\n_${created.grantHint}_` : '';
     const displayName = cleanProductTitle(buildIntent.name);
 
@@ -5312,10 +5391,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     if (uiPolishOk === false && !isThinCreatePath() && !productGenreGuard) {
       let allowFloorSalvage = true;
       try {
-        const { briefWantsProductLadder } = await import('@/lib/createProductLadder');
-        if (briefWantsProductLadder(authoritativeOriginalBrief || briefForUi)) {
+        if (artifactWantsProductLadder(createArtifactKind, authoritativeOriginalBrief || briefForUi)) {
           allowFloorSalvage = false;
-          host.pushStatus('Ladder · product brief — skipping floor salvage (invent owns App)…');
+          host.pushStatus('Ladder · product-site artifact — skipping floor salvage (invent owns App)…');
         }
       } catch { /* ignore */ }
       if (!allowFloorSalvage) {
@@ -5433,7 +5511,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             if (repaired.changed) {
               createFilesAcc = repaired.files;
               host.pushStatus(`Product plan repair · ${plan.compositionFamily} · ${repaired.actions.slice(0, 4).join(', ')}`);
-              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              if (artifactWantsVite(createArtifactKind)) {
+                createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              }
               await writePolishFiles();
               // Repair may close Live preflight — but if it owned the product shell, never claim quality.
               if (repaired.repairOwnedProduct || repaired.needFloor) {
@@ -5475,7 +5555,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             if (repaired.changed) {
               createFilesAcc = repaired.files;
               host.pushStatus(`Storefront repair · ${repaired.actions.slice(0, 4).join(', ')}`);
-              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              if (artifactWantsVite(createArtifactKind)) {
+                createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+              }
               await writePolishFiles();
               const cleared = await recheckPolishGate('Storefront repair cleared Preview Ready…');
               if (cleared || repaired.contractOk) {
@@ -6394,7 +6476,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             'src/App.css': floor.css,
           };
           try {
-            createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            if (artifactWantsVite(createArtifactKind)) {
+              createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
+            }
           } catch { /* best-effort */ }
           softBindCreateStudio(host, {
             files: createFilesAcc,
@@ -6712,7 +6796,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     // Product final verify — invent must leave desk-* seed behind; never ship seed as Ready.
     try {
       const {
-        briefWantsProductLadder,
         runProductCreateLadder,
         appLooksLikeDeskSpineTemplate,
         appLooksLikeWrongGenreForProductBrief,
@@ -6721,7 +6804,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         PRODUCT_LADDER_HARD_WALL_MS,
       } = await import('@/lib/createProductLadder');
       const productBrief = authoritativeOriginalBrief || briefForUi;
-      if (briefWantsProductLadder(productBrief)) {
+      if (artifactWantsProductLadder(createArtifactKind, productBrief)) {
         const elapsed = Date.now() - createStartedAt;
         if (elapsed >= PRODUCT_LADDER_HARD_WALL_MS) {
           uiPolishOk = false;
@@ -6931,14 +7014,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     if (uiPolishOk === false && productGenreGuard) {
       try {
         const {
-          briefWantsProductLadder,
           gradeProductQuality,
           liftProductSeedPastFloor,
           appLooksLikeProductSeedFloor,
           appLooksLikeWrongGenreForProductBrief,
         } = await import('@/lib/createProductLadder');
         const productBrief = authoritativeOriginalBrief || briefForUi;
-        if (briefWantsProductLadder(productBrief)) {
+        if (artifactWantsProductLadder(createArtifactKind, productBrief)) {
           const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
           const pre = gradeProductQuality(createFilesAcc, productBrief, lockedProductName);
           if (
@@ -7126,8 +7208,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ];
       let whyBlock = reasonLines;
       try {
-        const { briefWantsProductLadder, formatProductCraftFailHelp } = await import('@/lib/createProductLadder');
-        if (briefWantsProductLadder(authoritativeOriginalBrief || briefForUi)) {
+        const { formatProductCraftFailHelp } = await import('@/lib/createProductLadder');
+        if (artifactWantsProductLadder(createArtifactKind, authoritativeOriginalBrief || briefForUi)) {
           const failedBeat = uiPolishReasons.find((r) => /failed beat:/i.test(r))?.replace(/.*failed beat:\s*/i, '')
             || (uiPolishReasons.find((r) => /Product ladder miss at (\w+)/i.test(r))?.match(/at (\w+)/i)?.[1]);
           const help = formatProductCraftFailHelp({
@@ -7314,7 +7396,243 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       createFilesAcc['package.json']
       || Object.keys(createFilesAcc).some((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
     );
-    const needsNpmBootstrap = originDiskRoot && (projectUsesNpm(scaffoldKind) || diskHasPkg);
+    // Non-web artifacts (CLI / API / Python / library) + unknown coding workspaces:
+    // Ready without Live preview URL.
+    const isDocsOrMetaUnknown = /(^|\/)(readme|license|licence|changelog|contributing|notice|requirements)(\.[^/]*)?$|\.(md|markdown|rst|txt)$|(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig\.json|manifest\.json|\.gitignore)$/i;
+    const unknownBrief = String(authoritativeOriginalBrief || briefForUi || '');
+    const unknownAllowSiteShell = /\b(?:tauri|capacitor|ionic|react\s+native|expo|flutter)\b/i.test(unknownBrief);
+    const unknownHasSiteShell = Boolean(
+      createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || createFilesAcc['index.html'],
+    );
+    // README seed marks unknown coding workspaces; Tauri/Ionic/RN may keep index.html / App.
+    const codingUnknownWorkspace = createArtifactKind === 'unknown'
+      && Boolean(createFilesAcc['README.md'])
+      && (unknownAllowSiteShell || !unknownHasSiteShell);
+    if ((isNonWebArtifactKind(createArtifactKind) || codingUnknownWorkspace) && originDiskRoot) {
+      try {
+        const { markCreateJobReady } = await import('@/lib/createJobStore');
+        const { verifyArtifactFiles } = await import('@/lib/artifactEvidence');
+        const { unknownHasRealSource } = await import('@/lib/novaBuildLoop');
+        const {
+          stripWebShellFromNonWebFiles,
+          fixCliEsmRequireMismatch,
+          ensureLibraryImplementsBrief,
+        } = await import('@/lib/createArtifactKind');
+        // Drop App.jsx / Vite invent contamination before coding Ready — Acc AND disk.
+        // Always delete the known web-shell set (loop may have stripped Acc already while
+        // disk still has vite.config / App.jsx from an earlier write).
+        const webShellDeleteKeys = [
+          'index.html',
+          'vite.config.js',
+          'vite.config.ts',
+          'src/App.jsx',
+          'src/App.tsx',
+          'src/App.css',
+          'src/main.jsx',
+          'src/main.tsx',
+          'src/index.css',
+          'public/logo.svg',
+        ];
+        createFilesAcc = stripWebShellFromNonWebFiles(
+          createFilesAcc,
+          createArtifactKind,
+          unknownBrief,
+        );
+        if (createArtifactKind === 'node-cli') {
+          const esmFix = fixCliEsmRequireMismatch(createFilesAcc);
+          if (esmFix.fixed) {
+            createFilesAcc = esmFix.files;
+            host.pushStatus('Non-web · CLI package.json type:module dropped (entry uses require)…');
+          }
+        }
+        if (createArtifactKind === 'library') {
+          const libFix = ensureLibraryImplementsBrief(
+            createFilesAcc,
+            authoritativeOriginalBrief || briefForUi || host.content,
+          );
+          if (libFix.fixed) {
+            createFilesAcc = libFix.files;
+            host.pushStatus('Non-web · library seed hello replaced with brief API…');
+          }
+        }
+        if (originDiskRoot) {
+          try {
+            const { persistAcceptedCreateFiles } = await import('@/lib/chatAgentApply');
+            const strip = await persistAcceptedCreateFiles(
+              originDiskRoot,
+              createFilesAcc,
+              Object.keys(createFilesAcc),
+              { deleteKeys: webShellDeleteKeys },
+            );
+            if (strip?.ok) {
+              host.pushStatus('Non-web · removed website shell files from disk…');
+            } else {
+              host.pushStatus(`Non-web · disk strip incomplete · ${String(strip?.error || 'retry')}`);
+              // Second pass — deletes only (empty write payload still runs deleteKeys).
+              await persistAcceptedCreateFiles(originDiskRoot, {}, [], {
+                deleteKeys: webShellDeleteKeys,
+              }).catch(() => {});
+            }
+          } catch { /* best-effort disk strip */ }
+        }
+        const unknownHasReal = unknownHasRealSource(createFilesAcc, unknownBrief);
+        const artifactEvidence = codingUnknownWorkspace
+          ? {
+              kind: createArtifactKind,
+              runOk: unknownHasReal,
+              runDetail: unknownHasReal
+                ? 'coding workspace with real source/config'
+                : 'README-only / manifest-only seed — write real source or config for this stack',
+              evidencePath: unknownHasReal
+                ? (Object.keys(createFilesAcc).find((p) => !isDocsOrMetaUnknown.test(p.replace(/\\/g, '/'))) || 'README.md')
+                : 'README.md',
+            }
+          : verifyArtifactFiles(createFilesAcc, createArtifactKind, {
+              requireImplementation: true,
+            });
+        updateCreateJob(jobId, {
+          files: createFilesAcc,
+          artifactKind: createArtifactKind,
+          artifactEvidence,
+          path: originDiskRoot,
+        });
+        const isDocsOrMeta = isDocsOrMetaUnknown;
+        const wroteImplementation = Object.keys(createFilesAcc).some((p) => {
+          const norm = p.replace(/\\/g, '/');
+          if (isDocsOrMeta.test(norm)) return false;
+          return createSeedSnapshot[p] !== createFilesAcc[p];
+        });
+        // Unknown still needs real source; README/manifest-only must not Ready.
+        const noArtifactWrite = usedNovaLoop && !wroteImplementation && !(codingUnknownWorkspace && unknownHasReal);
+        const { countLineDiff, wrapReplyWithFileChanges, isInventAccNoisePath } = await import('@/lib/agentTrace');
+        const { formatCreateHandback } = await import('@/lib/taskHandbackReply');
+        const codingPaths = Object.keys(createFilesAcc)
+          .filter((p) => !isInventAccNoisePath(p))
+          .sort((a, b) => a.localeCompare(b));
+        const codingChanges = codingPaths.map((path) => {
+          const body = String(createFilesAcc[path] || '');
+          const diff = countLineDiff('', body);
+          return { path, added: Math.max(1, diff.added || body.split('\n').length), removed: 0 };
+        });
+        const codingStartedAt = host.replyStartedAt || Date.now();
+        const finishCodingHandback = async (
+          outcome: 'coding-ready' | 'coding-miss',
+          note: string,
+          statusLabels: string[],
+        ) => {
+          const prose = formatCreateHandback({
+            productName: lockedProductName,
+            outcome,
+            note,
+          });
+          const answer = wrapReplyWithFileChanges({
+            startedAt: codingStartedAt,
+            elapsedMs: Math.max(1, Date.now() - codingStartedAt),
+            userMessage: host.content,
+            answer: prose,
+            changedPaths: codingPaths,
+            fileChanges: codingChanges,
+            projectPath: originDiskRoot || undefined,
+            qualityGaps: outcome === 'coding-miss' ? [note] : undefined,
+            statusLabels,
+          });
+          markBuildDiagnosticsEnded();
+          clearBuildWritingPath(outcome === 'coding-ready' ? 'Non-web Ready' : 'Non-web evidence fail');
+          await host.finishPlainReply(answer, 'NOVA · create');
+        };
+        if (!artifactEvidence.runOk || noArtifactWrite) {
+          const reason = artifactEvidence.runOk
+            ? 'no implementation written'
+            : artifactEvidence.runDetail;
+          const { markCreateJobFailed } = await import('@/lib/createJobStore');
+          markCreateJobFailed(jobId, `artifact evidence missing: ${reason}`, undefined, {
+            craftBlocked: true,
+            blockedReasons: [reason],
+          });
+          host.commitStudio({
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+            previewUrl: null,
+          });
+          await finishCodingHandback(
+            'coding-miss',
+            `${createArtifactKind} evidence: ${reason}`,
+            [
+              `Checked ${createArtifactKind} evidence`,
+              reason,
+              'Scaffold on disk — implementation still open',
+            ],
+          );
+          return { status: 'handled' };
+        }
+        // Evidence ok → Ready for ALL non-web kinds. Never fall through into Vite/Live.
+        host.pushStatus(`Non-web · ${createArtifactKind} — ${artifactEvidence.runDetail}…`);
+        if (diskHasPkg) {
+          markCreateJobNpm(jobId);
+          const boot = await bootstrapProjectWorkspace(originDiskRoot, projectKindFromArtifactKind(createArtifactKind), {
+            files: createFilesAcc,
+            preferPreviewUrl: null,
+            npmTimeoutMs: 180_000,
+            onStatus: (label) => host.pushStatus(label),
+          }).catch(() => ({ npmInstalled: false } as ProjectBootstrapResult));
+          bootstrap = boot;
+        }
+        markCreateJobReady(jobId, null, `Ready · ${createArtifactKind} · ${artifactEvidence.runDetail}`, {
+          brief: authoritativeOriginalBrief || briefForUi,
+          allowWithoutPreview: true,
+          artifactKind: createArtifactKind,
+          artifactEvidence,
+        });
+        host.commitStudio({
+          files: createFilesAcc,
+          projectId: originProjectId,
+          name: lockedProductName,
+          diskRoot: originDiskRoot,
+          previewUrl: null,
+        });
+        await finishCodingHandback(
+          'coding-ready',
+          diskHasPkg && bootstrap.npmInstalled
+            ? `${createArtifactKind} Ready · ${artifactEvidence.runDetail}. Dependencies installed.`
+            : `${createArtifactKind} Ready · ${artifactEvidence.runDetail}.`,
+          [
+            `Non-web · ${createArtifactKind} : ${artifactEvidence.runDetail}`,
+            'Created the project folder',
+            `Wrote ${codingPaths.length} file${codingPaths.length === 1 ? '' : 's'}`,
+            diskHasPkg && bootstrap.npmInstalled
+              ? 'Installed project dependencies'
+              : (diskHasPkg ? 'Package install skipped or incomplete' : 'No npm install needed'),
+          ],
+        );
+        return { status: 'handled' };
+      } catch (err) {
+        // Never fall through into Vite invent for coding asks — hand back honestly.
+        host.pushStatus(`Non-web Ready path failed · ${String((err as Error)?.message || err).slice(0, 80)}`);
+        try {
+          const { markCreateJobFailed } = await import('@/lib/createJobStore');
+          markCreateJobFailed(jobId, String((err as Error)?.message || err), undefined, {
+            craftBlocked: true,
+            blockedReasons: [String((err as Error)?.message || err).slice(0, 160)],
+          });
+        } catch { /* ignore */ }
+        markBuildDiagnosticsEnded();
+        clearBuildWritingPath('Non-web Ready exception');
+        await host.finishPlainReply(
+          [
+            `**${lockedProductName}** hit an error finishing the **${createArtifactKind}** create.`,
+            String((err as Error)?.message || err).slice(0, 240),
+            'Tell me what to try next and I will retry.',
+          ].join('\n\n'),
+          'NOVA · create',
+        );
+        return { status: 'handled' };
+      }
+    }
+    const needsNpmBootstrap = originDiskRoot && (
+      diskHasPkg || projectUsesNpm(scaffoldKind, createFilesAcc)
+    );
     if (needsNpmBootstrap) {
       // Item 3: syntax gate before npm/Live — heal unclosed tags / catch crashers early.
       try {
@@ -7533,24 +7851,36 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           }
         }
       } catch { /* best-effort */ }
-      // Last chance: never start Vite against a static #app index leftover.
+      // Last chance: heal static #app index only when this create is actually Vite/React.
       try {
-        const { ensureViteReactProjectFiles, isValidViteIndexHtml } = await import('@/lib/createBuildQuality');
-        if (!isValidViteIndexHtml(createFilesAcc['index.html'] || '')) {
-          host.pushStatus('Healing index.html for Vite Live…');
-          const healed = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
-          createFilesAcc = healed.files;
-          const keys = ['index.html', 'src/main.jsx', 'src/main.tsx', 'vite.config.js', 'vite.config.ts', 'package.json']
-            .filter((k) => createFilesAcc[k]);
-          if (keys.length) {
-            await applyChatReplyEdits({
-              reply: keys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
-              projectId: originProjectId,
-              projectName: lockedProductName,
-              files: createFilesAcc,
-              userMessage: host.content,
-              diskRoot: originDiskRoot,
-            }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+        const healKind = resolveProjectKindForCreate(
+          [briefForUi, buildIntent.summary, host.content].filter(Boolean).join('\n'),
+          scaffoldKind,
+          scaffoldKind,
+        );
+        const healWantsVite = artifactWantsVite(createArtifactKind)
+          && (
+            healKind === 'vite-react'
+            || Boolean(createFilesAcc['vite.config.js'] || createFilesAcc['vite.config.ts'] || createFilesAcc['src/main.jsx'] || createFilesAcc['src/main.tsx'])
+          );
+        if (healWantsVite) {
+          const { ensureViteReactProjectFiles, isValidViteIndexHtml } = await import('@/lib/createBuildQuality');
+          if (!isValidViteIndexHtml(createFilesAcc['index.html'] || '')) {
+            host.pushStatus('Healing index.html for Vite Live…');
+            const healed = ensureViteReactProjectFiles(createFilesAcc, lockedProductName);
+            createFilesAcc = healed.files;
+            const keys = ['index.html', 'src/main.jsx', 'src/main.tsx', 'vite.config.js', 'vite.config.ts', 'package.json']
+              .filter((k) => createFilesAcc[k]);
+            if (keys.length) {
+              await applyChatReplyEdits({
+                reply: keys.map((k) => `@@@FILE ${k}\n${createFilesAcc[k]}`).join('\n'),
+                projectId: originProjectId,
+                projectName: lockedProductName,
+                files: createFilesAcc,
+                userMessage: host.content,
+                diskRoot: originDiskRoot,
+              }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
+            }
           }
         }
       } catch { /* best-effort */ }
@@ -7593,13 +7923,29 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             ? 'Thin create · invent-demo twin blocked at npm gate…'
             : 'Thin create · visual floor open — continuing to install/build diagnostics; Ready stays gated…',
         );
-      } else if (productGenreGuard && productInventSnapshot?.appJsx) {
+      } else if (
+        productGenreGuard
+        && productInventSnapshot?.appJsx
+        && artifactWantsProductLadder(createArtifactKind, briefForUi || authoritativeOriginalBrief || '')
+      ) {
+        // Only rewind product-site Acc — never restore a desk seed over CLI/API/dashboard.
         restoreProductInventSnapshot('npm gate');
       }
-      // Last gate before npm: Vite shell must be on disk (not only in memory).
+      // Last gate before npm: Vite shell on disk only for actual Vite/React creates.
       try {
         // JSX that imports ./Foo.css without writing Foo.css → Vite resolve fail → Live dead.
         createFilesAcc = ensureRelativeCssImportsExist(createFilesAcc);
+        const npmKind = resolveProjectKindForCreate(
+          [briefForUi, buildIntent.summary, host.content].filter(Boolean).join('\n'),
+          scaffoldKind,
+          scaffoldKind,
+        );
+        const npmWantsVite = artifactWantsVite(createArtifactKind)
+          && (
+            npmKind === 'vite-react'
+            || Boolean(createFilesAcc['vite.config.js'] || createFilesAcc['vite.config.ts'] || createFilesAcc['src/main.jsx'] || createFilesAcc['src/main.tsx'])
+          );
+        if (npmWantsVite) {
         const { ensureViteReactProjectFiles } = await import('@/lib/createBuildQuality');
         createFilesAcc = ensureViteReactProjectFiles(createFilesAcc, lockedProductName).files;
         if (originDiskRoot && createFilesAcc['package.json']) {
@@ -7622,6 +7968,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             { deleteKeys: ['css/styles.css', 'js/app.js'] },
           ).catch(() => {});
         }
+        } // end npmWantsVite
       } catch { /* best-effort */ }
       host.pushStatus('Installing project dependencies (npm) — downloading packages…');
       clearBuildWritingPath('Installing npm…');
@@ -7769,10 +8116,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 const {
                   appLooksLikeWrongGenreForProductBrief,
                   appLooksLikeDeskSpineTemplate,
-                  briefWantsProductLadder,
                 } = await import('@/lib/createProductLadder');
                 const productBrief = authoritativeOriginalBrief || briefForUi;
-                if (briefWantsProductLadder(productBrief)) {
+                if (artifactWantsProductLadder(createArtifactKind, productBrief)) {
                   const appNow = String(createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '');
                   if (
                     productInventSnapshot?.appJsx
@@ -7912,7 +8258,12 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
             markBuildDiagnosticsEnded();
             await host.finishPlainReply('Stopped.', 'NOVA · stop');
             return { status: 'handled' };
-          } else if (liveUrl && bootstrap.previewLive && !turnAborted()) {
+          } else if (
+            liveUrl
+            && bootstrap.previewLive
+            && !turnAborted()
+            && !isNonWebArtifactKind(createArtifactKind)
+          ) {
             // Final disk stamp at Ready — never overwrite invent-demo logos.
             if (originDiskRoot && !blankSolidColor && !inventDemoOwnsLogo(createFilesAcc)) {
               try {
@@ -8000,6 +8351,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 smokeOk: true,
                 consoleClean: true,
                 renderedSample: String(lockedProductName || ''),
+                staticReady: true,
+                staticReasons: [],
+                npmInstalled: true,
+                liveUrl: null,
+                consoleErrors: [],
+                smokeDetail: 'quality-bypass',
+                stage: 'late-quality',
               },
               files: createFilesAcc,
               brief: briefForUi,
@@ -8388,6 +8746,13 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               smokeOk: true,
               consoleClean: true,
               renderedSample: String(lockedProductName || ''),
+              staticReady: true,
+              staticReasons: [],
+              npmInstalled: true,
+              liveUrl: null,
+              consoleErrors: [],
+              smokeDetail: 'quality-bypass',
+              stage: 'late-quality',
             },
             files,
             brief: briefForUi,

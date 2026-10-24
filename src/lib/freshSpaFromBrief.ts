@@ -6,6 +6,8 @@
 export function isEmptyReactAppShell(appSource: string | undefined | null): boolean {
   const s = String(appSource || '');
   if (!s.trim()) return true;
+  // Intentional ladder blank (viteSolidShellEdits) — compiles and mounts; not a craft failure.
+  if (/aria-label=["']Blank page["']/i.test(s)) return false;
   if (/return\s*\(\s*<div\s+className=["']app["']\s*\/>\s*\)/i.test(s)) return true;
   if (/return\s*\(\s*<div\s+className=["']app["']\s*>\s*<\/div>\s*\)/i.test(s)) return true;
   const withoutImports = s.replace(/^[\s\S]*?export\s+default\s+function\s+App\s*\(/i, '');
@@ -44,21 +46,23 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   if (/\b(?:this is a sample text|sample text|lorem ipsum|placeholder text|coming soon|hello world)\b/i.test(s)) {
     return true;
   }
+  // Encoded SVG data-URIs are repetitive by nature — never treat as looped model garbage.
+  const sNoData = s.replace(/data:image\/svg\+xml[^"'\s]*/gi, 'DATA_SVG');
   // Endless SVG path / attribute loops (local-model failure mode).
   // Require path-like content — large real games can sit under 100 unique chars.
   if (
-    s.length >= 8000
-    && new Set(s).size < 80
-    && /(?:\bd\s*=\s*["']|viewBox|path\s|\.arcTo\b)/i.test(s)
-    && (s.match(/[-\d.]{4,}/g) || []).length > 180
+    sNoData.length >= 8000
+    && new Set(sNoData).size < 80
+    && /(?:\bd\s*=\s*["']|viewBox|path\s|\.arcTo\b)/i.test(sNoData)
+    && (sNoData.match(/[-\d.]{4,}/g) || []).length > 180
   ) {
     return true;
   }
-  if (s.length >= 5000) {
-    const start = Math.floor(s.length / 3);
+  if (sNoData.length >= 5000) {
+    const start = Math.floor(sNoData.length / 3);
     for (let len = 28; len <= 48; len += 4) {
-      const probe = s.slice(start, start + len);
-      if (probe.length === len && (s.split(probe).length - 1) >= 40) return true;
+      const probe = sNoData.slice(start, start + len);
+      if (probe.length === len && (sNoData.split(probe).length - 1) >= 40) return true;
     }
   }
   if (/\*\*CSS\b|```(?:jsx|css|tsx)?\s*$/m.test(s) || /This completes the initial implementation/i.test(s)) return true;
@@ -84,14 +88,44 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
       /* ok */
     } else if (s.length >= 160 && hasAppComponent && tagCount >= 3 && /<(?:button|a)\b/i.test(s) && /<h1\b/i.test(s)) {
       /* ok — minimal branded hero + CTA */
+    } else if (
+      hasAppComponent
+      && tagCount >= 2
+      && /<h1\b/i.test(s)
+      && /className=["']center-word["']/i.test(s)
+    ) {
+      /* ok — step-ladder name on blank (center-word only) */
+    } else if (
+      hasAppComponent
+      && /aria-label=["']Blank page["']/i.test(s)
+      && !/<h1\b/i.test(s)
+    ) {
+      /* ok — intentional blank solid shell */
+    } else if (
+      hasAppComponent
+      && tagCount >= 2
+      && /<(?:button|img|input|label|form|select|textarea|fieldset)\b/i.test(s)
+      && /(?:onClick|icon-btn|heart-btn|\bbtn\b|tab--active|top-nav|sidebar|modal|card-grid|sentence-stack|title-block|icon-rail|center-word|corner-word|field__input|placeholder=|radio-group|\bcheck\b|profile-card|spinner|toast|kanban|login|crumbs|pager|className=["']search)\b/i.test(s)
+    ) {
+      /* ok — ladder micro shells (clickable icon, tabs, buttons, inputs, stacked lines, etc.) */
+    } else if (
+      hasAppComponent
+      && tagCount >= 3
+      && /(?:sentence-stack|title-block|center-word|corner-word)\b/i.test(s)
+    ) {
+      /* ok — copy-only ladder shells (stacked sentences / title+paragraph / placed words) */
     } else {
       return true;
     }
   }
   if (!hasAppComponent) return true;
   if (/Ask NOVA in chat to add pages|Local demo from your brief|Main view/i.test(s)) return true;
-  // Single search box / empty chrome is not a product UI.
-  if (/placeholder=["']Search/i.test(s) && tagCount < 12) return true;
+  // Single search box / empty chrome is not a product UI — unless it filters a list (ladder).
+  if (
+    /placeholder=["']Search/i.test(s)
+    && tagCount < 12
+    && !/\b(?:filter|filtered|localeCompare|slice\s*\(|Sort|Previous|Next)\b/i.test(s)
+  ) return true;
   if (/^\s*\)\s*;?\s*$/m.test(s.slice(0, 120))) return true;
   if (/\bwindow\.event\b/.test(s) && /newDirection/.test(s) && !/useState\s*\(/.test(s)) return true;
   const opens = (s.match(/\{/g) || []).length;
@@ -108,6 +142,33 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
     return true;
   }
   return false;
+}
+
+/**
+ * Agent-loop / edit writes may be intentionally tiny (helpers, return null, micro patches).
+ * Peers (SWE-agent, Claude Code) accept any compile-valid file — invent completeness
+ * (`isBrokenReactAppSource`) must not block those paths.
+ */
+export function isAgentLoopWritableAppSource(appSource: string | undefined | null): boolean {
+  const s = String(appSource || '');
+  if (s.trim().length < 24) return false;
+  if (/\bTOOL:\s*(?:write|ready|done)\b|\bPATH:\s*src\//i.test(s)) return false;
+  if (looksLikeTruncatedUiSource(s)) return false;
+  if (/\b(?:lorem ipsum|this is a sample text|placeholder text)\b/i.test(s)) return false;
+  const hasApp =
+    /export\s+default\s+function\s+[A-Za-z_$][\w$]*/i.test(s)
+    || /export\s+default\s+[A-Za-z_$][\w$]*\b/i.test(s)
+    || /(?:const|let|var)\s+App\s*=/.test(s);
+  if (!hasApp) return false;
+  if (!/return\s+(?:null\b|\(|\s*<)/.test(s)) return false;
+  const opens = (s.match(/\{/g) || []).length;
+  const closes = (s.match(/\}/g) || []).length;
+  if (Math.abs(opens - closes) > 2) return false;
+  const parens = (s.match(/\(/g) || []).length - (s.match(/\)/g) || []).length;
+  if (Math.abs(parens) > 1) return false;
+  // Unclosed JSX open at EOF (even when under truncatedUi length floor).
+  if (/<[A-Za-z][\w.:-]*([^>'"`]|"[^"]*"|'[^']*')*$/.test(s.replace(/\s+$/g, ''))) return false;
+  return true;
 }
 
 /**

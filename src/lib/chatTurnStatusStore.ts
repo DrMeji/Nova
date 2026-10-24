@@ -2,11 +2,14 @@
  * Live turn status outside the messages array — avoids remounting chat on every status tick.
  */
 
-export type ChatTurnStatusStep = {
-  label: string;
-  /** ms since epoch when this step became current */
-  at: number;
-};
+import type {
+  ChatActivityKind,
+  ChatActivityRunStatus,
+  ChatActivityStep,
+} from '@/lib/chatTurnActivity';
+import { classifyStatusActivity } from '@/lib/chatTurnActivity';
+
+export type ChatTurnStatusStep = ChatActivityStep;
 
 export type ChatTurnStatus = {
   chatId: string;
@@ -17,6 +20,8 @@ export type ChatTurnStatus = {
   /** File path currently being written (Code overlay follows this while generating). */
   writingPath?: string | null;
 };
+
+export type { ChatActivityKind, ChatActivityRunStatus };
 
 let current: ChatTurnStatus | null = null;
 const listeners = new Set<() => void>();
@@ -34,7 +39,15 @@ export function getChatTurnStatus(): ChatTurnStatus | null {
 function historyLabelsEqual(a: ChatTurnStatusStep[], b: ChatTurnStatusStep[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].label !== b[i].label || a[i].at !== b[i].at) return false;
+    if (
+      a[i].label !== b[i].label
+      || a[i].at !== b[i].at
+      || a[i].kind !== b[i].kind
+      || a[i].summary !== b[i].summary
+      || a[i].runStatus !== b[i].runStatus
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -99,15 +112,35 @@ export function normalizeStatusHistory(
   const now = Date.now();
   if (!history?.length) {
     const label = String(fallbackLabel || '').trim();
-    return label ? [{ label, at: now }] : [];
+    if (!label) return [];
+    const classified = classifyStatusActivity(label);
+    return [{ label, at: now, ...classified }];
   }
   return history.map((h, i) => {
     if (typeof h === 'string') {
-      return { label: h.replace(/\u2014/g, ':'), at: now - (history.length - 1 - i) * 1000 };
+      const label = h.replace(/\u2014/g, ':');
+      const classified = classifyStatusActivity(label);
+      return {
+        label,
+        at: now - (history.length - 1 - i) * 1000,
+        ...classified,
+      };
     }
+    const label = String(h.label || '').replace(/\u2014/g, ':');
+    const classified = classifyStatusActivity(label, {
+      kind: h.kind,
+      summary: h.summary,
+      detail: h.detail,
+      runStatus: h.runStatus,
+      paths: h.paths,
+    });
     return {
-      label: String(h.label || '').replace(/\u2014/g, ':'),
+      label,
       at: typeof h.at === 'number' ? h.at : now,
+      ...classified,
+      detail: h.detail || classified.detail,
+      runStatus: h.runStatus ?? classified.runStatus,
+      paths: h.paths?.length ? h.paths : classified.paths,
     };
   });
 }
@@ -127,8 +160,20 @@ export function pushChatTurnStatus(opts: {
   assistantId: string;
   label: string;
   writingPath?: string | null;
+  kind?: ChatActivityKind;
+  summary?: string;
+  detail?: string;
+  runStatus?: ChatActivityRunStatus;
+  paths?: string[];
 }): void {
   const clean = plainStatusLabel(opts.label);
+  const classified = classifyStatusActivity(clean, {
+    kind: opts.kind,
+    summary: opts.summary,
+    detail: opts.detail,
+    runStatus: opts.runStatus,
+    paths: opts.paths,
+  });
   const prev = current;
   const sameTurn = prev
     && prev.chatId === opts.chatId
@@ -136,10 +181,37 @@ export function pushChatTurnStatus(opts: {
   const history = sameTurn ? [...prev.history] : [];
   const last = history[history.length - 1];
   const now = Date.now();
+  // Same label OR same kind within 1.2s → update in place (stops dropdown firehose).
+  const sameKindRecent = last
+    && classified.kind
+    && last.kind === classified.kind
+    && (now - last.at) < 1200
+    && !/^(?:write|read)$/i.test(String(classified.kind));
   if (!last || last.label !== clean) {
-    // Keep wall-clock gaps honest: never stamp two steps at the exact same ms.
-    const at = last && now <= last.at ? last.at + 1 : now;
-    history.push({ label: clean, at });
+    if (sameKindRecent && last) {
+      last.label = clean;
+      last.at = now <= last.at ? last.at + 1 : now;
+      last.summary = classified.summary;
+      last.detail = opts.detail || classified.detail || last.detail;
+      last.runStatus = opts.runStatus ?? classified.runStatus ?? last.runStatus;
+      last.paths = opts.paths?.length ? opts.paths : (classified.paths || last.paths);
+    } else {
+      const at = last && now <= last.at ? last.at + 1 : now;
+      history.push({
+        label: clean,
+        at,
+        kind: classified.kind,
+        summary: classified.summary,
+        detail: opts.detail || classified.detail,
+        runStatus: opts.runStatus ?? classified.runStatus,
+        paths: opts.paths?.length ? opts.paths : classified.paths,
+      });
+    }
+  } else if (last) {
+    // Same label — refresh runStatus / detail (e.g. Running → Success).
+    if (opts.runStatus) last.runStatus = opts.runStatus;
+    if (opts.detail) last.detail = opts.detail;
+    if (classified.summary) last.summary = classified.summary;
   }
   // Keep the full turn — do not drop early "3m" steps mid-build.
   while (history.length > 240) history.shift();
@@ -175,6 +247,12 @@ export function clearChatTurnStatus(assistantId?: string): void {
   }
   current = null;
   emit();
+  // Spine chips belong to the live dropdown — clear so they don't stick under the composer.
+  try {
+    void import('@/lib/createThinPath').then((m) => {
+      try { m.setActiveThinCreateSpineStage(null); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
 }
 
 /** Drop a settled step snapshot (e.g. Try again) so Done does not stick on plain chat. */

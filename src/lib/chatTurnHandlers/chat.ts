@@ -25,6 +25,8 @@ import {
   instantGreetingReply,
   looksLikeSoftCheckInAsk,
   looksLikeCapabilityOverviewAsk,
+  looksLikeFunHangoutAsk,
+  instantFunHangoutReply,
   scrubFalseProjectChatPreamble,
   scrubTalkFirstCodeBleed,
   scrubBuildAggression,
@@ -187,13 +189,17 @@ function plainChatHistorySeed(content: string): RouterChatTurn[] {
       content: 'Understood — warm human hello, no coding pitch, no canned “what’s up”.',
     }];
   }
-  if (looksLikeCapabilityOverviewAsk(content)) {
+  if (looksLikeFunHangoutAsk(content) || looksLikeCapabilityOverviewAsk(content)) {
     return [{
       role: 'user',
-      content: '[Reply style for this turn: ONE professional sentence (two max) about what NOVA actually does — chat with local or cloud models on this PC, build websites and apps when the user asks you to create them, edit files in folders they grant, and help with images and projects. No numbered lists. No fake categories like calendar, entertainment packages, or generic personal assistance.]',
+      content: [
+        '[Reply style for this turn: warm, playful, one or two short sentences.',
+        'Invite them to pick a direction — do NOT pitch coding projects, apps, calculators, or “what should we build”.',
+        'If they asked what you can do, one honest sentence about chat + creating/editing when they ask — no feature laundry list.]',
+      ].join(' '),
     }, {
       role: 'assistant',
-      content: 'Understood — one real sentence about NOVA.',
+      content: 'Understood — fun and human, no unsolicited coding-project pitch.',
     }];
   }
   if (isTalkFirstChatTurn(content)) {
@@ -417,6 +423,18 @@ export async function runChatTurn(host: ChatTurnHost): Promise<ChatTurnResult> {
           text: hi,
           intent: 'plain-chat',
           contract: chatSuccess(hi),
+          provider: 'NOVA',
+          modelName: 'NOVA',
+        };
+      }
+      // "lets do some fun" / "see what you're capable of" — instant, no Qwen load, no coding CTA.
+      if (looksLikeFunHangoutAsk(host.content)) {
+        const fun = instantFunHangoutReply();
+        return {
+          status: 'handled',
+          text: fun,
+          intent: 'plain-chat',
+          contract: chatSuccess(fun),
           provider: 'NOVA',
           modelName: 'NOVA',
         };

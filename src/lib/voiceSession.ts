@@ -478,7 +478,7 @@ export async function listenOnce(
   return new Promise((resolve) => {
     let done = false;
     let best = '';
-    let startedAt = Date.now();
+    const startedAt = Date.now();
     let restartCount = 0;
 
     const releaseMic = () => {

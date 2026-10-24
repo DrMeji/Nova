@@ -1698,6 +1698,27 @@ export function isWebMicroAsk(message: string): boolean {
   if (isStructuralUiPieceAsk(t)) return false;
   // Shop feature packs → model/create path only.
   if (isShopFeatureStructureAsk(t)) return false;
+  // Coding greenfield (CLI / API / plugin / test suite / native / bot…) is never surgical micro UI.
+  // Prevents "login"/"form"/"scroll"/"landing" tokens from stealing unbound create asks.
+  if (
+    /^(?:please\s+)?(?:build|create|make|scaffold|ship|port|wrap|write|implement|convert|migrate|refactor)\b/i.test(t)
+    && /\b(?:cli|api|sdk|bot|scraper|crawler|library|package|plugin|middleware|worker|pipeline|extension|composable|hooks?|generator|suite|flutter|react\s+native|electron|tauri|playwright|cypress|jest|vitest|pytest|test\s+suite|e2e|lambda|webhook|graphql|schema|resolvers?|receiver|interceptor|widget|terraform|dockerfile|helm|swiftui|kotlin|compose|firmware|arduino|esp32|homebrew|formula|yargs|rate\s+limiter)\b/i.test(t)
+    && !/\b(?:make\s+the\s+background|change\s+the\s+(?:color|font|title|button))\b/i.test(t)
+  ) {
+    return false;
+  }
+  // Live invent 2026-10-23: "create a website … grid of book cards" must NOT be micro —
+  // otherwise Card-one ladder stamps wipe invent (Moss/Cedar Quill fails).
+  // Keep "Build a full landing page: hero…" as surgical shell (ladder end below) —
+  // do not treat bare landing+hero as invent-create.
+  if (
+    /\b(?:create|build|make|scaffold)\b/i.test(t)
+    && /\b(?:website|site|project|homepage)\b/i.test(t)
+    && /\b(?:on\s+disk|skip\s+plan|full[- ]?bleed|hero|brand|polished)\b/i.test(t)
+    && !/\b(?:full\s+)?landing\s+page\b/i.test(t)
+  ) {
+    return false;
+  }
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
     // brand-new big builds are not micro. except hello world follow-ups with change verbs
   }
@@ -1751,8 +1772,18 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\bprofile\s+card\b/i.test(t) || (/\bavatar\b/i.test(t) && /\bname\b/i.test(t) && /\bbuttons?\b/i.test(t))) return true;
   if (/\b(?:fade|slide|animate|spinner|toast|skeleton)\b/i.test(t)) return true;
   if (/\btabs?\b/i.test(t) && /\b(?:Overview|Details|Reviews)\b/.test(t)) return true;
-  if (/\b(?:search|filter|sort|pagination|table|kanban|carousel|gallery|login|dashboard|breadcrumbs?)\b/i.test(t)
-    && /\b(?:add|build|make|show|with|after|go\s+to)\b/i.test(t)) return true;
+  // Surgical UI widget asks — not greenfield "build a dashboard/app on disk".
+  // Allow a few adjectives: "Build a sales dashboard for my shoe store" is create, not micro.
+  // Do NOT exempt "build a SaaS shell with … dashboard …" (dashboard buried mid-brief).
+  // "Build a vector search service" / "Fuse.js search" / "full-text search engine" are coding creates.
+  if (
+    /\b(?:search|filter|sort|pagination|table|kanban|carousel|gallery|login|dashboard|breadcrumbs?|control\s+panel|admin\s+panel)\b/i.test(t)
+    && /\b(?:add|build|make|show|with|after|go\s+to)\b/i.test(t)
+    && !/\b(?:on\s+disk|new\s+project|from\s+scratch|get\s+it\s+live|vite|react\s+app)\b/i.test(t)
+    && !/^(?:please\s+)?(?:build|create|make|scaffold)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?(?:(?:react|vite|saas|sales|admin|analytics|billing|iot|inventory|shoe|store|shop|panel)\s+){0,4}(?:dashboard|control\s+panel|admin\s+panel)\b/i.test(t)
+    && !/^(?:please\s+)?(?:build|create|make|scaffold)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?(?:[\w.-]+\s+){0,4}(?:search\s+(?:engine|service|ui|demo)|kanban\s+board|full-?text\s+search)\b/i.test(t)
+    && !/\b(?:vector\s+search|fuse\.?js\s+search|full-?text\s+search|collaborative\s+filter)\b/i.test(t)
+  ) return true;
   if (/\bSign\s*in\b/i.test(t) && /\bdashboard\b/i.test(t)) return true;
   if (/\bsettings\s+page\b/i.test(t) || (/\btoggles?\b/i.test(t) && /\b(?:notifications?|dark\s+mode)\b/i.test(t))) return true;
   if (/\b(?:upload|drop\s+zone|drag-and-drop|command\s+palette|infinite\s+scroll|multi-step|validate|kanban|chat-style|thumbnail|carousel|breadcrumb)\b/i.test(t)) return true;
@@ -2209,7 +2240,9 @@ export function reactSurgicalMicroAskEdits(
   if (isShopFeatureStructureAsk(t)) return [];
   // UI shells have real surgical App.jsx templates — do not force invent via marketing/rebuild.
   const shellAsk = isUiShellAsk(t);
-  // Full product / marketing landings must never collapse into a center-word stub.
+  // Full product / marketing landings must never collapse into Card-one / center-word stubs.
+  // Prefer invent even if a shell heuristic also matched (cards+grid in a create brief).
+  // UI shells (landing ladder, Velvet lounge, SaaS twin, Twitter mini) keep their templates.
   if (askLooksLikeMarketingOrProductHomepage(t) && !shellAsk) {
     return [];
   }
@@ -3149,50 +3182,8 @@ export default function App() {
           + `.app--dark { background: #0f172a; color: #e2e8f0; }\n`
           + `.btn { appearance: none; border: 1px solid currentColor; background: transparent; color: inherit; font: inherit; padding: 0.55rem 1.1rem; cursor: pointer; border-radius: 0.35rem; }\n`;
       } else {
-        app = `import { useEffect, useState } from 'react';
-import './App.css';
-
-export default function App() {
-  const [text, setText] = useState('');
-  const [items, setItems] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('nova-todos') || '[]'); } catch { return []; }
-  });
-  useEffect(() => { localStorage.setItem('nova-todos', JSON.stringify(items)); }, [items]);
-  const add = () => {
-    const v = text.trim();
-    if (!v) return;
-    setItems((list) => [...list, { id: Date.now(), text: v, done: false }]);
-    setText('');
-  };
-  return (
-    <div className="app">
-      <form className="todo-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="New todo" />
-        <button type="submit">Add</button>
-      </form>
-      <ul className="todo-list">
-        {items.map((item) => (
-          <li key={item.id} className={item.done ? 'todo done' : 'todo'}>
-            <button type="button" onClick={() => setItems((list) => list.map((x) => x.id === item.id ? { ...x, done: !x.done } : x))}>
-              {item.done ? 'Undo' : 'Complete'}
-            </button>
-            <span>{item.text}</span>
-            <button type="button" onClick={() => setItems((list) => list.filter((x) => x.id !== item.id))}>Delete</button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-`;
-        css = `html, body, #root { margin: 0; min-height: 100%; background: ${canvas}; }\n`
-          + `.app { min-height: 100dvh; margin: 0; background: ${canvas}; color: ${ink}; padding: 1.25rem; box-sizing: border-box; }\n`
-          + `.todo-form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }\n`
-          + `.todo-form input { flex: 1; font: inherit; padding: 0.45rem 0.6rem; }\n`
-          + `.todo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }\n`
-          + `.todo { display: flex; gap: 0.5rem; align-items: center; }\n`
-          + `.todo.done span { text-decoration: line-through; opacity: 0.65; }\n`
-          + `button { font: inherit; cursor: pointer; }\n`;
+        // REMOVED: default todo twin. No look-back recreate.
+        return [];
       }
       indexCss = solidRootRule(canvas);
       return [
@@ -3432,7 +3423,13 @@ export default function App() {
     const wantsModal = /\bmodal\b/i.test(t) || /\bopen\s+dialog\b/i.test(t);
     const wantsCards = /\bcards?\b/i.test(t) && /\b(?:row|grid|three|2-by-2|2\s*x\s*2|title)\b/i.test(t)
       && !/\b(?:remove|delete|drop)\b[\s\S]{0,24}\bthird\b/i.test(t);
-    if (wantsSidebar || wantsModal || wantsCards) {
+    // Never stamp Card-one onto invent-create / marketing briefs (Live invent gap).
+    const inventCreateBrief = /\b(?:create|build|make)\b/i.test(t)
+      && /\b(?:website|site|project|homepage)\b/i.test(t)
+      && (askLooksLikeMarketingOrProductHomepage(t) || /\bfull[- ]?bleed|hero|brand|on\s+disk\b/i.test(t));
+    if (inventCreateBrief && (wantsCards || wantsSidebar || wantsModal)) {
+      /* fall through — model invent owns App */
+    } else if (wantsSidebar || wantsModal || wantsCards) {
       const canvas = detectSolidCanvasBg(css, indexCss) || '#ffffff';
       const ink = contrastTextForBg(canvas);
       if (wantsModal) {
@@ -3663,11 +3660,16 @@ export default function App() {
   }
 
   // Ladder: text input / placeholder / email+password / simple form.
+  // Skip redesign / full-layout asks — those keep a real App, not a micro form stub.
   {
-    const wantsForm = /\bform\b/i.test(t) && /\b(?:name|email|submit)\b/i.test(t);
-    const wantsEmailPw = /\bemail\b/i.test(t) && /\bpassword\b/i.test(t) && /\binput\b/i.test(t);
-    const wantsInput = /\b(?:text\s+input|input\s+with|placeholder)\b/i.test(t)
-      || (/\binput\b/i.test(t) && /\b(?:type|placeholder|field)\b/i.test(t));
+    const redesignAsk = /\b(?:redesign|rewrite|completely\s+new|new\s+layout|premium\s+luggage|invent-demo|full\s+rewrite)\b/i.test(t)
+      || /\b(?:suitcases?|luggage|carry[- ]?ons?|duffels?)\b/i.test(t);
+    const wantsForm = !redesignAsk && /\bform\b/i.test(t) && /\b(?:name|email|submit)\b/i.test(t);
+    const wantsEmailPw = !redesignAsk && /\bemail\b/i.test(t) && /\bpassword\b/i.test(t) && /\binput\b/i.test(t);
+    const wantsInput = !redesignAsk && (
+      /\b(?:text\s+input|input\s+with|placeholder)\b/i.test(t)
+      || (/\binput\b/i.test(t) && /\b(?:type|placeholder|field)\b/i.test(t))
+    );
     if ((wantsInput || wantsEmailPw || wantsForm) && (!/\bbutton\b/i.test(t) || wantsForm)) {
       const canvas = detectSolidCanvasBg(css, indexCss) || '#ffffff';
       const ink = contrastTextForBg(canvas);

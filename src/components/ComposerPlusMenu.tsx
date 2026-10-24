@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Bug, ChevronLeft, Folder, Paperclip, Plus } from 'lucide-react';
+import { Bug, ChevronLeft, Folder, Paperclip, Plus, SlidersHorizontal } from 'lucide-react';
 import { isDebugComposerParked } from '@/lib/featurePark';
 
 export type ComposerPlusAction =
@@ -9,6 +9,7 @@ export type ComposerPlusAction =
   | 'agent'
   | 'debug'
   | 'multitask'
+  | 'studio'
   | 'file'
   | 'folder'
   | 'import-folder'
@@ -37,28 +38,47 @@ type MenuItem = {
   /** Icon-only paperclip — opens file / project attach panel. */
   clip?: boolean;
   /** Optional leading icon for attach-panel rows. */
-  icon?: 'folder' | 'clip' | 'bug';
+  icon?: 'folder' | 'clip' | 'bug' | 'studio';
   /** Parked like Message / Networking — visible, not clickable. */
   comingSoon?: boolean;
 };
 
-/** Mode ids (for separator between modes and attach). */
-const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
+/** Tool strip (icons) vs Ask/Plan/Act labels — separator sits between them. */
+const TOOL_IDS = new Set<ComposerPlusAction>([
+  'debug',
+  'studio',
+  'attach',
+  'folder',
+  'file',
+  'image',
+  'bind-path',
+  'import-folder',
+  'enter-path',
+]);
+const APA_MODE_IDS = new Set<ComposerPlusAction>(['ask', 'plan', 'agent']);
 
 function modeItemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
   if (scope === 'image') {
     return [{ id: 'attach', label: '', clip: true }];
   }
-  // Debug visible (parked Soon until clinic is ready); Plan/Agent/Multi-agent stay out.
-  // Attach (files + project bind) under the paperclip.
+  // Icons: Debug · Studio · Files · Folder  |  Ask · Plan · Act
   return [
     {
       id: 'debug',
-      label: 'Debug',
+      label: '',
       icon: 'bug',
       comingSoon: isDebugComposerParked(),
     },
+    {
+      id: 'studio',
+      label: '',
+      icon: 'studio',
+    },
     { id: 'attach', label: '', clip: true },
+    { id: 'folder', label: '', icon: 'folder' },
+    { id: 'ask', label: 'Ask' },
+    { id: 'plan', label: 'Plan' },
+    { id: 'agent', label: 'Act' },
   ];
 }
 
@@ -180,18 +200,17 @@ export function ComposerPlusMenu({
 
   const onItemClick = (m: MenuItem) => {
     if (m.comingSoon) return;
-    // Image scope: clip fires attach directly.
-    if (scope === 'image' && m.clip) {
+    // Parked Debug must never arm even if comingSoon flag is stale.
+    if (m.id === 'debug' && isDebugComposerParked()) return;
+    // Clip / folder fire directly from the icon strip (no nested attach panel).
+    if (!attachPanel && m.clip) {
       pick('attach');
       return;
     }
-    // Modes strip: clip opens the attach panel (files + project), does not close the bar.
-    if (!attachPanel && m.clip) {
-      setAttachPanel(true);
+    if (!attachPanel && m.id === 'folder') {
+      pick('folder');
       return;
     }
-    // Parked Debug must never arm even if comingSoon flag is stale.
-    if (m.id === 'debug' && isDebugComposerParked()) return;
     pick(m.id);
   };
 
@@ -221,17 +240,19 @@ export function ComposerPlusMenu({
             </button>
           ) : null}
           {visible.map((m, i) => {
+            const prev = visible[i - 1];
             const showSep =
               !attachPanel
               && i > 0
-              && MODE_IDS.has(visible[i - 1]!.id)
-              && !MODE_IDS.has(m.id);
-            const isClipOnly = Boolean(m.clip) && !m.label;
+              && prev != null
+              && TOOL_IDS.has(prev.id)
+              && APA_MODE_IDS.has(m.id);
+            const isIconOnly = !m.label && (Boolean(m.clip) || Boolean(m.icon));
             const soon = Boolean(m.comingSoon);
             return (
               <span key={`${attachPanel ? 'a' : 'm'}-${m.id}-${i}`} className="contents">
                 {showSep ? (
-                  <span className="mx-1 h-4 w-px bg-surface-border shrink-0" aria-hidden />
+                  <span className="mx-1.5 h-4 w-px bg-surface-border shrink-0" aria-hidden />
                 ) : null}
                 <button
                   type="button"
@@ -247,32 +268,46 @@ export function ComposerPlusMenu({
                   }}
                   title={
                     soon
-                      ? `${m.label} · Coming Soon — find issues in a bound project`
-                      : isClipOnly
-                        ? 'Files, photos, or bind a project folder'
+                      ? 'Debug · Coming soon — find issues in a bound project'
+                      : isIconOnly && m.clip
+                        ? 'Attach files or photos'
                         : m.id === 'attach'
                           ? 'Upload photos, PDFs, notes, or other files'
-                          : m.id === 'bind-path'
-                            ? 'Bind a project folder for Debug and edits'
+                          : m.id === 'folder' || m.id === 'bind-path'
+                            ? 'Bind a project folder'
                             : m.id === 'enter-path'
                               ? 'Type or paste a folder path on this PC'
                               : m.id === 'import-folder'
                                 ? 'Import a copy of a project folder'
-                                : m.id === 'debug'
-                                  ? 'Debug — find issues in a bound project and how to fix them'
-                                  : undefined
+                              : m.id === 'debug'
+                                ? 'Debug — find issues in a bound project'
+                                : m.id === 'studio'
+                                  ? 'Studio — chat, Live, and workspace switches'
+                                  : m.id === 'ask'
+                                    ? 'Ask — answer questions, no file edits'
+                                    : m.id === 'plan'
+                                      ? 'Plan — outline the work before building'
+                                      : m.id === 'agent'
+                                        ? 'Act — edit the bound project'
+                                        : undefined
                   }
                   aria-label={
                     soon
-                      ? `${m.label} (coming soon)`
-                      : isClipOnly
-                        ? 'Attach files or project'
-                        : m.label
+                      ? 'Debug (coming soon)'
+                      : isIconOnly && m.clip
+                        ? 'Attach files'
+                        : isIconOnly && m.icon === 'folder'
+                          ? 'Bind project folder'
+                          : isIconOnly && m.icon === 'bug'
+                            ? 'Debug'
+                            : isIconOnly && m.icon === 'studio'
+                              ? 'Studio'
+                              : m.label || m.id
                   }
                   className={
                     soon
-                      ? 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-content-tertiary opacity-55 cursor-not-allowed whitespace-nowrap'
-                      : isClipOnly
+                      ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-content-tertiary opacity-55 cursor-not-allowed shrink-0'
+                      : isIconOnly
                         ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'
                         : 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors whitespace-nowrap'
                   }
@@ -286,10 +321,10 @@ export function ComposerPlusMenu({
                   {m.icon === 'bug' ? (
                     <Bug className="w-3.5 h-3.5 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
                   ) : null}
-                  {m.label || null}
-                  {soon ? (
-                    <span className="text-[10px] uppercase tracking-wide text-content-tertiary">Soon</span>
+                  {m.icon === 'studio' ? (
+                    <SlidersHorizontal className="w-3.5 h-3.5 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
                   ) : null}
+                  {m.label || null}
                 </button>
               </span>
             );

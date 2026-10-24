@@ -4,6 +4,7 @@
 
 import {
   encodeTraceMessage,
+  isInventAccNoisePath,
   nextTraceStepId,
   traceThoughtFromAsk,
   type AgentFileChange,
@@ -15,6 +16,7 @@ import {
   stripFileBlocks,
 } from '@/lib/projectCodeEdit';
 import { formatReplyElapsed } from '@/lib/speedTest';
+import { coerceHandbackParagraph, formatEditHandback } from '@/lib/taskHandbackReply';
 
 export function buildStudioTraceMessage(opts: {
   startedAt: number;
@@ -27,7 +29,7 @@ export function buildStudioTraceMessage(opts: {
   projectName?: string;
   extraSteps?: AgentTraceStep[];
 }): string {
-  const wrote = (opts.wrotePaths || []).filter(Boolean);
+  const wrote = (opts.wrotePaths || []).filter(Boolean).filter((p) => !isInventAccNoisePath(p));
   const steps: AgentTraceStep[] = [
     {
       id: nextTraceStepId([]),
@@ -60,9 +62,9 @@ export function buildStudioTraceMessage(opts: {
 
   if (opts.extraSteps?.length) steps.push(...opts.extraSteps);
 
-  const fileChanges = opts.fileChanges?.length
-    ? opts.fileChanges
-    : wrote.map(path => ({ path, added: 1, removed: 0 }));
+  const fileChanges = (opts.fileChanges?.length
+    ? opts.fileChanges.filter((c) => !isInventAccNoisePath(c.path))
+    : wrote.map(path => ({ path, added: 1, removed: 0 })));
 
   const payload: AgentTracePayload = {
     startedAt: opts.startedAt,
@@ -144,48 +146,69 @@ export function finalizeCodingChatBubble(opts: {
     if (!cleanProse || /^(?:css|Done\.|Updated)\b/i.test(cleanProse)) {
       return askSpecific;
     }
-    // Good descriptive prose (nav sticky…) — keep it, skip the CODE stub footer.
+    // Good descriptive prose (nav sticky…) — keep it as one polished paragraph.
     if (!/I applied those updates on disk/i.test(cleanProse)) {
-      return cleanProse;
+      return coerceHandbackParagraph(cleanProse);
     }
     return askSpecific;
   }
   if (opts.applyError === 'no_edits' || opts.applyError === 'no_changes') {
-    if (prose) return prose;
-    return (
-      'I’m having an issue — I can’t provide the change you’re asking for right now.\n\n'
-      + 'No template was substituted. Try one clearer ask, and I’ll apply it to the open project.'
-    );
+    if (prose) return coerceHandbackParagraph(prose);
+    return formatEditHandback({
+      ask: opts.userMessage,
+      outcome: 'error',
+      summary: "I'm having an issue — I can't provide the change you're asking for right now. No template was substituted.",
+      surface: 'chat',
+    });
   }
   if (opts.editMode && /\b(?:here'?s the updated|updated codebase|full (?:source|code) below|copy[- ]paste)\b/i.test(stripped)) {
-    return prose || 'I almost pasted source into chat. Ask once more and I will apply the edits on disk only, then show Files Changed.';
+    return coerceHandbackParagraph(
+      prose || 'I almost pasted source into chat. Ask once more and I will apply the edits on disk only, then show Files Changed.',
+    );
   }
   if (opts.applyError === 'no_project') {
-    return 'No project folder is bound to this chat. Say **Create project …** or open the folder with +, then ask again.';
+    return formatEditHandback({
+      ask: opts.userMessage,
+      outcome: 'error',
+      summary: 'No project folder is bound to this chat. Say **Create project …** or open the folder with +, then ask again.',
+      surface: 'chat',
+    });
   }
   if (opts.applyError) {
-    return prose || `Could not save the change: ${opts.applyError}`;
+    return coerceHandbackParagraph(prose || `Could not save the change: ${opts.applyError}`);
   }
   if (opts.changedPaths?.length) {
     if (prose) {
-      return `${prose}\n\nI updated the project files. What would you like to add or polish next?`;
+      return formatEditHandback({
+        ask: opts.userMessage,
+        outcome: 'edit-ok',
+        summary: coerceHandbackParagraph(prose),
+        surface: 'chat',
+      });
     }
     return formatCodeChatReply(opts.userMessage, opts.changedPaths, '', { surface: 'chat' });
   }
   if (/```|@@@FILE/i.test(opts.rawReply) || looksLikeCodeDump(stripped)) {
     // Always keep substantial prose the user already saw streaming — never swap it for a canned line.
     if (prose) {
-      const askNext = opts.editMode
-        ? '\n\nWhat would you like to add or polish next?'
-        : '';
-      return `${prose}${askNext}`;
+      return coerceHandbackParagraph(
+        opts.editMode
+          ? `${prose} What would you like to add or polish next?`
+          : prose,
+      );
     }
     if (opts.editMode === true) {
       return 'Updating your project files on disk… If nothing changes in a moment, say the edit again in one short sentence.';
     }
     // @@@FILE in the raw reply is not proof anything landed on disk.
     if (/@@@FILE\b/i.test(String(opts.rawReply || ''))) {
-      return 'I drafted file updates but could not confirm they were saved. Say the change once more in one short sentence and I will apply it to the open project.';
+      return formatEditHandback({
+        ask: opts.userMessage,
+        outcome: 'edit-partial',
+        summary: 'I drafted file updates but could not confirm they were saved.',
+        missing: 'a clearer one-sentence ask so I can apply it to the open project',
+        surface: 'chat',
+      });
     }
     return 'Happy to keep shaping this with you. What should we improve next — layout, visuals, copy, or a new section?';
   }
@@ -194,9 +217,11 @@ export function finalizeCodingChatBubble(opts: {
     return prose || 'Still working on applying that to your project files…';
   }
   if (stripped && stripped.length > 12 && stripped.length < 400 && !/\b(App\.jsx|App\.css|\.jsx|\.css)\b/i.test(stripped)) {
-    return stripped;
+    return coerceHandbackParagraph(stripped);
   }
-  return stripped || prose || 'Done.';
+  return coerceHandbackParagraph(
+    stripped || prose || formatEditHandback({ ask: opts.userMessage, outcome: 'edit-ok', surface: 'chat' }),
+  );
 }
 
 function looksLikeCodeDump(text: string): boolean {

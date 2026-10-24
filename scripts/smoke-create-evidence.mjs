@@ -32,6 +32,7 @@ const {
   const cp = await import('../src/lib/createCheckpoint.ts');
   return { ...ev, ...cp };
 });
+const { generatedSectionSyntaxProblems } = await import('../src/lib/chatAgentApply.ts');
 
 const todoApp = `import { useState } from 'react';
 export default function App() {
@@ -51,6 +52,13 @@ export default function App() {
 `;
 
 const thin = `export default function App() { return <div />; }`;
+
+{
+  const incomplete = `export default function NavHeaderSection() {\n  return (<nav><a href="#shop">Shop</a></nav>);`;
+  const complete = `${incomplete}\n}`;
+  assert.match(generatedSectionSyntaxProblems({ 'src/sections/NavHeaderSection.jsx': incomplete }).join('; '), /unbalanced JSX braces/);
+  assert.deepEqual(generatedSectionSyntaxProblems({ 'src/sections/NavHeaderSection.jsx': complete }), []);
+}
 
 {
   const s = smokeCheckCreateFiles({ 'src/App.jsx': todoApp }, 'Build a simple todo app with add and delete');
@@ -83,6 +91,21 @@ const thin = `export default function App() { return <div />; }`;
   assert.equal(ev.pass, false, 'HTTP without mount must not PASS');
 }
 {
+  const ev = finalizeCreateEvidence(emptyCreateEvidence({
+    staticReady: true,
+    npmInstalled: true,
+    httpOk: true,
+    mounted: true,
+    consoleClean: true,
+    smokeOk: true,
+    buildOk: false,
+    buildErrors: ['missing export'],
+  }));
+  assert.equal(ev.pass, true, 'a mounted preview can remain inspectable after a build failure');
+  assert.equal(ev.qualityOk, false, 'a failed package build cannot be quality-ready');
+  assert.match(formatEvidenceForAgent(ev), /buildErrors:[\s\S]*missing export/);
+}
+{
   const text = formatEvidenceForAgent(emptyCreateEvidence({ pass: false, mounted: false }));
   assert.match(text, /Create evidence/);
   assert.match(createRuntimeStageLabel('live'), /Live/);
@@ -111,6 +134,18 @@ const thin = `export default function App() { return <div />; }`;
     productName: 'TaskNest',
   });
   assert.equal(bad.ok, false, 'judge must fail thin App');
+  const badBuild = judgeCreateEvidence({
+    evidence: emptyCreateEvidence({
+      staticReady: true, npmInstalled: true, httpOk: true, mounted: true,
+      consoleClean: true, smokeOk: true, pass: true, buildOk: false,
+      buildErrors: ['missing export'],
+    }),
+    files: { 'src/App.jsx': todoApp },
+    brief: 'Build a simple todo app with add and delete',
+    productName: 'TaskNest',
+    requirePlanDesign: false,
+  });
+  assert.equal(badBuild.ok, false, 'a failed package build must fail the host judge');
   const goodBrand = judgeCreateEvidence({
     evidence: emptyCreateEvidence({
       staticReady: true, npmInstalled: true, httpOk: true, mounted: true, consoleClean: true, smokeOk: true, pass: true,
@@ -124,6 +159,40 @@ const thin = `export default function App() { return <div />; }`;
     requirePlanDesign: false,
   });
   assert.equal(goodBrand.ok, true, `soft brand match should pass: ${goodBrand.reasons.join('; ')}`);
+
+  const composedApp = `import NavHeaderSection from './sections/NavHeaderSection.jsx';
+import './App.css';
+export default function App() { return <main className="app"><NavHeaderSection /><section>Welcome</section></main>; }`;
+  const composedFiles = {
+    'src/App.jsx': composedApp,
+    'src/App.css': '.app { min-height: 100vh; }',
+    'src/sections/NavHeaderSection.jsx': 'export default function NavHeaderSection(){ return <nav><span>Moss &amp; Morning</span></nav>; }',
+  };
+  const composed = judgeCreateEvidence({
+    evidence: emptyCreateEvidence({
+      staticReady: true, npmInstalled: true, httpOk: true, mounted: true,
+      consoleClean: true, consoleErrors: [], smokeOk: true, pass: true,
+      renderedSample: 'Moss & Morning Collection Care Tips Store Hours Location',
+    }),
+    files: composedFiles,
+    brief: 'Build a polished neighborhood plant shop website with a featured collection, care tips, store hours, and location.',
+    productName: 'Moss & Morning',
+    requirePlanDesign: false,
+  });
+  assert.equal(composed.ok, true, `composed brand in a section must pass: ${composed.reasons.join('; ')}`);
+
+  const missingVisibleBrand = judgeCreateEvidence({
+    evidence: emptyCreateEvidence({
+      staticReady: true, npmInstalled: true, httpOk: true, mounted: true,
+      consoleClean: true, consoleErrors: [], smokeOk: true, pass: true,
+      renderedSample: 'Collection Care Tips Store Hours Location',
+    }),
+    files: composedFiles,
+    brief: 'Build a polished neighborhood plant shop website with a featured collection, care tips, store hours, and location.',
+    productName: 'Moss & Morning',
+    requirePlanDesign: false,
+  });
+  assert.ok(missingVisibleBrand.reasons.some((reason) => /product brand not visible in Live sample/i.test(reason)));
 }
 {
   const { looksLikeRollbackAsk } = await import('../src/lib/createCheckpoint.ts');

@@ -204,7 +204,7 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
   return `${name} · saved key`;
 }
 
-export function autoRingDetail(brain: ThreadBrain | null, kind?: ThreadBrainKind): string {
+export function autoRingDetail(brain: ThreadBrain | null, _kind?: ThreadBrainKind): string {
   if (!brain) return '';
   if (brain.pinnedSource === 'local') return `Local · ${brain.modelName}`;
   if (brain.pinnedSource === 'optional') return `Optional · ${brain.modelName}`;

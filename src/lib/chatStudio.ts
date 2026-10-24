@@ -94,7 +94,7 @@ function cleanStudioAsk(message: string): string {
   return String(message || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
 

@@ -742,7 +742,7 @@ export function extractBookCandidatesFromLookup(hit: {
   for (const line of String(hit.text || '').split('\n')) {
     const clean = line.replace(/^\s*[-•]\s*/, '').replace(/\s*\(https?:\/\/[^)]+\)\s*/g, '').trim();
     if (looksLikeMetaBookFinderTitle(clean)) continue;
-    const m = clean.match(/\b([A-Z][\w''\-]+(?:\s+[A-Z][\w''\-]+){0,5})\s+by\s+([A-Z][\w.'’-]+(?:\s+[A-Z][\w.'’-]+){0,4})\b/);
+    const m = clean.match(/\b([A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,5})\s+by\s+([A-Z][\w.'’-]+(?:\s+[A-Z][\w.'’-]+){0,4})\b/);
     if (m) push(m[1], m[2]);
   }
 

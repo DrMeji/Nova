@@ -43,13 +43,13 @@ export type NewProjectIntent = {
 };
 
 const CREATE_RE =
-  /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|help\s+me\s+(?:to\s+)?(?:build|make|create)|(?:make|build)\s+(?:me\s+)?(?:an?\s+)(?:new\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?|open\s+(?:a\s+)?(?:vite|react)|kick\s+off(?:\s+(?:a|an))?)\b/i;
+  /\b(?:create|scaffold|ship|port|wrap|implement|convert|migrate|refactor|rewrite|write\s+me\s+(?:a\s+)?|write\s+(?:an?\s+|the\s+)|build\s+me\s+(?:a\s+)?|help\s+me\s+(?:to\s+)?(?:build|make|create)|(?:make|build|ship|port|wrap|implement|convert|migrate|refactor|rewrite)\s+(?:me\s+)?(?:an?\s+|the\s+|this\s+)?(?:new\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?|open\s+(?:a\s+)?(?:vite|react)|kick\s+off(?:\s+(?:a|an))?)\b/i;
 
 const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
 
 const PROJECT_NOUN_RE =
-  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage|shop|store|storefront|boutique|todo(?:s)?|to-?dos?|timer|counter|checklist|list)\b/i;
+  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage|shop|store|storefront|boutique|todo(?:s)?|to-?dos?|timer|counter|checklist|list|cli|command[\s-]?line|api|server|backend|library|package|script|tool|game|extension|service|dashboard|control\s+panel|admin\s+panel|scraper|crawler|spider|clone|pipeline|worker|plugin|middleware|sdk|hook|composable|parser|agent|rag|etl|consumer|indexer|generator|converter|downloader|classifier|detector|workflow|module|terraform|helm|dockerfile|processor|engine|demo|physics|scene|editor|interface|system|tracker|puzzle|tester|playground|router|client|board|synth|loader|splitter|merger|crm|pos|kanban|sudoku|quiz|habit|expense|booking|helpdesk|inventory|markdown|tiptap|codemirror|monaco|gradio|streamlit|fastapi|langchain|lambda|webhook|port|wrap|wrapper|imap|mdx|search\s+engine|search\s+service|search\s+ui|fuse\.?js|folium|geopandas|ocr|neural\s+net|cron\s+job|load\s+tester|dns\s+lookup|note\s+editor|chat\s+ui|chatbots?|prompt\s+playground|collaborative\s+filter|stable\s+diffusion|typing\s+(?:speed\s+)?test|edge\s+function|cloud\s+function|azure\s+function|serverless(?:\s+function)?|github\s+actions?|cypress|vitest|jest|playground|previewer|formatter|debugger|encoder|tester|clone|lobby|sitemap|changelog|migration|pubsub|insomnia|postman|excalidraw|storybook|tailwind\s+ui|block\s+kit|hasura|diff\s+viewer|figma|canvas|handler|addon|kit|ember|angular|widget|suite|schema|resolvers?|receiver|interceptor|formula|firmware|flake|sketch|arduino|esp32|homebrew|rate\s+limiter|swiftui|kotlin|compose)\b/i;
 
 /**
  * True when the user is refusing file/project creation (talk-first).
@@ -81,7 +81,7 @@ export function isCreateRefusedAsk(message: string): boolean {
  */
 /** Product nouns that map to single-object catalog visuals (not a new website). */
 export const PRODUCT_VISUAL_NOUN_RE =
-  /\b(?:microphones?|mics?\b|headphones?|headsets?|earbuds?|guitars?|keyboards?|mice|mouse|watches?|bottles?|iphones?|smartphones?|phones?|gpus?|graphics\s*cards?|monitors?|displays?|pc\s*cases?|computer\s*cases?|desks?|mouse\s*pads?|google\s*homes?|smart\s*speakers?|speakers?|webcams?|cameras?|laptops?|tablets?|ipads?|routers?|consoles?|controllers?|gamepads?|beds?|chairs?)\b/i;
+  /\b(?:microphones?|mics?\b|headphones?|headsets?|earbuds?|guitars?|keyboards?|mice|mouse|watches?|bottles?|iphones?|smartphones?|phones?|gpus?|graphics\s*cards?|monitors?|displays?|pc\s*cases?|computer\s*cases?|desks?|mouse\s*pads?|google\s*homes?|smart\s*speakers?|speakers?|webcams?|cameras?|laptops?|tablets?|ipads?|routers?|(?:game\s+)?consoles?(?!\s*\.)|controllers?|gamepads?|beds?|chairs?)\b/i;
 
 export function looksLikeProductVisualObjectAsk(message: string): boolean {
   const t = String(message || '').trim();

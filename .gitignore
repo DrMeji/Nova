@@ -45,8 +45,16 @@ supabase/.temp/
 # Overnight compare loop (temp creds, reference builds, shots)
 _overnight/
 
+# Local agent scratch
+.freebuff/
+opencode.jsonc
+opencode.json
+.nvidia-api-key
+scripts/claude-nvidia/.env*
+
 # Local agent / live-test junk
 .tmp*
+scripts/_probe-*
 .tmp-*/
 tmp-*.png
 tmp-*.jpg
@@ -70,4 +78,17 @@ scripts/inspect-ark-builds.mjs
 scripts/nav-chat-check.mjs
 scripts/reload-check.mjs
 scripts/_splash-preview*
+
+
+# Local agent launchers (not product)
+Open-Claude-Code-*.bat
+Open-OpenCode.bat
+Open-Temp-Nova.bat
+temp-nova/
+scripts/claude-nvidia/
+
+# Deep-rescan living matrix / local research blobs (not for GitHub)
+scripts/data/
+claude-upload/
+claude-upload-*/
 

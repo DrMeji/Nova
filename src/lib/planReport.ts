@@ -38,8 +38,8 @@ export type PlanReport = {
   };
 };
 
-const PLAN_OPEN = '<!--nova-plan-report-->';
-const PLAN_CLOSE = '<!--/nova-plan-report-->';
+
+
 
 export const PLAN_ARM_MARKER = '__NOVA_ARM_PLAN__';
 
@@ -673,7 +673,7 @@ export function buildPlanBriefFromThread(
   for (const m of (messages || []).slice(-10)) {
     const role = String(m?.role || '');
     if (role !== 'user' && role !== 'assistant') continue;
-    let body = String(m?.content || '')
+    const body = String(m?.content || '')
       .replace(/<!--[\s\S]*?-->/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();

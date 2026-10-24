@@ -28,10 +28,15 @@ import {
   resolveConversationalEditAsk,
   rememberLastEditTopic,
   inferEditTopicFromAsk,
+  looksLikeRevertEditAsk,
+  looksLikeRedoEditAsk,
 } from '@/lib/editAskResolve';
 import {
   getApplySnapshot,
   clearApplySnapshot,
+  getRedoSnapshot,
+  clearRedoSnapshot,
+  pushRedoSnapshot,
   snapshotToRevertBlocks,
 } from '@/lib/chatApplySnapshotStore';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
@@ -100,38 +105,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
   const prep = await prepareAIChatSend(content, ctx);
   if (prep.status === 'done') return;
 
-  const {
-    mode,
-    activeChatId,
-    assistantId,
-    mySeq,
-    finishPlainReply,
-    clearGeneratingIfMineEarly,
-    pushAssistantStatus,
-    resolvedStudio,
-    chatStudioFilesRef,
-    chatStudioDiskRootRef,
-    chatStudioProjectIdRef,
-    setChatStudioFiles,
-    setChatStudioDiskRoot,
-    setChatStudioProjectId,
-    pinnedModel,
-    composerMode,
-    diskIntent,
-    genSeqRef,
-    genSeqByChatRef,
-    activeGenChatIdRef,
-    routeChatIdAtTurnStart,
-    backgroundAllowed,
-    stopRequestedRef,
-    stopRequestedByChatRef,
-    threadBrainRef,
-    messagesRef,
-    routeChatIdRef,
-    chatRouteSeedRef,
-    chatTurnCtlRef,
-    flushQueuedSend,
-  } = prep;
+  const { mode, activeChatId, assistantId, mySeq, finishPlainReply, clearGeneratingIfMineEarly, pushAssistantStatus, resolvedStudio, chatStudioFilesRef, chatStudioDiskRootRef, chatStudioProjectIdRef, setChatStudioFiles, setChatStudioDiskRoot, setChatStudioProjectId, pinnedModel, composerMode, diskIntent, genSeqRef, genSeqByChatRef, routeChatIdAtTurnStart, backgroundAllowed, stopRequestedRef, stopRequestedByChatRef, threadBrainRef, messagesRef, routeChatIdRef, chatRouteSeedRef, chatTurnCtlRef, flushQueuedSend } = prep;
 
   if (prep.status === 'owned' && (mode === 'general' || mode === 'code')) {
     const turnCtx = await hydrateStudio({
@@ -757,13 +731,99 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       messages: messagesRef.current,
       workspaceBound,
       hasApplySnapshot: Boolean(getApplySnapshot(activeChatId)),
+      hasRedoSnapshot: Boolean(getRedoSnapshot(activeChatId)),
     });
     const editContent = resolvedAsk.content;
+
+    // Undo/redo with no buffer must never fall into inventing (2‑minute hang).
+    if (
+      !resolvedAsk.revertSnapshot
+      && !resolvedAsk.redoSnapshot
+      && (looksLikeRedoEditAsk(prep.content) || looksLikeRevertEditAsk(prep.content))
+    ) {
+      const isRedo = looksLikeRedoEditAsk(prep.content);
+      const reply = buildStudioTraceMessage({
+        startedAt: prep.replyStartedAt,
+        elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
+        userMessage: prep.content,
+        answer: isRedo
+          ? 'Nothing to redo yet — undo a change first, then ask me to redo it.'
+          : 'Nothing to undo yet — make a file change first, then ask me to undo it.',
+        wrotePaths: [],
+        projectName: resolvedStudio.name || 'App',
+      });
+      await finishPlainReply(reply, isRedo ? 'NOVA · redo' : 'NOVA · undo');
+      return;
+    }
+
+    if (resolvedAsk.redoSnapshot && workspaceBound) {
+      const redo = getRedoSnapshot(activeChatId);
+      const blocks = redo ? snapshotToRevertBlocks(redo) : '';
+      if (redo && blocks) {
+        const applied = await applyChatReplyEdits({
+          reply: blocks,
+          projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+          projectName: resolvedStudio.name || 'project',
+          files: redo.files,
+          userMessage: 'redo last change',
+          diskRoot: redo.diskRoot,
+        });
+        if (applied.ok) {
+          setChatStudioFiles(applied.files);
+          chatStudioFilesRef.current = applied.files;
+          prep.persistStudioSnapshot(activeChatId, {
+            files: applied.files,
+            projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+            diskRoot: redo.diskRoot,
+          });
+          clearRedoSnapshot(activeChatId);
+          const answer = finalizeCodingChatBubble({
+            userMessage: prep.content,
+            rawReply: '',
+            changedPaths: applied.updated,
+            applied: true,
+          }) || 'Redid the last undone change.';
+          const reply = buildStudioTraceMessage({
+            startedAt: prep.replyStartedAt,
+            elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
+            userMessage: prep.content,
+            answer,
+            wrotePaths: applied.updated,
+            projectName: resolvedStudio.name || 'App',
+          });
+          await finishPlainReply(reply, 'NOVA · redo');
+          return;
+        }
+      }
+      // No redo buffer — finish cleanly instead of inventing for 2 minutes.
+      const reply = buildStudioTraceMessage({
+        startedAt: prep.replyStartedAt,
+        elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
+        userMessage: prep.content,
+        answer: 'Nothing to redo yet — undo a change first, then ask me to redo it.',
+        wrotePaths: [],
+        projectName: resolvedStudio.name || 'App',
+      });
+      await finishPlainReply(reply, 'NOVA · redo');
+      return;
+    }
 
     if (resolvedAsk.revertSnapshot && workspaceBound) {
       const snap = getApplySnapshot(activeChatId);
       const blocks = snap ? snapshotToRevertBlocks(snap) : '';
       if (snap && blocks) {
+        // Save current (forward) files so redo can restore them.
+        const current = chatStudioFilesRef.current || {};
+        pushRedoSnapshot({
+          chatId: activeChatId,
+          assistantId: String(assistantId || ''),
+          diskRoot: snap.diskRoot,
+          files: { ...current },
+          updatedPaths: snap.updatedPaths.length
+            ? snap.updatedPaths
+            : Object.keys(current).filter((p) => /\.(jsx?|tsx?|css|html)$/i.test(p)),
+          at: Date.now(),
+        });
         const applied = await applyChatReplyEdits({
           reply: blocks,
           projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
@@ -791,7 +851,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
             rawReply: '',
             changedPaths: applied.updated,
             applied: true,
-          }) || 'Put it back — restored the previous version.';
+          }) || 'Undid the last change.';
           const reply = buildStudioTraceMessage({
             startedAt: prep.replyStartedAt,
             elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
@@ -804,6 +864,17 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
           return;
         }
       }
+      // Undo ask with no snapshot — don't hang on inventing agent.
+      const reply = buildStudioTraceMessage({
+        startedAt: prep.replyStartedAt,
+        elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
+        userMessage: prep.content,
+        answer: 'Nothing to undo yet — make a file change first, then ask me to undo it.',
+        wrotePaths: [],
+        projectName: resolvedStudio.name || 'App',
+      });
+      await finishPlainReply(reply, 'NOVA · undo');
+      return;
     }
 
     const bag: HostBag = {
@@ -1181,7 +1252,8 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     }
     const threadChatId = activeChatId;
     const viewingThisThread = Boolean(threadChatId && routeChatIdRef.current === threadChatId);
-    const cleaned = String(finalText || '').trim() || 'Done.';
+    const cleaned = String(finalText || '').trim()
+      || "I've finished that pass — open **Live** to review, or tell me what to do next.";
     const next = messagesRef.current.map((m) => (
       m.id === assistantId
         ? { ...m, content: cleaned, provider_used: provider || 'NOVA', library_id: libraryId }

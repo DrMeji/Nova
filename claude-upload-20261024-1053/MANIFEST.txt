@@ -1,0 +1,10 @@
+﻿NOVA CURRENT PACK — 20261024-1053
+Matrix: 307 asks green on working tree.
+
+REQUIRED MARKERS (must be >0 or STALE):
+- createThinPath.ts → codingUnknown
+- novaBuildLoop.ts → wroteCodeEver AND unknownHasRealSource
+- artifactEvidence.ts → rendererReal AND dnrReal AND TEST_PATH_RE
+- createArtifactKind.ts → NON_WEB_STACK_RE OR tracker|planner|finder
+
+Do not use older claude-upload* folders.

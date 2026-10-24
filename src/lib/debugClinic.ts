@@ -322,17 +322,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-function eligiblePaths(files: ProjectFileMap): string[] {
-  const flat = flattenProjectFiles(files);
-  return Object.keys(flat)
-    .filter((p) => !isBuildArtifactPath(p))
-    .filter((p) => {
-      const raw = String(flat[p] || '');
-      if (!raw.trim() || /^\[(image|binary|file)/i.test(raw.trim())) return false;
-      return SOURCE_RE.test(p) || /(^|\/)(Dockerfile|Makefile|\.env)/i.test(p);
-    })
-    .sort((a, b) => a.length - b.length || a.localeCompare(b));
-}
+
 
 function detectStack(keys: string[], flat: Record<string, string>): string {
   if (keys.some((k) => /electron\//i.test(k) || /from ['"]electron['"]/.test(String(flat[k] || '').slice(0, 1500)))) {
@@ -349,7 +339,7 @@ function detectStack(keys: string[], flat: Record<string, string>): string {
   return 'Mixed / unknown';
 }
 
-function inventoryPass(files: ProjectFileMap, projectName: string): ClinicInventory {
+function inventoryPass(files: ProjectFileMap, _projectName: string): ClinicInventory {
   const flat = flattenProjectFiles(files);
   const keys = Object.keys(flat).filter((k) => !isBuildArtifactPath(k));
   const entry = preferredEntryPath(files);

@@ -21,9 +21,16 @@ const SIMPLE_COLOR_BUTTON_TOY =
 export function looksLikeSimpleBuildToyChatAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // "not just a background color" / split-photo redesigns are project edits, not toys.
+  if (/\b(?:not\s+just|more\s+than|beyond)\s+(?:a\s+)?background\s+color\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:graphic\s+design|split\s+layout|hero\s+photo|product\s+photos?|look\s+different|visual\s+design)\b/i.test(t)) {
+    return false;
+  }
   const toyHit = SIMPLE_BUILD_TOY.test(t) || SIMPLE_COLOR_BUTTON_TOY.test(t);
   if (!toyHit) return false;
-  if (/\b(?:on\s+disk|scaffold|create\s+(?:the\s+)?(?:files|project)|lets?\s+build\s+this|build\s+it\s+now|open\s+preview|@@@FILE)\b/i.test(t)) {
+  if (/\b(?:on\s+disk|scaffold|create\s+(?:the\s+)?(?:files|project)|start\s+(?:a\s+)?new\s+project|new\s+project\s+with|plain\s+white\s+blank|blank\s+(?:white\s+)?page|lets?\s+build\s+this|build\s+it\s+now|open\s+preview|@@@FILE)\b/i.test(t)) {
     return false;
   }
   if (/\b(?:add|fix|change|update)\b[\s\S]{0,40}\b(?:this|the\s+)(?:app|site|project|folder)\b/i.test(t)) {

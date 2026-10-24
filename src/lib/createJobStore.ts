@@ -9,7 +9,16 @@ import { verifyCreateRenderedQuality } from '@/lib/createEvidence';
 import { preserveOriginalBriefInPrompt } from '@/lib/createBriefContext';
 import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
 import { briefWantsProductLadder, gradeProductQuality } from '@/lib/createProductLadder';
+import { artifactWantsProductLadder } from '@/lib/createArtifactKind';
 import { briefWantsStorefrontLadder, gradeStorefrontQuality } from '@/lib/createStorefrontLadder';
+import { CODING_AGENT_PACK, looksLikePlaceholderFloor } from '@/lib/codingAgentPack';
+import { HARNESS_PACK, harnessQualityReadyGate } from '@/lib/agentHarness';
+import { smokeCheckCreateFiles } from '@/lib/createEvidence';
+import { isChatDeleted } from '@/lib/recentStore';
+import { detectProjectKind } from '@/lib/projectKind';
+import type { ArtifactKind } from '@/lib/createArtifactKind';
+import { isNonWebArtifactKind, resolveArtifactKind } from '@/lib/createArtifactKind';
+import type { ArtifactEvidence } from '@/lib/artifactEvidence';
 
 export type CreateJobStatus = 'writing' | 'npm' | 'verifying' | 'ready' | 'failed';
 
@@ -24,6 +33,13 @@ export type CreateJob = {
   originalBrief?: string;
   /** Full prompt context used to generate the project. */
   generationBrief?: string;
+  /**
+   * Resolved once at create start — product ladder / desk seeds / Premium gates
+   * must only run when this is `product-site`.
+   */
+  artifactKind?: ArtifactKind;
+  /** Non-web Ready proof (CLI/API/etc.) — no Live preview URL required when runOk. */
+  artifactEvidence?: ArtifactEvidence;
   status: CreateJobStatus;
   previewUrl?: string | null;
   error?: string;
@@ -201,16 +217,41 @@ export function getCreateJobForPath(diskPath: string): CreateJob | null {
   return null;
 }
 
+function isReusableCreateJob(job: CreateJob | null | undefined): job is CreateJob {
+  if (!job) return false;
+  if (!String(job.path || '').trim()) return false;
+  if (job.status === 'failed' && !job.previewUrl) return false;
+  return true;
+}
+
 /**
- * Most recent create job that still has a disk folder — used when a UI edit ask
- * lands in a chat that lost its Folder/Code bind (e.g. New Chat mid step-ladder).
+ * Resolve a create job for edits when Folder/Code bind was lost.
+ *
+ * Default is chat-owned only. Cross-chat "latest anywhere" caused App↔VoltCore
+ * misbinds and wrote edits into unrelated/deleted projects. Pass
+ * `allowCrossChat: true` only for explicit recovery UX — and even then, skip
+ * tombstoned owner chats.
  */
-export function getLatestReusableCreateJob(): CreateJob | null {
+export function getLatestReusableCreateJob(opts?: {
+  chatId?: string | null;
+  /** Dangerous — prefer sticky disk / chat-owned bind instead. */
+  allowCrossChat?: boolean;
+}): CreateJob | null {
   hydrateAllFromSession();
+  const chatId = String(opts?.chatId || '').trim();
+  if (chatId) {
+    const owned = getCreateJobForChat(chatId);
+    if (isReusableCreateJob(owned)) return owned;
+    if (!opts?.allowCrossChat) return null;
+  } else if (!opts?.allowCrossChat) {
+    // No chat scope and no explicit cross-chat — refuse to guess a project.
+    return null;
+  }
+
   let best: CreateJob | null = null;
   for (const job of jobs.values()) {
-    if (!String(job.path || '').trim()) continue;
-    if (job.status === 'failed' && !job.previewUrl) continue;
+    if (!isReusableCreateJob(job)) continue;
+    if (isChatDeleted(String(job.chatId || ''))) continue;
     if (!best || (Number(job.updatedAt) || 0) > (Number(best.updatedAt) || 0)) {
       best = job;
     }
@@ -274,15 +315,70 @@ export function markCreateJobReady(
   id: string,
   previewUrl?: string | null,
   observation?: string,
-  opts?: { allowDespiteCraftBlocked?: boolean; brief?: string; requireQuality?: boolean },
+  opts?: {
+    allowDespiteCraftBlocked?: boolean;
+    brief?: string;
+    requireQuality?: boolean;
+    /** Non-web creates (CLI / Python / library) — Ready without a Live preview URL. */
+    allowWithoutPreview?: boolean;
+    artifactEvidence?: ArtifactEvidence;
+    artifactKind?: ArtifactKind;
+  },
 ): void {
   const url = String(previewUrl || '').trim();
-  if (!url) {
+  const prev = jobs.get(id);
+  const briefForKind = String(opts?.brief || prev?.originalBrief || '').trim();
+  const kind = opts?.artifactKind || prev?.artifactKind;
+  const evidence = opts?.artifactEvidence || prev?.artifactEvidence;
+  let nonWebReady = Boolean(opts?.allowWithoutPreview);
+  if (!nonWebReady && kind && isNonWebArtifactKind(kind)) {
+    nonWebReady = true;
+  }
+  // Prefer artifactKind / explicit allowWithoutPreview — do not re-guess from brief
+  // via detectProjectKind (that mislabeled product nouns as CLI and vice versa).
+  if (!nonWebReady && !kind && briefForKind) {
+    const guessed = resolveArtifactKind(briefForKind);
+    if (isNonWebArtifactKind(guessed)) {
+      nonWebReady = true;
+    }
+  }
+  if (!url && !nonWebReady) {
     // CONFLICT REMOVED: Ready-without-Live URL unlocked blank Live windows.
     markCreateJobFailed(id, 'Cannot mark Ready without a Live preview URL');
     return;
   }
-  const prev = jobs.get(id);
+  if (!url && nonWebReady) {
+    // CLI / library: Ready means files + evidence, not a browser preview.
+    if (!prev) return;
+    if (!opts?.allowDespiteCraftBlocked && (prev.status === 'failed' || prev.craftBlocked)) {
+      updateCreateJob(id, {
+        evidencePass: false,
+        status: 'failed',
+        blockedReasons: prev.blockedReasons,
+      });
+      return;
+    }
+    // Non-web Ready always requires evidence.runOk — never Ready on Acc shape alone.
+    if (!evidence || evidence.runOk !== true) {
+      markCreateJobFailed(id, `artifact evidence missing: ${evidence?.runDetail || 'not run'}`, undefined, {
+        craftBlocked: true,
+        blockedReasons: [evidence?.runDetail || 'artifact evidence failed'],
+      });
+      return;
+    }
+    updateCreateJob(id, {
+      status: 'ready',
+      evidencePass: true,
+      craftBlocked: false,
+      blockedReasons: [],
+      previewUrl: null,
+      artifactKind: kind || prev.artifactKind,
+      artifactEvidence: evidence || prev.artifactEvidence,
+      lastObservation: observation || evidence?.runDetail || 'Ready · non-web create (no Live URL required)',
+      stage: 'done',
+    });
+    return;
+  }
   if (!opts?.allowDespiteCraftBlocked && prev) {
     const originalBrief = String(opts?.brief || prev.originalBrief || '').trim();
     if (prev.status === 'failed' || prev.craftBlocked) {
@@ -318,14 +414,18 @@ export function markCreateJobReady(
       const rendered = verifyCreateRenderedQuality(prev.files || {}, originalBrief, prev.name);
       qualityGateReasons.push(...rendered.reasons);
     }
-    // Product / brand landings: Ready requires Quality+ on the product ladder (Nova source gate).
+    // Product / brand landings: Ready requires Premium+ — only for product-site artifacts.
     let productLadderBlocked = false;
-    if (originalBrief && briefWantsProductLadder(originalBrief)) {
+    if (
+      originalBrief
+      && artifactWantsProductLadder(kind || prev.artifactKind, originalBrief)
+      && briefWantsProductLadder(originalBrief)
+    ) {
       const graded = gradeProductQuality(prev.files || {}, originalBrief, prev.name || '');
-      if (!graded.okQuality) {
+      if (!graded.okPremium) {
         productLadderBlocked = true;
         qualityGateReasons.push(
-          `product ladder ${graded.label} — Ready needs Quality+`,
+          `product ladder ${graded.label} — Ready needs Premium+`,
           ...graded.reasons.slice(0, 4),
         );
       }
@@ -470,20 +570,61 @@ export function markCreateJobReadyVerified(
   observation: string,
   brief: string,
   files: Record<string, string>,
-  opts?: { qualityReady?: boolean },
+  opts?: { qualityReady?: boolean; artifactKind?: ArtifactKind },
 ): void {
-  updateCreateJob(id, { files, originalBrief: brief });
+  updateCreateJob(id, {
+    files,
+    originalBrief: brief,
+    ...(opts?.artifactKind ? { artifactKind: opts.artifactKind } : {}),
+  });
+  // Coding-agent pack: placeholder floors never get quality Ready (Live unlock only).
+  const floor = CODING_AGENT_PACK.rejectFloorAsReady
+    ? looksLikePlaceholderFloor(files)
+    : { floor: false, reasons: [] as string[] };
   const rendered = verifyCreateRenderedQuality(files, brief, jobs.get(id)?.name || '');
-  if (opts?.qualityReady === false || !rendered.ok) {
+  const smoke = smokeCheckCreateFiles(files, brief);
+  const harness = HARNESS_PACK.generatorNeEvaluator || HARNESS_PACK.binaryRubric
+    ? harnessQualityReadyGate({
+      files,
+      brief,
+      brand: jobs.get(id)?.name || '',
+      evidence: {
+        mounted: true,
+        consoleClean: true,
+        smokeOk: smoke.ok,
+        floor: floor.floor,
+      },
+      smoke,
+    })
+    : { ok: true, reasons: [] as string[], progressMd: '', artifacts: null, rubricFailed: [] as string[] };
+
+  // Persist progress.md into job files when harness says so.
+  if (harness.progressMd && HARNESS_PACK.progressMd) {
+    updateCreateJob(id, {
+      files: { ...files, 'PROGRESS.md': harness.progressMd },
+      originalBrief: brief,
+    });
+  }
+
+  if (opts?.qualityReady === false || !rendered.ok || floor.floor || !harness.ok) {
+    const denyReasons = floor.floor
+      ? floor.reasons
+      : !harness.ok
+        ? harness.reasons
+        : rendered.reasons;
     markCreateJobLiveOpen(
       id,
       previewUrl,
-      opts?.qualityReady === false
-        ? (observation || 'Live mounted · quality not verified')
-        : `Live mounted; Ready denied: ${rendered.reasons.slice(0, 3).join('; ')}`,
+      floor.floor
+        ? `Live mounted · floor salvage — quality Ready withheld (${floor.reasons.slice(0, 2).join('; ')})`
+        : opts?.qualityReady === false
+          ? (observation || 'Live mounted · quality not verified')
+          : !harness.ok
+            ? `Live mounted; harness Ready denied: ${harness.reasons.slice(0, 3).join('; ')}`
+            : `Live mounted; Ready denied: ${rendered.reasons.slice(0, 3).join('; ')}`,
       brief,
-      files,
-      rendered.ok ? undefined : rendered.reasons.slice(0, 12),
+      harness.progressMd ? { ...files, 'PROGRESS.md': harness.progressMd } : files,
+      denyReasons.slice(0, 12),
     );
     return;
   }
@@ -506,4 +647,38 @@ export function markCreateJobFailed(
     stage: opts?.craftBlocked ? 'craft-blocked' : undefined,
     lastObservation: observation ? String(observation).slice(0, 400) : String(error || '').slice(0, 400),
   });
+}
+
+/** Agents Kanban — all known create jobs (memory + session hydrate). */
+export function listCreateJobs(): CreateJob[] {
+  const byId = new Map<string, CreateJob>();
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (!key || !key.startsWith('nova-create-job:')) continue;
+      const chatId = key.slice('nova-create-job:'.length);
+      const job = getCreateJobForChat(chatId);
+      if (job?.id) byId.set(job.id, job);
+    }
+  } catch { /* private mode */ }
+  for (const job of jobs.values()) {
+    if (job?.id) byId.set(job.id, job);
+  }
+  return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/** Stop an in-flight create from the Agents desk. */
+export function cancelCreateJob(id: string): void {
+  const prev = getCreateJob(id);
+  if (!prev) return;
+  if (prev.status === 'ready' || prev.status === 'failed') return;
+  markCreateJobFailed(id, 'Cancelled from Agents', 'Stopped from Agents Kanban');
+}
+
+/** Brief text to re-queue a failed/ready job (composer retry). */
+export function createJobRetryBrief(id: string): string | null {
+  const job = getCreateJob(id);
+  if (!job) return null;
+  const brief = String(job.originalBrief || job.generationBrief || '').trim();
+  return brief || null;
 }

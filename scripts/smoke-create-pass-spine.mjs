@@ -31,6 +31,7 @@ const {
   CREATE_PASS_ORDER,
 } = await import('../src/lib/createPassSpine.ts');
 const { emptyCreateEvidence, finalizeCreateEvidence, createEvidencePassDefinition } = await import('../src/lib/createEvidence.ts');
+const { formatCompositionalSectionSpecs } = await import('../src/lib/createThinPath.ts');
 
 const CASES = [
   { brief: 'Build a habit tracker app with streaks', name: 'Streakly', family: 'app-chrome' },
@@ -56,6 +57,75 @@ for (const c of CASES) {
 }
 
 assert.deepEqual([...CREATE_PASS_ORDER], ['plan', 'structure', 'design', 'interact', 'verify', 'critic']);
+
+{
+  const brief = 'Build a brand website with an origin story and collection';
+  const name = 'Verdant';
+  const evidence = finalizeCreateEvidence(emptyCreateEvidence({
+    staticReady: true, npmInstalled: true, httpOk: true, mounted: true,
+    consoleClean: true, smokeOk: true,
+  }));
+  const partial = judgeCreateVerified({
+    evidence,
+    files: { 'src/App.jsx': 'export default function App(){return <main/>}', 'src/App.css': '.app{}' },
+    brief,
+    productName: name,
+  });
+  // Coding foundation: mount evidence unlocks Live; missing sections only block qualityReady.
+  assert.equal(partial.liveUnlock, true, 'mounted evidence unlocks Live without full composition');
+  assert.equal(partial.qualityReady, false, 'missing sections still deny quality Ready');
+  const sections = Object.fromEntries(formatCompositionalSectionSpecs(brief, name).map((spec) => [
+    spec.filePath,
+    `export default function ${spec.componentName}(){return <section><h2>${spec.slotLabel}</h2><p>${'Original copy for this product. '.repeat(18)}</p></section>;}`,
+  ]));
+  const complete = judgeCreateVerified({
+    evidence,
+    files: { 'src/App.jsx': 'export default function App(){return <main/>}', 'src/App.css': '.app{}', ...sections },
+    brief,
+    productName: name,
+  });
+  assert.equal(complete.liveUnlock, true, 'complete sections still permit Live unlock');
+  // Mount + 3 of N sections: Live ok, quality still soft-fail on composition.
+  const {
+    thinMeetsLiveVisualFloor,
+    THIN_LIVE_VISUAL_MIN_LANDED_SECTIONS,
+    THIN_LIVE_VISUAL_MIN_CSS,
+    THIN_LIVE_VISUAL_MIN_CHARS,
+    assembleCompositionalAppShell,
+    compositionalDepthIsComplete,
+  } = await import('../src/lib/createThinPath.ts');
+  const ginBrief = 'Build a polished gin brand website with tasting notes, shop, and subscribe for Harbor & Oak Distilling';
+  const ginName = 'Harbor & Oak';
+  const ginSpecs = formatCompositionalSectionSpecs(ginBrief, ginName);
+  const three = ginSpecs.slice(0, THIN_LIVE_VISUAL_MIN_LANDED_SECTIONS);
+  let threeFiles = {
+    'src/App.css': `.app{min-height:100dvh;${'d'.repeat(THIN_LIVE_VISUAL_MIN_CSS + 80)}}`,
+    'public/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 22h8M12 2v4"/></svg>',
+  };
+  for (const s of three) {
+    threeFiles[s.filePath] = (
+      `export default function ${s.componentName}(){return (<section id="${s.slotLabel}"><h2>${s.slotLabel}</h2>`
+      + `<p>${'Original copy for this product. '.repeat(24)}</p>`
+      + `<p>${'More authored detail. '.repeat(12)}</p></section>);}`
+    );
+  }
+  threeFiles = assembleCompositionalAppShell(threeFiles, ginBrief, ginName);
+  threeFiles['src/App.jsx'] = `${threeFiles['src/App.jsx'] || ''}\n/* ${' '.repeat(Math.max(0, THIN_LIVE_VISUAL_MIN_CHARS - 200))} */\n`;
+  assert.equal(thinMeetsLiveVisualFloor(threeFiles, ginBrief), true, '3 sections meet visual floor');
+  assert.equal(compositionalDepthIsComplete(threeFiles, ginBrief, ginName), false, '3 of N still incomplete');
+  const threeJudge = judgeCreateVerified({
+    evidence,
+    files: threeFiles,
+    brief: ginBrief,
+    productName: ginName,
+  });
+  assert.equal(threeJudge.liveUnlock, true, 'mounted + incomplete composition still unlocks Live');
+  assert.equal(threeJudge.qualityReady, false, 'incomplete composition still denies quality Ready');
+  assert.ok(
+    (threeJudge.reasons || []).some((r) => /compositional content incomplete/i.test(r)),
+    'spine cites incomplete composition for quality',
+  );
+}
 
 // Thin marketing mush must not quality-Ready for a habit ask.
 {
@@ -146,14 +216,30 @@ export default function App() {
     consoleClean: true,
     smokeOk: true,
   }));
-  const floored = judgeCreateVerified({
+  // Ridge Latch: floorFallback alone on craft Acc (not invent-floor twin) may Ready.
+  // Twin stamp + floorFallback must still withhold quality Ready.
+  const twinAcc = {
+    'src/App.jsx': `import './App.css';
+export default function App(){return <div className="app hero-fullbleed"><h1>Willow Latch Atelier</h1><p>Handcrafted bags in quiet leather</p><p>Parchment grounds, espresso type, warm brass hardware</p><p>Four everyday bags with honest materials</p><ul><li>Weekender</li><li>Crossbody</li><li>Tote</li><li>Belt Bag</li></ul><footer>Visit the atelier · Write us for commissions · Open by appointment</footer></div>}`,
+    'src/App.css': '.app{background:#f5f0e8}.hero-fullbleed{min-height:100vh}',
+  };
+  const flooredTwin = judgeCreateVerified({
+    evidence: ev,
+    files: twinAcc,
+    brief: 'Professional premium leather-goods atelier site with parchment and brass',
+    productName: 'Willow Latch Atelier',
+    floorFallback: true,
+  });
+  assert.equal(flooredTwin.qualityReady, false, 'floor fallback + invent-floor twin must never quality-Ready');
+  const flooredRepair = judgeCreateVerified({
     evidence: ev,
     files: shell,
     brief: 'Build a notes app with folders and empty state',
     productName: 'LeafNote',
     floorFallback: true,
+    repairOwnedProduct: true,
   });
-  assert.equal(floored.qualityReady, false, 'floor fallback must never quality-Ready');
+  assert.equal(flooredRepair.qualityReady, false, 'repair-owned floor must never quality-Ready');
   const good = judgeCreateVerified({
     evidence: ev,
     files: {

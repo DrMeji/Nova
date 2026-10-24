@@ -1310,6 +1310,7 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
         const text = chunkBuf;
         chunkBuf = '';
         try {
+          if (event.sender.isDestroyed?.()) return;
           event.sender.send('NOVA:engine-chunk', { webContentsId, text });
         } catch {
           /* ignore */
@@ -1326,8 +1327,8 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
         onChunk: (text) => {
           chunkBuf += String(text || '');
           if (chunkTimer) return;
-          // Coalesce lightly (~24ms) so Code can paint near line-by-line, not big chunks.
-          chunkTimer = setTimeout(flushChunks, 24);
+          // Coalesce toward UI budget (~100ms) — 24ms flooded React/Code and froze the shell.
+          chunkTimer = setTimeout(flushChunks, 100);
         },
       }).finally(() => {
         flushChunks();
@@ -1349,6 +1350,22 @@ ipcMain.handle('NOVA:engine-generate-cancel', async (_e, payload) => {
     }) || { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Cancel failed' };
+  }
+});
+
+ipcMain.handle('NOVA:engine-set-perf-policy', async (_e, policy) => {
+  try {
+    return { ok: true, policy: novaGguf.setGgufPerfPolicy?.(policy || {}) || null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Perf policy failed' };
+  }
+});
+
+ipcMain.handle('NOVA:engine-get-perf-policy', async () => {
+  try {
+    return { ok: true, policy: novaGguf.getGgufPerfPolicy?.() || null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Perf policy failed' };
   }
 });
 
@@ -1548,7 +1565,11 @@ ipcMain.handle('NOVA:workspace-open-root', async (event, payload) => {
     const win = BrowserWindow.fromWebContents(event.sender)
       || BrowserWindow.getFocusedWindow()
       || mainWindow;
-    let sourceDir = payload?.sourceDir;
+    // Accept { sourceDir } or a bare path string — never open the picker when a path was given.
+    let sourceDir = typeof payload === 'string'
+      ? payload
+      : (payload?.sourceDir || payload?.path || payload?.root || '');
+    sourceDir = typeof sourceDir === 'string' ? sourceDir.trim() : '';
     if (!sourceDir) {
       const result = await dialog.showOpenDialog(win || undefined, {
         title: 'Open folder on this PC',
@@ -2005,6 +2026,14 @@ ipcMain.handle('NOVA:git-clone', async (_e, payload) => {
     return await novaGit.cloneRepo(projectCwd(payload?.projectId), payload?.url, payload?.token);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'clone failed' };
+  }
+});
+
+ipcMain.handle('NOVA:git-init', async (_e, projectId) => {
+  try {
+    return await novaGit.initIfNeeded(projectCwd(projectId));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'git init failed' };
   }
 });
 

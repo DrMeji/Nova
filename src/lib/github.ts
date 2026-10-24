@@ -319,7 +319,7 @@ export async function runGitHubLive(
 
   // comment on owner/repo#123: hello
   const commentMatch = userText.match(
-    /(?:comment|post)\s+on\s+([\w.-]+)\/([\w.-]+)#(\d+)\s*[:\-]?\s*(.+)$/i,
+    /(?:comment|post)\s+on\s+([\w.-]+)\/([\w.-]+)#(\d+)\s*[:-]?\s*(.+)$/i,
   );
   if (commentMatch) {
     if (perms.length > 0 && !perms.includes('write')) {
@@ -403,7 +403,7 @@ export async function runGitHubLive(
 
   // create issue in owner/repo: title  |  create issue owner/repo title
   const createIssueMatch = userText.match(
-    /create\s+(?:an?\s+)?issue\s+(?:in\s+)?([\w.-]+)\/([\w.-]+)\s*[:\-]?\s*(.+)/i,
+    /create\s+(?:an?\s+)?issue\s+(?:in\s+)?([\w.-]+)\/([\w.-]+)\s*[:-]?\s*(.+)/i,
   );
   if (createIssueMatch) {
     if (perms.length > 0 && !perms.includes('write')) {

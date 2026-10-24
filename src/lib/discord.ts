@@ -121,10 +121,10 @@ export async function runDiscordLive(
       ].join('\n');
     }
     const snowflakeMatch = userText.match(
-      /(?:post|send|message|write)\s+(?:to\s+)?(?:channel\s+)?(\d{17,20})\s*[:\-]?\s*(.+)$/i,
+      /(?:post|send|message|write)\s+(?:to\s+)?(?:channel\s+)?(\d{17,20})\s*[:-]?\s*(.+)$/i,
     );
     const nameMatch = userText.match(
-      /(?:post|send|message|write)\s+(?:to\s+)?#([\w-]+)\s*[:\-]?\s*(.+)$/i,
+      /(?:post|send|message|write)\s+(?:to\s+)?#([\w-]+)\s*[:-]?\s*(.+)$/i,
     );
     const channelRef = snowflakeMatch?.[1] || nameMatch?.[1];
     const body = (snowflakeMatch?.[2] || nameMatch?.[2] || '').trim();

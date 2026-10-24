@@ -1,18 +1,11 @@
 import { classifyMobileTarget, looksLikeWebsiteBuild, mobileCodingRules } from '@/lib/mobileTarget';
-import { extractGreenfieldName } from '@/lib/chatIdeaIntent';
+import '@/lib/chatIdeaIntent';
 import { layoutLockEdits, planMobileFiles, simpleVisualPatchEdits } from '@/lib/mobileTemplates';
-import { isLayoutLockAsk } from '@/lib/mobileDevices';
-import {
-  canonicalizeWebEdits,
-  finalizeWebEdits,
-  isPlaceholderJunkPath,
-  prunePlaceholderJunk,
-  reactUiMicroAskEdits,
-  touchesPreviewServing,
-  webMicroAskEdits,
-} from '@/lib/webProjectCanon';
+import '@/lib/mobileDevices';
+import { canonicalizeWebEdits, isPlaceholderJunkPath, prunePlaceholderJunk, reactUiMicroAskEdits, webMicroAskEdits } from '@/lib/webProjectCanon';
 import { applyAgentPatches, parseAgentPatches } from '@/lib/novaAgentPatch';
 import { extractBrandLabel, looksLikeNameTextColorAsk } from '@/lib/brandLabel';
+import { formatEditHandback } from '@/lib/taskHandbackReply';
 
 export type ProjectFileMap = Record<string, string>;
 
@@ -42,7 +35,7 @@ const MAX_CONTEXT_CHARS = 12_000;
 const MAX_FILE_CHARS = 3_200;
 const MICRO_CONTEXT_CHARS = 4_500;
 const SMALL_CONTEXT_CHARS = 8_000;
-const OVERVIEW_CONTEXT_CHARS = 8_000;
+
 const MICRO_FILE_CHARS = 2_400;
 const FULL_PACK_MAX_FILES = 24;
 const SMALL_PACK_MAX_FILES = 8;
@@ -261,7 +254,7 @@ function pickFilesForTurnSize(flat: ProjectFileMap, size: CodeTurnSize, userMess
 function normalizePath(raw: string): string {
   return raw
     .trim()
-    .replace(/^[`"'[\(]+|[`"'][\)]+$/g, '')
+    .replace(/^[`"'[(]+|[`"'][)]+$/g, '')
     .replace(/\\/g, '/')
     .replace(/^\.\//, '')
     .replace(/^\/+/, '');
@@ -796,11 +789,25 @@ export function buildDoneSummary(
 ): string {
   if (opts?.stopped) {
     return opts.hadFiles
-      ? `Stopped. I kept what was already in Explorer. Edit your prompt and send. I’ll continue from those files.`
-      : `Stopped. Edit your prompt and send when you’re ready.`;
+      ? formatEditHandback({
+        outcome: 'edit-partial',
+        summary: 'I stopped mid-edit but kept what was already in Explorer.',
+        missing: 'the rest of your ask',
+        surface: 'code',
+      })
+      : formatEditHandback({
+        outcome: 'edit-partial',
+        summary: 'I stopped before applying changes.',
+        missing: 'a fresh send when you are ready',
+        surface: 'code',
+      });
   }
   if (opts?.continued) {
-    return `Done. I updated the project. Press **Start** to see the preview.`;
+    return formatEditHandback({
+      outcome: 'edit-ok',
+      summary: "I've updated the project and saved the changes on disk.",
+      surface: 'code',
+    });
   }
   const safe = String(label || 'Project').trim();
   // Never echo a full user ask as the project title in chat.
@@ -808,29 +815,23 @@ export function buildDoneSummary(
     || safe.length > 48
     || /\?$/.test(safe);
   if (lookslikeAsk) {
-    return `Done. I updated the project. Press **Start** to see the preview.`;
+    return formatEditHandback({
+      outcome: 'edit-ok',
+      summary: "I've updated the project and saved the changes on disk.",
+      surface: 'code',
+    });
   }
-  return `I built **${safe}**. It’s in Explorer. hit Start when you want to try it, or tell me what to change.`;
+  return formatEditHandback({
+    outcome: 'edit-ok',
+    productName: safe,
+    summary: `I've finished building **${safe}** and it is in Explorer.`,
+    surface: 'code',
+  });
 }
 
-function escapeHtml(s: string) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
-function titleFromAsk(message: string) {
-  // Prefer explicit product names from casual speech ("ShelfCircle sounds good").
-  const named = extractGreenfieldName(message);
-  if (named && !/^My (App|Website|Web App)$/i.test(named)) return named;
-  const called = String(message || '').match(/\bcalled\s+([A-Za-z0-9][A-Za-z0-9 '-]{1,40})/);
-  if (called?.[1]) return called[1].trim();
-  const camel = String(message || '').match(/\b([A-Z][a-z]+[A-Z][A-Za-z0-9]+)\b/);
-  if (camel?.[1] && !/^(HTML|CSS|JS|API)$/i.test(camel[1])) return camel[1];
-  return inferBuildLabel(message);
-}
+
+
 
 /** Only patch an existing tree. Never invent Hello World / stock React / landings. */
 export function scaffoldFallbackEdits(
@@ -924,7 +925,7 @@ export function composePreviewHtml(files: ProjectFileMap): string {
     if (isPlaceholderJunkPath(key)) return full;
     const js = flat[key] || flat[key.split('/').pop() || ''] || '';
     if (!js) return full;
-    return `<script>\n${js}\n<\/script>`;
+    return `<script>\n${js}\n</script>`;
   });
   return html;
 }
@@ -1168,7 +1169,7 @@ export function coerceCodingFileReply(reply: string): string {
 
   // Also salvage a CSS dump that never got a path.
   if (!blocks.some((b) => /@@@FILE src\/App\.css/i.test(b))) {
-    const cssMatch = text.match(/(?:^|\n)((?:\.|\#|body|html|:root)[^{]*\{[\s\S]{200,})/);
+    const cssMatch = text.match(/(?:^|\n)((?:\.|#|body|html|:root)[^{]*\{[\s\S]{200,})/);
     if (cssMatch?.[1]) {
       blocks.push(`@@@FILE src/App.css\n\`\`\`\n${cssMatch[1].trim()}\n\`\`\``);
     }
@@ -1271,9 +1272,12 @@ export function formatCodeChatReply(
 
   const previewOk = opts?.previewTouched !== false;
   const surface = opts?.surface || 'code';
-  const doneFooter = surface === 'chat'
-    ? 'Refresh your browser tab to see the change.'
-    : 'Press **Start** to see the preview.';
+  const hand = (summary: string) => formatEditHandback({
+    ask,
+    outcome: 'edit-ok',
+    summary,
+    surface,
+  });
 
   if (changedPaths.length && previewOk) {
     const hello = /\bhello\s*world\b/i.test(ask) && /\b(build|create|make)\b/i.test(ask);
@@ -1284,55 +1288,55 @@ export function formatCodeChatReply(
       const labels = [...ask.matchAll(/\b(Products|Specs|Buy|Shop|About|Contact)\b/g)].map((m) => m[1]);
       const uniq = [...new Set(labels)];
       if (uniq.length) {
-        return `Done. I added a dark sticky nav with ${uniq.join(', ')}. ${doneFooter}`;
+        return hand(`I've finished adding a dark sticky nav with ${uniq.join(', ')}.`);
       }
-      return `Done. I added a sticky nav. ${doneFooter}`;
+      return hand(`I've finished the sticky nav update.`);
     }
     const bg = /\bbackground\b/i.test(ask) && !structural && !/\bnav\b/i.test(ask);
     const search = /\bsearch\b/i.test(ask) && !structural;
     const rgb = /\b(rgb|multi[- ]?colou?r|gradient)\b/i.test(ask);
     const toggle = /\b(toggle|theme)\b/i.test(ask) && /\b(remove|delete)\b/i.test(ask);
-    if (usable) return `${clean}\n\n${doneFooter}`;
-    if (hello) return `Done. Hello World is ready. ${doneFooter}`;
-    if (pizza) return `Done. updated the page text. ${doneFooter}`;
+    if (usable) return hand(clean.replace(/\n+/g, ' ').trim());
+    if (hello) return hand(`I've finished building Hello World and it is ready to review.`);
+    if (pizza) return hand(`I've updated the page text as requested.`);
     if (/\bcharcoal\b/i.test(ask) || (/\bglow\b/i.test(ask) && /\b(?:red|accent)\b/i.test(ask))) {
-      return `Done. charcoal background with a soft red accent glow is in. ${doneFooter}`;
+      return hand(`I've applied a charcoal background with a soft red accent glow.`);
     }
     if (/\bunderline\b/i.test(ask) && /\b(?:brand|title|name|larger|bigger)\b/i.test(ask)) {
-      return `Done. brand title is larger with a red accent underline. ${doneFooter}`;
+      return hand(`I've enlarged the brand title and added a red accent underline.`);
     }
     if (/\b(?:cinematic|movie[- ]?like|film\s+still|atmospheric)\b/i.test(ask)
       || (/\bpremium\b/i.test(ask) && /\bbackground\b/i.test(ask) && /\b(?:image|imagery|photo|orb)\b/i.test(ask))) {
-      return `Done. cinematic background is in. ${doneFooter}`;
+      return hand(`I've finished the cinematic background update.`);
     }
     if (looksLikeNameTextColorAsk(ask)) {
-      return `Done. updated the name color. ${doneFooter}`;
+      return hand(`I've updated the name color.`);
     }
     if (/\b(?:menu|search|bag|cart)\s+icons?\b/i.test(ask) && /\b(?:add|put|place)\b/i.test(ask) && !structural) {
-      return `Done. added the icon. ${doneFooter}`;
+      return hand(`I've added the icon you asked for.`);
     }
     if (/\blogo\b/i.test(ask) && /\b(?:add|put|place|insert)\b/i.test(ask) && !structural) {
-      return `Done. added the logo. ${doneFooter}`;
+      return hand(`I've added the logo.`);
     }
     if (/\bicons?\b/i.test(ask) && /\b(?:add|put|place|premium|professional)\b/i.test(ask) && !structural) {
-      return `Done. added the icons. ${doneFooter}`;
+      return hand(`I've added the icons.`);
     }
     // "keep the cream background" is a constraint — not a background-change ask.
     if (bg && !/\b(?:keep|leave|don't\s+change|do\s+not\s+change)\b[\s\S]{0,32}\bbackground\b/i.test(ask)
       && !/\b(?:logo|icon)\b/i.test(ask)) {
-      return `Done. background and colors are updated. ${doneFooter}`;
+      return hand(`I've updated the background and colors.`);
     }
-    if (search) return `Done. search is in the top-right. ${doneFooter}`;
-    if (rgb) return `Done. multi-color title is applied. ${doneFooter}`;
-    if (toggle) return `Done. removed the theme toggle. ${doneFooter}`;
+    if (search) return hand(`I've placed search in the top-right.`);
+    if (rgb) return hand(`I've applied the multi-color title.`);
+    if (toggle) return hand(`I've removed the theme toggle.`);
     if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask) && !structural) {
-      return `Done. added the logo centered on screen. ${doneFooter}`;
+      return hand(`I've centered the logo on screen.`);
     }
     // Ask-specific Done lines (brand / image / tagline)
     {
       const brand = extractBrandLabel(ask);
       if (brand && /\b(?:brand|center|middle|title)\b/i.test(ask) && !/\bfrom\s+\w+\s+to\b/i.test(ask)) {
-        return `Done. I centered **${brand}** in white on the page. ${doneFooter}`;
+        return hand(`I've centered **${brand}** in white on the page.`);
       }
     }
     {
@@ -1341,37 +1345,45 @@ export function formatCodeChatReply(
         || (/\bprecision\b/i.test(ask) && /\bspeed\b/i.test(ask) && /\b(?:add|short)\b/i.test(ask));
       if (/\bproduct\s+cards?\b/i.test(ask) || (/\bcards?\b/i.test(ask) && /\bMouse\b/i.test(ask))) {
         if (/\b(?:remove|delete|drop)\b[\s\S]{0,40}\bHeadset\b/i.test(ask)) {
-          return `Done. removed the Headset card. ${doneFooter}`;
+          return hand(`I've removed the Headset card.`);
         }
-        return `Done. product cards are on the page. ${doneFooter}`;
+        return hand(`I've added the product cards to the page.`);
       }
       if (photo && tagline) {
         const what = /\bmouse\b/i.test(ask) ? 'gaming mouse' : (/\bheadset\b/i.test(ask) ? 'headset' : 'keyboard');
-        return `Done. I added a ${what} product photo and a short tagline about precision and speed. ${doneFooter}`;
+        return hand(`I've added a ${what} product photo and a short tagline about precision and speed.`);
       }
       if (photo) {
         const what = /\bmouse\b/i.test(ask) ? 'gaming mouse' : (/\bheadset\b/i.test(ask) ? 'headset' : 'keyboard');
-        return `Done. I added a ${what} product photo in the hero. ${doneFooter}`;
+        return hand(`I've added a ${what} product photo in the hero.`);
       }
       if (tagline) {
-        return `Done. I added a short tagline about precision and speed. ${doneFooter}`;
+        return hand(`I've added a short tagline about precision and speed.`);
       }
     }
     if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask) && !structural) {
-      return `Done. updated the layout. ${doneFooter}`;
+      return hand(`I've updated the layout.`);
     }
-    const fileHint = changedPaths.length === 1
-      ? `Updated \`${changedPaths[0].replace(/^src\//, '')}\`.`
-      : `Updated ${changedPaths.length} files.`;
-    return `Done. ${fileHint} ${doneFooter}`;
+    return formatEditHandback({ ask, outcome: 'edit-ok', surface });
   }
 
   if (changedPaths.length && !previewOk) {
-    return 'I wrote files, but they were not on the live preview page. Try the ask again. I’ll target index.html / css / js.';
+    return formatEditHandback({
+      ask,
+      outcome: 'edit-partial',
+      summary: 'I wrote files, but they were not on the live preview page.',
+      missing: 'a retry targeting index.html / css / js',
+      surface,
+    });
   }
 
-  if (usable) return clean;
-  return 'I couldn’t apply file changes for that. Try a shorter ask, or say “build a hello world page”.';
+  if (usable) return clean.replace(/\n+/g, ' ').trim();
+  return formatEditHandback({
+    ask,
+    outcome: 'error',
+    summary: 'I could not apply file changes for that ask.',
+    surface,
+  });
 }
 
 function looksLikeCodeDump(text: string): boolean {
@@ -1402,12 +1414,12 @@ export function scrubLeakedFileMarkers(content: string, path?: string): string {
 
 /** Repair / reject corrupt JSON bodies (especially package.json). */
 export function sanitizeJsonFileContent(path: string, content: string): string {
-  let body = scrubLeakedFileMarkers(content).trim();
+  const body = scrubLeakedFileMarkers(content).trim();
   if (!body) return body;
   try {
     return `${JSON.stringify(JSON.parse(body), null, 2)}\n`;
   } catch {
-    const start = body.search(/[\{\[]/);
+    const start = body.search(/[{[]/);
     if (start < 0) return '';
     let depth = 0;
     let end = -1;

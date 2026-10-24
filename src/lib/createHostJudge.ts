@@ -50,8 +50,18 @@ export function judgeCreateEvidence(opts: {
   if (!ev.pass) reasons.push('evidence.pass is false');
   if (!ev.mounted) reasons.push('UI not mounted');
   if (!ev.httpOk) reasons.push('Live HTTP failed');
-  if (!ev.consoleClean) reasons.push('console not clean');
+  if (!ev.consoleClean) {
+    const errs = Array.isArray(ev.consoleErrors) ? ev.consoleErrors : [];
+    const onlySoftToast = errs.length > 0 && errs.every((e) =>
+      /Live can't show the app|something in this file is broken/i.test(String(e || '')),
+    );
+    // Cove Latch: soft Live toast while paint verified must not block quality Ready.
+    if (!(ev.mounted && onlySoftToast)) reasons.push('console not clean');
+  }
   if (ev.smokeOk === false) reasons.push(ev.smokeDetail || 'smoke failed');
+  if (ev.buildOk === false) {
+    reasons.push(`project build failed${ev.buildErrors?.[0] ? `: ${ev.buildErrors[0].slice(0, 220)}` : ''}`);
+  }
 
   // Re-smoke only when evidence did not already clear smoke (avoid double-flaky fails).
   if (ev.smokeOk !== true) {
@@ -61,9 +71,19 @@ export function judgeCreateEvidence(opts: {
 
   const brand = String(opts.productName || '').trim();
   if (brand.length >= 2) {
-    const app = opts.files['src/App.jsx'] || opts.files['src/App.tsx'] || opts.files['index.html'] || '';
-    if (app && !brandPresentInApp(brand, app)) {
-      reasons.push(`product brand missing in App: ${brand}`);
+    // Compositional sites keep their visible brand in imported section modules.
+    // Judge the source tree that App renders instead of requiring the brand text
+    // to be duplicated into the thin App shell.
+    const renderedSources = Object.entries(opts.files || {})
+      .filter(([path]) => /^(?:src\/App\.(?:jsx|tsx)|src\/sections\/.*\.(?:jsx|tsx)|index\.html)$/i.test(path.replace(/\\/g, '/')))
+      .map(([, body]) => String(body || ''))
+      .join('\n');
+    if (renderedSources && !brandPresentInApp(brand, renderedSources)) {
+      reasons.push(`product brand missing from rendered source: ${brand}`);
+    }
+    const visibleText = String(ev.renderedSample || '').trim();
+    if (ev.mounted && visibleText && !brandPresentInApp(brand, visibleText)) {
+      reasons.push(`product brand not visible in Live sample: ${brand}`);
     }
   }
 

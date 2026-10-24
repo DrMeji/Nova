@@ -66,6 +66,17 @@ await send('Runtime.enable');
 await send('Page.enable');
 
 if (NEW_CHAT) {
+  // Stop any stuck create/timer first so New Chat is not blocked.
+  await evalE(`(() => {
+    const btns = [...document.querySelectorAll('button, a, [role="button"]')];
+    const stop = btns.find((b) => {
+      const t = ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '')).toLowerCase();
+      return /^stop$|\\bstop\\b/.test(t.trim()) || /aria-label=["']stop/i.test(b.outerHTML || '');
+    });
+    if (stop) { stop.click(); return 'stopped'; }
+    return 'idle';
+  })()`);
+  await sleep(800);
   await evalE(`(() => {
     const btns = [...document.querySelectorAll('button, a, [role="button"]')];
     const hit = btns.find((b) => {
@@ -73,13 +84,21 @@ if (NEW_CHAT) {
       return /new\\s*chat/.test(t) || /squarepen|new conversation/.test(t);
     });
     if (hit) { hit.click(); return 'clicked'; }
-    // Force a blank chat route when the button is missing.
     location.hash = '#/chat?new=' + Date.now();
     return 'hash';
   })()`);
-  await sleep(2500);
+  await sleep(2800);
+  // Confirm we are on a fresh empty thread (no prior user asks).
+  await evalE(`(() => {
+    const ta = document.querySelector('textarea');
+    if (ta) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(ta, '');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return location.hash;
+  })()`);
 }
-
 const before = await evalE(`(() => {
   const keys = [];
   for (let i = 0; i < localStorage.length; i++) {
@@ -173,11 +192,19 @@ while (Date.now() - t0 < TIMEOUT) {
     const assistants = arr.filter((m) => m?.role === 'assistant' && !/^__generating__:/i.test(String(m.content || '')));
     const lastAsst = assistants[assistants.length - 1];
     const body = document.body?.innerText || '';
-    const status = (body.match(/(?:^|\\n)\\s*(?:Build:|Fix:|Using \\*\\*|Coding |Nova tool|Preview Ready|Wrote |Refining)[^\\n]{0,80}/i) || [null])[0];
+    const status = (body.match(/(?:^|\\n)\\s*(?:Build:|Fix:|Using \\*\\*|Coding |Nova tool|Preview Ready|Wrote |Refining|Non-web)[^\\n]{0,80}/i) || [null])[0];
+    const stopVisible = [...document.querySelectorAll('button, [role="button"]')].some((b) => {
+      const t = ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')).trim().toLowerCase();
+      return t === 'stop' || /^stop\\b/.test(t);
+    });
+    const hasFilesCard = /Files changed|Location|\\+\\d+|−\\d+|project folder/i.test(body)
+      || Boolean(document.querySelector('[data-nova-files-changed], .nova-files-changed, [class*="FilesChanged"]'));
     return {
       k: best.k,
       len: arr.length,
-      generating,
+      generating: generating || stopVisible,
+      stopVisible,
+      hasFilesCard,
       userHit: true,
       provider: lastAsst?.provider_used || lastAsst?.provider || null,
       content: lastAsst ? String(lastAsst.content || '') : '',
@@ -204,7 +231,13 @@ while (Date.now() - t0 < TIMEOUT) {
   const textNow = String(snap?.content || '').trim();
   const newThread = Boolean(snap?.k && !beforeKeys.has(snap.k));
   const newAsst = textNow.length > 40 && !beforeAsst.has(textNow.slice(0, 96));
-  if (snap?.userHit && !snap.generating && newAsst && (newThread || sawGenerating || textNow.length > 200)) {
+  // Same chat key after New Chat is normal — don't require newThread.
+  // Short coding handbacks (~150 chars) must still count as done.
+  if (snap?.userHit && !snap.generating && newAsst && (sawGenerating || textNow.length > 80 || Date.now() - t0 > 45_000)) {
+    if (snap?.stopVisible) {
+      // Reply landed but Stop/timer still sticky — wait for UI to settle.
+      continue;
+    }
     const text = textNow;
     const flags = [];
     if (/Hello!\s*How can I assist you today/i.test(text)) flags.push('canned-greeting');
@@ -232,8 +265,9 @@ while (Date.now() - t0 < TIMEOUT) {
       meta: snap.provider || 'ok',
       modelPill: snap.modelPill,
       flags,
+      hasFilesCard: Boolean(snap?.hasFilesCard),
       len: text.length,
-      text,
+      text: text.slice(0, 2500),
     }, null, 2));
     ws.close();
     process.exit(flags.length ? 2 : 0);

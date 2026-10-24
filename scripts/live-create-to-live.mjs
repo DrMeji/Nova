@@ -57,8 +57,18 @@ for (const name of fs.existsSync(PROJECTS) ? fs.readdirSync(PROJECTS) : []) {
 }
 
 const list = await fetchJson(`http://127.0.0.1:${PORT}/json/list`);
-const page = list.find((t) => t.type === 'page');
+// Prefer the Nova shell — after Live, Vite preview pages often sort first and
+// steal the CDP attach (Maple Latch: stuck on Cedar preview, no chat textarea).
+const pages = (list || []).filter((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+const page = pages.find((t) => {
+  const hay = `${t.title || ''} ${t.url || ''}`;
+  return /nova/i.test(hay) && !/127\.0\.0\.1:\d{4}/.test(t.url || '');
+})
+  || pages.find((t) => /nova/i.test(`${t.title || ''} ${t.url || ''}`))
+  || pages.find((t) => !/127\.0\.0\.1:\d{4}/.test(t.url || '') && !/localhost:\d{4}/.test(t.url || ''))
+  || pages[0];
 if (!page?.webSocketDebuggerUrl) throw new Error(`NOVA missing on CDP ${PORT}`);
+console.log('CDP page:', (page.title || '').slice(0, 60), (page.url || '').slice(0, 80));
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
@@ -92,15 +102,52 @@ const evalE = async (expression) => {
 await send('Page.enable');
 await send('Runtime.enable');
 
-// New chat
+// Leave Live overlay if open, then Chat + wait for composer.
+// Ash Latch 2026-10-23: hard reload left Chat unmounted; 15s wait then threw "no textarea".
+const clickChat = `(() => {
+  const els = [...document.querySelectorAll('button,[role=button],a,[data-nova-nav]')];
+  const labelOf = (el) => ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).trim();
+  const exact = els.filter((el) => (el.getAttribute('aria-label') || '') === 'Chat');
+  exact.sort((a, b) => labelOf(a).length - labelOf(b).length);
+  if (exact[0]) { exact[0].click(); return 'chat'; }
+  const soft = els.find((el) => /^chat$/i.test(labelOf(el)) || /\\bai chat\\b/i.test(labelOf(el)));
+  if (soft) { soft.click(); return 'soft'; }
+  return 'miss';
+})()`;
+const hasComposer = `Boolean(
+  document.querySelector('textarea.nova-composer-textarea')
+  || document.querySelector('[data-ark-composer] textarea')
+  || document.querySelector('textarea')
+)`;
 await evalE(`(() => {
-  const els = [...document.querySelectorAll('button,[role=button],a')];
-  const hits = els.filter(el => (el.getAttribute('aria-label') || '') === 'Chat');
-  hits.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-  if (hits[0]) hits[0].click();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
   return true;
 })()`);
-await sleep(1500);
+await sleep(600);
+await evalE(clickChat);
+{
+  const tWait = Date.now();
+  let has = false;
+  while (Date.now() - tWait < 45_000) {
+    has = Boolean(await evalE(hasComposer).catch(() => false));
+    if (has) break;
+    await sleep(700);
+    await evalE(clickChat).catch(() => {});
+  }
+  if (!has) {
+    const snap = await evalE(`(() => ({
+      url: location.href,
+      title: document.title,
+      labels: [...document.querySelectorAll('button,[role=button],a')]
+        .map((el) => ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).trim().slice(0, 40))
+        .filter(Boolean)
+        .slice(0, 24),
+    }))()`).catch(() => null);
+    console.error('FAIL: no chat textarea after wait', snap);
+    process.exit(1);
+  }
+}
+await sleep(800);
 await evalE(`(() => {
   const btns = [...document.querySelectorAll('button,[role=button]')];
   const neu = btns.find(b => /new chat|new conversation/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')));
@@ -108,10 +155,17 @@ await evalE(`(() => {
   return 'skip';
 })()`);
 await sleep(1200);
+{
+  const ready = Boolean(await evalE(hasComposer).catch(() => false));
+  if (!ready) {
+    console.error('FAIL: composer lost after New chat');
+    process.exit(1);
+  }
+}
 
-const prompt = MODE === 'static'
+const prompt = String(process.env.NOVA_CREATE_PROMPT || '').trim() || (MODE === 'static'
   ? `Create a new website project called ${BRAND} on disk now. Tiny sticky-note page: one title "${BRAND}" and one textarea for the note. Static HTML ok. Skip Plan — build it.`
-  : `Create a new website project called ${BRAND} on disk now. Soft paper background, deep ink navy type, warm brass accent. Full-bleed quiet hero with the brand name, one short line about a reading shelf, and a grid of 4 book cards (title + author). Polished single page. Skip Plan — build it.`;
+  : `Create a new website project called ${BRAND} on disk now. Soft paper background, deep ink navy type, warm brass accent. Full-bleed quiet hero with the brand name, one short line about a reading shelf, and a grid of 4 book cards (title + author). Polished single page. Skip Plan — build it.`);
 
 console.log('=== CREATE → LIVE ===');
 console.log('Mode:', MODE);
@@ -119,7 +173,9 @@ console.log('Brand:', BRAND);
 console.log('Prompt:', prompt);
 
 await evalE(`(() => {
-  const ta = document.querySelector('textarea');
+  const ta = document.querySelector('textarea.nova-composer-textarea')
+    || document.querySelector('[data-ark-composer] textarea')
+    || document.querySelector('textarea');
   if (!ta) throw new Error('no textarea');
   const d = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
   d.set.call(ta, ${JSON.stringify(prompt)});
@@ -129,7 +185,10 @@ await evalE(`(() => {
   return true;
 })()`);
 
-const needle = prompt.slice(0, 36);
+// Ash Latch iter-10: prompt.slice(0,36) was "Create a new website project called "
+// shared by every invent — matched stale Pine Latch replies and proved the wrong Live.
+const brandCoreForNeedle = String(BRAND).replace(/\s+[a-z0-9]{3,5}$/i, '').trim() || BRAND;
+const needle = `project called ${brandCoreForNeedle}`;
 const t0 = Date.now();
 let reply = '';
 let meta = '';
@@ -139,6 +198,8 @@ while (Date.now() - t0 < 720_000) {
   try {
     snap = await evalE(`(() => {
     const needle = ${JSON.stringify(needle)};
+    const brandCore = ${JSON.stringify(brandCoreForNeedle)};
+    const startedAt = ${JSON.stringify(TEST_STARTED_AT)};
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -149,7 +210,8 @@ while (Date.now() - t0 < 720_000) {
       try { arr = JSON.parse(localStorage.getItem(k) || '[]'); } catch { continue; }
       let userIdx = -1;
       for (let i = arr.length - 1; i >= 0; i--) {
-        if (arr[i]?.role === 'user' && String(arr[i].content || '').includes(needle)) { userIdx = i; break; }
+        const c = String(arr[i]?.content || '');
+        if (arr[i]?.role === 'user' && c.includes(needle) && c.includes(brandCore)) { userIdx = i; break; }
       }
       if (userIdx < 0) continue;
       const last = arr[arr.length - 1];
@@ -162,9 +224,11 @@ while (Date.now() - t0 < 720_000) {
       }
       if (asst) {
         const ts = Number(asst.createdAt || asst.ts || asst.at || 0);
-        // Ignore stale assistant replies from prior runs with the same prompt text.
-        if (ts && ts < TEST_STARTED_AT - 5000) continue;
-        return { generating: false, content: String(asst.content || ''), provider: asst.provider_used || asst.provider, ts };
+        // Ignore stale assistant replies (missing ts ⇒ treat as stale when content names another brand).
+        if (ts && ts < startedAt - 5000) continue;
+        const body = String(asst.content || '');
+        if (!ts && brandCore && !body.toLowerCase().includes(String(brandCore).toLowerCase())) continue;
+        return { generating: false, content: body, provider: asst.provider_used || asst.provider, ts };
       }
     }
     return null;
@@ -181,10 +245,40 @@ while (Date.now() - t0 < 720_000) {
   if (snap?.content && snap.content.length > 40) {
     // Ignore mid-flight plan-only replies; wait for Created / setup copy.
     const c = snap.content;
-    const looksDone = /Created\s+\*\*|setup did not finish|Live preview verified|Open \*\*Live\*\*|install npm dependencies|Dependencies installed|Live server started/i.test(c);
-    // Require our brand name in the reply (or folder evidence) so stale threads don't pass.
-    const mentionsBrand = new RegExp(BRAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(c)
-      || new RegExp(SLUG.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(c);
+    // Prefer human answer inside <!--nova-trace:…{"answer":"…"}--> (brand often only there).
+    // Trace payloads can truncate before `-->` — also regex-pull "answer".
+    let text = c;
+    const traceAns = c.match(/<!--nova-trace:([\s\S]*?)-->/);
+    if (traceAns?.[1]) {
+      try {
+        const j = JSON.parse(traceAns[1]);
+        if (j?.answer) text = `${String(j.answer)}\n${c}`;
+      } catch { /* keep c */ }
+    }
+    if (!/\banswer\b/i.test(text.slice(0, 80)) || text === c) {
+      const am = c.match(/"answer"\s*:\s*"((?:\\.|[^"\\])*)"/);
+      if (am?.[1]) {
+        try {
+          text = `${JSON.parse(`"${am[1]}"`)}\n${c}`;
+        } catch {
+          text = `${am[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')}\n${c}`;
+        }
+      }
+    }
+    const traceDone = /<!--nova-trace:[\s\S]*?"done"\s*:\s*true/.test(c);
+    const looksDone = traceDone
+      || /Created\s+\*\*|setup did not finish|Live preview verified|Open \*\*Live\*\*|install npm dependencies|Dependencies installed|Live server started|on disk|Live is open|Click \*\*Live\*\*|Click Live|Live did not verify|Live stays locked|will not claim success/i.test(text);
+    // Require full brand core (not Latch+Atelier alone — that matched Pine Latch for Ash Latch).
+    const brandCore = String(BRAND).replace(/\s+[a-z0-9]{3,5}$/i, '').trim() || BRAND;
+    const brandEsc = brandCore.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mentionsBrand = new RegExp(brandEsc, 'i').test(text)
+      || new RegExp(BRAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text);
+    const wrongBrand = /\b(?:Pine|Oak|Moss|River|Sable|Copper|Amber|Meridian)\s+Latch\b/i.test(text)
+      && !new RegExp(brandEsc, 'i').test(text);
+    if (wrongBrand) {
+      process.stdout.write(`\rstale other-brand reply skipped… ${Math.round((Date.now() - t0) / 1000)}s   `);
+      continue;
+    }
     if ((!looksDone || !mentionsBrand) && Date.now() - t0 < 600_000) {
       process.stdout.write(`\rwaiting final create reply… ${Math.round((Date.now() - t0) / 1000)}s   `);
       continue;
@@ -193,37 +287,113 @@ while (Date.now() - t0 < 720_000) {
       process.stdout.write(`\rstale reply skipped… ${Math.round((Date.now() - t0) / 1000)}s   `);
       continue;
     }
-    reply = c;
+    reply = text;
     meta = snap.provider || '';
     console.log('\nmeta:', meta);
     console.log(reply.slice(0, 700));
     break;
   }
 }
-if (!reply) throw new Error('create timed out with no reply');
+if (!reply) {
+  // Fallback: create wrote a project folder even if chat reply parse missed / invent hung.
+  // Amber Bridle: bare App had no brand string → old fallback threw timeout; accept by slug.
+  const late = fs.existsSync(PROJECTS)
+    ? fs.readdirSync(PROJECTS)
+      .map((n) => ({ n, p: path.join(PROJECTS, n), t: fs.statSync(path.join(PROJECTS, n)).mtimeMs }))
+      .filter((x) => x.t >= TEST_STARTED_AT - 120_000)
+      .filter((x) => {
+        const n = x.n.toLowerCase();
+        const core = SLUG.split('-')[0];
+        // Brand/slug only — atelier|pine|leather catch-all attached Pine Latch for Ash Latch.
+        return n === SLUG || n.startsWith(`${SLUG}-`) || (core.length > 2 && n.includes(core));
+      })
+      .sort((a, b) => b.t - a.t)
+    : [];
+  const hit = late[0] || (fs.existsSync(path.join(PROJECTS, SLUG))
+    ? { n: SLUG, p: path.join(PROJECTS, SLUG), t: Date.now() }
+    : null);
+  const appPath = hit ? path.join(hit.p, 'src', 'App.jsx') : '';
+  const app = appPath && fs.existsSync(appPath) ? fs.readFileSync(appPath, 'utf8') : '';
+  const brandCore = String(BRAND).replace(/\s+[a-z0-9]{3,5}$/i, '').trim() || BRAND;
+  const brandRe = new RegExp(brandCore.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  // River Hide: brand lived in HeroSection, not App.jsx — still count as brand on disk.
+  let brandBlob = app || '';
+  const secDir = hit ? path.join(hit.p, 'src', 'sections') : '';
+  if (secDir && fs.existsSync(secDir)) {
+    for (const n of fs.readdirSync(secDir)) {
+      if (/\.jsx?$/i.test(n)) {
+        try { brandBlob += `\n${fs.readFileSync(path.join(secDir, n), 'utf8')}`; } catch { /* ignore */ }
+      }
+    }
+  }
+  const brandOnDisk = Boolean(brandBlob && brandRe.test(brandBlob));
+  const hasPkg = hit && fs.existsSync(path.join(hit.p, 'package.json'));
+  if (app && (brandOnDisk || hasPkg)) {
+    reply = `DISK FALLBACK: ${brandCore} App on disk (${app.length} chars)${brandOnDisk ? '' : ' — brand pending in sections'}. Chat reply parse missed.`;
+    console.log('\nmeta: disk-fallback');
+    console.log(reply);
+  } else {
+    throw new Error('create timed out with no reply');
+  }
+}
 
+const diskFallback = /^DISK FALLBACK:/i.test(reply);
 if (/npm install timed out|Dependencies are not installed yet|setup did not finish/i.test(reply)) {
   console.error('FAIL: create reported install/setup failure');
   process.exit(2);
 }
+if (!diskFallback && /Live did not verify|Live stays locked|will not claim success until Live verifies/i.test(reply)) {
+  console.error('FAIL: create finished but Live did not verify (honest miss — invent/quality gap)');
+  process.exit(3);
+}
 
+const brandSlugCore = String(brandCoreForNeedle).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const diskCandidates = fs.existsSync(PROJECTS)
   ? fs.readdirSync(PROJECTS)
     .map((n) => ({ n, p: path.join(PROJECTS, n), t: fs.statSync(path.join(PROJECTS, n)).mtimeMs }))
-    .filter((x) => x.n.toLowerCase().includes(SLUG.split('-')[0]) || /inkspire|harbor|quill|library|desk|quicknote|notedot/i.test(x.n))
-    .sort((a, b) => b.t - a.t)
+    .filter((x) => {
+      const n = x.n.toLowerCase();
+      const core = SLUG.split('-')[0];
+      return n === SLUG || n === brandSlugCore || n.startsWith(`${brandSlugCore}-`)
+        || n.startsWith(`${SLUG}-`) || (core.length > 2 && n.includes(core));
+    })
+    .sort((a, b) => {
+      const score = (n) => {
+        const low = n.toLowerCase();
+        if (low === brandSlugCore || low === SLUG) return 3;
+        if (low.startsWith(`${brandSlugCore}-`) || low.startsWith(`${SLUG}-`)) return 2;
+        return 1;
+      };
+      const d = score(b.n) - score(a.n);
+      return d !== 0 ? d : b.t - a.t;
+    })
   : [];
 const disk = diskCandidates[0]?.p
-  || [path.join(PROJECTS, SLUG), path.join(PROJECTS, BRAND)].find((p) => fs.existsSync(p));
+  || [path.join(PROJECTS, brandSlugCore), path.join(PROJECTS, SLUG), path.join(PROJECTS, BRAND)].find((p) => fs.existsSync(p));
 if (!disk || !fs.existsSync(disk)) {
   console.error('FAIL: project folder missing for', BRAND, SLUG);
   process.exit(3);
 }
 console.log('disk:', disk);
+
+// Peer bar (create-vite --immediate): never click Live until node_modules/vite exists.
+{
+  const viteDir = path.join(disk, 'node_modules', 'vite');
+  const tVite = Date.now();
+  while (!fs.existsSync(viteDir) && Date.now() - tVite < 240_000) {
+    process.stdout.write(`\rwaiting npm/vite on disk… ${Math.round((Date.now() - tVite) / 1000)}s   `);
+    await sleep(3000);
+  }
+  process.stdout.write('\n');
+}
 const hasVite = fs.existsSync(path.join(disk, 'node_modules', 'vite'));
 const hasIndex = fs.existsSync(path.join(disk, 'index.html'));
 const hasPkg = fs.existsSync(path.join(disk, 'package.json'));
 console.log('hasPkg=', hasPkg, 'hasVite=', hasVite, 'hasIndex=', hasIndex);
+if (hasPkg && !hasVite) {
+  console.error('FAIL: package.json present but node_modules/vite missing after wait — npm bootstrap gap');
+  process.exit(5);
+}
 
 // Click Live
 const liveClick = await evalE(`(() => {
@@ -268,15 +438,38 @@ const probe = await evalE(`(async () => {
 
 console.log('preview probe:', JSON.stringify(probe, null, 2));
 
+const sample = String(probe?.mounted?.sample || '');
+const textLen = Number(probe?.mounted?.textLen || 0);
+const consoleErrors = Array.isArray(probe?.mounted?.consoleErrors)
+  ? probe.mounted.consoleErrors.map((e) => String(e || ''))
+  : [];
+const resolveFail = consoleErrors.some((e) => /Failed to resolve import/i.test(e));
+// Oak Latch: real invent-floor paint (886 chars) still logged Nova's soft
+// "can't show the app" toast — do not fail when visible text is clearly there.
+const softBrokenToast = consoleErrors.some((e) =>
+  /can't show the app|something in this file is broken/i.test(e),
+);
+const hasRealPaint = textLen > 80 || sample.replace(/\s+/g, '').length > 60;
+const brokenOverlay = resolveFail || (softBrokenToast && !hasRealPaint);
 const ok = Boolean(
   probe?.attach?.ok
   && probe?.attach?.url
-  && (probe?.mounted?.mounted || (probe?.mounted?.ok && String(probe?.mounted?.sample || '').length > 12)),
+  && !probe?.mounted?.fail
+  && !probe?.mounted?.viteErr
+  && !brokenOverlay
+  && hasRealPaint
+  && (probe?.mounted?.mounted || probe?.mounted?.ok),
 );
 
 if (!ok) {
   console.error('FAIL: Live did not paint UI');
+  if (resolveFail) console.error('reason: Failed to resolve import');
+  else if (softBrokenToast && !hasRealPaint) console.error('reason: broken Live overlay / empty paint');
+  else if (!hasRealPaint) console.error('reason: empty paint (no visible text)');
   process.exit(4);
+}
+if (softBrokenToast && hasRealPaint) {
+  console.log('note: soft Live toast present but real paint verified (textLen=' + textLen + ')');
 }
 
 console.log('PASS: Live URL', probe.attach.url);

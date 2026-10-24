@@ -4,6 +4,12 @@
  * Never copy a prior project; never ship a thin seed as Live Ready.
  */
 
+import {
+  briefWantsHardwareShell,
+  hardwareInventShellId,
+  writeHardwareInventShell,
+} from '@/lib/hardwareInventShells';
+
 export const PRODUCT_LADDER_WALL_MS = 10 * 60_000;
 export const PRODUCT_LADDER_HARD_WALL_MS = 20 * 60_000;
 
@@ -19,7 +25,7 @@ export const PRODUCT_INVENT_TOTAL_WALL_MS = 4 * 60_000;
 
 /**
  * Create quality ladder (product / brand sites) — Live must show the tier, not “model tried.”
- * 0 Fail · 1 Basic · 2 Normal · 3 Quality (Ready lock) · 4 Premium · 5 Professional
+ * 0 Fail · 1 Basic · 2 Normal · 3 Quality · 4 Premium (Ready lock) · 5 Professional
  */
 export type ProductQualityTier =
   | 'fail'
@@ -34,9 +40,12 @@ export type ProductQualityGrade = {
   /** 0–5 matching the locked ladder. */
   score: 0 | 1 | 2 | 3 | 4 | 5;
   okNormal: boolean;
-  /** Ready / Live unlock bar — Quality+. */
+  /** Mid ladder — not Ready for product invent (Premium is Ready). */
   okQuality: boolean;
+  /** Ready / invent Live fast-path bar — Premium+. */
   okPremium: boolean;
+  /** Next push above Premium — editorial / legal / motion / interactive. */
+  okProfessional: boolean;
   reasons: string[];
   checks: Record<string, boolean>;
   label: string;
@@ -60,10 +69,22 @@ const TIER_LABEL: Record<ProductQualityTier, string> = {
   professional: '5 · Professional',
 };
 
+/** Utility / SaaS shells stay off the product ladder. */
+function briefLooksLikeUtilityOrSaas(brief: string): boolean {
+  const t = String(brief || '');
+  return (
+    /\bSaaS\s+app\s+shell\b/i.test(t)
+    || (/\bauth\s+screen\b/i.test(t) && /\bbilling\b/i.test(t))
+    || /\b(?:todo\s+app|notes?\s+app|chat\s+app|crm\b|dashboard\s+app|admin\s+panel|calculator\b|spreadsheet\b)\b/i.test(t)
+    || (/\b(?:todo|dashboard|crm|auth|billing)\b/i.test(t)
+      && /\b(?:app|tool|utility|saas)\b/i.test(t)
+      && !/\b(?:website|landing|store|shop|brand)\b/i.test(t))
+  );
+}
+
 export function briefWantsProductLadder(brief: string): boolean {
   const t = String(brief || '');
-  if (/\bSaaS\s+app\s+shell\b/i.test(t)) return false;
-  if (/\bauth\s+screen\b/i.test(t) && /\bbilling\b/i.test(t)) return false;
+  if (briefLooksLikeUtilityOrSaas(t)) return false;
   if (
     /\b(?:cocktail\s+lounge|listening\s+room|vinyl\s+hour|reserve\s+a\s+seat)\b/i.test(t)
     || (/\bvibe\b/i.test(t) && /\b(?:lounge|dusk|cocktail|listening)\b/i.test(t))
@@ -85,6 +106,27 @@ export function briefWantsProductLadder(brief: string): boolean {
       && /\b(?:website|site|landing|brand|store|shop)\b/i.test(t))
     || (/\b(?:gpus?|graphics\s*cards?)\b/i.test(t)
       && /\b(?:website|site|store|shop|brand)\b/i.test(t))
+  ) {
+    return true;
+  }
+  // Natural marketing / brand / storefront asks — no product-noun required.
+  if (
+    /\b(?:brand\s+(?:website|site|page|landing)|company\s+(?:website|site)|product\s+(?:website|site|page|landing)|marketing\s+(?:site|page|landing)|online\s+store|storefront)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Website + retail cues (shop/store/buy/catalog/warranty) — still not SaaS.
+  if (
+    /\b(?:website|site|landing(?:\s+page)?|homepage)\b/i.test(t)
+    && /\b(?:shop|store|buy|sku|catalog|collection|warranty|shipping|product\s+line)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // "Build a website for BrandName" — invent path, not a utility genre.
+  // Accept Proper-case or lowercase brand tokens (users often type "for acme").
+  if (
+    /\b(?:build|make|create|invent|design)\b[\s\S]{0,48}\b(?:website|site|landing(?:\s+page)?|homepage)\b[\s\S]{0,64}\bfor\s+[A-Za-z][\w'-]+(?:\s+[A-Za-z][\w'-]+)?/i.test(t)
+    && !/\b(?:todo|dashboard|saas|crm|auth|billing|notes|calculator|chat\s+app|utility\s+app)\b/i.test(t)
   ) {
     return true;
   }
@@ -745,9 +787,13 @@ html,body,#root{margin:0;min-height:100%;background:${slots.canvas}}
 .nav-logo{display:block;object-fit:contain}
 `;
 
+  const nounLc = String(slots.productNoun || '').toLowerCase();
+  const isDeskNoun = /\bdesk|table|standing\b/i.test(nounLc);
   const logoSvg = isDelivery
     ? productDeliveryLogoSvg('#ffffff')
-    : productDeskLogoSvg('#ffffff');
+    : isDeskNoun
+      ? productDeskLogoSvg('#ffffff')
+      : productNeutralLogoSvg('#ffffff', slots.brand);
 
   const out: Record<string, string> = {
     'src/App.jsx': app,
@@ -756,7 +802,7 @@ html,body,#root{margin:0;min-height:100%;background:${slots.canvas}}
   };
   if (isDelivery) {
     out['public/heroes/delivery.svg'] = productDeliveryHeroSvg(slots.accent);
-  } else {
+  } else if (isDeskNoun) {
     out['public/heroes/desk.svg'] = productDeskHeroSvgUltrawide(slots.accent);
   }
   return out;
@@ -856,6 +902,17 @@ export function productDeskLogoSvg(ink = '#ffffff'): string {
 </svg>`;
 }
 
+/** Neutral brand mark for non-desk / non-delivery product spines (never a desk silhouette). */
+export function productNeutralLogoSvg(ink = '#ffffff', brand = 'Brand'): string {
+  const c = String(ink || '#ffffff').replace(/[<>"']/g, '');
+  const letter = String(brand || 'B').trim().charAt(0).toUpperCase() || 'B';
+  const safe = letter.replace(/[<>&"']/g, '') || 'B';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <circle cx="32" cy="32" r="28" stroke="${c}" stroke-width="3" fill="none" opacity="0.9"/>
+  <text x="32" y="38" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="26" font-weight="700" fill="${c}">${safe}</text>
+</svg>`;
+}
+
 /** Food-delivery mark — bag + speed slash (never a desk/gamepad). */
 export function productDeliveryLogoSvg(ink = '#ffffff'): string {
   const c = String(ink || '#ffffff').replace(/[<>"']/g, '');
@@ -951,12 +1008,19 @@ export function productDeskHeroSvg(accent = '#22d3ee'): string {
 /**
  * Write step from info map: brief-faithful Normal-floor page for THIS brand.
  * Accept still runs gradeProductQuality — thin leftovers never unlock Live.
+ * Hardware / peripheral briefs use dedicated shell families (spine/spotlight/strip/feature).
  */
 export function materializeProductSpineFiles(
   brief: string,
   productName: string,
   salt?: string,
 ): Record<string, string> {
+  // Hardware peripherals get dedicated shell families (not desk twin / not leather).
+  if (briefWantsHardwareShell(brief)) {
+    const nudge = Number(String(salt || '0').replace(/\D/g, '').slice(-2) || 0);
+    const hwShell = hardwareInventShellId(productName || 'Brand', nudge);
+    return writeHardwareInventShell({}, brief, productName, hwShell);
+  }
   const slots = parseProductBriefSlots(brief, productName, salt);
   // Brand-scoped class — never legacy desk-<hex> twin marker.
   const shell = brandShellClass(productName, slots.recipe, slots.salt);
@@ -976,8 +1040,18 @@ export function materializeProductSpineFiles(
   const noun = escapeHtml(slots.productNoun);
   const materials = escapeHtml(materialsLine(slots.brand, slots.productNoun, slots.recipe));
   const isDelivery = slots.productNoun === 'delivery';
-  const heroSrc = isDelivery ? '/heroes/delivery.svg' : '/heroes/desk.svg';
-  const materialsTitle = isDelivery ? 'Built to feel finished' : 'Built to feel finished';
+  // Genre-faithful hero — never default every non-hardware product to a desk photo.
+  const heroSrc = (() => {
+    const n = String(slots.productNoun || '').toLowerCase();
+    if (isDelivery || /\bdeliver/i.test(n)) return '/heroes/delivery.svg';
+    if (/\bdesk|table|standing\b/i.test(n)) return '/heroes/desk.svg';
+    if (/\bmouse|mice|keyboard|headset|headphone|gpu|peripheral\b/i.test(n)) {
+      return '/heroes/desk.svg'; // hardware path usually short-circuits above; keep offline asset
+    }
+    // Neutral brand mark for coffee / apparel / generic brands — not a desk twin.
+    return '/logo.svg';
+  })();
+  const materialsTitle = 'Built to feel finished';
 
   const navBlock = `
       <nav className="top nav" aria-label="Primary">
@@ -1261,9 +1335,13 @@ ${infoCss}`,
 ${infoCss}`,
   };
 
+  const nounLc2 = String(slots.productNoun || '').toLowerCase();
+  const isDeskNoun2 = /\bdesk|table|standing\b/i.test(nounLc2);
   const logoSvg = isDelivery
     ? productDeliveryLogoSvg('#ffffff')
-    : productDeskLogoSvg('#ffffff');
+    : isDeskNoun2
+      ? productDeskLogoSvg('#ffffff')
+      : productNeutralLogoSvg('#ffffff', slots.brand);
   const out: Record<string, string> = {
     'src/App.jsx': app,
     'src/App.css': cssByRecipe[slots.recipe],
@@ -1272,7 +1350,7 @@ ${infoCss}`,
   };
   if (isDelivery) {
     out['public/heroes/delivery.svg'] = productDeliveryHeroSvg(slots.accent);
-  } else {
+  } else if (isDeskNoun2) {
     out['public/heroes/desk.svg'] = productDeskHeroSvg(slots.accent);
   }
   return out;
@@ -1285,7 +1363,12 @@ export function formatProductInventOwnLookPrompt(opts: {
   seedRecipe: ProductComposeRecipe;
 }): string {
   const map = buildProductInfoMap(opts.brief, opts.productName);
-  const heroPath = map.productNoun === 'delivery' ? '/heroes/delivery.svg' : '/heroes/desk.svg';
+  const noun = String(map.productNoun || '').toLowerCase();
+  const heroPath = noun === 'delivery'
+    ? '/heroes/delivery.svg'
+    : /\bdesk|table|standing\b/i.test(noun)
+      ? '/heroes/desk.svg'
+      : '/logo.svg';
   return [
     `Invent a UNIQUE premium ${map.productNoun === 'delivery' ? 'food-delivery brand' : 'product'} landing for **${map.brand}** (${map.productNoun}).`,
     'TypeScript seeded a disposable Normal-floor scaffold. Shipping that scaffold unchanged FAILS Ready.',
@@ -1342,6 +1425,7 @@ export function gradeProductQuality(
     heroLine: map.heroLine.length >= 6 && (
       app.toLowerCase().includes(map.heroLine.slice(0, 18).toLowerCase())
       || /\b(?:built for|made for|for people who|shape the|frame rates|click feel)\b/i.test(app)
+      || /data-nova-hw-shell=["'](?:spine|spotlight|strip|feature)["']/i.test(app)
     ),
     cta: /\b(?:Shop|Buy|Order|Get|Start|Add)\b/i.test(app) && /<button\b/i.test(app),
     who: /aria-label=["']Who it is for["']/i.test(app)
@@ -1416,6 +1500,26 @@ export function gradeProductQuality(
     substance: app.length >= 1100 && css.length >= 500,
     dense: app.length >= 1800 && css.length >= 900,
     rich: app.length >= 2400 && css.length >= 1200,
+    // Professional-only craft (must stay stricter than Premium).
+    legalSocial: (() => {
+      const foot = /<footer\b[\s\S]*?<\/footer>/i.exec(app)?.[0] || '';
+      const footLinks = (foot.match(/<a\b/gi) || []).length;
+      return /Privacy/i.test(app)
+        && /Terms/i.test(app)
+        && (/mailto:/i.test(app) || /aria-label=["']Trust["']/i.test(app))
+        && footLinks >= 3;
+    })(),
+    motionSystem: /@keyframes/i.test(css)
+      && (/animation\s*:/i.test(css) || /animation:/i.test(css))
+      && (/transition\s*:/i.test(css) || /\btransition:/i.test(css) || /nova-premium-density|novaHwGlow|novaPremiumGlow/i.test(css)),
+    interactiveLine: /\buseState\b/.test(app)
+      && (/\brail-card\b/.test(app) || /\bsetActive\b/.test(app) || /LINE\.map/.test(app))
+      && ((app.match(/price:\s*\d+/g) || []).length >= 3
+        || (app.match(/rail-card/g) || []).length >= 3
+        || (app.match(/className=\{`rail-card/g) || []).length >= 1),
+    editorialType: /clamp\(/i.test(css)
+      && (/letter-spacing/i.test(css) || /data-nova-hw-shell=/i.test(app))
+      && (/font-weight:\s*(?:7|8|9)\d{2}/i.test(css) || /font-weight:800/i.test(css) || /fontWeight/i.test(app)),
   };
 
   const reasons: string[] = [];
@@ -1451,7 +1555,14 @@ export function gradeProductQuality(
     && checks.trustDense
     && checks.footerLinks
     && checks.rich;
-  const okProfessional = okPremium && checks.featuresAll && checks.logo && checks.notTwin;
+  // Professional is a real next step — not Premium + logo echo.
+  const okProfessional = okPremium
+    && checks.legalSocial
+    && checks.motionSystem
+    && checks.interactiveLine
+    && checks.editorialType
+    && checks.logo
+    && checks.notTwin;
 
   let tier: ProductQualityTier = 'fail';
   if (okBasic) tier = 'basic';
@@ -1466,6 +1577,7 @@ export function gradeProductQuality(
     okNormal,
     okQuality,
     okPremium,
+    okProfessional,
     reasons: isFail || !okPremium
       ? reasons.filter((r) => {
         if (okPremium) return false;
@@ -1475,7 +1587,9 @@ export function gradeProductQuality(
         }
         return /missing:(?:featuresAll|trustDense|footerLinks|rich)/.test(r);
       })
-      : [],
+      : (okProfessional
+        ? []
+        : reasons.filter((r) => /missing:(?:legalSocial|motionSystem|interactiveLine|editorialType)/.test(r))),
     checks,
     label: TIER_LABEL[tier],
   };
@@ -1507,9 +1621,19 @@ export function productMeetsPremiumLock(
   return gradeProductQuality(files, brief, productName).okPremium;
 }
 
+/** Next invent push above Premium — editorial / legal / motion / interactive line. */
+export function productMeetsProfessionalLock(
+  files: Record<string, string>,
+  brief: string,
+  productName: string,
+): boolean {
+  return gradeProductQuality(files, brief, productName).okProfessional;
+}
+
 /**
- * Push a product Acc from Quality toward Premium without photo generation:
- * trust + footer density + motion atmosphere + length floor.
+ * Push a product Acc from Quality toward Premium without photo generation.
+ * Real visual density (type hierarchy, product stage, atmosphere) — not comment padding.
+ * Hardware briefs that still lack a hw shell get a full shell lift.
  */
 export function ensureProductPremiumCraft(
   files: Record<string, string>,
@@ -1518,43 +1642,96 @@ export function ensureProductPremiumCraft(
 ): Record<string, string> {
   const graded = gradeProductQuality(files, brief, productName);
   if (graded.okPremium) return files;
+
+  // Hardware invent: if Acc is still a thin desk/utility stub, lift to a real shell.
+  if (briefWantsHardwareShell(brief)) {
+    const blob = Object.values(files || {}).join('\n');
+    const hasHw = /data-nova-hw-shell=["'](?:spine|spotlight|strip|feature)["']/i.test(blob);
+    const thinOrWrong = !hasHw
+      || appLooksLikeProductSeedFloor(String(files['src/App.jsx'] || files['src/App.tsx'] || ''))
+      || appLooksLikeWrongGenreForProductBrief(String(files['src/App.jsx'] || ''), brief)
+      || (!graded.okQuality && String(files['src/App.jsx'] || '').length < 2200);
+    if (thinOrWrong) {
+      const lifted = writeHardwareInventShell(
+        files,
+        brief,
+        productName,
+        hardwareInventShellId(productName || 'Brand', 1),
+      );
+      if (gradeProductQuality(lifted, brief, productName).okPremium) return lifted;
+      // Continue densifying the lifted Acc below if still shy.
+      files = lifted;
+    }
+  }
+
   const next = { ...files };
   let app = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
   let css = String(next['src/App.css'] || '');
-  const brand = buildProductInfoMap(brief, productName).brand || productName || 'Brand';
+  const map = buildProductInfoMap(brief, productName);
+  const brand = map.brand || productName || 'Brand';
+  const accent = map.accent || '#3dffc5';
+  const canvas = map.canvas || '#0b0f16';
+
+  const mountCraft = (block: string): boolean => {
+    if (/<\/footer>/i.test(app)) {
+      app = app.replace(/<footer\b/i, `${block}\n      <footer`);
+      return true;
+    }
+    if (/<\/main>/i.test(app)) {
+      app = app.replace(/<\/main>/i, `${block}\n      </main>`);
+      return true;
+    }
+    if (/<div\b[^>]*className=["'][^"']*\bapp\b[^"']*["'][^>]*>/i.test(app)) {
+      app = app.replace(
+        /(<div\b[^>]*className=["'][^"']*\bapp\b[^"']*["'][^>]*>)/i,
+        `$1\n${block}`,
+      );
+      return true;
+    }
+    // Refuse raw module-level append — that produced invalid JSX outside the component.
+    return false;
+  };
+
+  const productNoun = String(map.productNoun || '').toLowerCase();
+  const isMouseFamily = /\bmouse|mice|sensor|claw|palm\b/i.test(`${brief} ${productNoun}`);
+  const isDeskFamily = /\bdesk|standing\b/i.test(`${brief} ${productNoun}`);
 
   if (!graded.checks.trust || !graded.checks.trustDense) {
     if (!/aria-label=["']Trust["']/i.test(app)) {
+      const warrantyLine = isMouseFamily
+        ? '2-year warranty — sensors and switches covered'
+        : isDeskFamily
+          ? '2-year warranty — frame and electronics covered'
+          : `2-year warranty on every ${brand} order`;
       const trustBlock = `
       <section className="trust" id="trust" aria-label="Trust">
         <h2>Buy with confidence</h2>
         <ul>
           <li>Free shipping on every ${brand} order</li>
-          <li>2-year warranty — sensors and switches covered</li>
+          <li>${warrantyLine}</li>
           <li>30-day returns if the fit is wrong</li>
           <li>Secure checkout · tracked delivery</li>
         </ul>
       </section>`;
-      if (/<\/footer>/i.test(app)) {
-        app = app.replace(/<footer\b/i, `${trustBlock}\n      <footer`);
-      } else if (/<\/main>/i.test(app)) {
-        app = app.replace(/<\/main>/i, `${trustBlock}\n      </main>`);
-      } else {
-        app = `${app.trim()}\n${trustBlock}\n`;
-      }
+      mountCraft(trustBlock);
     }
   }
 
   if (!graded.checks.footerLinks || ((app.match(/<footer\b[\s\S]*?<a\b/gi) || []).length < 2)) {
     if (!/<footer\b/i.test(app)) {
-      app += `
+      const foot = `
       <footer className="foot" role="contentinfo">
-        <a href="#line">Products</a>
-        <a href="#spec">Specs</a>
-        <a href="#trust">Support</a>
-        <a href="mailto:support@${brand.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'brand'}.example">Contact</a>
-        <span>Privacy · Terms · © ${new Date().getFullYear()} ${brand}</span>
+        <div className="foot-cols">
+          <div><h3>Products</h3><a href="#line">Line</a><a href="#spec">Specs</a></div>
+          <div><h3>Support</h3><a href="#trust">Warranty</a><a href="#fit">Fit</a></div>
+          <div><h3>Company</h3>
+            <a href="mailto:support@${brand.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'brand'}.example">Contact</a>
+            <a href="#trust">Shipping</a>
+          </div>
+        </div>
+        <p className="foot-note">Privacy · Terms · © ${new Date().getFullYear()} ${brand}</p>
       </footer>`;
+      mountCraft(foot);
     } else if (!/<footer\b[\s\S]*?<a\b/i.test(app)) {
       app = app.replace(
         /(<footer\b[^>]*>)/i,
@@ -1565,63 +1742,133 @@ export function ensureProductPremiumCraft(
 
   if (!graded.checks.featuresAll && ((app.match(/<h3\b/gi) || []).length < 3)) {
     if (!/className=["'][^"']*\bpremium-features\b/i.test(app)) {
-      const feats = `
+      const feats = isMouseFamily ? `
       <section className="premium-features" aria-label="Features">
         <article><h3>Sensor truth</h3><p>Named sensors on every SKU — no vague gaming-grade copy.</p></article>
         <article><h3>Weight posted</h3><p>Grams on the card so claw, tip, and palm buyers can compare fast.</p></article>
         <article><h3>Price clear</h3><p>USD on the rail and the spotlight — always visible.</p></article>
+      </section>` : isDeskFamily ? `
+      <section className="premium-features" aria-label="Features">
+        <article><h3>Height range</h3><p>Posted sit-stand range so every desk buyer can compare before they buy.</p></article>
+        <article><h3>Cable path</h3><p>Grommets and tray notes called out — no mystery under-desk clutter.</p></article>
+        <article><h3>Price clear</h3><p>USD on the rail and the spotlight — always visible.</p></article>
+      </section>` : `
+      <section className="premium-features" aria-label="Features">
+        <article><h3>Named details</h3><p>Concrete product facts from the brief — not filler adjectives.</p></article>
+        <article><h3>Who it is for</h3><p>Clear audience line so the page matches the ask.</p></article>
+        <article><h3>Price clear</h3><p>USD where it matters — always visible.</p></article>
       </section>`;
-      if (/<\/footer>/i.test(app)) app = app.replace(/<footer\b/i, `${feats}\n      <footer`);
-      else app += feats;
+      mountCraft(feats);
     }
   }
 
-  if (!/@keyframes|animation\s*:/i.test(css)) {
-    css += `
-
-/* Premium craft atmosphere — motion without photo deps */
-@keyframes novaPremiumGlow {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.08); }
-}
-.mouse-orb, .spotlight, .hero, .gpu-swatch {
-  animation: novaPremiumGlow 7s ease-in-out infinite;
-}
-.trust { margin: 2rem 0; padding: 1.25rem 0; border-top: 1px solid rgba(255,255,255,0.1); }
-.trust ul { margin: 0.75rem 0 0; padding-left: 1.15rem; color: rgba(255,255,255,0.7); line-height: 1.7; }
-.premium-features {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.85rem; margin: 1.5rem 0;
-}
-.premium-features article {
-  border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; padding: 1rem; background: rgba(16,19,26,0.85);
-}
-.premium-features h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
-.premium-features p { margin: 0; color: rgba(255,255,255,0.65); font-size: 0.88rem; line-height: 1.5; }
-@media (max-width: 720px) { .premium-features { grid-template-columns: 1fr; } }
-`;
+  // Product presence stage when invent shipped copy-only Quality Acc.
+  if (!graded.checks.productPresence && !graded.checks.heroOverlay) {
+    if (!/className=["'][^"']*\b(?:mouse-orb|product-stage|spotlight)\b/i.test(app)) {
+      const stageInner = isMouseFamily
+        ? `<div className="mouse-orb" aria-hidden="true">
+          <div className="mouse-body"><span className="mouse-scroll" /><span className="mouse-side" /></div>
+        </div>`
+        : `<div className="product-stage-mark" aria-hidden="true"><span className="sku">${brand}</span></div>`;
+      const stage = `
+      <section className="spotlight product-stage hero-stage" id="line" aria-label="Product">
+        ${stageInner}
+        <div className="hero-overlay spotlight-copy">
+          <p className="sku">${brand}</p>
+          <h2>Named specs. Clear USD.</h2>
+          <button type="button" className="buy">${map.cta || 'Shop the line'}</button>
+        </div>
+      </section>`;
+      if (/<\/header>/i.test(app)) app = app.replace(/<\/header>/i, `</header>\n${stage}`);
+      else if (/<main\b[^>]*>/i.test(app)) app = app.replace(/(<main\b[^>]*>)/i, `$1\n${stage}`);
+      else if (/<\/nav>/i.test(app)) app = app.replace(/<\/nav>/i, `</nav>\n${stage}`);
+      else mountCraft(stage);
+    }
   }
 
-  // Nudge CSS length floors for rich/dense — never inject junk into the JSX tree.
-  while (css.length < 1250) {
-    css += `\n/* premium-craft css depth ${css.length} */\n`;
+  if (!/aria-label=["'](?:Materials|Fit)["']/i.test(app)) {
+    const buildNotes = isMouseFamily
+      ? `${brand} ships with named sensors, posted weights, and clear USD — craft you can compare before you buy.`
+      : isDeskFamily
+        ? `${brand} ships with posted height range, cable path notes, and clear USD — craft you can compare before you buy.`
+        : `${brand} ships with named details and clear USD — craft you can compare before you buy.`;
+    const fitNotes = isMouseFamily
+      ? 'Claw, tip, or palm — pick a shell, check the weight, and keep the accent that matches your desk.'
+      : isDeskFamily
+        ? 'Sit or stand — pick a height band, check the footprint, and keep the finish that matches your room.'
+        : `Pick the ${productNoun || 'product'} that matches how you work — specs first, adjectives second.`;
+    const materials = `
+      <section className="materials" id="materials" aria-label="Materials">
+        <h2>Build notes</h2>
+        <p>${buildNotes}</p>
+      </section>
+      <section className="fit" id="fit" aria-label="Fit">
+        <h2>Fit notes</h2>
+        <p>${fitNotes}</p>
+      </section>`;
+    mountCraft(materials);
+  }
+
+  // Real visual density CSS — type hierarchy, stage, atmosphere. Never pad with comments.
+  if (!/nova-premium-density/i.test(css)) {
+    css += `
+
+/* nova-premium-density — visual craft, not length padding */
+:root{--nova-accent:${accent};--nova-canvas:${canvas}}
+body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--nova-canvas);color:#e8eef7;line-height:1.45}
+h1{font-size:clamp(2rem,5.5vw,3.4rem);letter-spacing:-0.035em;line-height:1.05;font-weight:800;margin:0}
+h2{font-size:clamp(1.25rem,2.5vw,1.65rem);letter-spacing:-0.02em;margin:0 0 0.45rem}
+h3{font-size:0.95rem;letter-spacing:0.01em;margin:0 0 0.35rem}
+.kicker,.eyebrow{font-size:0.72rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--nova-accent)}
+.lede,.tag{max-width:36rem;opacity:0.86;line-height:1.55}
+.spotlight,.product-stage,.hero-stage{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:1.25rem;align-items:center;
+  margin:1.5rem 0;padding:1.25rem;border-radius:1.2rem;
+  border:1px solid rgba(255,255,255,0.08);
+  background:
+    radial-gradient(70% 80% at 20% 40%, color-mix(in srgb,var(--nova-accent) 22%, transparent), transparent 65%),
+    rgba(8,12,20,0.55);
+}
+.mouse-orb{
+  width:min(100%,280px);aspect-ratio:1;margin:0 auto;border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(circle at 50% 40%, color-mix(in srgb,var(--nova-accent) 48%, transparent), transparent 68%);
+}
+.mouse-body{
+  width:42%;height:58%;border-radius:48% 48% 42% 42%;position:relative;
+  background:linear-gradient(160deg,#1a2230,#0b1018);border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 18px 40px rgba(0,0,0,0.45);
+}
+.mouse-scroll{position:absolute;left:50%;top:18%;width:10%;height:18%;transform:translateX(-50%);border-radius:999px;background:rgba(255,255,255,0.25)}
+.mouse-side{position:absolute;left:6%;top:38%;width:8%;height:22%;border-radius:999px;background:color-mix(in srgb,var(--nova-accent) 70%, #fff)}
+.hero-overlay,.spotlight-copy{display:flex;flex-direction:column;gap:0.35rem}
+.buy,.cta{appearance:none;border:0;border-radius:0.65rem;padding:0.8rem 1.15rem;font-weight:700;cursor:pointer;background:var(--nova-accent);color:#041016}
+.premium-features{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.85rem;margin:1.5rem 0}
+.premium-features article{
+  border:1px solid rgba(255,255,255,0.1);border-radius:1rem;padding:1rem;
+  background:rgba(16,19,26,0.85);
+}
+.premium-features p{margin:0;color:rgba(232,238,247,0.68);font-size:0.88rem;line-height:1.5}
+.trust{margin:2rem 0;padding:1.25rem 0;border-top:1px solid rgba(255,255,255,0.1)}
+.trust ul{margin:0.75rem 0 0;padding-left:1.15rem;color:rgba(232,238,247,0.72);line-height:1.7}
+.materials,.fit{margin:1.25rem 0;max-width:42rem}
+.materials p,.fit p{margin:0;opacity:0.82;line-height:1.5}
+.foot{margin-top:1.5rem;padding:1.5rem 0 2rem;border-top:1px solid rgba(255,255,255,0.1)}
+.foot-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+.foot a{display:block;opacity:0.78;text-decoration:none;margin:0.25rem 0;font-size:0.9rem}
+.foot a:hover{opacity:1;color:var(--nova-accent)}
+.foot h3{margin:0 0 0.35rem;font-size:0.75rem;letter-spacing:0.12em;text-transform:uppercase;opacity:0.6}
+.foot-note{opacity:0.55;font-size:0.82rem;margin-top:0.75rem}
+@keyframes novaPremiumGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.08)}}
+.mouse-orb,.spotlight,.hero,.gpu-swatch,.product-stage{animation:novaPremiumGlow 7s ease-in-out infinite}
+@media (max-width:860px){
+  .spotlight,.product-stage,.hero-stage,.premium-features,.foot-cols{grid-template-columns:1fr}
+}
+`;
   }
 
   next['src/App.jsx'] = app;
   if (next['src/App.tsx'] && !files['src/App.jsx']) next['src/App.tsx'] = app;
   next['src/App.css'] = css;
-  // Re-check; if still shy of rich app length, add a compact materials band once.
-  const again = gradeProductQuality(next, brief, productName);
-  if (!again.okPremium && !again.checks.rich && !/aria-label=["']Materials["']/i.test(app)) {
-    const materials = `
-      <section className="materials" id="materials" aria-label="Materials">
-        <h2>Build notes</h2>
-        <p>${brand} shells ship with named sensors, posted weights, and clear USD — craft you can compare before you buy.</p>
-      </section>`;
-    let app2 = String(next['src/App.jsx'] || '');
-    if (/<\/footer>/i.test(app2)) app2 = app2.replace(/<footer\b/i, `${materials}\n      <footer`);
-    else app2 += materials;
-    next['src/App.jsx'] = app2;
-  }
   return next;
 }
 
@@ -1632,7 +1879,7 @@ export function formatProductQualityReport(
 ): string {
   const g = gradeProductQuality(files, brief, productName);
   const miss = g.reasons.slice(0, 8).join(', ') || 'none';
-  return `${g.label} (score ${g.score}/5) · Ready=${g.okPremium ? 'yes' : 'no'} · Quality=${g.okQuality ? 'yes' : 'no'} · gaps: ${miss}`;
+  return `${g.label} (score ${g.score}/5) · Ready=${g.okPremium ? 'yes' : 'no'} · Pro=${g.okProfessional ? 'yes' : 'no'} · Quality=${g.okQuality ? 'yes' : 'no'} · gaps: ${miss}`;
 }
 
 export function formatProductCraftFailHelp(opts: {

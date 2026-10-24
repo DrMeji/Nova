@@ -5,7 +5,7 @@ import { NovaMark } from '../components/NovaMark';
 import { HeroChips } from '../components/HeroChips';
 import { useAuth } from '../lib/auth';
 import { RELEASES_URL } from '../lib/constants';
-import { PRODUCT_NAME } from '../lib/brand';
+import '../lib/brand';
 
 const FEATURES = [
   {

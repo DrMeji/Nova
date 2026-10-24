@@ -424,7 +424,8 @@ function isSandboxBlockedPath(rel) {
   return safe.split('/').some(part => blocked.has(String(part || '').toLowerCase()));
 }
 
-function writeProjectFiles(projectId, projectName, files, sandbox) {
+async function writeProjectFiles(projectId, projectName, files, sandbox) {
+  const fsp = fs.promises;
   const root = resolveProjectRoot(projectId);
   const rootResolved = path.resolve(root);
   const prior = readMeta(projectId);
@@ -458,8 +459,8 @@ function writeProjectFiles(projectId, projectName, files, sandbox) {
       blocked.push(safe);
       continue;
     }
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
+    await fsp.mkdir(path.dirname(full), { recursive: true });
+    await fsp.writeFile(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
     written.push(safe);
   }
   if (sandbox && blocked.length && written.length === 0) {
@@ -490,8 +491,8 @@ function writeProjectFiles(projectId, projectName, files, sandbox) {
     updatedAt: new Date().toISOString(),
     files: written,
   };
-  fs.mkdirSync(projectDir(projectId), { recursive: true });
-  fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
+  await fsp.mkdir(projectDir(projectId), { recursive: true });
+  await fsp.writeFile(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
   return { ok: true, root, files: written, inPlace: Boolean(meta.inPlace) };
 }
 

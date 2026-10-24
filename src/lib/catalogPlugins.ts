@@ -66,7 +66,7 @@ async function runOutlookMailLive(token: string, userText: string) {
   return ['Outlook · inbox', '', rows.length ? rows.join('\n') : 'No messages returned.', userText ? '' : ''].filter(Boolean).join('\n');
 }
 
-async function runOutlookCalLive(token: string, userText: string) {
+async function runOutlookCalLive(token: string, _userText: string) {
   await verifyMicrosoftToken(token);
   const res = await desktopRequest('https://graph.microsoft.com/v1.0/me/events?$top=8&$select=subject,start,end&$orderby=start/dateTime', {
     method: 'GET',
@@ -80,7 +80,7 @@ async function runOutlookCalLive(token: string, userText: string) {
   return ['Outlook Calendar · upcoming', '', rows.length ? rows.join('\n') : 'No events returned.'].join('\n');
 }
 
-async function runTeamsLive(token: string, userText: string) {
+async function runTeamsLive(token: string, _userText: string) {
   await verifyMicrosoftToken(token);
   const res = await desktopRequest('https://graph.microsoft.com/v1.0/me/joinedTeams?$top=12', {
     method: 'GET',
@@ -101,7 +101,7 @@ async function verifyDatadogToken(token: string) {
   return { label: 'Datadog' };
 }
 
-async function runDatadogLive(token: string, userText: string) {
+async function runDatadogLive(token: string, _userText: string) {
   await verifyDatadogToken(token);
   const [apiKey, appKey] = token.includes('|') ? splitPipe(token, 1) : [token.trim(), ''];
   const headers: Record<string, string> = { 'DD-API-KEY': apiKey };
@@ -128,7 +128,7 @@ async function verifyShopifyToken(token: string) {
   return { label: data.shop?.name || 'Shopify' };
 }
 
-async function runShopifyLive(token: string, userText: string) {
+async function runShopifyLive(token: string, _userText: string) {
   const [shop, accessToken] = splitPipe(token, 2);
   const host = shop.replace(/^https?:\/\//, '').replace(/\/$/, '');
   const res = await desktopRequest(`https://${host}/admin/api/2024-10/products.json?limit=8`, {
@@ -150,7 +150,7 @@ async function verifyHubspotToken(token: string) {
   return { label: 'HubSpot' };
 }
 
-async function runHubspotLive(token: string, userText: string) {
+async function runHubspotLive(token: string, _userText: string) {
   await verifyHubspotToken(token);
   const res = await desktopRequest('https://api.hubapi.com/crm/v3/objects/contacts?limit=8&properties=firstname,lastname,email', {
     method: 'GET',
@@ -175,7 +175,7 @@ async function verifyNeonToken(token: string) {
   return { label: projects[0]?.name ? `Neon · ${projects[0].name}` : 'Neon' };
 }
 
-async function runNeonLive(token: string, userText: string) {
+async function runNeonLive(token: string, _userText: string) {
   await verifyNeonToken(token);
   const res = await desktopRequest('https://console.neon.tech/api/v2/projects', {
     method: 'GET',
@@ -199,7 +199,7 @@ async function verifyMondayToken(token: string) {
   return { label: data.data?.me?.name || 'Monday.com' };
 }
 
-async function runMondayLive(token: string, userText: string) {
+async function runMondayLive(token: string, _userText: string) {
   await verifyMondayToken(token);
   const res = await desktopRequest('https://api.monday.com/v2', {
     method: 'POST',
@@ -222,7 +222,7 @@ async function verifyAsanaToken(token: string) {
   return { label: data.data?.name || 'Asana' };
 }
 
-async function runAsanaLive(token: string, userText: string) {
+async function runAsanaLive(token: string, _userText: string) {
   await verifyAsanaToken(token);
   const res = await desktopRequest('https://app.asana.com/api/1.0/tasks?limit=8&opt_fields=name,completed,due_on', {
     method: 'GET',
@@ -247,7 +247,7 @@ async function verifyAtlassianToken(token: string) {
   return { label: me.displayName || 'Atlassian' };
 }
 
-async function runAtlassianLive(token: string, userText: string) {
+async function runAtlassianLive(token: string, _userText: string) {
   const [site, email, apiToken] = splitPipe(token, 3);
   const host = site.replace(/^https?:\/\//, '').replace(/\/$/, '');
   const basic = btoa(`${email}:${apiToken}`);
@@ -272,7 +272,7 @@ async function verifySalesforceToken(token: string) {
   return { label: 'Salesforce' };
 }
 
-async function runSalesforceLive(token: string, userText: string) {
+async function runSalesforceLive(token: string, _userText: string) {
   const [instance, accessToken] = splitPipe(token, 2);
   const base = instance.replace(/\/$/, '');
   const res = await desktopRequest(`${base}/services/data/v59.0/query?q=${encodeURIComponent('SELECT Id,Name FROM Account LIMIT 8')}`, {
@@ -317,7 +317,7 @@ async function verifyZoomToken(token: string) {
   return { label: [me.first_name, me.last_name].filter(Boolean).join(' ') || me.email || 'Zoom' };
 }
 
-async function runZoomLive(token: string, userText: string) {
+async function runZoomLive(token: string, _userText: string) {
   await verifyZoomToken(token);
   const res = await desktopRequest('https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=8', {
     method: 'GET',
@@ -338,7 +338,7 @@ async function verifyIntercomToken(token: string) {
   return { label: 'Intercom' };
 }
 
-async function runIntercomLive(token: string, userText: string) {
+async function runIntercomLive(token: string, _userText: string) {
   await verifyIntercomToken(token);
   const res = await desktopRequest('https://api.intercom.io/conversations?per_page=8', {
     method: 'GET',
@@ -362,7 +362,7 @@ async function verifyFirefliesToken(token: string) {
   return { label: data.data?.user?.name || 'Fireflies' };
 }
 
-async function runFirefliesLive(token: string, userText: string) {
+async function runFirefliesLive(token: string, _userText: string) {
   await verifyFirefliesToken(token);
   const res = await desktopRequest('https://api.fireflies.ai/graphql', {
     method: 'POST',
@@ -407,7 +407,7 @@ async function verifyZohoToken(token: string) {
   return { label: data.users?.[0]?.full_name || 'Zoho CRM' };
 }
 
-async function runZohoLive(token: string, userText: string) {
+async function runZohoLive(token: string, _userText: string) {
   await verifyZohoToken(token);
   const res = await desktopRequest('https://www.zohoapis.com/crm/v2/Leads?per_page=8', {
     method: 'GET',
@@ -430,7 +430,7 @@ async function verifyQuickbooksToken(token: string) {
   return { label: data.CompanyInfo?.CompanyName || 'QuickBooks' };
 }
 
-async function runQuickbooksLive(token: string, userText: string) {
+async function runQuickbooksLive(token: string, _userText: string) {
   const [realmId, accessToken] = splitPipe(token, 2);
   await verifyQuickbooksToken(token);
   const res = await desktopRequest(`https://quickbooks.api.intuit.com/v3/company/${realmId}/query?query=${encodeURIComponent('select * from Customer maxresults 8')}`, {
@@ -453,8 +453,8 @@ async function verifyWhatsappToken(token: string) {
   return { label: 'WhatsApp Business' };
 }
 
-async function runWhatsappLive(token: string, userText: string) {
-  const [phoneNumberId, accessToken] = splitPipe(token, 2);
+async function runWhatsappLive(token: string, _userText: string) {
+  const [phoneNumberId, ] = splitPipe(token, 2);
   await verifyWhatsappToken(token);
   return [
     'WhatsApp Business · connected',
@@ -473,7 +473,7 @@ async function verifyWixToken(token: string) {
   return { label: 'Wix' };
 }
 
-async function runWixLive(token: string, userText: string) {
+async function runWixLive(token: string, _userText: string) {
   await verifyWixToken(token);
   return [
     'Wix · connected',
@@ -492,7 +492,7 @@ async function verifyCanvaToken(token: string) {
   return { label: me.profile?.display_name || 'Canva' };
 }
 
-async function runCanvaLive(token: string, userText: string) {
+async function runCanvaLive(token: string, _userText: string) {
   await verifyCanvaToken(token);
   return ['Canva · connected', '', 'Token verified. Paste a Canva design URL in chat for NOVA to help review or export notes.'].join('\n');
 }
@@ -506,7 +506,7 @@ async function verifyHeygenToken(token: string) {
   return { label: 'HeyGen' };
 }
 
-async function runHeygenLive(token: string, userText: string) {
+async function runHeygenLive(token: string, _userText: string) {
   await verifyHeygenToken(token);
   return ['HeyGen · connected', '', 'API key verified. Ask NOVA to draft a video script — generation runs in HeyGen.'].join('\n');
 }
@@ -520,7 +520,7 @@ async function verifyRunwayToken(token: string) {
   return { label: 'Runway' };
 }
 
-async function runRunwayLive(token: string, userText: string) {
+async function runRunwayLive(token: string, _userText: string) {
   await verifyRunwayToken(token);
   return ['Runway · connected', '', 'API key verified. Describe a clip in chat and NOVA can help craft a Runway prompt.'].join('\n');
 }
@@ -541,7 +541,7 @@ function passthroughRun(name: string, hint: string) {
   ].filter(Boolean).join('\n');
 }
 
-async function runDevpostLive(_token: string, userText: string) {
+async function runDevpostLive(_token: string, _userText: string) {
   const res = await desktopRequest('https://devpost.com/api/hackathons?challenge_type[]=online&order_by=recent', {
     method: 'GET',
   });

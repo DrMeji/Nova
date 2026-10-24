@@ -1,64 +1,28 @@
-import {
-  SettingsSection,
-  Field,
-  InfoCard,
-  ToggleRow,
-  ThemeCard,
-  SettingsGroup,
-  GgufSliderRow,
-  StorageBar,
-  OAuthClientRow,
-  AUTO_LOCK_OPTIONS,
-  AI_MODES,
-  DEFAULT_MODELS,
-  PROVIDER_ROWS,
-  ACCENTS,
-} from '@/components/SettingsShared';
-import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
-import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { NovaMark } from '@/components/NovaMark';
-import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { NOVA_CHANGELOG } from '@/lib/changelog';
-import { formatNovaId } from '@/lib/novaUserId';
-import { isNovaDevEmail } from '@/lib/novaDevAccount';
-import { clearSetupCompleted } from '@/lib/setup';
-import { getHardwareClass, getAccurateHardware } from '@/lib/api';
-import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
-import { setCloudProviderEnabled } from '@/lib/cloudSources';
-import { probeProviderKey } from '@/lib/providerSpeed';
-import { setProviderApiKey, getProviderApiKeys, getLocalPrefs, type DensityPref, type AiModePref } from '@/lib/localPrefs';
-import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
-import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
-import {
-  getEnabledSkillIds,
-  listBuiltinSkillPacks,
-  toggleSkillEnabled,
-  type BuiltinNovaSkillId,
-} from '@/lib/novaSkills';
+import { SettingsSection, Field, InfoCard, ToggleRow, StorageBar, type SettingsSharedCtx } from '@/components/SettingsShared';
+import '@/components/VoiceSettingsPanel';
+import '@/components/SettingsSystemHealth';
+import '@/components/NovaMark';
+import { StatusCheck } from '@/components/BrandMark';
+import '@/lib/changelog';
+import '@/lib/novaUserId';
+import '@/lib/novaDevAccount';
+import '@/lib/setup';
+import '@/lib/api';
+import '@/lib/ggufContext';
+import '@/lib/cloudSources';
+import '@/lib/providerSpeed';
+import '@/lib/localPrefs';
+import '@/lib/pinLock';
+import '@/lib/twoFactor';
+import '@/lib/novaSkills';
 import { isNovaDevSession } from '@/lib/novaRuntime';
-import {
-  Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
-} from 'lucide-react';
+import { NOVA_CHANGELOG } from '@/lib/changelog';
+import type { ArkEngineModel } from '@/lib/novaEngine';
+import { Trash2, Download, Info, FolderOpen, Github, RefreshCw } from 'lucide-react';
 
 
-export function SettingsAdvanced({ ctx }: { ctx: any }) {
-  const {
-    activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
-    flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
-    deleteConfirmOpen, setDeleteConfirmOpen, deleteAccountPermanently,
-    signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
-    engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
-    allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
-    keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
-    setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
-    brainProfileReason, setBrainProfileReason, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
-    installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
-    deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
-    pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
-    checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion,
-    checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose,
-    settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked,
-  } = ctx;
+export function SettingsAdvanced({ ctx }: { ctx: SettingsSharedCtx }) {
+  const { activeSection, setSavedFlash, prefs, patchPrefs, featureTick, engineStatus, diskSpace, brainUrl, brainContractVersion, setLocalReports, cacheBusy, runClearAppCaches, installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent, deletingModelId, runDeleteModel, checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion, checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose, refreshBlocked } = ctx;
 
   void featureTick;
   void setLocalReports;
@@ -139,7 +103,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                     </p>
                   ) : (
                     <div className="rounded-xl border border-surface-border divide-y divide-surface-border/80 overflow-hidden">
-                      {installedModels.map((model: any) => (
+                      {installedModels.map((model: ArkEngineModel) => (
                         <div key={model.id} className="flex items-center gap-3 px-3.5 py-2.5 min-w-0">
                           <StatusCheck label={`${model.name} installed in NOVA Engine`} />
                           <div className="min-w-0 flex-1">
@@ -204,7 +168,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                       { id: 'web' as const, label: 'Web' },
                       { id: 'api' as const, label: 'API' },
                       { id: 'desktop' as const, label: 'Desktop' },
-                    ]).map((t: any) => (
+                    ]).map((t) => (
                       <button
                         key={t.id}
                         type="button"
@@ -321,7 +285,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                   value={prefs.launchOnStartup}
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
-                    void window.novaDesktop?.loginItemSet?.(v).then((r: any) => {
+                    void window.novaDesktop?.loginItemSet?.(v).then((r) => {
                       if (r?.devBlocked && v) {
                         patchPrefs({ launchOnStartup: false });
                         setSavedFlash('Launch at startup is unavailable in a development build');
@@ -352,7 +316,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                         You’re on NOVA v{appVersion}.
                       </p>
                     ) : (
-                      visibleChangelog.map((entry: any) => (
+                      visibleChangelog.map((entry: (typeof NOVA_CHANGELOG)[number]) => (
                       <div key={entry.version} className="rounded-xl border border-surface-border p-4">
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div>
@@ -366,7 +330,7 @@ export function SettingsAdvanced({ ctx }: { ctx: any }) {
                           </span>
                         </div>
                         <ul className="space-y-1.5">
-                          {(entry.notes || []).map((note: any) => (
+                          {(entry.notes || []).map((note: string) => (
                             <li key={note} className="text-xs text-content-secondary flex gap-2">
                               <span className="text-content-tertiary">·</span>
                               <span>{String(note).replace(/\u2014|\u2013|\u2212/g, '. ')}</span>

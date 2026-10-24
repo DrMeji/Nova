@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import type { AgentFileChange, AgentTracePayload, AgentTraceStep } from '@/lib/agentTrace';
+import { cleanSpokenAgentAnswer, isInventAccNoisePath } from '@/lib/agentTrace';
 import { ChatMarkdown } from '@/lib/chatMarkdown';
+import { loadCheckpointStack } from '@/lib/createCheckpoint';
 
 function stepVerb(kind: AgentTraceStep['kind']): string {
   if (kind === 'read') return 'Read';
@@ -11,7 +13,32 @@ function stepVerb(kind: AgentTraceStep['kind']): string {
   return '';
 }
 
+/** Human label for Nova internal harness keys (not real project files). */
+function novaHarnessLabel(path: string): string | null {
+  const base = path.split(/[/\\]/).pop() || path;
+  if (!/^\.__nova/i.test(base)) return null;
+  const key = base.replace(/^\.__nova/i, '');
+  const map: Record<string, string> = {
+    BrowserLoop: 'Browser loop',
+    DriverAsk: 'Driver brief',
+    NavigatorAsk: 'Navigator brief',
+    GenericInventAsk: 'Invent brief',
+    StorefrontInventAsk: 'Storefront brief',
+    ProductInventAsk: 'Product brief',
+    MetaHarness: 'Build route',
+    ArchitectPlan: 'Architect plan',
+    EditorAsk: 'Editor brief',
+  };
+  return map[key] || key.replace(/([a-z])([A-Z])/g, '$1 $2').trim() || 'Build note';
+}
+
 function fileExtBadge(path: string): { label: string; tone: string } {
+  if (/^\.__nova/i.test(path.split(/[/\\]/).pop() || path)) {
+    return { label: 'NV', tone: 'bg-cyan-500/30 text-cyan-100' };
+  }
+  if (/\.gitignore$/i.test(path)) {
+    return { label: 'GIT', tone: 'bg-rose-500/25 text-rose-200' };
+  }
   const ext = (path.split('.').pop() || '').toLowerCase();
   if (ext === 'ts' || ext === 'tsx') return { label: 'TS', tone: 'bg-sky-500/25 text-sky-200' };
   if (ext === 'js' || ext === 'jsx' || ext === 'cjs' || ext === 'mjs') return { label: 'JS', tone: 'bg-amber-500/25 text-amber-200' };
@@ -19,7 +46,14 @@ function fileExtBadge(path: string): { label: string; tone: string } {
   if (ext === 'html') return { label: 'HTML', tone: 'bg-orange-500/25 text-orange-200' };
   if (ext === 'css') return { label: 'CSS', tone: 'bg-fuchsia-500/25 text-fuchsia-200' };
   if (ext === 'json') return { label: 'JSON', tone: 'bg-yellow-500/25 text-yellow-100' };
+  if (ext === 'md') return { label: 'MD', tone: 'bg-indigo-500/30 text-indigo-100' };
+  if (ext === 'svg') return { label: 'SVG', tone: 'bg-teal-500/30 text-teal-100' };
+  if (/^\.env/i.test(path.split(/[/\\]/).pop() || '')) return { label: 'ENV', tone: 'bg-lime-500/25 text-lime-100' };
   return { label: (ext || 'FILE').slice(0, 4).toUpperCase(), tone: 'bg-surface-hover text-content-tertiary' };
+}
+
+function fileRowName(path: string): string {
+  return novaHarnessLabel(path) || path.split(/[/\\]/).pop() || path;
 }
 
 function ThoughtBlock({
@@ -96,26 +130,36 @@ function ThoughtBlock({
   );
 }
 
+/** ~10 rows visible; rest scrolls inside the card. */
+const PREVIEW = 6;
+const EXPANDED_VISIBLE_ROWS = 10;
+/** Rough row height (badge + text) for max-height calc. */
+const ROW_PX = 28;
+
 function FilesChangedCard({
   changes,
   paths,
   projectPath,
+  checkpoints,
 }: {
   changes: AgentFileChange[];
   paths: string[];
   projectPath?: string;
+  checkpoints?: Array<{ label: string; at: number; productName: string }>;
 }) {
-  // Collapsed by default so long SVG lists don't eat the chat viewport.
   const [expanded, setExpanded] = useState(false);
-  const rows: AgentFileChange[] = changes.length
+  const rawRows: AgentFileChange[] = changes.length
     ? changes
     : paths.map(path => ({ path, added: 0, removed: 0 }));
-  if (!rows.length && !projectPath) return null;
-  const PREVIEW = 6;
+  // Acc/open-all dumps can be 200+ rows — keep the card about product files.
+  const rows = rawRows.filter((r) => !isInventAccNoisePath(r.path));
+  if (!rows.length && !projectPath && !checkpoints?.length) return null;
+
   const visible = expanded ? rows : rows.slice(0, PREVIEW);
-  const hidden = Math.max(0, rows.length - visible.length);
+  const hidden = Math.max(0, rows.length - PREVIEW);
   const totalAdd = rows.reduce((n, r) => n + (r.added || 0), 0);
   const totalDel = rows.reduce((n, r) => n + (r.removed || 0), 0);
+  const latest = checkpoints?.[0];
 
   return (
     <div className="rounded-xl border border-surface-border/70 bg-surface-hover/30 px-3 py-2.5 max-w-full min-w-0">
@@ -127,6 +171,24 @@ function FilesChangedCard({
           </span>
         </p>
       ) : null}
+
+      {latest ? (
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+          <span className="font-medium text-content-secondary">Checkpoint</span>
+          <span className="text-content-primary">{latest.label}</span>
+          <span className="text-content-tertiary">
+            {checkpoints!.length > 1 ? `· ${checkpoints!.length} saved` : null}
+            {' · '}
+            {new Date(latest.at).toLocaleString(undefined, {
+              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+            })}
+          </span>
+          <span className="w-full text-[10px] text-content-tertiary/90">
+            Say “rollback” to restore the previous craft snapshot.
+          </span>
+        </div>
+      ) : null}
+
       <p className="text-[12px] font-medium text-content-primary mb-1.5">
         {rows.length} File{rows.length === 1 ? '' : 's'} Changed
         {totalAdd > 0 || totalDel > 0 ? (
@@ -137,10 +199,26 @@ function FilesChangedCard({
           </span>
         ) : null}
       </p>
-      <ul className="space-y-1">
+
+      <ul
+        className={`space-y-1 ${expanded ? 'nova-nested-scroll overflow-y-auto overscroll-contain pr-0.5' : ''}`}
+        style={expanded ? { maxHeight: EXPANDED_VISIBLE_ROWS * ROW_PX, overscrollBehavior: 'contain' } : undefined}
+        onWheel={(e) => {
+          if (!expanded) return;
+          const el = e.currentTarget;
+          if (el.scrollHeight <= el.clientHeight + 1) return;
+          const atTop = el.scrollTop <= 0;
+          const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+          const leaving = (e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom);
+          // Keep wheel inside this list — never chain into the chat thread.
+          e.stopPropagation();
+          if (leaving) e.preventDefault();
+        }}
+      >
         {visible.map(row => {
           const badge = fileExtBadge(row.path);
-          const name = row.path.split(/[/\\]/).pop() || row.path;
+          const name = fileRowName(row.path);
+          const harness = Boolean(novaHarnessLabel(row.path));
           const add = Math.max(0, row.added || 0);
           const del = Math.max(0, row.removed || 0);
           return (
@@ -148,7 +226,10 @@ function FilesChangedCard({
               <span className={`inline-flex h-5 min-w-[1.6rem] items-center justify-center rounded-md px-1 text-[9px] font-bold ${badge.tone}`}>
                 {badge.label}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[12px] text-content-secondary font-mono" title={row.path}>
+              <span
+                className={`min-w-0 flex-1 truncate text-[12px] text-content-secondary ${harness ? '' : 'font-mono'}`}
+                title={row.path}
+              >
                 {name}
               </span>
               <span className="shrink-0 text-[11px] font-mono tabular-nums text-content-tertiary">
@@ -161,7 +242,8 @@ function FilesChangedCard({
           );
         })}
       </ul>
-      {hidden > 0 ? (
+
+      {hidden > 0 && !expanded ? (
         <button
           type="button"
           onClick={() => setExpanded(true)}
@@ -196,7 +278,7 @@ export function AgentTracePanel({
   stepsOnly?: boolean;
   onContinue?: () => void;
 }) {
-  const shownAnswer = (answer || payload.answer || '').trim();
+  const shownAnswer = cleanSpokenAgentAnswer(answer || payload.answer || '');
   const actionSteps = useMemo(
     () => payload.steps.filter(s => s.kind !== 'thought'),
     [payload.steps],
@@ -205,6 +287,17 @@ export function AgentTracePanel({
   const changed = payload.changedPaths || [];
   const fileChanges = payload.fileChanges || [];
   const showFilesCard = payload.done && (fileChanges.length > 0 || changed.length > 0 || Boolean(payload.projectPath));
+  const checkpoints = useMemo(() => {
+    const root = String(payload.projectPath || '').trim();
+    if (!root || !payload.done) return [] as Array<{ label: string; at: number; productName: string }>;
+    const stack = loadCheckpointStack(root);
+    // Newest first for the compact header line.
+    return stack.slice().reverse().map((c) => ({
+      label: c.label,
+      at: c.at,
+      productName: c.productName,
+    }));
+  }, [payload.projectPath, payload.done]);
 
   return (
     <div className="space-y-2 min-w-0 max-w-full">
@@ -223,17 +316,40 @@ export function AgentTracePanel({
         </div>
       ) : null}
 
-      {showFilesCard ? (
+      {shownAnswer && !stepsOnly ? (
+        <div className={`${payload.steps.length ? 'pt-1' : ''} min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere] text-content-primary`}>
+          <ChatMarkdown text={shownAnswer} />
+        </div>
+      ) : null}
+
+      {showFilesCard || checkpoints.length ? (
         <FilesChangedCard
           changes={fileChanges}
           paths={changed}
           projectPath={payload.projectPath}
+          checkpoints={checkpoints}
         />
       ) : null}
 
-      {shownAnswer && !stepsOnly ? (
-        <div className={`${payload.steps.length || showFilesCard ? 'pt-1' : ''} min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere] text-content-primary`}>
-          <ChatMarkdown text={shownAnswer} />
+      {payload.done && Array.isArray(payload.qualityGaps) && payload.qualityGaps.length ? (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5 max-w-full min-w-0">
+          <p className="text-[12px] font-medium text-amber-100/95 mb-1.5">
+            Quality gaps
+            <span className="ml-2 text-[11px] font-normal text-content-tertiary">
+              where Ready held back
+            </span>
+          </p>
+          <ul className="space-y-1.5 m-0 p-0 list-none">
+            {payload.qualityGaps.slice(0, 8).map((gap, i) => (
+              <li
+                key={`${i}-${String(gap).slice(0, 40)}`}
+                className="flex items-start gap-2 text-[12px] leading-snug text-content-secondary"
+              >
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/80" aria-hidden />
+                <span className="min-w-0 break-words [overflow-wrap:anywhere]">{gap}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

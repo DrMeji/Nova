@@ -160,7 +160,7 @@ export async function runLinearLive(
         'Creating issues needs Write. Enable it under Plugins → Linear → Permissions.',
       ].join('\n');
     }
-    const titleMatch = userText.match(/(?:create|new|add)\s+(?:an?\s+)?(?:issue|ticket|bug|task)\s*[:\-]?\s*(.+)$/i);
+    const titleMatch = userText.match(/(?:create|new|add)\s+(?:an?\s+)?(?:issue|ticket|bug|task)\s*[:-]?\s*(.+)$/i);
     const title = (titleMatch?.[1] || userText.replace(/using linear[,:]?/i, '').trim()).slice(0, 120)
       || 'New issue from NOVA';
     const issue = await createLinearIssue(token, title);

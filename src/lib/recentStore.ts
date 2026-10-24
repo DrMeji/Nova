@@ -554,7 +554,8 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
     for (const mid of collectChatMediaIds(chatId, existing?.creationId)) {
       mediaIds.add(mid);
     }
-    wipeLinkedChatProjects(chatId, { quiet: true });
+    // Keys only here — disk wipe is deferred so History bulk delete cannot freeze
+    // the main thread and leave the composer unresponsive.
     removeKnownChatKeys(chatId);
   }
 
@@ -577,6 +578,7 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
     }
   }
 
+  // Fire unlock BEFORE deferred disk work so Chat can accept typing immediately.
   window.dispatchEvent(new Event('NOVA:chats-changed'));
   window.dispatchEvent(new Event('NOVA:creations-changed'));
   window.dispatchEvent(new Event('NOVA:projects-changed'));
@@ -589,7 +591,13 @@ export function deleteRecentChatsPermanentlyBulk(chatIds: string[]): number {
   }
 
   const mediaList = [...mediaIds];
+  const wipeIds = [...ids];
   window.setTimeout(() => {
+    for (const chatId of wipeIds) {
+      try {
+        wipeLinkedChatProjects(chatId, { quiet: true });
+      } catch { /* ignore */ }
+    }
     try {
       removeLocalStorageKeysMatching(idSet);
     } catch { /* ignore */ }
@@ -748,7 +756,7 @@ export function deleteCreationPermanently(creationId: string) {
 }
 
 export function titleFromPrompt(prompt: string): string {
-  let cleaned = String(prompt || '')
+  const cleaned = String(prompt || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
     .replace(/^Agent mode\.[^\n]*\n+/i, '')
@@ -829,7 +837,7 @@ export function mediaMessageMarkdown(
   dataUrl?: string,
   opts?: { real?: boolean; kind?: 'image' | 'video'; source?: string },
 ): string {
-  const safe = (alt || 'NOVA generation').slice(0, 80).replace(/[\[\]]/g, '');
+  const safe = (alt || 'NOVA generation').slice(0, 80).replace(/[[\]]/g, '');
   const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](nova-media:${libraryId})`;
   const sourceLine = '';
   if (opts?.source?.includes('motion-still')) {

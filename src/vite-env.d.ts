@@ -277,6 +277,15 @@ declare global {
         jobId?: string;
         chatId?: string;
       }) => Promise<{ ok: boolean; error?: string; cancelled?: boolean }>;
+      engineSetPerfPolicy?: (policy: {
+        shareGpu?: boolean;
+        createInflight?: boolean;
+      }) => Promise<{ ok: boolean; policy?: { shareGpu?: boolean; createInflight?: boolean }; error?: string }>;
+      engineGetPerfPolicy?: () => Promise<{
+        ok: boolean;
+        policy?: { shareGpu?: boolean; createInflight?: boolean };
+        error?: string;
+      }>;
       webSearch?: (query: string) => Promise<{
         ok: boolean;
         text?: string;
@@ -771,6 +780,16 @@ declare global {
         error?: string;
       }>;
       projectDeleteFiles?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
+      gitInit?: (projectId: string) => Promise<{
+        ok: boolean;
+        created?: boolean;
+        error?: string;
+      }>;
+      gitInit?: (projectId: string) => Promise<{
+        ok: boolean;
+        created?: boolean;
+        error?: string;
+      }>;
       gitStatus?: (projectId: string) => Promise<{
         ok: boolean;
         git?: boolean;

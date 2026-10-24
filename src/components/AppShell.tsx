@@ -64,6 +64,7 @@ import {
   placeAllMissingHomesOnce,
   saveMissingPlaced,
 } from '@/lib/missingItemsCatalog';
+import { ensureHomeControlDefaultsOn } from '@/components/HomeControlsPanel';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/novaUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
@@ -167,6 +168,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // All Missing-item controls now have mounted homes — mark Placed once.
   useEffect(() => {
     placeAllMissingHomesOnce();
+    // Code helpers On by default without cluttering the Code pill (Agents · helper suites).
+    ensureHomeControlDefaultsOn('code-header');
     setMissingOpen(countMissingOpen());
   }, []);
 

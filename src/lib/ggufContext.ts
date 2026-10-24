@@ -5,6 +5,7 @@
  */
 
 import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
+import { getLocalPrefs } from '@/lib/localPrefs';
 
 /** Leave room for the next reply (chat nPredict default is 4096). */
 export const REPLY_RESERVE = 4096;
@@ -13,26 +14,43 @@ export const REPLY_RESERVE = 4096;
 export const GGUF_CTX_MAX = 65536;
 export const GGUF_CTX_MIN = 8192;
 
+/** Create / share-GPU ceilings — keep in sync with electron/novaGguf.cjs. */
+export const GGUF_CTX_CREATE_CAP = 16384;
+export const GGUF_CTX_SHARE_GPU_CAP = 12288;
+
 /**
  * Pick a llama.cpp `-c` size from installed system RAM (GB).
  * Same table as electron/novaGguf.cjs — keep them in sync.
  */
-export function resolveGgufCtx(ramGb: number): number {
+export function resolveGgufCtx(
+  ramGb: number,
+  opts?: { shareGpu?: boolean; createInflight?: boolean },
+): number {
   const ram = Number(ramGb);
   const g = Number.isFinite(ram) && ram > 0 ? ram : 8;
-  if (g < 8) return 8192;
-  if (g < 12) return 16384;
-  if (g < 20) return 24576;
-  if (g < 28) return 32768;
-  if (g < 40) return 49152;
-  return GGUF_CTX_MAX;
+  let ctx = GGUF_CTX_MAX;
+  if (g < 8) ctx = 8192;
+  else if (g < 12) ctx = 16384;
+  else if (g < 20) ctx = 24576;
+  else if (g < 28) ctx = 32768;
+  else if (g < 40) ctx = 49152;
+  else ctx = GGUF_CTX_MAX;
+  if (opts?.shareGpu) ctx = Math.min(ctx, GGUF_CTX_SHARE_GPU_CAP);
+  else if (opts?.createInflight) ctx = Math.min(ctx, GGUF_CTX_CREATE_CAP);
+  return ctx;
 }
 
-/** Current PC’s local context window (tokens). */
+/** Current PC’s local context window (tokens), honoring share-GPU prefs when available. */
 export function getGgufCtx(): number {
   const hw = loadHardwareSnapshot();
   const ram = hw ? parseRamGb(hw) : 8;
-  return resolveGgufCtx(ram);
+  let shareGpu = true;
+  try {
+    shareGpu = getLocalPrefs().shareGpuMode !== false;
+  } catch {
+    shareGpu = true;
+  }
+  return resolveGgufCtx(ram, { shareGpu });
 }
 
 /** Tokens available for history / packed prompt (ctx minus reply reserve). */

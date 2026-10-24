@@ -265,7 +265,13 @@ export function ChatCodeOverlay({
       .map(p => p.replace(/\\/g, '/'))
       // Never show npm lockfiles in Code — they look like endless copy-paste and freeze scroll.
       .filter(p => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?)$/i.test(p))
-      .filter(p => !/(^|\/)node_modules\//i.test(p)),
+      .filter(p => !/(^|\/)node_modules\//i.test(p))
+      // Agent harness prompts + invent Acc shards — not product source.
+      .filter(p => !/(^|\/)\.__nova/i.test(p))
+      .filter(p => !/\.nova\//i.test(p))
+      .filter(p => !/\.nova\/open-all\//i.test(p))
+      .filter(p => !/\.nova\/open-all-/i.test(p))
+      .filter(p => !/\.nova\/workers\//i.test(p)),
     [files],
   );
   const tree = useMemo(() => buildTree(paths), [paths]);
@@ -277,7 +283,10 @@ export function ChatCodeOverlay({
   const revealPathRef = useRef('');
   const revealedByPathRef = useRef<Record<string, string>>({});
   const targetRef = useRef('');
-  const typingActive = readOnly || smoothTyping;
+
+  // Never run the 22ms typewriter during Live/craft — it starved the renderer.
+  // Show the full buffer immediately; followTail still pins scroll to the end.
+  const typingActive = Boolean(smoothTyping) && !readOnly;
 
   useEffect(() => {
     if (!open) return;
@@ -485,6 +494,18 @@ export function ChatCodeOverlay({
     setRevealed(fullValue);
   }, [open, typingActive, fullValue]);
 
+  // Must stay above any early return — conditional useMemo crashed Code pill (hooks mismatch).
+  const ghostHints = useMemo(() => {
+    try {
+      const raw = files['.nova/ghost-hints.json'] || '';
+      if (!raw) return [] as string[];
+      const parsed = JSON.parse(raw) as { hints?: string[] };
+      return Array.isArray(parsed.hints) ? parsed.hints.filter((h) => typeof h === 'string') : [];
+    } catch {
+      return [] as string[];
+    }
+  }, [files]);
+
   if (!open) return null;
 
   const value = typingActive ? revealed : fullValue;
@@ -629,6 +650,7 @@ export function ChatCodeOverlay({
                   value={value}
                   readOnly={readOnly}
                   followTail={typingActive || readOnly}
+                  ghostHints={ghostHints}
                   onChange={(next) => {
                     if (readOnly) return;
                     onChangeFile(selected, next);

@@ -13,6 +13,12 @@ import {
   countJsxTagBalance,
 } from '@/lib/freshSpaFromBrief';
 import { ensureJsxHasNoTypeScript, healBrokenJsxOpenTags } from '@/lib/createBuildQuality';
+import {
+  healMissingSectionDataImports,
+  healSectionRelativeImports,
+  rewriteAppImportsForPageBody,
+  unresolvedRelativeImportReasons,
+} from '@/lib/createThinPath';
 
 export type SyntaxGateResult = {
   ok: boolean;
@@ -21,14 +27,42 @@ export type SyntaxGateResult = {
   healed: boolean;
 };
 
-/** Vite crash: siblings after the return root closed (`</div>` then `<section>`…). */
+/** End index (exclusive) of the outermost <div>…</div> inside a return ( … ). */
+function findOuterDivEnd(inner: string): number {
+  const open = String(inner || '').search(/<div\b/i);
+  if (open < 0) return -1;
+  const openTag = inner.slice(open).match(/^<div\b[^>]*>/i)?.[0] || '';
+  let i = open + openTag.length;
+  let depth = 1;
+  while (i < inner.length && depth > 0) {
+    const rest = inner.slice(i);
+    const o = rest.search(/<div\b/i);
+    const c = rest.search(/<\/div>/i);
+    if (c < 0) return -1;
+    if (o >= 0 && o < c) {
+      depth += 1;
+      i += o + 4;
+      continue;
+    }
+    depth -= 1;
+    i += c + 6;
+  }
+  return depth === 0 ? i : -1;
+}
+
+/**
+ * Vite crash: landmarks after the return root already closed.
+ * Must NOT flag brand-lockup/nav `</div>` followed by a sibling `<section>` inside `.app`.
+ */
 export function hasAdjacentJsxOutsideRoot(app: string): boolean {
   const body = String(app || '').match(/return\s*\(([\s\S]*?)\)\s*;/);
   if (!body) return false;
+  const rootEnd = findOuterDivEnd(body[1]);
+  if (rootEnd < 0) return false;
+  const after = body[1].slice(rootEnd);
   // Nested logo `</div>` then `<nav>` inside a header is normal — never treat nav
   // as an orphan sibling (that re-broke SoftPalm after mangled-JSX heal).
-  // Only tipjar-class landmarks that usually sit outside the page root.
-  return /<\/div>\s*\n\s*<(?:section|footer|main|aside)\b/.test(body[1]);
+  return /<(?:section|footer|main|aside)\b/i.test(after);
 }
 
 /** Pull orphan siblings back inside the return root before its closing </div>. */
@@ -36,12 +70,19 @@ export function healAdjacentJsxOutsideRoot(app: string): string {
   const src = String(app || '');
   if (!hasAdjacentJsxOutsideRoot(src)) return src;
   return src.replace(
-    /(return\s*\(\s*)([\s\S]*?)(<\/div>)(\s*)((?:<(?:section|footer|main|aside)\b[\s\S]*?))(\s*\))/m,
-    (_m, ret, before, close, _ws, orphans, end) => {
-      if (!String(orphans || '').trim() || /export\s+default/.test(orphans)) {
-        return `${ret}${before}${close}${orphans}${end}`;
+    /(return\s*\()([\s\S]*?)(\)\s*;)/,
+    (_m, ret: string, inner: string, end: string) => {
+      const rootEnd = findOuterDivEnd(inner);
+      if (rootEnd < 0) return `${ret}${inner}${end}`;
+      const root = inner.slice(0, rootEnd);
+      const orphans = inner.slice(rootEnd).trim();
+      if (!orphans || /export\s+default/.test(orphans)) {
+        return `${ret}${inner}${end}`;
       }
-      return `${ret}${before}${orphans}\n    ${close}${end}`;
+      const closeIdx = root.lastIndexOf('</div>');
+      if (closeIdx < 0) return `${ret}${inner}${end}`;
+      const healed = `${root.slice(0, closeIdx)}${orphans}\n    ${root.slice(closeIdx)}`;
+      return `${ret}${healed}${end}`;
     },
   );
 }
@@ -119,7 +160,7 @@ export function healCssDumpedFromAppJsx(app: string): { app: string; cssExtract:
   if (!m) return { app: s, cssExtract: '' };
   const head = m[1];
   const tail = m[2];
-  if (!/(?:\/\*|\:root\s*\{|html\s*,\s*body)/.test(tail)) {
+  if (!/(?:\/\*|:root\s*\{|html\s*,\s*body)/.test(tail)) {
     return { app: s, cssExtract: '' };
   }
   // Keep only JS/JSX in head; ensure it still ends with component close.
@@ -132,8 +173,9 @@ export function healCssDumpedFromAppJsx(app: string): { app: string; cssExtract:
  */
 export function hasOrphanJsxAfterRootClose(app: string): boolean {
   const s = String(app || '');
-  // Normal shells are `<div><main>…</main></div>` — only flag Tipjar-style junk.
-  return /<\/main>\s*(?:<\/div>\s*){2,}\s*(?:\)\s*:\s*null\s*\})?/i.test(s)
+  // Tipjar-style junk only: ternary/null glued after root closes — not a normal
+  // nested shell (`</main></div></div>`), which is valid layout markup.
+  return /<\/main>\s*(?:<\/div>\s*){2,}\s*\)\s*:\s*null\s*\}/i.test(s)
     || /<\/main>\s*\)\s*:\s*null\s*\}/i.test(s)
     || /<\/(?:main|div)>\s*(?:<\/div>\s*){2,}\s*\)\s*:\s*null/i.test(s);
 }
@@ -153,6 +195,26 @@ export function healOrphanJsxAfterRootClose(app: string): string {
     '</main>\n',
   );
   return s;
+}
+
+/**
+ * Free-model invent often emits `cards.map` / `books.map` after deleting the
+ * array — Live ReferenceError blank. Catch before Ready (Live invent 2026-10-23).
+ */
+export function undeclaredCollectionReasons(app: string): string[] {
+  const s = String(app || '');
+  const reasons: string[] = [];
+  for (const name of ['cards', 'books', 'items', 'products', 'posts', 'entries', 'rows', 'slides', 'features'] as const) {
+    const used = new RegExp(`\\b${name}\\.(?:map|filter|length|forEach|find|slice)\\b`, 'i').test(s)
+      || new RegExp(`\\{${name}\\.`).test(s);
+    if (!used) continue;
+    const declared = new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`).test(s)
+      || new RegExp(`\\b(?:const|let)\\s*\\[\\s*${name}\\s*,`).test(s)
+      || new RegExp(`\\bfunction\\s+${name}\\b`).test(s)
+      || new RegExp(`\\bimport\\s+[\\s\\S]{0,120}\\b${name}\\b[\\s\\S]{0,40}from\\s+['\"]`).test(s);
+    if (!declared) reasons.push(`${name} used without declaration (would ReferenceError / blank Live)`);
+  }
+  return reasons;
 }
 
 /** setX / value={x} without matching useState — ReferenceError at runtime / sometimes compile. */
@@ -223,6 +285,20 @@ export function healUnboundTipCalculatorState(app: string): string {
   return s;
 }
 
+/**
+ * Agent-loop mid-write dumps (`TOOL: write` / `PATH:` / `TOOL: ready`) into App/CSS
+ * must never ship — Vite treats them as syntax errors → SPA HTML fallback.
+ */
+export function stripAgentToolResidueFromSource(source: string): string {
+  let s = String(source || '');
+  if (!s) return s;
+  // Cut from first agent tool trailer (TOOL: write / ready / …).
+  const cut = s.search(/\n\s*TOOL:\s*(?:write|ready|done|read|patch|list)\b/i);
+  if (cut >= 0) s = s.slice(0, cut);
+  s = s.replace(/\n\s*PATH:\s*src\/[\w./-]+\s*\n?\s*\}?\s*$/i, '');
+  return `${s.trimEnd()}\n`;
+}
+
 /** Heuristic JSX/TSX sanity — not a full parser; enough to block known Live crashers. */
 export function runCreateSyntaxGate(
   files: Record<string, string>,
@@ -230,6 +306,18 @@ export function runCreateSyntaxGate(
   const next = { ...files };
   const reasons: string[] = [];
   let healed = false;
+
+  // Strip TOOL:/PATH: residue from every text source before App-specific heals.
+  for (const [rel, body] of Object.entries(next)) {
+    if (typeof body !== 'string') continue;
+    if (!/\.(?:jsx?|tsx?|css)$/i.test(rel)) continue;
+    if (!/\bTOOL:\s*(?:write|ready|done)\b|\bPATH:\s*src\//i.test(body)) continue;
+    const cleaned = stripAgentToolResidueFromSource(body);
+    if (cleaned !== body) {
+      next[rel] = cleaned;
+      healed = true;
+    }
+  }
 
   const appKey = next['src/App.jsx']
     ? 'src/App.jsx'
@@ -327,6 +415,9 @@ export function runCreateSyntaxGate(
     }
   }
 
+  if (/\bTOOL:\s*(?:write|ready|done)\b|\bPATH:\s*src\//i.test(app)) {
+    reasons.push('App source still contains agent TOOL residue');
+  }
   if (looksLikeTruncatedUiSource(app)) {
     reasons.push('App source looks truncated mid-write');
   }
@@ -354,6 +445,39 @@ export function runCreateSyntaxGate(
     reasons.push('Orphan JSX after component close (will not compile)');
   }
   for (const r of unboundStateReasons(app)) reasons.push(r);
+  for (const r of undeclaredCollectionReasons(app)) reasons.push(r);
+
+  // PageBody + all section files: rewrite App-relative ./context|./sections paths.
+  // Also heal App.jsx if ../context leaked from a PageBody rewrite (kids:0 Live).
+  {
+    const importHealed = healSectionRelativeImports(next);
+    for (const k of Object.keys(importHealed)) {
+      if (importHealed[k] !== next[k]) {
+        next[k] = importHealed[k];
+        healed = true;
+      }
+    }
+  }
+  const bodyKey = 'src/sections/PageBodySection.jsx';
+  if (typeof next[bodyKey] === 'string' && next[bodyKey].trim()) {
+    const rewritten = rewriteAppImportsForPageBody(String(next[bodyKey]));
+    if (rewritten !== next[bodyKey]) {
+      next[bodyKey] = rewritten;
+      healed = true;
+    }
+  }
+  {
+    const dataHealed = healMissingSectionDataImports(next);
+    for (const k of Object.keys(dataHealed)) {
+      if (dataHealed[k] !== next[k]) {
+        next[k] = dataHealed[k];
+        healed = true;
+      }
+    }
+  }
+  for (const r of unresolvedRelativeImportReasons(next)) {
+    reasons.push(`Unresolved import: ${r}`);
+  }
   // After strip heal — only fail if TS still remains.
   if (appKey.endsWith('.jsx') && jsxSourceHasTypeScriptOnlySyntax(app)) {
     reasons.push('src/App.jsx contains TypeScript syntax');

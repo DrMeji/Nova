@@ -65,9 +65,9 @@ export async function runFigmaLive(
     }
     const fileKey = keyMatch?.[1];
     const bodyMatch = userText.match(
-      /(?:comment|post|write)\s+(?:on\s+)?(?:figma\.com\/(?:file|design)\/[a-zA-Z0-9]+|[a-zA-Z0-9]{10,})\s*[:\-]?\s*(.+)$/i,
+      /(?:comment|post|write)\s+(?:on\s+)?(?:figma\.com\/(?:file|design)\/[a-zA-Z0-9]+|[a-zA-Z0-9]{10,})\s*[:-]?\s*(.+)$/i,
     )
-      || userText.match(/\bcomment\s*[:\-]\s*(.+)$/i);
+      || userText.match(/\bcomment\s*[:-]\s*(.+)$/i);
     const body = (bodyMatch?.[1] || '').trim();
     if (!fileKey || !body) {
       return [

@@ -103,7 +103,7 @@ export async function runCodeStudioCommand(opts: {
   }
 
   if (gitKind === 'commit') {
-    const msg = message.match(/commit(?:\s+these changes)?(?:\s+with)?\s*[:\-]\s*(.+)$/i)?.[1]
+    const msg = message.match(/commit(?:\s+these changes)?(?:\s+with)?\s*[:-]\s*(.+)$/i)?.[1]
       || message.match(/["“](.+)["”]/)?.[1]
       || 'Update from NOVA';
     const committed = await gitCommit(projectId, msg.trim());

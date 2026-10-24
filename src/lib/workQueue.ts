@@ -552,7 +552,7 @@ function extractNumberedItems(text: string): WorkQueueItem[] {
 export function replaceOpenItems(queue: WorkQueue, items: Array<Partial<WorkQueueItem>>): WorkQueue {
   const done = queue.items.filter((i) => i.status === 'done' || i.status === 'skipped');
   const fresh: WorkQueueItem[] = [];
-  items.forEach((raw, idx) => {
+  items.forEach((raw, _idx) => {
     const title = String(raw.title || '').trim().slice(0, 140);
     if (!title) return;
     fresh.push({

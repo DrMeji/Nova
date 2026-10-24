@@ -165,7 +165,7 @@ function cleanAsk(message: string): string {
   return String(message || '')
     .replace(/<!--nova-attach:[\s\S]*?-->/g, '')
     .replace(/<!--nova-auto-read-->/g, '')
-    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
+    .replace(/^[[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
 
@@ -612,7 +612,7 @@ export async function answerStudio(
           if (streamed.length === 0 && delta.length >= 80) streamed = delta;
           else if (delta.length > streamed.length + 40 && delta.length >= 80) streamed = delta;
           else streamed += delta;
-          let live = scrubCannedGreetingFlash(scrubFalseProjectChatPreamble(streamed));
+          const live = scrubCannedGreetingFlash(scrubFalseProjectChatPreamble(streamed));
           if (live.length < 2 || isCannedGreetingReply(live, input.userMessage)) {
             if (lastGood.length >= 2) onDelta(lastGood);
             return;

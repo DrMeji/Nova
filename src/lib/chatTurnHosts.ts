@@ -74,11 +74,11 @@ export type HostBag = {
   pushAssistantStatus: (label: string, writingPath?: string | null) => void;
   stopIfSuperseded: () => Promise<boolean>;
   clearGeneratingIfMineEarly: () => void;
-  commitStudioForChat: (chatId: string, opts: Record<string, unknown>) => void;
-  persistStudioSnapshot: (chatId: string, opts: Record<string, unknown>) => void;
+  commitStudioForChat: (chatId: string, opts: Record<string, any>) => void;
+  persistStudioSnapshot: (chatId: string, opts: Record<string, any>) => void;
   persistModeThread: (mode: string, next: unknown[], opts: { chatId: string }) => void;
   renameChat: (chatId: string, title: string) => void;
-  addChat: (chat: Record<string, unknown>) => void;
+  addChat: (chat: Record<string, any>) => void;
   touchRecentProject?: (id: string, name?: string, diskPath?: string) => void;
   previewFromText: (text: string) => string | undefined;
   setCodePillSticky: (on: boolean) => void;
@@ -91,7 +91,7 @@ export type HostBag = {
   pendingFileDeleteRef: { current: unknown };
   pendingProjectDeleteRef: { current: unknown };
   pendingFolderClarifyRef: { current: unknown };
-  openFolderInChat: (path: string) => Promise<Record<string, unknown>>;
+  openFolderInChat: (path: string) => Promise<Record<string, any>>;
   lastFolderLocateNoteRef: { current: unknown };
   chatStudioFilesRef: { current: Record<string, string> };
   chatStudioDiskRootRef: { current: string | null };

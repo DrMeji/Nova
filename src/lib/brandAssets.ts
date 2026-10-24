@@ -354,11 +354,17 @@ const LOGO_FAMILY_ICONS: Array<{ re: RegExp; iconify: string }> = [
     re: /\b(?:insulated|water\s+bottle|tumbler|hydration|flask|rambler|\d+\s*oz)\b|\b(?:bottle|bottles)\b[\s\S]{0,80}\b(?:cart|checkout|e-?commerce|storefront|add\s+to\s+cart)\b/i,
     iconify: 'lucide:shopping-bag',
   },
+  // Leather atelier BEFORE coffee — "espresso type" + bags must not stamp a mug.
+  {
+    re: /\b(?:leather[- ]?goods|leather\s+atelier|handcrafted\s+bags?|full[- ]?grain|bridle\s+leather|saddle\s+leather|vegetable[- ]?tanned)\b|\batelier\b[\s\S]{0,60}\b(?:bag|leather|parchment|brass)\b/i,
+    iconify: 'lucide:shopping-bag',
+  },
   // Food / beverage BEFORE notes — "tasting notes" must not steal matcha/tea brands.
   // Spirits before coffee so "gin · not coffee" never gets a mug mark.
   { re: /\b(?:gin|whisky|whiskey|vodka|tequila|bourbon|rum|spirit|distill|liquor|scotch|cognac|wine)\b/i, iconify: 'lucide:wine' },
   { re: /\b(?:matcha|green\s*tea|tea\s+brand|loose[- ]?leaf|steep|tin\s+hero|canister|brew(?:ing)?)\b/i, iconify: 'lucide:leaf' },
-  { re: /\b(?:coffee|cafe|espresso|roasters?|roast(?:ery)?)\b/i, iconify: 'lucide:coffee' },
+  // Espresso alone is weak — require coffee/roaster framing (not "espresso type" typography).
+  { re: /\b(?:coffee|cafe|roasters?|roast(?:ery)?)\b|\bespresso\b(?!\s+(?:type|ink|navy))/i, iconify: 'lucide:coffee' },
   { re: /\b(?:ceramic|pottery|porcelain|stoneware|tableware|kiln|dinnerware|clay)\b/i, iconify: 'lucide:utensils' },
   { re: /\b(?:restaurant|dining|menu|food|fruit|grocery|supermarket|bakery|kitchen)\b/i, iconify: 'lucide:utensils' },
   { re: /\b(?:lotion|skincare|serum|beauty|moisturizer|hand\s+cream|face\s+cream|body\s+cream)\b/i, iconify: 'lucide:sparkles' },
@@ -369,6 +375,17 @@ const LOGO_FAMILY_ICONS: Array<{ re: RegExp; iconify: string }> = [
   // Desk / hardware BEFORE music/shop — custom desk mark (not gamepad).
   { re: /\b(?:gaming\s+desk|standing\s+desk|desk\s+brand|battlestation|rgb\s+edge|shop\s+the\s+desk)\b/i, iconify: 'nova:desk' },
   { re: /\b(?:game|arcade|puzzle|playable|gaming)\b/i, iconify: 'lucide:gamepad-2' },
+  // Luggage / bags BEFORE music + generic travel-plane — suitcase mark, not a music note.
+  {
+    re: /\b(?:suitcase|carry[- ]?on|luggage|duffel|weekender|roller\s+bag|cabin\s+bag|travel\s+bag|check[- ]?in\s+bag|hardcase|garment\s+bag)\b/i,
+    iconify: 'lucide:briefcase',
+  },
+  // Speakers / audio gear BEFORE music note — speaker mark, not a treble clef.
+  {
+    re: /\b(?:speakers?|subwoofers?|bookshelf\s+speakers?|floorstanding|soundbars?|amplifiers?|amps?\b|woofers?|tweeters?|in[- ]?wall\s+speakers?|monitor\s+speakers?|studio\s+monitors?)\b/i,
+    // Bundled set has no speaker glyph — radio-adjacent package mark; invent-demo SVG still owns logo.
+    iconify: 'lucide:package',
+  },
   { re: /\b(?:music|playlist|podcast|album)\b/i, iconify: 'lucide:music' },
   { re: /\b(?:photo(?:graphy|grapher)?|gallery|portfolio|camera)\b/i, iconify: 'lucide:camera' },
   { re: /\b(?:chat|messag(?:e|ing)|inbox|community)\b/i, iconify: 'lucide:message-circle' },
@@ -486,11 +503,12 @@ export function brandLogoSvgFor(opts: {
   if (!svg || /M9\.937 15\.5/i.test(svg)) {
     const kind = detectHeroProductKind(name, brief);
     const forcedId = insulatedShop ? 'lucide:shopping-bag'
-      : kind === 'bottle' ? 'lucide:wine'
-        : kind === 'coffee' ? 'lucide:coffee'
-          : kind === 'tea' ? 'lucide:leaf'
-            : kind === 'ceramic' ? 'lucide:utensils'
-              : '';
+      : kind === 'bag' ? 'lucide:shopping-bag'
+        : kind === 'bottle' ? 'lucide:wine'
+          : kind === 'coffee' ? 'lucide:coffee'
+            : kind === 'tea' ? 'lucide:leaf'
+              : kind === 'ceramic' ? 'lucide:utensils'
+                : '';
     if (forcedId) svg = localIconifySvg(forcedId, ink) || svg;
   }
   return svg || localIconifySvg('lucide:sparkles', ink) || '';
@@ -1087,6 +1105,18 @@ export async function materializeBrandAssets(opts: {
   /** Disk-first: bundled Lucide SVG (no network). Returns true when the slot file is written. */
   const installLocalIcon = async (slot: BrandAssetPlan['slots'][number]): Promise<boolean> => {
     if (!slot.iconify || slot.role === 'hero') return false;
+    // Absolute invent logo lock — never replace invent-demo / locked marks with Lucide.
+    if (slot.role === 'logo' && /(^|\/)public\/logo\.svg$/i.test(slot.rel.replace(/\\/g, '/'))) {
+      const existing = String(files['public/logo.svg'] || '');
+      const inventApp = /data-nova-invent-demo\s*=\s*["']1["']/.test(
+        String(files['src/App.jsx'] || files['src/App.tsx'] || ''),
+      );
+      const inventLogo = /data-nova-invent-logo\s*=\s*["']1["']/i.test(existing)
+        || (/viewBox=["']0 0 64 64["']/i.test(existing)
+          && /<text\b/i.test(existing)
+          && !/viewBox=["']0 0 24 24["']/i.test(existing));
+      if (inventApp || inventLogo) return true;
+    }
     // Brand mark: always prefer offline family SVG (gin→wine, coffee→mug) over a
     // stale sparkles iconify id left in the plan from an earlier pass.
     let svg = '';

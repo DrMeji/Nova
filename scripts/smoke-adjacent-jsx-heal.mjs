@@ -89,6 +89,32 @@ assert(Boolean(injected), 'inject returns app');
 assert(!hasAdjacentJsxOutsideRoot(injected || ''), 'inject does not create adjacent JSX');
 assert(/storefront-island[\s\S]*<footer/i.test(injected || ''), 'inject before footer inside root');
 
+// brand-lockup </div> then hero <section> are siblings under .app — NOT orphans.
+const lockupSibling = `import './App.css';
+export default function App() {
+  return (
+    <div className="app">
+      <div className="brand-lockup">
+        <h1 className="center-word">Auralis</h1>
+        <p className="tagline">Clear sound for everyday listening</p>
+      </div>
+      <section className="hero-copy" aria-label="Hero">
+        <h2 className="hero-headline">Hear every detail</h2>
+        <p className="hero-support">Studio clarity, light wear, ready to ship</p>
+      </section>
+    </div>
+  );
+}
+`;
+assert(!hasAdjacentJsxOutsideRoot(lockupSibling), 'lockup+hero siblings are inside root');
+const lockupGate = runCreateSyntaxGate({ 'src/App.jsx': lockupSibling, 'src/App.css': '.app{}' });
+const lockupOut = lockupGate.files['src/App.jsx'] || '';
+assert(!hasAdjacentJsxOutsideRoot(lockupOut), 'gate keeps lockup+hero as siblings');
+assert(
+  /className=["']brand-lockup["'][\s\S]*?<\/div>\s*<section\b[^>]*className=["']hero-copy["']/i.test(lockupOut),
+  'gate must not nest hero inside brand-lockup',
+);
+
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);
   process.exit(1);

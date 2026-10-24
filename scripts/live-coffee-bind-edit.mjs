@@ -103,7 +103,12 @@ const bind = await evalE(`(async () => {
   const out = { root };
   try {
     if (api?.workspaceOpenRoot) {
-      out.open = await api.workspaceOpenRoot(root);
+      out.open = await api.workspaceOpenRoot({
+        projectId: `proj-coffee-${Date.now().toString(36)}`,
+        projectName: 'Harbor Roast',
+        sourceDir: root,
+        catalogOnly: true,
+      });
     }
   } catch (e) { out.openErr = String(e?.message||e); }
   try {

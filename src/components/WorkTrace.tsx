@@ -1,6 +1,4 @@
-import {
-  CheckCircle2, Circle, FileSearch, FolderOpen, Lightbulb, Loader2, Pencil, Terminal,
-} from 'lucide-react';
+import { CheckCircle2, FileSearch, FolderOpen, Lightbulb, Loader2, Pencil, Terminal } from 'lucide-react';
 
 export type WorkTraceKind = 'think' | 'scan' | 'read' | 'run' | 'write';
 

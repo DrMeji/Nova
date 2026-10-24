@@ -36,10 +36,7 @@ import { openInSystemBrowser } from '@/lib/openExternal';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { RotatingTip } from '@/components/RotatingTip';
 import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
-import {
-  Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
-  Monitor, MonitorCog, Check, Gauge, ExternalLink, Wifi,
-} from 'lucide-react';
+import { Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download, Monitor, MonitorCog, Check, ExternalLink, Wifi } from 'lucide-react';
 
 type Phase = 'intro' | 'hardware' | 'speed' | 'models' | 'access' | 'connect' | 'finishing';
 
@@ -169,67 +166,14 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
   ].filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).slice(0, 6);
 }
 
-function queueSetupBrainDownloads(opts: {
-  chatId: string;
-  chatName?: string;
-  hw: HardwareInfo | null;
-}) {
-  void Promise.all([
-    import('@/lib/engineDownloads'),
-    import('@/lib/localPrefs'),
-  ]).then(([{ startEngineDownload }, { setLocalPrefs }]) => {
-    // Chat brain first so Enter NOVA unlocks conversation ASAP.
-    void startEngineDownload({
-      id: opts.chatId,
-      name: opts.chatName || opts.chatId,
-      source: 'local-ai',
-      forceUnknownDisk: true,
-    }).catch(() => undefined);
-    if (!opts.hw) return;
-    const coder = getRecommendedCoderModel(opts.hw);
-    // Coding (+ Design) continue in the background Jobs strip — never pin chat as coder.
-    if (coder && coder.id !== opts.chatId) {
-      void startEngineDownload({
-        id: coder.id,
-        name: coder.name,
-        source: 'local-ai',
-        forceUnknownDisk: true,
-      }).then(() => {
-        setLocalPrefs({ activeCoderId: coder.id, defaultCodeModelId: coder.id });
-      }).catch(() => undefined);
-    }
-    const ram = opts.hw.ramGb ?? 8;
-    if (ram >= 8) {
-      void startEngineDownload({
-        id: 'uigen-fx-4b',
-        name: 'UIGEN-FX 4B',
-        source: 'local-ai',
-        forceUnknownDisk: true,
-      }).then(() => {
-        setLocalPrefs({ activeDesignId: 'uigen-fx-4b' });
-      }).catch(() => undefined);
-    }
-    const extras = recommendationsFor(opts.hw)
-      .map(m => m.id)
-      .filter(id => id !== opts.chatId && id !== coder?.id && id !== 'uigen-fx-4b');
-    for (const id of extras.slice(0, 1)) {
-      const hit = recommendationsFor(opts.hw).find(m => m.id === id);
-      void startEngineDownload({
-        id,
-        name: hit?.name || id,
-        source: 'local-ai',
-        forceUnknownDisk: true,
-      }).catch(() => undefined);
-    }
-  });
-}
+
 
 export function OnboardingScreen() {
   const { refreshProfile } = useAuth();
   const [phase, setPhase] = useState<Phase>('intro');
   const [hw, setHw] = useState<HardwareInfo | null>(null);
-  const [hwScanning, setHwScanning] = useState(false);
-  const [hwStep, setHwStep] = useState(0);
+  const [hwScanning] = useState(false);
+  const [hwStep] = useState(0);
   const [speedTesting, setSpeedTesting] = useState(false);
   const [speedPlan, setSpeedPlan] = useState<PreloadPlan | null>(null);
   const [speedMbps, setSpeedMbps] = useState<number | null>(null);
@@ -271,31 +215,7 @@ export function OnboardingScreen() {
     setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
 
-  const runHardware = async () => {
-    setPhase('hardware');
-    setHwScanning(true);
-    setHwStep(0);
-    const labels = 5;
-    for (let i = 0; i < labels; i++) {
-      await new Promise(r => setTimeout(r, 450));
-      setHwStep(i + 1);
-    }
-    const detected = await detectHardwareAsync();
-    saveHardwareSnapshot(detected);
-    const recs = recommendationsFor(detected);
-    setHw(detected);
-    setModels(recs);
-    const chatId = recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null;
-    setSelectedIds(chatId ? [chatId] : []);
-    setHwScanning(false);
-    if (chatId) {
-      queueSetupBrainDownloads({
-        chatId,
-        chatName: recs.find(m => m.id === chatId)?.name,
-        hw: detected,
-      });
-    }
-  };
+  
 
   const runSpeed = async () => {
     setPhase('speed');

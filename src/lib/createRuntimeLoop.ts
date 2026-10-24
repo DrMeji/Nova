@@ -33,6 +33,13 @@ export type CreateRuntimeLoopHost = {
   onStage?: (stage: string, detail?: string) => void;
 };
 
+export type CreateBuildRepair = (input: {
+  files: Record<string, string>;
+  brief: string;
+  productName: string;
+  errors: string[];
+}) => Promise<{ files: Record<string, string>; changed: boolean; summary?: string }>;
+
 export type CreateRuntimeFixResult = {
   files: Record<string, string>;
   evidence: CreateEvidence;
@@ -69,17 +76,23 @@ export async function runCreateVerifyAndFix(opts: {
   maxFixRounds?: number;
   /** Floor/recovery path — may unlock Live but never qualityReady. */
   floorFallback?: boolean;
+  /** Same selected coder can apply one small, error-fed compile repair per failed build. */
+  repairBuild?: CreateBuildRepair;
 }): Promise<CreateRuntimeFixResult> {
   let files = { ...opts.files };
   let observations: string[] = [];
   const thin = isThinCreatePath();
   // Thin path: heal + syntax + plan repair / near-ready / commander when quality fails — never
   // stuck at 2 rounds (too few for syntax heal → Live → quality repair).
-  const maxRounds = Math.max(
-    1,
-    Math.min(8, opts.maxFixRounds ?? (thin ? THIN_MAX_FIX_ROUNDS : MAX_FIX_ROUNDS)),
-  );
+  // Explicit 0 = verify once, never invent-repair (blank / step-ladder shells).
+  const maxRounds = opts.maxFixRounds === 0
+    ? 0
+    : Math.max(
+      1,
+      Math.min(8, opts.maxFixRounds ?? (thin ? THIN_MAX_FIX_ROUNDS : MAX_FIX_ROUNDS)),
+    );
   let fixRounds = 0;
+  let buildRepairAttempts = 0;
   // Keep the user's original requirements intact through every verifier and repair prompt.
   // Plan/ensemble notes may be long, but must not push the actual ask out of the capped brief.
   const brief = String(opts.brief || '').trim();
@@ -101,6 +114,50 @@ export async function runCreateVerifyAndFix(opts: {
     liveUrl: opts.liveUrl,
     stage: 'live',
   });
+  const buildGateEnabled = Boolean(
+    opts.diskRoot
+    && files['package.json']
+    && opts.npmInstalled
+    && typeof window !== 'undefined'
+    && window.novaDesktop?.agentRun,
+  );
+  let buildGateOk: boolean | null = null;
+  let buildErrors: string[] = [];
+  let lastBuiltSnapshot = '';
+  const sourceSnapshot = () => Object.entries(files)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, body]) => `${path}\0${body}`)
+    .join('\0');
+  const runBuildGate = async (detail: string) => {
+    if (!buildGateEnabled || !window.novaDesktop?.agentRun) return;
+    lastBuiltSnapshot = sourceSnapshot();
+    try {
+      opts.host.pushStatus(`Build gate · npm run build (${detail}, bounded)…`);
+      const build = await window.novaDesktop.agentRun({
+        command: 'npm run build',
+        cwd: opts.diskRoot,
+        userConfirmed: true,
+        skipConfirm: true,
+        timeoutMs: 90_000,
+      });
+      if (!build?.ok) {
+        const errText = String((build as { error?: string; output?: string })?.error
+          || (build as { output?: string })?.output
+          || 'build failed').slice(0, 1200);
+        buildGateOk = false;
+        buildErrors = [errText];
+        observations.push(`npm build failed (${detail}): ${errText}`);
+      } else {
+        buildGateOk = true;
+        buildErrors = [];
+        observations.push(`npm build passed (${detail})`);
+      }
+    } catch (e) {
+      buildGateOk = false;
+      buildErrors = [e instanceof Error ? e.message : String(e)].slice(0, 1);
+      observations.push(`npm build failed (${detail}): ${buildErrors[0]}`);
+    }
+  };
 
   const refreshEvidenceAfterFix = async (reason: string) => {
     // A repair may affect the currently served files. Persist, wait for Vite/HMR, then
@@ -108,13 +165,10 @@ export async function runCreateVerifyAndFix(opts: {
     const appKey = files['src/App.jsx'] ? 'src/App.jsx' : files['src/App.tsx'] ? 'src/App.tsx' : '';
     if (opts.diskRoot && appKey) {
       const edit = await applyChatReplyEdits({
-        reply: [
-          `@@@FILE ${appKey}\n${files[appKey]}`,
-          files['src/App.css'] ? `@@@FILE src/App.css\n${files['src/App.css']}` : '',
-          files['src/index.css'] ? `@@@FILE src/index.css\n${files['src/index.css']}` : '',
-          ...Object.entries(files).filter(([path]) => /^src\/sections\/.+\.jsx?$/i.test(path.replace(/\\/g, '/')))
-            .map(([path, body]) => `@@@FILE ${path}\n${body}`),
-        ].filter(Boolean).join('\n'),
+        reply: Object.entries(files)
+          .filter(([path]) => /^src\//i.test(path.replace(/\\/g, '/')))
+          .map(([path, body]) => `@@@FILE ${path}\n${body}`)
+          .join('\n'),
         projectId: opts.projectId,
         projectName: opts.productName,
         files,
@@ -123,6 +177,9 @@ export async function runCreateVerifyAndFix(opts: {
         originalBrief: brief,
       }).catch(() => null);
       if (edit?.ok) files = edit.files;
+    }
+    if (buildGateEnabled && sourceSnapshot() !== lastBuiltSnapshot) {
+      await runBuildGate(`repair: ${reason}`);
     }
     opts.host.pushStatus(createRuntimeStageLabel('live', `rechecking after ${reason}`));
     try { await window.novaDesktop?.getOrAttachPreview?.(opts.diskRoot); } catch { /* best effort */ }
@@ -161,41 +218,8 @@ export async function runCreateVerifyAndFix(opts: {
     }
   }
 
-  // Bounded vite build via desktop agentRun (never renderer spawn — hangs Windows).
-  // Soft: failure feeds observations; skipped when static imports already broken.
-  if (
-    !staticImportBlocked
-    && opts.diskRoot
-    && files['package.json']
-    && opts.npmInstalled
-    && typeof window !== 'undefined'
-    && window.novaDesktop?.agentRun
-  ) {
-    try {
-      opts.host.pushStatus('Build gate · vite build (bounded)…');
-      const build = await Promise.race([
-        window.novaDesktop.agentRun({
-          command: 'npm run build --if-present',
-          cwd: opts.diskRoot,
-          userConfirmed: true,
-          skipConfirm: true,
-        }),
-        new Promise<{ ok: false; error: string }>((resolve) => {
-          window.setTimeout(() => resolve({ ok: false, error: 'build gate timed out (90s)' }), 90_000);
-        }),
-      ]);
-      if (!build?.ok) {
-        const errText = String((build as { error?: string; output?: string })?.error
-          || (build as { output?: string })?.output
-          || 'build failed').slice(0, 400);
-        observations.push(`vite build gate: ${errText}`);
-      } else {
-        observations.push('vite build gate: ok');
-      }
-    } catch (e) {
-      observations.push(`vite build gate skipped: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  // A real project build is part of the quality contract, not a best-effort log.
+  await runBuildGate(staticImportBlocked ? 'initial (import gate also failed)' : 'initial');
 
   const probeOnce = async () => {
     opts.host.pushStatus(createRuntimeStageLabel('live'));
@@ -214,6 +238,8 @@ export async function runCreateVerifyAndFix(opts: {
       ...live,
       staticReady: opts.staticReady,
       npmInstalled: opts.npmInstalled,
+      buildOk: buildGateOk,
+      buildErrors,
     });
     observations.push(formatEvidenceForAgent(evidence));
     observations = condenseObservations(observations, 8);
@@ -252,6 +278,14 @@ export async function runCreateVerifyAndFix(opts: {
   while (fixRounds < maxRounds && ( !evidence.pass || needsQualityFix()) && !opts.host.shouldAbort?.()) {
     // Floor fallback: one heal round for mount only — never pretend quality.
     if (floorFallback && fixRounds >= 1 && evidence.pass) break;
+    // Invent-demo host site: once Live mounts, never run plan-repair (todo/Apple paste).
+    try {
+      const { filesHaveInventDemoSite } = await import('@/lib/createThinPath');
+      if (filesHaveInventDemoSite(files) && evidence.mounted) {
+        observations.push('fix: invent-demo mounted — skip further repair rounds');
+        break;
+      }
+    } catch { /* optional */ }
 
     fixRounds += 1;
     let filesChanged = false;
@@ -293,6 +327,28 @@ export async function runCreateVerifyAndFix(opts: {
         files = syn.files;
         filesChanged = true;
         observations.push('fix: syntax gate heal');
+      }
+
+      if (buildGateOk === false && opts.repairBuild && !filesChanged && buildRepairAttempts < 2) {
+        buildRepairAttempts += 1;
+        opts.host.pushStatus(createPassStatusLabel('verify', `targeted build repair ${buildRepairAttempts}/2`));
+        try {
+          const repaired = await opts.repairBuild({
+            files,
+            brief,
+            productName: opts.productName,
+            errors: buildErrors,
+          });
+          if (repaired.changed) {
+            files = repaired.files;
+            filesChanged = true;
+            observations.push(`fix: targeted build repair ${buildRepairAttempts}/2${repaired.summary ? ` (${repaired.summary})` : ''}`);
+          } else {
+            observations.push('fix: targeted build repair returned no applicable file changes');
+          }
+        } catch (err) {
+          observations.push(`fix: targeted build repair failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       // Thin path: strip-only bleed + syntax. No plan repair / near-ready / commander salvage.
@@ -374,7 +430,29 @@ export async function runCreateVerifyAndFix(opts: {
         // syntax/Live/quality still fails (never leave creates stuck on strip-only rounds).
         // If repair owns the product shell, keep files for Live but mark floorFallback so quality Ready fails.
         const thinRepairWanted = !thin || !syn.ok || !evidence.pass || fixRounds >= 2;
-        if (!floorFallback && thinRepairWanted) {
+        // Product one-spine: never let plan-repair / near-ready paste todo/Apple over unique desk App.
+        let productSpineOwnsApp = false;
+        let inventDemoOwnsApp = false;
+        try {
+          const { filesHaveInventDemoSite } = await import('@/lib/createThinPath');
+          inventDemoOwnsApp = filesHaveInventDemoSite(files);
+          if (inventDemoOwnsApp) {
+            observations.push('fix: skip plan/near-ready — invent-demo owns App');
+          }
+        } catch { /* ignore */ }
+        try {
+          const { briefWantsProductLadder } = await import('@/lib/createProductLadder');
+          const { artifactWantsProductLadder, resolveArtifactKind } = await import('@/lib/createArtifactKind');
+          const appNow = String(files['src/App.jsx'] || files['src/App.tsx'] || '');
+          const kind = resolveArtifactKind(brief);
+          productSpineOwnsApp = artifactWantsProductLadder(kind, brief)
+            && briefWantsProductLadder(brief)
+            && /className=["'][^"']*\bapp\s+desk-/i.test(appNow);
+          if (productSpineOwnsApp) {
+            observations.push('fix: skip plan/near-ready — product spine owns App');
+          }
+        } catch { /* ignore */ }
+        if (!floorFallback && thinRepairWanted && !productSpineOwnsApp && !inventDemoOwnsApp) {
           try {
             const { buildProductPlan, repairToContract } = await import('@/lib/createProductPlan');
             const plan = buildProductPlan(brief, opts.productName);
@@ -394,7 +472,7 @@ export async function runCreateVerifyAndFix(opts: {
           }
         }
 
-        if (thinRepairWanted) {
+        if (thinRepairWanted && !productSpineOwnsApp && !inventDemoOwnsApp) {
           const near = healNearReadyCreateUi(files, opts.productName, brief);
           if (near.changed) {
             files = near.files;
@@ -497,6 +575,15 @@ export async function runCreateVerifyAndFix(opts: {
   }
 
   opts.host.pushStatus(createPassStatusLabel('critic'));
+  // Ridge Latch: floorFallback may stick from Live unlock even after Acc left the
+  // invent-floor twin — clear it so quality Ready can pass on craft-past-floor Acc.
+  try {
+    const { looksLikeInventFloorTwin } = await import('@/lib/createThinPath');
+    if (floorFallback && !looksLikeInventFloorTwin(files)) {
+      floorFallback = false;
+      observations.push('floorFallback cleared — Acc no longer invent-floor twin');
+    }
+  } catch { /* optional */ }
   const verified = judgeCreateVerified({
     evidence,
     files,
@@ -505,8 +592,8 @@ export async function runCreateVerifyAndFix(opts: {
     floorFallback,
   });
   const renderedQuality = verifyCreateRenderedQuality(files, brief, opts.productName);
-  let judgedOk = verified.qualityReady && renderedQuality.ok;
-  let judgeReasons = [...verified.reasons, ...renderedQuality.reasons.map((r) => `rendered: ${r}`)];
+  const judgedOk = verified.qualityReady && renderedQuality.ok;
+  const judgeReasons = [...verified.reasons, ...renderedQuality.reasons.map((r) => `rendered: ${r}`)];
   // Leave a precise, actionable failure on the job card instead of letting callers report Ready.
   if (verified.liveUnlock) {
     opts.host.pushStatus(

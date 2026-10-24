@@ -94,7 +94,10 @@ function notify() {
   }
 }
 
-function persist() {
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPersist() {
+  persistTimer = null;
   try {
     sessionStorage.setItem(
       'NOVA:last-build-diag',
@@ -106,6 +109,21 @@ function persist() {
     );
   } catch { /* quota */ }
   notify();
+}
+
+/** Coalesce sessionStorage writes — hot path used to triple-stringify every status tick. */
+function persist(opts?: { force?: boolean }) {
+  if (opts?.force) {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    flushPersist();
+    return;
+  }
+  notify();
+  if (persistTimer) return;
+  persistTimer = setTimeout(flushPersist, 1000);
 }
 
 function formatMs(ms: number): string {
@@ -174,7 +192,7 @@ export function resetBuildDiagnostics(opts?: {
   snap.startedAt = new Date().toISOString();
   snap.updatedAt = snap.startedAt;
   snap.lastActivityAt = Date.now();
-  persist();
+  persist({ force: true });
 }
 
 export function tickBuildHeartbeat(detail?: string): void {
@@ -183,7 +201,7 @@ export function tickBuildHeartbeat(detail?: string): void {
   snap.updatedAt = new Date().toISOString();
   snap.lastActivityAt = now;
   if (detail) snap.lastStatus = String(detail).slice(0, 220);
-  // Keep total clock alive without closing the current file timing.
+  // Memory + light notify; sessionStorage coalesced.
   persist();
 }
 
@@ -191,7 +209,7 @@ export function markBuildDiagnosticsEnded(): void {
   if (snap.endedAt) return;
   closeCurrentPathTiming();
   snap.endedAt = new Date().toISOString();
-  persist();
+  persist({ force: true });
 }
 
 /** Leave craft file follow when npm/Live starts — stops Code showing App.jsx idle for minutes. */
@@ -245,7 +263,7 @@ export function pushBuildDiag(ev: Omit<BuildDiagEvent, 'at'> & { at?: string }):
     snap.endedAt = snap.endedAt || new Date().toISOString();
   }
   // 'ready' does not freeze the clock — npm / Live may still run; call markBuildDiagnosticsEnded.
-  persist();
+  persist(ev.kind === 'fail' || ev.kind === 'ready' ? { force: true } : undefined);
 }
 
 export function noteBuildContext(partial: Partial<BuildDiagSnapshot>): void {
@@ -258,7 +276,7 @@ export function noteBuildContext(partial: Partial<BuildDiagSnapshot>): void {
       pushBuildDiag({ kind: 'write', detail: `Follow ${nextPath}`, path: nextPath });
     }
   }
-  const { writingPath: _wp, ...rest } = partial;
+  const { ...rest } = partial;
   snap = {
     ...snap,
     ...rest,

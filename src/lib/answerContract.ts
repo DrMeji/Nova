@@ -35,7 +35,7 @@ import {
 import { looksLikeShoppingOrPartsLinksAsk, looksLikeHowToGuideAsk, looksLikeBuildToolingAsk } from '@/lib/replySanity';
 import { looksLikeSimpleBuildToyChatAsk } from '@/lib/chatIntent';
 import { looksLikeColorCodeAsk } from '@/lib/colorCodeAsk';
-import { looksLikePureGreeting } from '@/lib/plainChatAsk';
+import { looksLikePureGreeting, looksLikeFunHangoutAsk } from '@/lib/plainChatAsk';
 
 export type AnswerJob =
   | 'answer'
@@ -165,6 +165,20 @@ export function resolveAnswerContract(opts: ResolveAnswerContractOpts): AnswerCo
       allowPlugins: false,
       useStudioDisk: false,
       reason: 'greeting',
+    };
+  }
+
+  // Fun hangout / “see what you're capable of” — same instant NOVA path as hello (no GGUF).
+  if (looksLikeFunHangoutAsk(t)) {
+    return {
+      job: 'deterministic',
+      topic: 'none',
+      grounding: 'none',
+      stance: 'deterministic',
+      allowWeb: false,
+      allowPlugins: false,
+      useStudioDisk: false,
+      reason: 'fun-hangout',
     };
   }
 

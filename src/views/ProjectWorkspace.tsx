@@ -8,16 +8,10 @@ import { useCreateJobForWorkspace } from '@/hooks/useCreateJob';
 import { isPlaceholderPreviewUrl } from '@/lib/projectPreview';
 import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
-import {
-  ChevronRight, FileCode, Folder, FolderOpen, FileText,
-  Play, Square, CheckCircle2, Loader2, User as UserIcon,
-  PanelLeft, PanelRight,
-  Globe, Circle, ArrowUp, X, History, FilePlus2, FolderPlus,
-  ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone,
-} from 'lucide-react';
+import { ChevronRight, FileCode, Folder, FolderOpen, FileText, Play, Square, CheckCircle2, Loader2, User as UserIcon, PanelLeft, PanelRight, Globe, ArrowUp, X, History, FilePlus2, FolderPlus, ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { NovaErrorInline } from '@/components/NovaErrorInline';
-import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
+import { isLikelyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
   detectPluginIntent,
@@ -89,21 +83,7 @@ import {
 import { applyAndVerify } from '@/lib/applyAndVerify';
 import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, looksLikeWebsiteBuild, needsMobileTargetChoice, WEBSITE_BUILD_MARK } from '@/lib/mobileTarget';
 import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, preferredMobileFocus, simpleVisualPatchEdits, layoutLockEdits } from '@/lib/mobileTemplates';
-import {
-  classifyMobileDevice,
-  classifyNamedDevice,
-  deviceChipLabel,
-  deviceLine,
-  devicesForChips,
-  isLayoutLockAsk,
-  layoutLockPrompt,
-  needsDeviceFamilyChoice,
-  PHONE_DEVICES,
-  resolveDevices,
-  sizedBuildPrompt,
-  type MobilePlatform,
-  type PhoneDevice,
-} from '@/lib/mobileDevices';
+import { classifyMobileDevice, classifyNamedDevice, deviceChipLabel, devicesForChips, isLayoutLockAsk, layoutLockPrompt, needsDeviceFamilyChoice, PHONE_DEVICES, resolveDevices, sizedBuildPrompt, type MobilePlatform, type PhoneDevice } from '@/lib/mobileDevices';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { DevicePreview } from '@/components/DevicePreview';
 import { WorkTrace, buildCodeTrace, buildInspectTrace } from '@/components/WorkTrace';
@@ -1996,7 +1976,7 @@ export function ProjectWorkspace() {
     };
 
     const composerWasDebug = composerMode === 'debug';
-    const turnComposerMode = composerMode;
+    
     const improveAsk = isImproveAsk(rawContent);
     const explainOnly = isExplainAsk(rawContent) && !improveAsk;
     const hasFilesNow = Object.values(fileContentsRef.current)
@@ -3064,7 +3044,7 @@ export function ProjectWorkspace() {
       role: 'user' as const,
       content: [
         encodeChatAttach({ kind: 'image', name: img.name, count: 1 }),
-        `![${img.name.replace(/[\[\]]/g, '')}](${img.url})`,
+        `![${img.name.replace(/[[\]]/g, '')}](${img.url})`,
       ].join('\n'),
       provider_used: null,
       created_at: new Date().toISOString(),
@@ -3086,13 +3066,7 @@ export function ProjectWorkspace() {
     });
   };
 
-  const removeImage = (id: string) => {
-    setAttachedImages(prev => {
-      const found = prev.find(i => i.id === id);
-      if (found) URL.revokeObjectURL(found.url);
-      return prev.filter(i => i.id !== id);
-    });
-  };
+  
 
   const handleBuild = () => {
     if (buildRunning) {

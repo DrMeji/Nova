@@ -863,7 +863,10 @@ async function generate(message, opts = {}) {
       // Coding crafts need long walls — 32B Q4 often needs 15–25+ min for a full App.
       // Old 7-minute cap killed mid-@@@FILE and looked like "incomplete code".
       const timeoutMs = kind === 'coding' ? 1_800_000 : 600_000;
-      const nPredictMin = kind === 'coding' ? 16384 : 8192;
+      const shareGpu = Boolean(novaGguf.getGgufPerfPolicy?.()?.shareGpu);
+      const nPredictMin = kind === 'coding'
+        ? (shareGpu ? 8192 : 16384)
+        : (shareGpu ? 4096 : 8192);
       const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
         : nPredictMin;

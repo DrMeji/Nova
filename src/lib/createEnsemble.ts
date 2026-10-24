@@ -22,7 +22,7 @@ import {
   type LayoutContract,
   type ProductSpec,
 } from '@/lib/createLayoutContract';
-import { buildDesignPlan, formatDesignCraftRules, formatOriginalCraftRules } from '@/lib/createDesignSystem';
+import { formatOriginalCraftRules } from '@/lib/createDesignSystem';
 import { isEnsembleAutoParked } from '@/lib/localPrefs';
 
 type EngineRow = { id?: string; status?: string; name?: string };

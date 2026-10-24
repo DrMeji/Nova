@@ -35,7 +35,6 @@ function Face({ title }: { person: Person; title: string }) {
 export function TeammateBar({
   people,
   assignments,
-  myAccess,
   canInvite,
   onInvite,
   onAssign,

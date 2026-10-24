@@ -695,7 +695,12 @@ function wantsChatCode(latest: string) {
 
 export function flattenHistoryText(history: RouterChatTurn[]): string {
   return history
-    .map(t => `${t.role === 'user' ? 'User' : 'NOVA'}: ${String(t.content || '').trim()}`)
+    .map((t) => {
+      const raw = String(t.content || '').trim();
+      // Prefer spoken answer — nova-trace JSON (esp. invent Acc file lists) must not inflate budget.
+      const body = t.role === 'assistant' ? (stripAgentTrace(raw) || raw) : raw;
+      return `${t.role === 'user' ? 'User' : 'NOVA'}: ${body}`;
+    })
     .filter(Boolean)
     .join('\n');
 }
@@ -1116,6 +1121,19 @@ export function sanitizeAssistantReply(
       )
       .replace(
         /(?:\s+|\n+)(?:Any|Got any) (?:coding |programming )?(?:projects?|apps?) you(?:'re| are) (?:working on|excited about|building)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      // "What kind of fun coding project…" / "Maybe we can build a simple game…"
+      .replace(
+        /(?:\s+|\n+)What kind of (?:fun\s+)?(?:coding|programming)\s+project[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)Maybe we can (?:build|create|make) (?:a\s+)?(?:simple\s+)?(?:game|calculator|web\s+page|app)[^.!?\n]*[.!]?\s*/gi,
+        ' ',
+      )
+      .replace(
+        /(?:\s+|\n+)What (?:kind of |catches your interest|are you interested in)[^.!?\n]*(?:coding|project|build)[^.!?\n]*[.!]?\s*/gi,
         ' ',
       )
       .replace(

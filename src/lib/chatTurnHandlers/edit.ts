@@ -122,18 +122,20 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
           const bound = String(host.diskRoot || '').trim();
           if (bound) return bound;
           try {
-            const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+            const chatId = String((host as { chatId?: string }).chatId || '');
+            const byChat = getCreateJobForChat(chatId);
             if (byChat?.path) return String(byChat.path);
-            const latest = getLatestReusableCreateJob();
+            const latest = getLatestReusableCreateJob({ chatId });
             if (latest?.path) return String(latest.path);
           } catch { /* best-effort */ }
           return null;
         })();
         const resolvedProjectId = host.projectId || (() => {
           try {
-            const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+            const chatId = String((host as { chatId?: string }).chatId || '');
+            const byChat = getCreateJobForChat(chatId);
             if (byChat?.projectId) return byChat.projectId;
-            return getLatestReusableCreateJob()?.projectId || null;
+            return getLatestReusableCreateJob({ chatId })?.projectId || null;
           } catch {
             return null;
           }
@@ -196,18 +198,20 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
       const bound = String(host.diskRoot || '').trim();
       if (bound) return bound;
       try {
-        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        const chatId = String((host as { chatId?: string }).chatId || '');
+        const byChat = getCreateJobForChat(chatId);
         if (byChat?.path) return String(byChat.path);
-        const latest = getLatestReusableCreateJob();
+        const latest = getLatestReusableCreateJob({ chatId });
         if (latest?.path) return String(latest.path);
       } catch { /* best-effort */ }
       return null;
     })();
     const resolvedProjectIdEarly = host.projectId || (() => {
       try {
-        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        const chatId = String((host as { chatId?: string }).chatId || '');
+        const byChat = getCreateJobForChat(chatId);
         if (byChat?.projectId) return byChat.projectId;
-        return getLatestReusableCreateJob()?.projectId || null;
+        return getLatestReusableCreateJob({ chatId })?.projectId || null;
       } catch {
         return null;
       }
@@ -489,18 +493,20 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
     const bound = String(host.diskRoot || '').trim();
     if (bound) return bound;
     try {
-      const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      const chatId = String((host as { chatId?: string }).chatId || '');
+      const byChat = getCreateJobForChat(chatId);
       if (byChat?.path) return String(byChat.path);
-      const latest = getLatestReusableCreateJob();
+      const latest = getLatestReusableCreateJob({ chatId });
       if (latest?.path) return String(latest.path);
     } catch { /* best-effort */ }
     return null;
   })();
   const resolvedProjectId = host.projectId || (() => {
     try {
-      const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      const chatId = String((host as { chatId?: string }).chatId || '');
+      const byChat = getCreateJobForChat(chatId);
       if (byChat?.projectId) return byChat.projectId;
-      return getLatestReusableCreateJob()?.projectId || null;
+      return getLatestReusableCreateJob({ chatId })?.projectId || null;
     } catch {
       return null;
     }
@@ -1201,9 +1207,10 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       const bound = String(host.diskRoot || '').trim();
       if (bound) return bound;
       try {
-        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        const chatId = String((host as { chatId?: string }).chatId || '');
+        const byChat = getCreateJobForChat(chatId);
         if (byChat?.path) return String(byChat.path);
-        const latest = getLatestReusableCreateJob();
+        const latest = getLatestReusableCreateJob({ chatId });
         if (latest?.path) return String(latest.path);
       } catch { /* best-effort */ }
       return '';

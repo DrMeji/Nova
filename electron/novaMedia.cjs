@@ -518,7 +518,14 @@ function sniffImageExt(buf) {
 /** Free community SD when Pollinations Gen Sana is down (no user key required). */
 async function fetchHordeImage(prompt, opts = {}) {
   const positive = hostSafeImagePrompt(String(prompt || 'studio product photograph')).slice(0, 380);
-  const negative = 'blurry, soft focus, shallow depth of field, bokeh, out of focus, creamy bokeh, low detail, mushy, smoothed, plastic skin';
+  const negative = [
+    'blurry, soft focus, shallow depth of field, bokeh, out of focus, creamy bokeh',
+    'low detail, mushy, smoothed, plastic skin, flat icon, clipart, cartoon outline',
+    'watermark, text overlay, logo, brand name, label',
+    'boom microphone, headset mic arm, tangled cables, visible wires, cord mess',
+    'hands, people, person, human, face, portrait, model, woman, man, wearing headphones',
+    'cluttered background, dark background, green glow, lifestyle photo',
+  ].join(', ');
   const text = `${positive} ### ${negative}`.slice(0, 480);
   const dim = resolveImageDimensions(positive);
   const width = Math.min(opts.width || dim.width, 512);
@@ -526,28 +533,38 @@ async function fetchHordeImage(prompt, opts = {}) {
   const ref = String(opts.referenceImageDataUrl || '').trim();
   const refB64 = ref.replace(/^data:image\/\w+;base64,/, '');
   const allowNsfw = Boolean(opts.allowNsfw);
+  // Anonymous Horde queues often need 2–3 minutes — product visuals must wait.
+  const waitMs = Math.max(38_000, Number(opts.timeoutMs) || (isCatalogProductPrompt(positive) ? 180_000 : 90_000));
+  const pollCapMs = Math.max(32_000, waitMs - 6_000);
   const headers = {
     'Content-Type': 'application/json',
     apikey: '0000000000',
     'Client-Agent': 'NOVA-Desktop:0.2:https://github.com/DrMeji/Nova',
   };
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 38_000);
+  const timer = setTimeout(() => ac.abort(), waitMs);
   try {
+    const catalog = isCatalogProductPrompt(positive);
     const payload = {
       prompt: text,
       params: {
-        width,
-        height,
-        steps: refB64 ? 26 : 30,
+        width: catalog ? Math.min(Math.max(width, 512), 640) : width,
+        height: catalog ? Math.min(Math.max(height, 512), 640) : height,
+        steps: refB64 ? 28 : (catalog ? 32 : 30),
+        cfg_scale: catalog ? 6.5 : undefined,
         n: 1,
-        denoising_strength: refB64 ? 0.52 : undefined,
+        // Lower denoise keeps catalog SVG silhouette (product-only); higher = freer but drifts to portraits.
+        denoising_strength: refB64 ? (catalog ? 0.48 : 0.52) : undefined,
       },
       nsfw: allowNsfw,
       censor_nsfw: !allowNsfw,
       r2: true,
       shared: false,
       slow_workers: true,
+      // Prefer photography-oriented workers when available; Horde falls back if busy.
+      models: catalog
+        ? ['AlbedoBase XL (SFW)', 'ICBINP - I Can\'t Believe It\'s Not Photography', 'stable_diffusion']
+        : undefined,
     };
     if (refB64) {
       payload.source_image = refB64;
@@ -565,9 +582,10 @@ async function fetchHordeImage(prompt, opts = {}) {
       try { console.log(`[nova-media] horde submit failed ${submit.status}`); } catch { /* ignore */ }
       return null;
     }
+    try { console.log(`[nova-media] horde job ${id} waitMs=${waitMs}`); } catch { /* ignore */ }
     const started = Date.now();
-    while (Date.now() - started < 32_000) {
-      await sleep(1600);
+    while (Date.now() - started < pollCapMs) {
+      await sleep(2200);
       const check = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, {
         headers,
         signal: ac.signal,
@@ -729,6 +747,14 @@ function isProductPrompt(prompt) {
     || (/\b(phone|device|product)\b/.test(lower) && /\b(make|create|design|render|generate)\b/.test(lower));
 }
 
+/** Catalog-style product shots (headphones, mic, keyboard, …) — longer Horde wait + white-bg prompt. */
+function isCatalogProductPrompt(prompt) {
+  const lower = String(prompt || '').toLowerCase();
+  return /\b(?:headphones?|headset|earbuds?|microphone|mic\b|keyboard|mouse|mice|guitar|watch|bottle|iphone|smartphone|phone|gpu|graphics\s*card|monitor|display|pc\s*case|desk|mouse\s*pad|google\s*home|smart\s*speaker|speaker|webcam|camera|laptop|tablet|router|console|controller|gamepad)\b/.test(lower)
+    || /\b(?:product\s+(?:shot|photograph|photo|image|visual|render)|studio\s+product|catalog\s+(?:shot|photo))\b/.test(lower)
+    || isProductPrompt(prompt);
+}
+
 function rewriteImagePrompt(prompt) {
   let raw = hostSafeImagePrompt(String(prompt || '').trim());
   raw = raw.replace(/^(Studio headshot|Create a caricature|Anime style|Underwater)\s*/i, '').trim() || raw;
@@ -778,6 +804,19 @@ function rewriteImagePrompt(prompt) {
   if (/\b(wireless|bluetooth)\b/.test(lower) && /\b(mouse|keyboard|headset|earbuds|headphones)\b/.test(lower)) {
     hints.push('wireless device with no cable, no cord, no wire visible');
   }
+  if (/\b(headphones?|headset)\b/.test(lower)) {
+    hints.push(
+      'clean wireless over-ear headphones product shot',
+      'no boom microphone arm, no headset mic, no dangling cables or cords',
+      'symmetric ear cups, padded headband, catalog ecommerce framing',
+    );
+  }
+  if (/\b(microphone|mic)\b/.test(lower) && !/\b(headphones?|headset)\b/.test(lower)) {
+    hints.push(
+      'desktop condenser microphone on a round weighted base with U-yoke mount',
+      'fine mesh grille, single blue LED accent, no headphones in frame',
+    );
+  }
   if (/\b(logitech|razer|steelseries|corsair)\b/.test(lower)) {
     hints.push('accurate consumer electronics product design, no garbled logos or fake brand text');
   }
@@ -800,12 +839,23 @@ function rewriteImagePrompt(prompt) {
       hints.push('vivid red factory paint, studio automotive lighting, sharp reflections');
     }
   }
-  if (isProductPrompt(raw)) {
-    const concept = hostSafeImagePrompt(raw.replace(/product concept:\s*/i, '')).slice(0, 140);
+  if (isCatalogProductPrompt(raw) || isProductPrompt(raw)) {
+    const concept = hostSafeImagePrompt(
+      raw
+        .replace(/product concept:\s*/i, '')
+        .replace(/\bstudio product (?:shot|photograph|photo) of\s*/i, '')
+        .replace(/\bstudio photograph of\s*/i, ''),
+    ).slice(0, 160);
     return [
-      `studio photograph of ${concept}`,
-      'isolated product on a seamless gray backdrop',
-      'centered, no hands, no people, tack sharp, high resolution',
+      `OBJECT-ONLY studio product photograph of ${concept}`,
+      'the product alone floating/standing on white — ZERO humans',
+      'no person, no face, no model, nobody wearing the product',
+      'matte black premium finish when the subject is electronics',
+      'isolated on seamless pure white background',
+      'soft natural contact shadow under the object',
+      'centered, generous white space, Apple-style catalog ecommerce',
+      'no hands, no text, no watermark, no logo, no lifestyle scene',
+      'tack sharp, clean lighting, high detail product render',
     ].join(', ');
   }
   return [
@@ -1098,12 +1148,17 @@ async function generateImage(prompt, modelName, opts = {}) {
   }
 
   // Community SD fallback (no Pollinations — quality too inconsistent for premium UI work).
+  // Product catalog shots get a long Horde wait — anonymous queue often needs 2–3 min.
+  const hordeTimeout = isCatalogProductPrompt(enhanced)
+    ? (Number(opts.timeoutMs) || 200_000)
+    : (Number(opts.timeoutMs) || 90_000);
   const secondary = await Promise.all([
     fetchHordeImage(enhanced, {
       width: 512,
       height: 512,
       referenceImageDataUrl: ref || undefined,
       allowNsfw,
+      timeoutMs: hordeTimeout,
     }).then((hit) => (isUsableImageHit(hit) ? { ...hit, source: hit.source || 'ai-horde' } : null)).catch(() => null),
   ]);
   for (const hit of secondary) {

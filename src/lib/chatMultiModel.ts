@@ -12,7 +12,7 @@ import {
   cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
-import { engineGenerate, engineGenerateStream, getEngineStatus } from '@/lib/novaEngine';
+import { engineGenerate, getEngineStatus } from '@/lib/novaEngine';
 import { getProviderApiKeys, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import type { RouterChatTurn } from '@/lib/chatHistory';

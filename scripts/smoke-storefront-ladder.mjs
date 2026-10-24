@@ -1,16 +1,19 @@
 /**
- * Storefront compose-first ladder: catalog → cart → chrome → mark → hero.
- * Spine is the primary path — not invent-stall + hard-guarantee salvage.
+ * Storefront invent-first + salvage floor helpers.
+ * Compose spine is last-resort only — create path must not Accept from floor alone.
  *   npx tsx --tsconfig tsconfig.app.json scripts/smoke-storefront-ladder.mjs
  */
 import assert from 'node:assert/strict';
 import {
   briefWantsStorefrontLadder,
   composeStorefrontSpine,
+  formatStorefrontInventOwnLookPrompt,
   gradeStorefrontQuality,
   runStorefrontCreateLadder,
   storefrontFlaskLogoSvg,
   storefrontHeroSvg,
+  STOREFRONT_INVENT_FIRST,
+  appLooksLikeStorefrontFloor,
 } from '@/lib/createStorefrontLadder';
 import { briefLooksLikeInsulatedBottleShop } from '@/lib/createStorefrontFloor';
 import { appHasCommerceCart } from '@/lib/createBuildQuality';
@@ -34,6 +37,7 @@ const bottleBrief = [
   'About, Careers, Help, and a support email.',
 ].join(' ');
 
+assert.equal(STOREFRONT_INVENT_FIRST, true, 'invent-first contract on');
 assert.equal(briefWantsStorefrontLadder(bottleBrief, 'ValeBottle'), true, 'wants storefront ladder');
 assert.equal(briefLooksLikeInsulatedBottleShop('ValeBottle', bottleBrief), true, 'insulated bottle shop');
 assert.equal(
@@ -41,6 +45,15 @@ assert.equal(
   false,
   'desk landing is not storefront ladder',
 );
+
+const inventAsk = formatStorefrontInventOwnLookPrompt({
+  brand: 'ValeBottle',
+  brief: bottleBrief,
+  salt: 'smoke1',
+});
+assert.ok(/one-of-one|Invent/i.test(inventAsk), 'invent ask present');
+assert.ok(/fails Ready/i.test(inventAsk), 'invent ask gates Ready');
+assert.equal(appLooksLikeStorefrontFloor(blank['src/App.jsx']), false, 'blank scaffold is not floor');
 
 // Blank-solid must not wipe rich cream storefront asks.
 assert.equal(blankSolidColorFromAsk(bottleBrief), null, 'no blank wipe on cream storefront');
@@ -69,6 +82,7 @@ const flask = storefrontFlaskLogoSvg('#0f766e');
 assert.ok(flask.includes('<svg'), 'flask svg');
 assert.ok(storefrontHeroSvg('ValeBottle').includes('ValeBottle'), 'hero names brand');
 
+// Salvage helpers still work when invent fails — but are not the create happy path.
 const spine = composeStorefrontSpine('ValeBottle', bottleBrief, 'smoke1');
 assert.ok(spine['src/data/products.ts'], 'products.ts');
 assert.ok((spine['src/data/products.ts'].match(/"id"\s*:/g) || []).length >= 9, '9 SKUs');
@@ -76,6 +90,10 @@ assert.ok(appHasCommerceCart(spine), 'cart + purchase');
 assert.ok(spine['public/logo.svg'], 'logo');
 assert.ok(Object.keys(spine).some((p) => /public\/heroes\/.+\.svg$/i.test(p)), 'hero svg on disk');
 assert.ok(/#f7f3eb/i.test(spine['src/App.css'] || ''), 'ivory canvas');
+assert.ok(
+  appLooksLikeStorefrontFloor(spine['src/App.jsx'] || '', spine),
+  'salvage spine is detectable as floor',
+);
 
 const graded = gradeStorefrontQuality(spine, bottleBrief, 'ValeBottle');
 assert.equal(graded.okQuality, true, `Quality Accept: ${graded.reasons.join('; ')}`);
@@ -95,8 +113,8 @@ assert.ok(ladder.beatsDone.includes('mark'), 'mark beat');
 assert.ok(ladder.beatsDone.includes('hero'), 'hero beat');
 assert.equal(ladder.grade.okQuality, true, 'ladder Quality');
 
-// Generic goods storefront still wants ladder.
+// Generic goods storefront still wants invent-first path.
 const goodsBrief = 'Create an online store with cart, checkout, and a product catalog on disk.';
 assert.equal(briefWantsStorefrontLadder(goodsBrief, 'GoodsCo'), true, 'generic commerce ladder');
 
-console.log('smoke-storefront-ladder: ok');
+console.log('smoke-storefront-ladder: ok (invent-first + salvage helpers)');

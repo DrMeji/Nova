@@ -1,6 +1,12 @@
 /** Agent command + file execution policy (Cursor-style modes). */
 
 import { getLocalPrefs } from '@/lib/localPrefs';
+import {
+  DEFAULT_APPROVAL_PREFS,
+  commandNeedsApproval,
+  type ApprovalPolicy,
+  type SandboxMode,
+} from '@/lib/agentHarness/p0';
 
 export type AgentExecutionMode = 'allowlist' | 'auto_review' | 'run_all';
 
@@ -9,6 +15,26 @@ export function getAgentExecutionMode(): AgentExecutionMode {
   if (mode === 'auto_review' || mode === 'run_all') return mode;
   return 'allowlist';
 }
+
+/** Codex-style approval_policy + sandbox layered on prefs. */
+export function getApprovalPrefs() {
+  const p = getLocalPrefs() as LocalPrefsWithHarness;
+  return {
+    approvalPolicy: (p.approvalPolicy || DEFAULT_APPROVAL_PREFS.approvalPolicy) as ApprovalPolicy,
+    sandboxMode: (p.sandboxMode || DEFAULT_APPROVAL_PREFS.sandboxMode) as SandboxMode,
+    networkDenyByDefault: p.networkDenyByDefault !== false,
+    networkAllowlist: Array.isArray(p.networkAllowlist) && p.networkAllowlist.length
+      ? p.networkAllowlist
+      : DEFAULT_APPROVAL_PREFS.networkAllowlist,
+  };
+}
+
+type LocalPrefsWithHarness = ReturnType<typeof getLocalPrefs> & {
+  approvalPolicy?: ApprovalPolicy;
+  sandboxMode?: SandboxMode;
+  networkDenyByDefault?: boolean;
+  networkAllowlist?: string[];
+};
 
 export function executionModeLabel(mode: AgentExecutionMode): string {
   if (mode === 'run_all') return 'Run everything';
@@ -82,6 +108,15 @@ export function isAllowlistedAgentCommand(command: string): boolean {
 export function agentCommandNeedsConfirm(command: string): boolean {
   const mode = getAgentExecutionMode();
   if (isBlockedAgentCommand(command)) return true;
+  // Harness P0: network deny-by-default + approval_policy.
+  try {
+    const harness = commandNeedsApproval(command, getApprovalPrefs());
+    if (harness.needsApproval && /network deny|destructive|read-only/i.test(harness.reason)) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
   // OpenHands-style: verify cmds are low-risk when allowlisted.
   if (isVerifyAgentCommand(command) && isAllowlistedAgentCommand(command)) return false;
   const powerful = /^(node|python(?:\d+(?:\.\d+)?)?|py|npx)(\.exe|\.cmd)?(\s|$)/i.test(command.trim())
