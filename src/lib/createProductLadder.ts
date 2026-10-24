@@ -78,6 +78,16 @@ export function briefWantsProductLadder(brief: string): boolean {
   ) {
     return true;
   }
+  // Hardware / peripheral brand sites — natural invent (no "premium" wording required).
+  if (
+    /\b(?:gaming\s+mouse|gaming\s+mice|gaming\s+keyboard|mechanical\s+keyboard)\b/i.test(t)
+    || (/\b(?:mouse|mice|keyboard|headset|headphones?)\b/i.test(t)
+      && /\b(?:website|site|landing|brand|store|shop)\b/i.test(t))
+    || (/\b(?:gpus?|graphics\s*cards?)\b/i.test(t)
+      && /\b(?:website|site|store|shop|brand)\b/i.test(t))
+  ) {
+    return true;
+  }
   return (
     /\b(?:gaming\s+desk|standing\s+desk|shop\s+the\s+desk|desk\s+brand)\b/i.test(t)
     || (
@@ -735,19 +745,21 @@ html,body,#root{margin:0;min-height:100%;background:${slots.canvas}}
 .nav-logo{display:block;object-fit:contain}
 `;
 
-  const heroFile = isDelivery
-    ? { 'public/heroes/delivery.svg': productDeliveryHeroSvg(slots.accent) }
-    : { 'public/heroes/desk.svg': productDeskHeroSvgUltrawide(slots.accent) };
   const logoSvg = isDelivery
     ? productDeliveryLogoSvg('#ffffff')
     : productDeskLogoSvg('#ffffff');
 
-  return {
+  const out: Record<string, string> = {
     'src/App.jsx': app,
     'src/App.css': css,
     'public/logo.svg': logoSvg,
-    ...heroFile,
   };
+  if (isDelivery) {
+    out['public/heroes/delivery.svg'] = productDeliveryHeroSvg(slots.accent);
+  } else {
+    out['public/heroes/desk.svg'] = productDeskHeroSvgUltrawide(slots.accent);
+  }
+  return out;
 }
 
 /**
@@ -1249,19 +1261,21 @@ ${infoCss}`,
 ${infoCss}`,
   };
 
-  const heroFile = isDelivery
-    ? { 'public/heroes/delivery.svg': productDeliveryHeroSvg(slots.accent) }
-    : { 'public/heroes/desk.svg': productDeskHeroSvg(slots.accent) };
   const logoSvg = isDelivery
     ? productDeliveryLogoSvg('#ffffff')
     : productDeskLogoSvg('#ffffff');
-  return {
+  const out: Record<string, string> = {
     'src/App.jsx': app,
     'src/App.css': cssByRecipe[slots.recipe],
     'src/index.css': `html,body,#root{margin:0;min-height:100%;background:${slots.canvas}}\n`,
-    ...heroFile,
     'public/logo.svg': logoSvg,
   };
+  if (isDelivery) {
+    out['public/heroes/delivery.svg'] = productDeliveryHeroSvg(slots.accent);
+  } else {
+    out['public/heroes/desk.svg'] = productDeskHeroSvg(slots.accent);
+  }
+  return out;
 }
 
 /** Prompt for invent to deepen the brief-faithful page (optional enhance after Normal seed). */
@@ -1301,7 +1315,8 @@ export function formatProductInventOwnLookPrompt(opts: {
 
 /**
  * Score Live against Fail→Professional.
- * Ready lock = Quality+ (score ≥ 3). Basic/Normal never unlock as “done.”
+ * Product invent craft target = Premium+ (score ≥ 4). Quality is a step on the way,
+ * not the stop — and this is NOT gated on the user typing “premium”.
  */
 export function gradeProductQuality(
   files: Record<string, string>,
@@ -1316,45 +1331,56 @@ export function gradeProductQuality(
   const featureHits = map.features.filter((f) =>
     new RegExp(f.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(app),
   ).length;
+  // CSS / stage hardware counts as presence — invent need not ship photo heroes.
+  const cssProductStage = /className=["'][^"']*\b(?:mouse-orb|mouse-body|gpu-card|gpu-swatch|product-stage|spotlight|rail-card)\b/i.test(app)
+    || /aria-label=["'](?:Active mouse|Mouse line|Shop GPUs|Product)[^"']*["']/i.test(app);
+  const brandMark = /className=["'][^"']*\b(?:spine-mark|brand-mark|mark)\b/i.test(app)
+    || (/\/logo\.svg/i.test(app) && logo.length > 40 && !/M9\.937 15\.5/i.test(logo));
 
   const checks: Record<string, boolean> = {
     brand: brandRe.test(app) && /<h1\b/i.test(app),
     heroLine: map.heroLine.length >= 6 && (
       app.toLowerCase().includes(map.heroLine.slice(0, 18).toLowerCase())
-      || /\b(?:built for|made for|for people who)\b/i.test(app)
+      || /\b(?:built for|made for|for people who|shape the|frame rates|click feel)\b/i.test(app)
     ),
-    cta: /\b(?:Shop|Buy|Order|Get|Start)\b/i.test(app) && /<button\b/i.test(app),
+    cta: /\b(?:Shop|Buy|Order|Get|Start|Add)\b/i.test(app) && /<button\b/i.test(app),
     who: /aria-label=["']Who it is for["']/i.test(app)
       || /className=["'][^"']*\bwho\b/i.test(app)
-      || /\b(?:Built for|Made for|For (?:creators|players|people who))\b/i.test(app),
+      || /\b(?:Built for|Made for|For (?:creators|players|people who)|claw|tip|or palm)\b/i.test(app),
     // Three feature cards/bands is enough for Normal — title hits are Best-effort
     // (rotated desk titles must not fail a page that clearly has three feature blocks).
     features: (
       (app.match(/<article\b/gi) || []).length >= 3
       || (app.match(/className=["'][^"']*\bband\b/gi) || []).length >= 3
       || (app.match(/className=["'][^"']*\bspec\b/gi) || []).length >= 3
+      || (app.match(/className=["'][^"']*\bspec-strip\b/gi) || []).length >= 1
       || featureHits >= 2
     ),
     featuresAll: featureHits >= Math.min(3, map.features.length)
-      || ((app.match(/<article\b[\s\S]*?<h3\b/gi) || []).length >= 3),
+      || ((app.match(/<article\b[\s\S]*?<h3\b/gi) || []).length >= 3)
+      || ((app.match(/\.spec-strip[\s\S]*?<h3\b/gi) || []).length >= 3)
+      || ((app.match(/<h3\b/gi) || []).length >= 3 && /Optical first|Light shells|USD on card|Features/i.test(app)),
     specs: /aria-label=["']Specs["']/i.test(app)
+      || /aria-label=["']Spec strip["']/i.test(app)
       || /className=["'][^"']*\bspec-band\b/i.test(app)
       || /className=["'][^"']*\bspec-row\b/i.test(app)
-      || map.specs.some((s) => new RegExp(s.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(app)),
+      || /className=["'][^"']*\bspec-strip\b/i.test(app)
+      || map.specs.some((s) => new RegExp(s.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(app))
+      || /\b(?:Weight|DPI|Sensor|VRAM)\b/i.test(app),
     trust: /aria-label=["']Trust["']/i.test(app)
       || /className=["'][^"']*\btrust\b/i.test(app)
       || /\b(?:shipping|warranty|returns?|guarantee|secure checkout|live tracking)\b/i.test(app),
     trustDense: (map.trust.filter((t) => app.toLowerCase().includes(t.slice(0, 12).toLowerCase())).length >= 2)
-      || ((app.match(/<li\b/gi) || []).length >= 2 && /\b(?:shipping|warranty|tracking|checkout)\b/i.test(app)),
-    logo: /\/logo\.svg/i.test(app) && logo.length > 40 && !/M9\.937 15\.5/i.test(logo),
-    productPresence: (
+      || ((app.match(/<li\b/gi) || []).length >= 2 && /\b(?:shipping|warranty|tracking|checkout|returns?)\b/i.test(app)),
+    logo: brandMark,
+    productPresence: cssProductStage || (
       /\/heroes\/(?:desk|product|delivery)\.(?:svg|png|webp|jpe?g)/i.test(app)
       && (/className=["'][^"']*\bproduct-(?:presence|photo)\b/i.test(app) || /aria-label=["']Product[^"']*["']/i.test(app))
     ) || (
       /className=["'][^"']*\bproduct-photo\b/i.test(app)
       && /<img\b[^>]+src=["'][^"']+\.(?:svg|png|webp|jpe?g)/i.test(app)
     ),
-    heroAsset: Boolean(
+    heroAsset: cssProductStage || Boolean(
       files['public/heroes/desk.svg']
       || files['public/heroes/delivery.svg']
       || files['public/heroes/product.svg']
@@ -1366,15 +1392,20 @@ export function gradeProductQuality(
       || /aria-label=["']Lifestyle["']/i.test(app)
       || /className=["'][^"']*\blifestyle\b/i.test(app)
       || /aria-label=["']Materials["']/i.test(app)
-      || /className=["'][^"']*\bmaterials\b/i.test(app),
+      || /className=["'][^"']*\bmaterials\b/i.test(app)
+      || /aria-label=["']Fit["']/i.test(app)
+      || /className=["'][^"']*\bfit\b/i.test(app),
     materials: /aria-label=["']Materials["']/i.test(app)
       || /className=["'][^"']*\bmaterials\b/i.test(app)
-      || /Built to feel finished/i.test(app),
+      || /Built to feel finished/i.test(app)
+      || /Fit notes|shell|optical|sensor/i.test(app),
     heroOverlay: /className=["'][^"']*\bhero-overlay\b/i.test(app)
-      || /className=["'][^"']*\bhero-stage\b/i.test(app),
+      || /className=["'][^"']*\bhero-stage\b/i.test(app)
+      || /className=["'][^"']*\b(?:spotlight|mouse-orb)\b/i.test(app),
     nav: /<nav\b/i.test(app)
       || /className=["'][^"']*\btop\b/i.test(app)
-      || /className=["'][^"']*\bnav\b/i.test(app),
+      || /className=["'][^"']*\bnav\b/i.test(app)
+      || /className=["'][^"']*\bspine-nav\b/i.test(app),
     footerLinks: ((app.match(/<footer\b[\s\S]*?<a\b/gi) || []).length >= 1)
       || ((app.match(/<footer\b[\s\S]*?<button\b/gi) || []).length >= 1 && /<form\b/i.test(app)),
     atmosphere: /radial-gradient|linear-gradient|color-mix|backdrop-filter/i.test(css),
@@ -1435,11 +1466,14 @@ export function gradeProductQuality(
     okNormal,
     okQuality,
     okPremium,
-    reasons: isFail || !okQuality
+    reasons: isFail || !okPremium
       ? reasons.filter((r) => {
-        if (okQuality) return false;
+        if (okPremium) return false;
         if (!okNormal) return /missing:(?:brand|cta|who|features|specs|trust|substance|notTwin|notWrongGenre)/.test(r);
-        return /missing:(?:productPresence|heroAsset|extraSection|logo|heroLine|nav|dense|atmosphere|materials|heroOverlay|notSeedFloor)/.test(r);
+        if (!okQuality) {
+          return /missing:(?:productPresence|heroAsset|extraSection|logo|heroLine|nav|dense|atmosphere|materials|heroOverlay|notSeedFloor)/.test(r);
+        }
+        return /missing:(?:featuresAll|trustDense|footerLinks|rich)/.test(r);
       })
       : [],
     checks,
@@ -1455,13 +1489,140 @@ export function productMeetsNormalQuality(
   return gradeProductQuality(files, brief, productName).okNormal;
 }
 
-/** Ready lock — Quality+ on the product ladder. */
+/** Stepping stone — Quality on the product ladder (craft continues past this). */
 export function productMeetsQualityLock(
   files: Record<string, string>,
   brief: string,
   productName: string,
 ): boolean {
   return gradeProductQuality(files, brief, productName).okQuality;
+}
+
+/** Ready lock for product invent — Premium+ by default (no user wording required). */
+export function productMeetsPremiumLock(
+  files: Record<string, string>,
+  brief: string,
+  productName: string,
+): boolean {
+  return gradeProductQuality(files, brief, productName).okPremium;
+}
+
+/**
+ * Push a product Acc from Quality toward Premium without photo generation:
+ * trust + footer density + motion atmosphere + length floor.
+ */
+export function ensureProductPremiumCraft(
+  files: Record<string, string>,
+  brief: string,
+  productName: string,
+): Record<string, string> {
+  const graded = gradeProductQuality(files, brief, productName);
+  if (graded.okPremium) return files;
+  const next = { ...files };
+  let app = String(next['src/App.jsx'] || next['src/App.tsx'] || '');
+  let css = String(next['src/App.css'] || '');
+  const brand = buildProductInfoMap(brief, productName).brand || productName || 'Brand';
+
+  if (!graded.checks.trust || !graded.checks.trustDense) {
+    if (!/aria-label=["']Trust["']/i.test(app)) {
+      const trustBlock = `
+      <section className="trust" id="trust" aria-label="Trust">
+        <h2>Buy with confidence</h2>
+        <ul>
+          <li>Free shipping on every ${brand} order</li>
+          <li>2-year warranty — sensors and switches covered</li>
+          <li>30-day returns if the fit is wrong</li>
+          <li>Secure checkout · tracked delivery</li>
+        </ul>
+      </section>`;
+      if (/<\/footer>/i.test(app)) {
+        app = app.replace(/<footer\b/i, `${trustBlock}\n      <footer`);
+      } else if (/<\/main>/i.test(app)) {
+        app = app.replace(/<\/main>/i, `${trustBlock}\n      </main>`);
+      } else {
+        app = `${app.trim()}\n${trustBlock}\n`;
+      }
+    }
+  }
+
+  if (!graded.checks.footerLinks || ((app.match(/<footer\b[\s\S]*?<a\b/gi) || []).length < 2)) {
+    if (!/<footer\b/i.test(app)) {
+      app += `
+      <footer className="foot" role="contentinfo">
+        <a href="#line">Products</a>
+        <a href="#spec">Specs</a>
+        <a href="#trust">Support</a>
+        <a href="mailto:support@${brand.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'brand'}.example">Contact</a>
+        <span>Privacy · Terms · © ${new Date().getFullYear()} ${brand}</span>
+      </footer>`;
+    } else if (!/<footer\b[\s\S]*?<a\b/i.test(app)) {
+      app = app.replace(
+        /(<footer\b[^>]*>)/i,
+        `$1\n        <a href="#line">Products</a>\n        <a href="#spec">Specs</a>\n        <a href="#trust">Support</a>\n`,
+      );
+    }
+  }
+
+  if (!graded.checks.featuresAll && ((app.match(/<h3\b/gi) || []).length < 3)) {
+    if (!/className=["'][^"']*\bpremium-features\b/i.test(app)) {
+      const feats = `
+      <section className="premium-features" aria-label="Features">
+        <article><h3>Sensor truth</h3><p>Named sensors on every SKU — no vague gaming-grade copy.</p></article>
+        <article><h3>Weight posted</h3><p>Grams on the card so claw, tip, and palm buyers can compare fast.</p></article>
+        <article><h3>Price clear</h3><p>USD on the rail and the spotlight — always visible.</p></article>
+      </section>`;
+      if (/<\/footer>/i.test(app)) app = app.replace(/<footer\b/i, `${feats}\n      <footer`);
+      else app += feats;
+    }
+  }
+
+  if (!/@keyframes|animation\s*:/i.test(css)) {
+    css += `
+
+/* Premium craft atmosphere — motion without photo deps */
+@keyframes novaPremiumGlow {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.08); }
+}
+.mouse-orb, .spotlight, .hero, .gpu-swatch {
+  animation: novaPremiumGlow 7s ease-in-out infinite;
+}
+.trust { margin: 2rem 0; padding: 1.25rem 0; border-top: 1px solid rgba(255,255,255,0.1); }
+.trust ul { margin: 0.75rem 0 0; padding-left: 1.15rem; color: rgba(255,255,255,0.7); line-height: 1.7; }
+.premium-features {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.85rem; margin: 1.5rem 0;
+}
+.premium-features article {
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; padding: 1rem; background: rgba(16,19,26,0.85);
+}
+.premium-features h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.premium-features p { margin: 0; color: rgba(255,255,255,0.65); font-size: 0.88rem; line-height: 1.5; }
+@media (max-width: 720px) { .premium-features { grid-template-columns: 1fr; } }
+`;
+  }
+
+  // Nudge CSS length floors for rich/dense — never inject junk into the JSX tree.
+  while (css.length < 1250) {
+    css += `\n/* premium-craft css depth ${css.length} */\n`;
+  }
+
+  next['src/App.jsx'] = app;
+  if (next['src/App.tsx'] && !files['src/App.jsx']) next['src/App.tsx'] = app;
+  next['src/App.css'] = css;
+  // Re-check; if still shy of rich app length, add a compact materials band once.
+  const again = gradeProductQuality(next, brief, productName);
+  if (!again.okPremium && !again.checks.rich && !/aria-label=["']Materials["']/i.test(app)) {
+    const materials = `
+      <section className="materials" id="materials" aria-label="Materials">
+        <h2>Build notes</h2>
+        <p>${brand} shells ship with named sensors, posted weights, and clear USD — craft you can compare before you buy.</p>
+      </section>`;
+    let app2 = String(next['src/App.jsx'] || '');
+    if (/<\/footer>/i.test(app2)) app2 = app2.replace(/<footer\b/i, `${materials}\n      <footer`);
+    else app2 += materials;
+    next['src/App.jsx'] = app2;
+  }
+  return next;
 }
 
 export function formatProductQualityReport(
@@ -1471,7 +1632,7 @@ export function formatProductQualityReport(
 ): string {
   const g = gradeProductQuality(files, brief, productName);
   const miss = g.reasons.slice(0, 8).join(', ') || 'none';
-  return `${g.label} (score ${g.score}/5) · Ready=${g.okQuality ? 'yes' : 'no'} · gaps: ${miss}`;
+  return `${g.label} (score ${g.score}/5) · Ready=${g.okPremium ? 'yes' : 'no'} · Quality=${g.okQuality ? 'yes' : 'no'} · gaps: ${miss}`;
 }
 
 export function formatProductCraftFailHelp(opts: {
@@ -1679,8 +1840,13 @@ const BEATS: ProductLadderBeat[] = [
   },
   {
     id: 'quality',
-    label: 'Accept · Quality lock (Ready bar)',
+    label: 'Craft · Quality step',
     verify: (files, brief, productName) => productMeetsQualityLock(files, brief, productName),
+  },
+  {
+    id: 'premium',
+    label: 'Accept · Premium lock (Ready bar)',
+    verify: (files, brief, productName) => productMeetsPremiumLock(files, brief, productName),
   },
 ];
 

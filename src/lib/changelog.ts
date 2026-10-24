@@ -5,6 +5,18 @@
 
 export const NOVA_CHANGELOG = [
   {
+    version: '0.1.340',
+    channel: 'stable' as const,
+    date: 'Oct 24, 2026',
+    title: 'Product invent Ready = Premium (no wording gate)',
+    notes: [
+      'Hardware/mouse/GPU brand sites enter the product ladder naturally — user need not say quality/premium',
+      'Product invent Accept / Ready aims for Premium craft (trust, footer, features density, rich CSS) after Quality',
+      'ensureProductPremiumCraft pushes Quality→Premium with motion + trust + footer — CSS stages count as product presence',
+      'Negated “not leather atelier” still cannot force leather floors onto gaming mice',
+    ],
+  },
+  {
     version: '0.1.339',
     channel: 'stable' as const,
     date: 'Oct 24, 2026',
