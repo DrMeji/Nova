@@ -4,7 +4,6 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, RotateCcw, Square, ExternalLink } from 'lucide-react';
-import { HomeControlsPanel } from '@/components/HomeControlsPanel';
 import { ToolsHomeShell } from '@/components/ToolsHomeShell';
 import { CodingWorkerDagPanel } from '@/components/CodingWorkerDagPanel';
 import {
@@ -147,7 +146,6 @@ function AgentJobCard({
 export function AgentsView() {
   const { navigate } = useRouter();
   const [jobs, setJobs] = useState<CreateJob[]>(() => listCreateJobs());
-  const [helpersOpen, setHelpersOpen] = useState(false);
 
   useEffect(() => {
     const sync = () => setJobs(listCreateJobs());
@@ -189,7 +187,7 @@ export function AgentsView() {
   return (
     <ToolsHomeShell
       title="Agents"
-      summary="Watch create and coding workers — cancel, retry, and follow the build DAG. Helper suites stay below."
+      summary="Watch create and coding workers — cancel, retry, and follow the build path. Capabilities are built in; nothing to turn on."
     >
       <div className="space-y-5" data-nova-agents-desk="1">
         <CodingWorkerDagPanel />
@@ -235,30 +233,6 @@ export function AgentsView() {
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="pt-1">
-          <button
-            type="button"
-            className="text-[12px] text-content-secondary hover:text-content-primary underline-offset-2 hover:underline mb-2"
-            onClick={() => setHelpersOpen((v) => !v)}
-            aria-expanded={helpersOpen}
-          >
-            {helpersOpen ? 'Hide helper suites' : 'Show helper suites'}
-          </button>
-          {helpersOpen ? (
-            <div className="space-y-4">
-              <HomeControlsPanel home="agents-window" peerBoxes defaultOn />
-              {/* Code-header helpers used to clutter the Code pill — live here, On by default. */}
-              <HomeControlsPanel
-                home="code-header"
-                title="Code helpers"
-                blurb="Diff review, git chrome, and coding pipeline helpers. On by default — patches auto-apply during create."
-                peerBoxes
-                defaultOn
-              />
-            </div>
-          ) : null}
         </section>
       </div>
     </ToolsHomeShell>

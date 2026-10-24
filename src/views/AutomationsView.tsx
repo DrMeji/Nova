@@ -1,14 +1,16 @@
-import { HomeControlsPanel } from '@/components/HomeControlsPanel';
 import { ToolsHomeShell } from '@/components/ToolsHomeShell';
 
-/** Scheduled jobs & Tools utilities — layout matches Plugins / Models. */
+/** Schedules & tool utilities — baked into create / chat, not a switch wall. */
 export function AutomationsView() {
   return (
     <ToolsHomeShell
       title="Automations"
-      summary="Verify, MCP, schedules, and related Nova tools. Open a suite to see what’s active."
+      summary="Verify, MCP, and scheduled helpers run as part of Nova. Nothing here needs turning on."
     >
-      <HomeControlsPanel home="nav-tools" peerBoxes defaultOn />
+      <p className="text-[13px] text-content-secondary leading-relaxed rounded-xl border border-stroke-subtle/70 bg-surface-hover/20 px-4 py-3">
+        Create and chat already run verify steps, installs, and tool loops for you.
+        Use this page as a quiet home for upcoming schedules — no research toggles.
+      </p>
     </ToolsHomeShell>
   );
 }

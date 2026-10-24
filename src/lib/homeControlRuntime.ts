@@ -42,11 +42,17 @@ function boundValue(id: string): boolean | null {
   }
 }
 
-/** True when the user turned this control on for this PC. */
+/**
+ * True when this helper is active on this PC.
+ * Product helpers default On (plug-and-play). Opt-in safety modes stay Off until chosen.
+ */
 export function isHomeControlOn(id: string): boolean {
   const bound = boundValue(id);
   if (bound !== null) return bound;
-  return Boolean(readToggles()[id]);
+  const toggles = readToggles();
+  if (Object.prototype.hasOwnProperty.call(toggles, id)) return Boolean(toggles[id]);
+  if (id === 'explore-readonly-mode' || id === 'agent-dry-run-mode') return false;
+  return true;
 }
 
 /** Explore / dry-run: agent must not write disk. */

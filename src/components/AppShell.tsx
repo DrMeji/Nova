@@ -3,7 +3,7 @@ import { useRouter, type Route } from '@/context/RouterContext';
 import {
   Settings, Search, History,
   Trash2,
-  Globe, Download, Brain, PackageOpen,
+  Globe, Download, Brain,
 } from 'lucide-react';
 import {
   IconChatAi,
@@ -119,7 +119,7 @@ function getNavGroups(): {
         { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: isSocialParked('networking') },
         { label: 'Message', icon: IconMessage, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
         { label: 'Notifications', icon: IconNotifications, route: { name: 'notifications' }, activity: 'notifications' },
-        { label: 'Missing items', icon: PackageOpen, route: { name: 'missing-items' } },
+        // Missing-items research parking lot removed from nav — capabilities are baked in.
       ],
     },
   ];

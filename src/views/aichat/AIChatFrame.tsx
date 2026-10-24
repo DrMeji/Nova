@@ -324,16 +324,25 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const pickPhotosIntoChat = props.pickPhotosIntoChat;
   const placeholder = props.placeholder;
   const previewUrl = props.previewUrl;
-  // Bound folder / new chat: show Live when the tree can paint — even if verify failed
-  // ("Click Live to try once more"). Compositional App shells are short; boundFolderLiveReady
-  // counts sections. Never hide Live solely because the create job status is failed.
+  // Bound folder / new chat: show Live only when this is a real web/Live project.
+  // CLI / API / library creates must not advertise Live (no HTML / no preview URL).
   const filesLiveReady = boundFolderLiveReady(chatStudioFiles);
+  const liveArtifactKind = createJobLive?.artifactKind;
+  // Known coding artifacts never get a Live pill (no website to open).
+  const codingKindsHideLive = liveArtifactKind === 'node-cli'
+    || liveArtifactKind === 'node-api'
+    || liveArtifactKind === 'library'
+    || liveArtifactKind === 'python'
+    || liveArtifactKind === 'test-suite'
+    || liveArtifactKind === 'extension';
   const showBoundLive = Boolean(
     chatStudioDiskRoot
+    && !codingKindsHideLive
+    && filesLiveReady
     && (
-      filesLiveReady
-      || (createLiveUnlock.ok && !createJobLive?.craftBlocked)
-      || (Boolean(previewUrl) && filesLiveReady)
+      createLiveUnlock.ok && !createJobLive?.craftBlocked
+      || Boolean(previewUrl)
+      || createJobLive?.status === 'ready'
     ),
   );
   const queueLen = props.queueLen;
