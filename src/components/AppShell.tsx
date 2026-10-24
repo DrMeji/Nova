@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import {
-  SquarePen, Briefcase, Blocks, Database,
   Settings, Search, History,
-  MessageSquare, Trash2,
-  Globe, Bell, Download, Brain, Cable, Bot,
+  Trash2,
+  Globe, Download, Brain, PackageOpen,
 } from 'lucide-react';
+import {
+  IconChatAi,
+  IconProject,
+  IconAgents,
+  IconPlugins,
+  IconModelsCpuAi,
+  IconLocalAi,
+  IconMcp,
+  IconAutomations,
+  IconIntegrations,
+  IconNotifications,
+  IconMessage,
+  IconTestDevice,
+} from '@/components/NavIcons';
+import { GlobalHelpHost } from '@/components/GlobalHelpHost';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isVmParked } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
@@ -26,8 +40,8 @@ import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
-import { NovaMark } from '@/components/NovaMark';
-import { formatNovaId } from '@/lib/novaUserId';
+import { useIdleGhostChrome } from '@/hooks/useIdleGhostChrome';
+import { useTheme } from '@/context/ThemeContext';
 import { isNovaDevEmail } from '@/lib/novaDevAccount';
 import {
   clearActivity,
@@ -43,6 +57,13 @@ import {
 } from '@/lib/chatInflight';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
 import { countUnreadLocalNotifications } from '@/lib/localNotifications';
+import {
+  countMissingOpen,
+  loadMissingPlaced,
+  MISSING_ITEMS,
+  placeAllMissingHomesOnce,
+  saveMissingPlaced,
+} from '@/lib/missingItemsCatalog';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/novaUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
@@ -64,14 +85,14 @@ function getNavGroups(): {
     {
       id: 'create',
       items: [
-        { label: 'Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
+        { label: 'Chat', icon: IconChatAi, route: { name: 'chat' }, activity: 'chat' },
       ],
     },
     {
       id: 'work',
       label: 'Work',
       items: [
-        { label: 'Projects', icon: Briefcase, route: { name: 'projects' as const } },
+        { label: 'Projects', icon: IconProject, route: { name: 'projects' as const } },
         { label: 'History', icon: History, route: { name: 'dashboard' as const } },
       ],
     },
@@ -79,10 +100,14 @@ function getNavGroups(): {
       id: 'tools',
       label: 'Tools',
       items: [
-        { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
-        { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
-        { label: 'Local AI', icon: Bot, route: { name: 'local-ai' } },
-        { label: 'MCP', icon: Cable, route: { name: 'mcp' } },
+        { label: 'Agents', icon: IconAgents, route: { name: 'agents' } },
+        { label: 'Plugins', icon: IconPlugins, route: { name: 'build' }, activity: 'plugins' },
+        { label: 'Models', icon: IconModelsCpuAi, route: { name: 'models' }, activity: 'models' },
+        { label: 'Local AI', icon: IconLocalAi, route: { name: 'local-ai' } },
+        { label: 'MCP', icon: IconMcp, route: { name: 'mcp' } },
+        { label: 'Automations', icon: IconAutomations, route: { name: 'automations' } },
+        { label: 'Integrations', icon: IconIntegrations, route: { name: 'integrations' } },
+        { label: 'Test device', icon: IconTestDevice, route: { name: 'test-device' }, comingSoon: isVmParked() },
         { label: 'Brain', icon: BrainNavIcon, route: { name: 'brain' } },
       ],
     },
@@ -91,8 +116,9 @@ function getNavGroups(): {
       label: 'Connect',
       items: [
         { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: isSocialParked('networking') },
-        { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
-        { label: 'Notifications', icon: Bell, route: { name: 'notifications' }, activity: 'notifications' },
+        { label: 'Message', icon: IconMessage, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
+        { label: 'Notifications', icon: IconNotifications, route: { name: 'notifications' }, activity: 'notifications' },
+        { label: 'Missing items', icon: PackageOpen, route: { name: 'missing-items' } },
       ],
     },
   ];
@@ -100,8 +126,11 @@ function getNavGroups(): {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
+  const { theme } = useTheme();
   const { user, profile } = useAuth();
   const { deleteChatForever, removeRecent } = useRecentProjects();
+  /** Moving color orbs only in Fun — Dark / Light / Gray stay still. */
+  const hideOrbs = theme !== 'fun';
   /** Hover-expanded main nav. Collapsed by default; no sticky toggle. */
   const [hoverOpen, setHoverOpen] = useState(false);
   const hoverLeaveTimer = useRef<number | null>(null);
@@ -114,17 +143,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const statusMenuOpenRef = useRef(false);
   statusMenuOpenRef.current = statusMenuOpen;
   const collapsed = !hoverOpen;
-  const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
-  const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
+  const [, setCapacity] = useState<LiveCapacity | null>(null);
+  const [, setModeLabel] = useState<AiModeLabel | null>(null);
   const [updateInfo, setUpdateInfo] = useState<ArkUpdateInfo | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [wipeProjectDisk, setWipeProjectDisk] = useState(true);
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
-  const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
-  const [inflightChats, setInflightChats] = useState(() => new Set(listInflightChatIds()));
+  const [, setDoneChats] = useState(() => new Set(getDoneChatIds()));
+  const [, setInflightChats] = useState(() => new Set(listInflightChatIds()));
   const [navTick, setNavTick] = useState(0);
   const [notifUnread, setNotifUnread] = useState(0);
+  const [missingOpen, setMissingOpen] = useState(() => countMissingOpen());
   const { unreadFrom } = useSocial();
   const myNovaIdForNotifs = isNovaDevEmail(user?.email) ? 'DEV' : (profile?.nova_id || undefined);
 
@@ -134,7 +164,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('NOVA:features-changed', onFeat);
   }, []);
 
+  // All Missing-item controls now have mounted homes — mark Placed once.
+  useEffect(() => {
+    placeAllMissingHomesOnce();
+    setMissingOpen(countMissingOpen());
+  }, []);
+
   const voiceFocus = route.name === 'chat' && route.mode === 'voice';
+  const railGhost = useIdleGhostChrome({
+    idleMs: 5000,
+    ghostOpacity: 0.26,
+    // Keep full opacity while Voice hides the rail entirely.
+    enabled: !voiceFocus,
+  });
 
   // Keep ambient orbs in sync when leaving/entering Voice (sidebar hops, etc.).
   useEffect(() => {
@@ -167,6 +209,29 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener('NOVA:local-notifications', bump);
     return () => window.removeEventListener('NOVA:local-notifications', bump);
   }, [myNovaIdForNotifs]);
+
+  useEffect(() => {
+    const bump = () => setMissingOpen(countMissingOpen());
+    bump();
+    window.addEventListener('NOVA:missing-items-changed', bump);
+    return () => window.removeEventListener('NOVA:missing-items-changed', bump);
+  }, []);
+
+  // Homes now exist — mark catalog rows Placed so Missing items tracks deepen-work, not parking.
+  useEffect(() => {
+    const SEED = 'NOVA:missing-homes-seeded-v2';
+    try {
+      if (localStorage.getItem(SEED)) return;
+      const placed = loadMissingPlaced();
+      for (const item of MISSING_ITEMS) {
+        if (item.id === 'missing-items-nav') continue;
+        placed.add(item.id);
+      }
+      saveMissingPlaced(placed);
+      localStorage.setItem(SEED, '1');
+      setMissingOpen(countMissingOpen());
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     const onPrefs = () => {
@@ -287,6 +352,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.label === 'Brain') {
       return route.name === 'brain';
     }
+    if (item.label === 'Agents') {
+      return route.name === 'agents';
+    }
+    if (item.label === 'Automations') {
+      return route.name === 'automations';
+    }
+    if (item.label === 'Integrations') {
+      return route.name === 'integrations';
+    }
+    if (item.label === 'Settings') {
+      return settingsOpen;
+    }
     return route.name === item.route.name;
   };
 
@@ -303,6 +380,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeSettings = () => {
     setSettingsOpen(false);
   };
+
+  // Legacy full-page Settings route → restore click-outside modal.
+  useEffect(() => {
+    if (route.name !== 'settings') return;
+    setSettingsSection(route.section || 'account');
+    setSettingsOpen(true);
+    navigate({ name: 'chat' });
+  }, [route, navigate]);
 
   const startUpdateDownload = () => {
     if (!updateInfo?.newerAvailable || !updateInfo.setupAssetUrl || !updateInfo.latestTag || updateBusy) return;
@@ -447,6 +532,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     if (item.activity) clearActivity(item.activity);
+    if (item.label === 'Settings') {
+      openSettings('account');
+      return;
+    }
     if (item.label === 'Chat') {
       navigate({ name: 'chat' });
       return;
@@ -463,12 +552,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   }) => {
     const active = isActive(item);
     const isNotifications = item.label === 'Notifications';
+    const isMissingItems = item.label === 'Missing items';
     const notifAttention = isNotifications && (notifUnread > 0 || Boolean(activity.notifications));
+    const missingAttention = isMissingItems && missingOpen > 0;
     const busy = Boolean(item.activity && activity[item.activity]) && !notifAttention;
     const unreadCount = item.label === 'Message' && !item.comingSoon && !isSocialParked('message')
       ? unreadFrom.length
       : 0;
-    const attention = notifAttention || busy || unreadCount > 0;
+    const attention = notifAttention || missingAttention || busy || unreadCount > 0;
     if (item.comingSoon) {
       return (
         <button
@@ -503,7 +594,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         aria-label={
           isNotifications && notifUnread > 0
             ? `Notifications (${notifUnread} unread)`
-            : item.label
+            : isMissingItems && missingOpen > 0
+              ? `Missing items (${missingOpen} open)`
+              : item.label
         }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
@@ -511,15 +604,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           attention && !active ? 'nova-nav-attention' : ''
         }`}
       >
-        <span className={`nova-nav-icon ${attention ? 'text-sky-400' : ''}`}>
+        <span className={`nova-nav-icon ${missingAttention ? 'text-amber-400' : attention ? 'text-sky-400' : ''}`}>
           <item.icon />
         </span>
-        <span className={`truncate nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''} ${attention ? 'text-sky-300' : ''}`}>
+        <span className={`truncate nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''} ${
+          missingAttention ? 'text-amber-200' : attention ? 'text-sky-300' : ''
+        }`}>
           {item.label}
         </span>
         {unreadCount > 0 ? (
           <span className={`text-[10px] font-semibold tabular-nums text-sky-300 nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
             {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        ) : null}
+        {isMissingItems && missingOpen > 0 ? (
+          <span className={`text-[10px] font-semibold tabular-nums text-amber-300 nova-nav-label ${collapsed ? 'nova-nav-label-hide' : ''}`}>
+            {missingOpen > 99 ? '99+' : missingOpen}
           </span>
         ) : null}
       </button>
@@ -528,13 +628,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="h-full min-w-0 flex overflow-hidden relative bg-nova-navy-950">
-      <AuthAmbientOrbs variant="app" />
-      {/* Left edge tab — downloads dock above the pill (outside); hover opens right */}
+      {!hideOrbs ? <AuthAmbientOrbs variant="app" /> : null}
+      {/* Left edge tab — vertically centered; hover widens labels without moving icons */}
       {!voiceFocus ? (
-      <div className="relative z-10 shrink-0 mr-2 flex items-center self-stretch">
-      <div className="relative h-[70%] flex flex-col min-w-0">
-        {/* Downloads — outside the pill, above Search */}
-        <div className="absolute bottom-full left-0 right-0 mb-2 flex flex-col items-center gap-1.5 pointer-events-auto z-20">
+      <div
+        className="relative z-10 shrink-0 mr-2 flex items-center self-stretch"
+        style={railGhost.style}
+        {...railGhost.bind}
+      >
+      <div className="relative flex flex-col min-w-0 my-auto">
+        <div className="absolute bottom-full left-0 right-0 mb-1.5 flex flex-col items-center gap-1 pointer-events-auto z-20">
           <JobsStrip variant="sidebar" collapsed />
           {updateInfo?.newerAvailable && updateInfo?.setupAssetUrl && updateInfo?.latestTag ? (
             <button
@@ -554,14 +657,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : null}
         </div>
       <aside
-        className={`nova-sidebar-edge flex flex-col min-w-0 h-full overflow-hidden nova-sidebar-panel nova-glass ${
+        className={`nova-sidebar-edge nova-sidebar-bare nova-sidebar-fit flex flex-col min-w-0 overflow-hidden nova-sidebar-panel ${
           collapsed ? 'is-collapsed' : ''
         }`}
-        onMouseEnter={openSidebarHover}
+        onMouseEnter={() => { railGhost.bump(); openSidebarHover(); }}
         onMouseLeave={scheduleSidebarClose}
       >
-          {/* Search — same icon plate open or closed so nothing jumps */}
-          <div className="flex-none pt-1">
+          <nav className="nova-nav-flat flex flex-col" aria-label="Main">
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
@@ -576,98 +678,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Search
               </span>
             </button>
-          </div>
-
-          <nav className="flex-none min-h-0 flex flex-col overflow-y-auto overscroll-contain mt-3 pt-1">
-            {/* Primary nav — labels fade in to the right; icons stay locked */}
-            <div className="nova-nav-stack flex-none shrink-0 flex flex-col">
-              {NAV_GROUPS.map(group => (
-                <div key={group.id} className={group.label ? 'nova-nav-group' : ''}>
-                  {group.items.map(renderNavItem)}
-                </div>
-              ))}
-            </div>
+            {NAV_GROUPS.flatMap((group) => group.items.map((item) => renderNavItem(item)))}
+            <span className="nova-nav-flat-rule" aria-hidden />
+            {renderNavItem({
+              label: 'Settings',
+              icon: Settings,
+              route: { name: 'settings' },
+            })}
           </nav>
-
-            {/* Spacer pushes profile to the bottom */}
-            <div className="min-h-0 flex-1" aria-hidden />
-
-            {/* Footer locked — same padding/height open or closed so profile never jumps */}
-            <div
-              className="flex-none shrink-0 relative px-0.5 pt-2 pb-3"
-              data-status-menu
-            >
-              {PRESENCE_UI_ENABLED && statusMenuOpen && (
-                <div
-                  className="absolute z-50 left-full bottom-0 ml-2 rounded-xl border border-white/10 bg-nova-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0"
-                  role="menu"
-                >
-                  {PRESENCE_OPTIONS.map(opt => {
-                    const active = presence === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => setPresenceStatus(opt.id)}
-                        className={`w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-white/5 first:rounded-t-xl last:rounded-b-xl ${
-                          active ? 'bg-white/[0.04]' : ''
-                        }`}
-                      >
-                        <span className={`mt-1 shrink-0 h-3.5 w-3.5 rounded-full ${presenceDotClass(opt.id)}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm text-content-primary">{opt.label}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Profile + settings — fixed h-10 row; labels only expand sideways */}
-              <div className="flex items-center min-w-0 h-10">
-                <span className="nova-nav-icon !h-10">
-                  <button
-                    type="button"
-                    onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
-                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
-                    className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors ${
-                      PRESENCE_UI_ENABLED ? presenceRingClass(presence) : ''
-                    }`}
-                    aria-label={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
-                    aria-expanded={PRESENCE_UI_ENABLED ? statusMenuOpen : undefined}
-                  >
-                    {profile?.avatar_url ? (
-                      <img src={profile?.avatar_url ?? undefined} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <NovaMark className="w-5 h-5 text-content-primary" title="NOVA" />
-                    )}
-                  </button>
-                </span>
-                <span className={`flex items-center gap-1 min-w-0 flex-1 h-10 ${collapsed ? 'nova-nav-label-hide' : ''}`}>
-                  <button
-                    type="button"
-                    onClick={() => (PRESENCE_UI_ENABLED ? setStatusMenuOpen(v => !v) : openSettings())}
-                    className="flex-1 min-w-0 text-left"
-                    title={PRESENCE_UI_ENABLED ? 'Change status' : 'Open Settings'}
-                  >
-                    <span className="block text-xs font-mono font-medium text-content-primary truncate">
-                      {isNovaDevEmail(user?.email)
-                        ? 'DEV'
-                        : (profile?.nova_id ? formatNovaId(String(profile?.nova_id)) : (user?.id === 'guest-local' ? 'Guest' : 'GitHub'))}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openSettings()}
-                    title="Open Settings"
-                    className="p-1.5 rounded-lg shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                    aria-label="Open Settings"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
-                </span>
-              </div>
-            </div>
       </aside>
       </div>
       </div>
@@ -681,6 +699,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           {children}
           </div>
         </main>
+
+      <GlobalHelpHost />
 
       <Modal
         isOpen={searchOpen}

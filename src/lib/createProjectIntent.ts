@@ -2,7 +2,7 @@
  * Detect "create a new project from nothing" asks in Chat.
  */
 
-import { looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
+import '@/lib/webLandingFromBrief';
 import { looksLikeImplementGo, looksLikeHardCreateGo } from '@/lib/chatPlanMode';
 import { looksLikeSingleFileCreateAsk } from '@/lib/chatCreateBrief';
 import {
@@ -68,7 +68,44 @@ export function isCreateRefusedAsk(message: string): boolean {
     || /^(?:please\s+)?(?:build|create|scaffold)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?/i.test(t)) {
     return false;
   }
+  // "Don't create a new project — rewrite / redesign this bound folder" is edit, not talk-first chat.
+  if (/\b(?:rewrite|redesign|rebuild|overhaul|edit\s+the\s+bound|bound\s+(?:folder|project)|this\s+(?:folder|project|site|app)|src\/App)\b/i.test(t)) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * "Create a microphone on the page" / "draw headphones" — product visual edit, not a new project.
+ * Still create when they ask for a mic shop / website / app.
+ */
+/** Product nouns that map to single-object catalog visuals (not a new website). */
+export const PRODUCT_VISUAL_NOUN_RE =
+  /\b(?:microphones?|mics?\b|headphones?|headsets?|earbuds?|guitars?|keyboards?|mice|mouse|watches?|bottles?|iphones?|smartphones?|phones?|gpus?|graphics\s*cards?|monitors?|displays?|pc\s*cases?|computer\s*cases?|desks?|mouse\s*pads?|google\s*homes?|smart\s*speakers?|speakers?|webcams?|cameras?|laptops?|tablets?|ipads?|routers?|consoles?|controllers?|gamepads?|beds?|chairs?)\b/i;
+
+export function looksLikeProductVisualObjectAsk(message: string): boolean {
+  const t = String(message || '').trim();
+  if (!t) return false;
+  if (!PRODUCT_VISUAL_NOUN_RE.test(t)) return false;
+  // Negated verbs ("do not add leather") must never trip the glyph wipe path.
+  if (/\b(?:do\s+not|don't|dont|never|without)\s+(?:create|draw|generate|render|add|put|place|show|make)\b/i.test(t)) {
+    return false;
+  }
+  // Catalog / store polish asks — improve cards, filters, prices — never a single-object glyph stage.
+  if (/\b(?:cards?|filters?|skus?|catalog|inventory|prices?|usd|cart|grid|shop\s+gpus?|named\s+cards?)\b/i.test(t)
+    && /\b(?:improve|keep|filter|all\s*\/|nvidia|amd|intel|maker|gradient|plate|accent)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:website|web\s*app|application|shop|store|storefront|landing|homepage|dashboard|site)\b/i.test(t)) {
+    return false;
+  }
+  // "image of X" / "create me a X image" — explicit catalog visual asks
+  if (/\b(?:image|picture|photo|visual|glyph|render)\b/i.test(t) && PRODUCT_VISUAL_NOUN_RE.test(t)) {
+    return true;
+  }
+  if (/\b(?:create|draw|generate|render|add|put|place|show|make)\b/i.test(t)) return true;
+  if (/\bon\s+the\s+page\b/i.test(t)) return true;
+  return false;
 }
 
 /** Shared create-verb + product-noun gate (classifyTurn / createBrief / buildStart). */
@@ -78,6 +115,8 @@ export function isCreateVerbNoun(message: string): boolean {
   if (isCreateRefusedAsk(t)) return false;
   if (wantsPlanningOnly(t)) return false;
   if (looksLikeTalkBeforeCreateAsk(t)) return false;
+  // Single product object on an existing page — never a greenfield create.
+  if (looksLikeProductVisualObjectAsk(t)) return false;
   // "what do I need / requirements" even if wantsPlanningOnly missed a variant
   if (/\b(?:what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|requirements?)\b/i.test(t)
     && !/\b(?:build\s+it\s+now|scaffold\s+now|on\s+disk|skip\s+(?:the\s+)?plan|get\s+(?:it\s+)?live)\b/i.test(t)) {
@@ -108,13 +147,28 @@ export function looksLikeCreateProjectBrief(message: string): boolean {
 
 export { slugifyProjectName } from '@/lib/projectNames';
 
+/** Strip "not a tip calculator" / forbid clauses before utility name heuristics. */
+function stripNegatedUtilityNames(text: string): string {
+  return String(text || '')
+    .replace(
+      /\b(?:do\s+not|never|forbidden|don't|dont|avoid|without)\b[^\n.]{0,160}\b(?:tip(?:\s*(?:calc|calculator|wise|app))?|tipwise|todo(?:\s*lists?)?|checklist|calculator)\b[^\n.]*/gi,
+      ' ',
+    )
+    .replace(
+      /\b(?:not|no)\b[^\n.]{0,80}\b(?:a\s+|an\s+)?(?:tip(?:\s*(?:calc|calculator|wise|app))?|tipwise|todo(?:\s*lists?)?|checklist|shop\s+twin|purple\s+ai\s+template|calculator)\b[^\n.]*/gi,
+      ' ',
+    );
+}
+
 /** When the user says create/build but never names the product. */
 export function fallbackCreateProjectName(text: string): string {
-  const t = String(text || '');
+  const raw = String(text || '');
   // Prefer an explicit ProductName in the ask before generic Site/App.
-  const named = extractProjectName(t);
+  const named = extractProjectName(raw);
   if (named && !/^(site|app|my app|board|game|tool|new app)$/i.test(named)) return named;
-  const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
+  // "not a tip calculator" must never rename a textile/atelier site to Tip Calculator.
+  const t = stripNegatedUtilityNames(raw);
+  const kind = resolveProjectKindForCreate(raw, detectProjectKind(raw), detectProjectKind(raw));
   if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
   if (/\b(?:todo(?:s)?|to-?dos?|checklist)\b/i.test(t)) return 'Todo List';
   if (/\b(?:tip\s*(?:calc|calculator)|tipwise)\b/i.test(t)) return 'Tip Calculator';
@@ -126,7 +180,7 @@ export function fallbackCreateProjectName(text: string): string {
   // "no cafe menus" / forbid lines must never name the product Coffee Shop.
   if (
     /\b(?:coffee|cafe|café|brew)\b/i.test(t)
-    && !/\b(?:no|never|not|without|forbid(?:den)?|avoid)\b[\s\S]{0,32}\b(?:coffee|cafe|café|brew)\b/i.test(t)
+    && !/\b(?:no|never|not|without|forbid(?:den)?|avoid)\b[\s\S]{0,32}\b(?:coffee|cafe|café|brew)\b/i.test(raw)
   ) {
     return 'Coffee Shop';
   }
@@ -146,6 +200,8 @@ export function extractProjectName(text: string): string | null {
   // Prefer explicit called/named titles before "create the project on disk" (which used to
   // capture the junk name "on disk").
   const patterns = [
+    // **CedarLoom 6ad8** / markdown brand emphasis
+    /\*\*([A-Z][A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,3})\*\*/,
     // "Product: Maskline Viper X …" / "website for Maskline —"
     /\bProduct:\s*([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,4})\b/,
     /\b(?:website|site|app|landing)\s+for\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,2})\b/,

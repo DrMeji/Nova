@@ -2,138 +2,62 @@
  * AIChat controller — state, effects, send wiring.
  */
 // @ts-nocheck — large closure bag; Frame consumes returned props.
-import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, startTransition, type ClipboardEvent as ReactClipboardEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, type ClipboardEvent as ReactClipboardEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import 'react-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { saveChatMessage } from '@/lib/api';
-import { getLocalPrefs, getProviderApiKeys, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
-import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { resolvePreferredCloudProvider, hasAnyCloudChatKey } from '@/lib/cloudChat';
-import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
-import { tipAt, tipStartIndex } from '@/lib/novaTips';
-import { RotatingTip } from '@/components/RotatingTip';
-import { ParkedNotice } from '@/components/ParkedNotice';
+import '@/lib/api';
+import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
+import '@/lib/cloudSources';
+import { hasAnyCloudChatKey } from '@/lib/cloudChat';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/novaCapacity';
+import '@/lib/novaTips';
+import '@/components/RotatingTip';
+import '@/components/ParkedNotice';
 import {
   BACKUP_DOWNLOAD_EVENT,
 } from '@/lib/novaHuntBootstrap';
-import {
-  chatThreadKey,
-  mediaMessageMarkdown,
-  extractVisionImages,
-  rememberThumb,
-  getMemoryThumb,
-  resolveCreationDataUrl,
-  slimChatContent,
-  titleFromPrompt,
-  loadRecentProjects,
-  loadRecentChats,
-} from '@/lib/recentStore';
-import { looksLikeCodeAsk, looksLikeCopyPasteCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
-import {
-  formatChatInspectReply,
-  formatRepoCatalog,
-  handoffPrompt,
-  isGithubPullAsk,
-  listAccountRepos,
-  looksLikeBuildStart,
-  pickGithubRepo,
-  shouldInspectInChat,
-  wantsGithubCatalog,
-} from '@/lib/chatStudio';
+import { chatThreadKey, mediaMessageMarkdown, rememberThumb, resolveCreationDataUrl, slimChatContent, loadRecentChats } from '@/lib/recentStore';
+import { looksLikeImageAsk } from '@/lib/chatIntent';
+import '@/lib/chatStudio';
 import {
   type StudioIntent,
 } from '@/lib/studioAnswerEngine';
-import {
-  attachKey,
-  encodeChatAttaches,
-  parseChatAttach,
-  parseChatAttaches,
-  type ChatAttachMeta,
-} from '@/lib/chatAttach';
+import { attachKey, encodeChatAttaches, type ChatAttachMeta } from '@/lib/chatAttach';
 import { allowWindowFileDrop, dropHasFiles, imagesFromClipboardData, resolveChatDrop } from '@/lib/chatDrop';
-import { AttachCard } from '@/components/AttachCard';
-import {
-  describeProjectFromFiles,
-  isExplainAsk,
-  isInspectAsk,
-  type InspectFinding,
-} from '@/lib/projectInspect';
-import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
-import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
-import { gitClone, githubCloneUrl, parseGithubRepoRef, classifyGitAsk } from '@/lib/novaGitClient';
-import { verifyGitHubToken, type GitHubRepo } from '@/lib/github';
-import {
-  MEDIA_GEN_STAGES,
-  rewriteImagePrompt,
-  rewriteVideoPrompt,
-  runMediaGenStages,
-} from '@/lib/mediaPrompt';
-import {
-  buildImageBriefMessage,
-  mergeImageBrief,
-  needsImageBrief,
-  parseImageRequest,
-} from '@/lib/mediaBrief';
-import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/novaRouter';
-import {
-  executionModeLabel,
-  getAgentExecutionMode,
-} from '@/lib/agentExecution';
-import {
-  looksLikeFolderPathAsk,
-  parseFolderPathAsk,
-  GRANT_OFF_FOLDER_MSG,
-  looksLikeInstallDepsAsk,
-} from '@/lib/folderPathAsk';
-import {
-  buildFolderCatalogData,
-  encodeCatalogMessage,
-  isCatalogMessage,
-  looksLikeFolderCatalogAsk,
-  looksLikeProjectsInventoryAsk,
-  resolveCatalogFolderRef,
-  looksLikeStartWorkOnFolderAsk,
-  parseWorkOnFolderName,
-  shouldFullImportFolderAsk,
-} from '@/lib/folderCatalog';
-import {
-  buildPcExploreData,
-  classifyPcExploreMode,
-  encodePcExploreMessage,
-  isPcExploreMessage,
-  looksLikePcExploreAsk,
-  pcExploreStatusStages,
-} from '@/lib/pcExplore';
-import { isTraceMessage, encodeTraceMessage, nextTraceStepId, traceThoughtFromAsk, countLineDiff, wrapReplyWithFileChanges, type AgentFileChange, type AgentTracePayload, type AgentTraceStep } from '@/lib/agentTrace';
-import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
+import '@/components/AttachCard';
+import { type InspectFinding } from '@/lib/projectInspect';
+import '@/lib/projectThread';
+import '@/components/GitHubRepoPicker';
+import { gitClone, githubCloneUrl } from '@/lib/novaGitClient';
+import { type GitHubRepo } from '@/lib/github';
+import '@/lib/mediaPrompt';
+import '@/lib/mediaBrief';
+import '@/lib/novaRouter';
+import '@/lib/agentExecution';
+import '@/lib/folderPathAsk';
+import '@/lib/folderCatalog';
+import '@/lib/pcExplore';
+import '@/lib/agentTrace';
+import '@/lib/workspaceGrants';
+import { saveChatStudio, loadChatStudio, clearChatStudio, clearLastListedFolder, setLastDiskTarget, clearLastDiskTarget, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { hasChatPlanPill, saveChatPlan, setChatPlanPill } from '@/lib/chatPlanStore';
 import type { PlanReport as PlanReportData } from '@/lib/planReport';
-import { runCodeStudioCommand } from '@/lib/studioCommands';
-import { applyChatReplyEdits } from '@/lib/chatAgentApply';
-import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/novaMultiAgent';
-import {
-  formatSkillsForPrompt,
-  resolveSkillsForBrief,
-  skillNamesLabel,
-  type NovaSkillPack,
-} from '@/lib/novaSkills';
-import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/novaQuickEdit';
+import '@/lib/studioCommands';
+import '@/lib/chatAgentApply';
+import '@/lib/novaMultiAgent';
+import '@/lib/novaSkills';
+import '@/lib/novaQuickEdit';
 import { beginChatInflight, endChatInflight, hasChatInflight, isChatInflight } from '@/lib/chatInflight';
-import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
-import {
-  arkSelfHarmBlockedReply,
-  isArkProtectedPathOnDisk,
-  looksLikeArkSelfHarmAsk,
-} from '@/lib/novaSelfGuard';
+import '@/lib/nsfwGate';
+import { arkSelfHarmBlockedReply, looksLikeArkSelfHarmAsk } from '@/lib/novaSelfGuard';
 import {
   harmfulContentBlockedReply,
   looksLikeHarmfulContentAsk,
 } from '@/lib/novaContentSafety';
 import { redactArkSelfLeak, looksLikeAgentToolLeak } from '@/lib/replySanitizer';
-import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
+import { speakText, stopSpeaking, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
 import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
@@ -141,269 +65,77 @@ import {
   looksLikeVoiceBuildOrEditAsk,
   voiceBuildEditRefuseReply,
 } from '@/lib/voiceMode';
-import { VoiceModeLayout } from '@/components/VoiceModeLayout';
-import {
-  formatMcpToolsHelp,
-  parseMcpCallIntent,
-  resolveMcpToolServer,
-  callMcpTool,
-  runMcpAutoToolLoop,
-  looksLikeArkCapabilityAsk,
-  formatArkCapabilitiesHelp,
-} from '@/lib/novaMcp';
-import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
-import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
-import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
-import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest, handleRenameFileChatRequest } from '@/lib/chatDiskOps';
-import {
-  buildRestorePointCommand,
-  extractWriteFileContent,
-  looksLikeReadFileAsk,
-  looksLikeRestorePointAsk,
-  parseReadFileTarget,
-} from '@/lib/chatPcTasks';
-import {
-  looksLikeProjectDebugAsk,
-  parseProjectDebugTarget,
-  folderPathFromDebugTarget,
-} from '@/lib/chatProjectDebug';
-import { resolveDiskParentPath } from '@/lib/diskPathResolve';
-import {
-  inferAgentCommand,
-  looksLikeRuntimeInstallAsk,
-  proposeRuntimeInstall,
-  runAgentCommand,
-} from '@/lib/chatAgentExec';
-import {
-  detectProjectKind,
-  extractProjectName,
-  fallbackCreateProjectName,
-  findBestProductBrief,
-  parseNewProjectIntent,
-  recoverOriginalUserBrief,
-  resolveCreateIntentFromThread,
-  resolveProjectKindForCreate,
-  slugifyProjectName,
-  type ProjectKind,
-} from '@/lib/createProjectIntent';
-import {
-  shouldSkipWeakModelCodingHop,
-  weakModelMicroEditReply,
-  runSurgicalEditTurn,
-  isWeakCoderModel,
-  FIRST_RUN_KIND_CHIPS,
-  runEditTurn,
-} from '@/lib/chatTurnHandlers';
-import {
-  pushApplySnapshot,
-  getApplySnapshot,
-  clearApplySnapshot,
-  snapshotToRevertBlocks,
-} from '@/lib/chatApplySnapshotStore';
-import { projectUsesNpm, mergeBriefNpmDependencies } from '@/lib/projectScaffolds';
-import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint, keepBuildingConversationHint } from '@/lib/chatPlanMode';
-import { looksLikePlanRefineAsk } from '@/lib/planReport';
-import {
-  looksLikeWorkQueueDoNext,
-  looksLikeWorkQueueFinishAll,
-  looksLikeWorkQueueStop,
-  loadWorkQueue,
-} from '@/lib/workQueue';
-import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
-import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
-import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeDirectJudgmentAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
-import {
-  chatTurnAllowsExec,
-  chatTurnAllowsFileEdits,
-  hasActiveWorkspace,
-  isChatPlanTurn,
-  looksLikeCodeEditAsk,
-  looksLikeKeepBuildingAsk,
-  NO_WORKSPACE_MSG,
-  normalizeComposerMode,
-  stripComposerPrefix,
-  workspacePathLabel,
-} from '@/lib/chatAgentTurn';
-import type { ClassifyTurnResult } from '@/lib/classifyTurn';
-import {
-  clearChatTurnStatus,
-  setChatTurnStatus,
-  forgetFinishedChatTurnStatus,
-} from '@/lib/chatTurnStatusStore';
-import { consumePendingStudioBind, readPendingStudioBind, clearPendingStudioBind, writePendingStudioBind } from '@/lib/pendingStudioBind';
+import '@/components/VoiceModeLayout';
+import '@/lib/novaMcp';
+import '@/lib/webProjectCanon';
+import { deleteProjectFolderOnDisk } from '@/lib/deleteProjectFlow';
+import '@/lib/chatDiskIntent';
+import { deleteFileOnDisk } from '@/lib/chatDiskOps';
+import '@/lib/chatPcTasks';
+import '@/lib/chatProjectDebug';
+import '@/lib/diskPathResolve';
+import '@/lib/chatAgentExec';
+import '@/lib/createProjectIntent';
+import '@/lib/chatTurnHandlers';
+import '@/lib/chatApplySnapshotStore';
+import '@/lib/projectScaffolds';
+import '@/lib/chatPlanMode';
+import '@/lib/planReport';
+import '@/lib/workQueue';
+import '@/lib/chatBuildIntent';
+import '@/lib/chatCreateBrief';
+import '@/lib/chatIdeaIntent';
+import { hasActiveWorkspace } from '@/lib/chatAgentTurn';
+
+import { clearChatTurnStatus, forgetFinishedChatTurnStatus } from '@/lib/chatTurnStatusStore';
+import { clearPendingStudioBind, writePendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
 import { useCreateJob } from '@/hooks/useCreateJob';
-import {
-  buildStudioTraceMessage,
-  finalizeCodingChatBubble,
-  liveCodingStatusText,
-} from '@/lib/chatCodeReply';
-import {
-  composeVisionToCoderBrief,
-  hasVisionCapability,
-  looksLikeScreenshotFixAsk,
-  messageHasImages,
-  multiModelStatusLabel,
-  runVisionDescribeHop,
-  visionCapabilityGapReply,
-} from '@/lib/chatMultiModel';
-import { githubToken } from '@/lib/codeGitHubWorkflow';
-import {
-  cloudKeyNudgeAfterEmptyBuild,
-  cloudKeyNudgeReply,
-  markCloudKeyNudgeShown,
-  shouldOfferCloudKeyNudge,
-} from '@/lib/cloudKeyNudge';
-import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
-import { DeleteFileModal } from '@/components/DeleteFileModal';
-import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
-import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
-import { TokenUsageRing } from '@/components/TokenUsageRing';
-import { NovaErrorInline } from '@/components/NovaErrorInline';
-import { NovaMark } from '@/components/NovaMark';
-import {
-  planMultiModelWebsiteTeam,
-  formatMultiModelAttribution,
-  multiModelStatusLine,
-  type MultiModelPartPlan,
-  type MultiModelPartResult,
-} from '@/lib/chatMultiModelBuild';
-import {
-  createProgressLabel,
-  startProgressHeartbeat,
-  type CreateProgressPhase,
-} from '@/lib/createProgressCopy';
-import {
-  formatHybridAttribution,
-  normalizeHybridAiMode,
-  pickForRole,
-  preferCloudForCreate,
-} from '@/lib/hybridRoleRouting';
-import { smokeCheckPreviewUrl } from '@/lib/previewBrowserSmoke';
-import {
-  briefLooksLikeMarketingLanding,
-  briefRequiresInteractiveApp,
-  ensureViteReactProjectFiles,
-  isPreviewReady,
-  isPlayableGameReady,
-  isPlayableArcadeGameReady,
-  looksLikeFillerStubAppSource,
-  restaurantBriefBuiltAsCoffeeShop,
-  stripModelProseFromSource,
-  ensureProductBrandInApp,
-} from '@/lib/createBuildQuality';
-import { pickLocalCoderModel } from '@/lib/enginePick';
+import '@/lib/chatCodeReply';
+import '@/lib/chatMultiModel';
+import '@/lib/codeGitHubWorkflow';
+import '@/lib/cloudKeyNudge';
+import '@/components/DeleteProjectFolderModal';
+import '@/components/DeleteFileModal';
+import '@/components/DeleteFolderClarifyModal';
+import { type ComposerPlusAction } from '@/components/ComposerPlusMenu';
+import '@/components/TokenUsageRing';
+import '@/components/NovaErrorInline';
+import '@/components/NovaMark';
+import '@/lib/chatMultiModelBuild';
+import '@/lib/createProgressCopy';
+import '@/lib/hybridRoleRouting';
+import '@/lib/previewBrowserSmoke';
+import '@/lib/createBuildQuality';
+import '@/lib/enginePick';
 import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
 import { liveOwnerKey } from '@/lib/liveOwnerKey';
-import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
-import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
+import '@/lib/errors';
+import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled, isDebugComposerParked } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
-import { formatReplyElapsed } from '@/lib/speedTest';
+import '@/lib/speedTest';
 
-import { getTokenUsageRatio, recordTokenUsage, syncTokenUsage, estimateTokens } from '@/lib/tokenUsage';
-import { getModelHealthRatio, recordModelTurn } from '@/lib/modelHealth';
-import { prepareBrainRotation } from '@/lib/modelRotation';
-import {
-  buildRouterHistory,
-  looksLikePromptEcho,
-  looksLikeThreadSummaryAsk,
-  threadSummarySystemHint,
-  buildThreadSummaryFromMessages,
-  sanitizeAssistantReply,
-  usableAssistantText,
-  isCannedGreetingReply,
-  historyWasCompacted,
-} from '@/lib/chatHistory';
-import {
-  looksLikeWebGroundedAsk,
-  looksLikeSideQuestAsk,
-  looksLikeLyricsAsk,
-  looksLikeInventedLyricsDump,
-  looksLikeLinkDirectoryReply,
-  looksLikeBuildBleedReply,
-  looksLikeThinSideQuestReply,
-  honestLyricsUnavailableReply,
-  sideQuestAnswerHint,
-  scrubSideQuestBleed,
-  fallbackAnswerFromLookup,
-  webSearchForChat,
-  formatWebLookupForPrompt,
-  webLookupUnavailableNote,
-} from '@/lib/webSearch';
-import {
-  autoEquippedCaption,
-  autoPillLabel,
-  autoRingDetail,
-  brainKindForChatMode,
-  clearThreadBrain,
-  loadThreadBrain,
-  saveAutoThreadBrain,
-  type ThreadBrain,
-} from '@/lib/threadBrain';
-import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
-import { ChatCodeOverlay } from '@/components/ChatCodeOverlay';
-import {
-  detectPluginIntent,
-  getChatEnabledPlugins,
-  getPluginRuntime,
-  loadPluginState,
-  runPluginAction,
-  type PluginDef,
-} from '@/lib/plugins';
+import { getTokenUsageRatio } from '@/lib/tokenUsage';
+import { getModelHealthRatio } from '@/lib/modelHealth';
+import '@/lib/modelRotation';
+import '@/lib/chatHistory';
+import '@/lib/webSearch';
+import { autoPillLabel, brainKindForChatMode, clearThreadBrain, loadThreadBrain, type ThreadBrain } from '@/lib/threadBrain';
+import '@/components/MediaMessage';
+import '@/components/ChatCodeOverlay';
+import { getChatEnabledPlugins, getPluginRuntime, loadPluginState, type PluginDef } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
-import {
-  Loader2, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff,
-} from 'lucide-react';
+import 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/novaEngine';
-import { runMediaChatTurn } from '@/lib/chatMediaTurn';
-import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
-import { cleanProductTitle, looksLikeSpatialApp, looksLikePlayableCanvasGame, looksLikeFpsGame } from '@/lib/freshSpaFromBrief';
+import '@/lib/chatMediaTurn';
+import { refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
+import '@/lib/freshSpaFromBrief';
 import { classifyMobileTarget, isNativeMobileTree } from '@/lib/mobileTarget';
 import { classifyNamedDevice, defaultDeviceForTarget } from '@/lib/mobileDevices';
-import {
-  briefWantsSiteHeroImagery,
-  hasCloudImageKey,
-  listReadyLocalImageModels,
-  repairBrokenSiteImageSrcs,
-  siteImageCapabilityGapReply,
-  siteImageGuidanceForBrief,
-} from '@/lib/siteHeroImages';
-import {
-  applyAttachedChatImageAsAsset,
-  applyAttachedChatImagesAsAssets,
-  extractExplicitAssetUrls,
-  formatBrandAssetsForPrompt,
-  looksLikeAssetLinkAsk,
-  looksLikeUseAttachedAsset,
-  materializeBrandAssets,
-  planBrandAssets,
-} from '@/lib/brandAssets';
+import '@/lib/siteHeroImages';
+import '@/lib/brandAssets';
 
-import {
-  COMPOSER_MODE_PREFIX,
-  DEBUG_CLINIC_SEED,
-  PLAN_MODE_SEED,
-  AGENT_MODE_SEED,
-  MULTI_AGENT_MODE_SEED,
-  composerModeFromContent,
-  previewFromText,
-  CHAT_MODELS,
-  CLOUD_CHAT_WHEN_KEYED,
-  kindForMode,
-  defaultModelForKind,
-  failoverChipText,
-  PLACEHOLDERS,
-  GREETINGS,
-  pickVoiceGreeting,
-  pickVoiceHoldLine,
-  resolveStudioFiles,
-  persistModeThread,
-  deletePrepareErrorReply,
-  focusComposerIfSafe,
-  type ChatModelOption,
-} from '@/views/aichat/aiChatHelpers';
+import { DEBUG_CLINIC_SEED, composerModeFromContent, previewFromText, kindForMode, defaultModelForKind, failoverChipText, PLACEHOLDERS, GREETINGS, pickVoiceGreeting, pickVoiceHoldLine, resolveStudioFiles, persistModeThread, focusComposerIfSafe, type ChatModelOption } from '@/views/aichat/aiChatHelpers';
 import { runAIChatSend } from '@/views/aichat/useAIChatSend';
 
 export function useAIChatController() {
@@ -582,9 +314,9 @@ export function useAIChatController() {
     projectId: string | null;
     mySeq: number;
   } | null>(null);
-  const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
+  const [, ] = useState<string | null>(null);
   /** actions = what next; handoff = after inspect */
-  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
+  const [, ] = useState<'actions' | 'handoff' | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
   const [composerMode, setComposerModeState] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
   /** Sync pill mode immediately so Debug/Bind + Enter never race a stale closure. */
@@ -728,8 +460,8 @@ export function useAIChatController() {
   const messagesChatIdRef = useRef<string | null>(null);
   const messagesRef = useRef(messages);
   const imageBriefRef = useRef<{ chatId: string; original: string } | null>(null);
-  const imageOfferPromptRef = useRef('');
-  const [imageOfferId, setImageOfferId] = useState<string | null>(null);
+  useRef('');
+  useState<string | null>(null);
   const [imageSwitchDismissed, setImageSwitchDismissed] = useState(false);
   const [codePillSticky, setCodePillSticky] = useState(false);
   const [codeOverlayOpen, setCodeOverlayOpen] = useState(false);
@@ -749,7 +481,7 @@ export function useAIChatController() {
   const chatStudioFilesRef = useRef<Record<string, string>>({});
   const chatStudioProjectIdRef = useRef<string | null>(null);
   const chatStudioDiskRootRef = useRef<string | null>(null);
-  const lastInspectReplyRef = useRef('');
+  useRef('');
   const lastStudioIntentRef = useRef<StudioIntent | null>(null);
   const lastFindingsRef = useRef<InspectFinding[]>([]);
   const lastFolderLocateNoteRef = useRef<string | null>(null);
@@ -1147,6 +879,31 @@ export function useAIChatController() {
     };
     window.addEventListener(BACKUP_DOWNLOAD_EVENT, onBackup);
     return () => window.removeEventListener(BACKUP_DOWNLOAD_EVENT, onBackup);
+  }, []);
+
+  // Agents Kanban → Retry in Chat: seed composer with the create brief.
+  useEffect(() => {
+    const applyBrief = (brief: string) => {
+      const text = String(brief || '').trim();
+      if (!text) return;
+      setInput(text);
+      inputRef.current = text;
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
+      setDropHint('Retry from Agents — press Enter to run create again.');
+    };
+    const onRetry = (event: Event) => {
+      const detail = (event as CustomEvent<{ brief?: string }>).detail;
+      if (detail?.brief) applyBrief(detail.brief);
+    };
+    try {
+      const pending = sessionStorage.getItem('nova-agents-retry-brief');
+      if (pending) {
+        sessionStorage.removeItem('nova-agents-retry-brief');
+        applyBrief(pending);
+      }
+    } catch { /* ignore */ }
+    window.addEventListener('nova-agents-retry', onRetry as EventListener);
+    return () => window.removeEventListener('nova-agents-retry', onRetry as EventListener);
   }, []);
 
   useEffect(() => {
@@ -1560,12 +1317,26 @@ export function useAIChatController() {
         persistTimerRef.current = undefined;
       }
       let nextMsgs: ChatMessage[] = [];
-      try {
-        const raw = localStorage.getItem(chatThreadKey(switchChatId));
-        const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
-        nextMsgs = Array.isArray(loaded) ? loaded : [];
-      } catch {
-        nextMsgs = [];
+      const readThread = (): ChatMessage[] => {
+        try {
+          const raw = localStorage.getItem(chatThreadKey(switchChatId));
+          if (!raw) return [];
+          const loaded = JSON.parse(raw) as ChatMessage[];
+          return Array.isArray(loaded) ? loaded : [];
+        } catch {
+          return [];
+        }
+      };
+      nextMsgs = readThread();
+      // One retry — rare race when History/Recent navigates before persist flush lands.
+      if (!nextMsgs.length) {
+        try {
+          const sticky = sessionStorage.getItem(`NOVA:last-thread:${switchChatId}`);
+          if (sticky) {
+            const loaded = JSON.parse(sticky) as ChatMessage[];
+            if (Array.isArray(loaded) && loaded.length) nextMsgs = loaded;
+          }
+        } catch { /* ignore */ }
       }
       // Queue is per-view: never show another chat's backlog here.
       pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === switchChatId);
@@ -2094,11 +1865,27 @@ export function useAIChatController() {
 
   const onMessagesWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
     if (Date.now() < ignoreScrollUntilRef.current) return;
+    // File-change cards / nested lists own their wheel — never scroll the thread under them.
+    const nested = (e.target as HTMLElement | null)?.closest?.('.nova-nested-scroll') as HTMLElement | null;
+    if (nested && nested !== messagesScrollRef.current) {
+      return;
+    }
     if (e.deltaY < 0) {
       userDetachScrollRef.current = true;
       stickToBottomRef.current = false;
       setShowJumpToBottom(true);
     }
+    // Nested .nova-msg-body-cap steals wheel; at its edge, keep scrolling the thread.
+    const cap = (e.target as HTMLElement | null)?.closest?.('.nova-msg-body-cap') as HTMLElement | null;
+    if (!cap) return;
+    const parent = messagesScrollRef.current;
+    if (!parent || cap === parent) return;
+    const atTop = cap.scrollTop <= 0;
+    const atBottom = cap.scrollTop + cap.clientHeight >= cap.scrollHeight - 1;
+    const leavingCap = (e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom);
+    if (!leavingCap) return;
+    parent.scrollTop += e.deltaY;
+    e.preventDefault();
   };
 
   const jumpToBottom = () => {
@@ -2287,11 +2074,7 @@ export function useAIChatController() {
     }, 0);
   };
 
-  const openImageTab = (_seedPrompt?: string) => {
-    // Image mode removed from the product — stay in Chat.
-    setImageOfferId(null);
-    setImageSwitchDismissed(true);
-  };
+  
 
   const openCodeWorkspace = (_seedPrompt?: string, _seedFiles?: Record<string, string>) => {
     // Code pill overlay is the only code UI — old ProjectWorkspace tab is retired.
@@ -2435,11 +2218,21 @@ export function useAIChatController() {
       })();
     };
     const onCloseCode = () => setCodeOverlayOpen(false);
+    const onCodePill = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ chatId?: string; on?: boolean }>).detail || {};
+      const chatId = String(detail.chatId || '').trim();
+      const active = String(routeChatIdRef.current || persistChatIdRef.current || '').trim();
+      if (!chatId || (active && chatId !== active)) return;
+      // Pill visibility only — never open the overlay from this event.
+      setCodePillSticky(detail.on !== false);
+    };
     window.addEventListener('NOVA:open-code-overlay', onOpenCode);
     window.addEventListener('NOVA:close-code-overlay', onCloseCode);
+    window.addEventListener('NOVA:chat-code-pill', onCodePill);
     return () => {
       window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
       window.removeEventListener('NOVA:close-code-overlay', onCloseCode);
+      window.removeEventListener('NOVA:chat-code-pill', onCodePill);
     };
   }, []);
 
@@ -2636,16 +2429,18 @@ export function useAIChatController() {
     }
 
     if (createJob?.status === 'failed') {
-      const why = String(createJob.error || 'Live evidence failed').slice(0, 160);
-      setDropHint(
-        createJob.craftBlocked
-          ? `Preview (unverified) — craft blocked: ${why}`
-          : `Live had a problem — ${why}. Opening anyway so you can see it.`,
-      );
+      const why = String(createJob.error || 'Live evidence failed').slice(0, 120);
+      if (createJob.craftBlocked) {
+        setDropHint(`Unable to open preview — craft not Live-ready${why ? `: ${why}` : ''}`);
+        window.setTimeout(() => {
+          setDropHint((prev) => (prev && /Unable to open preview/i.test(prev || '') ? null : prev));
+        }, 7000);
+        return null;
+      }
+      setDropHint(`Live had a problem — ${why}. Opening anyway so you can see it.`);
       window.setTimeout(() => {
-        setDropHint((prev) => (prev && /(Live had a problem|Preview \(unverified\))/i.test(prev || '') ? null : prev));
+        setDropHint((prev) => (prev && /Live had a problem/i.test(prev || '') ? null : prev));
       }, 6000);
-      // Still attach from disk — craft-blocked opens as unverified Preview, not evidence-ready Live.
     }
 
     // Attach to create-job preview when Ready or verifying-with-URL (never during npm install).
@@ -3323,13 +3118,7 @@ export function useAIChatController() {
     }
   };
 
-  const enterPathInChat = async () => {
-    // Native Explorer only — typed path strip is gone.
-    setPathBindOpen(false);
-    setPathBindDraft('');
-    setDropHint('Pick the project folder to bind.');
-    await openFolderInChat(undefined, { mode: 'path' });
-  };
+  
 
   const bindTypedPath = async () => {
     const typed = pathBindDraft.trim().replace(/^["']|["']$/g, '');
@@ -3476,9 +3265,30 @@ export function useAIChatController() {
       navigate({ name: 'models' });
       return;
     }
-    // Plan / Agent / Multi-agent / Debug removed from composer — ignore if somehow invoked.
-    if (action === 'plan' || action === 'debug' || action === 'agent' || action === 'multitask' || action === 'ask') {
-      setComposerMode(null);
+    // Ask / Plan / Act (agent) live under + ; Debug stays parked until clinic ships.
+    if (action === 'ask') {
+      setComposerMode('ask');
+      setDropHint(null);
+      return;
+    }
+    if (action === 'plan') {
+      setComposerMode('plan');
+      setDropHint(null);
+      return;
+    }
+    if (action === 'agent') {
+      setComposerMode('agent');
+      setDropHint(null);
+      return;
+    }
+    if (action === 'multitask') {
+      setComposerMode('multitask');
+      setDropHint(null);
+      return;
+    }
+    if (action === 'debug') {
+      if (isDebugComposerParked()) return;
+      setComposerMode('debug');
       setDropHint(null);
     }
   };
@@ -3762,6 +3572,20 @@ export function useAIChatController() {
         ...pendingQueueRef.current.filter(q => q.chatId !== qChat),
         ...trimmed,
       ];
+      // Mid-turn STEER — stash on studio Acc so invent craft can apply at next checkpoint.
+      if (/^\s*STEER\b/i.test(content) || /\b(?:steer|nudge)\b/i.test(content.slice(0, 48))) {
+        try {
+          const cur = { ...(chatStudioFilesRef.current || {}) };
+          cur['.__novaSteer'] = content.slice(0, 500);
+          setChatStudioFiles(cur);
+          chatStudioFilesRef.current = cur;
+        } catch { /* optional */ }
+      }
+      try {
+        void import('@/lib/inventHarnessPack').then((m) => {
+          m.enqueueCraftPrompt(qChat, content);
+        });
+      } catch { /* optional */ }
       setQueueLen(pendingQueueRef.current.filter(q => !viewingChatId || q.chatId === viewingChatId).length);
       setQueueTick(t => t + 1);
       setInput('');
@@ -3881,12 +3705,12 @@ export function useAIChatController() {
     return () => window.removeEventListener('NOVA:agent-continue', onContinue);
   }, []);
 
-  /** Grow textarea without collapsing to auto (that flash draws a seam above the toolbar). */
+  /** Grow textarea up to ~4 lines, then scroll inside the box (thread stays put). */
   const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    const max = Math.round(window.innerHeight * 0.4);
-    // Must clear room for line-height + vertical padding (pt-2.5 / pb-1 ≈ 14px).
+    // 15px font × 1.55 line-height × 4 lines + vertical padding ≈ 6.2rem
+    const max = Math.round(6.2 * 16);
     const minPx = 44;
     const prevHeight = el.style.height;
     const locked = el.offsetHeight;
@@ -3898,7 +3722,7 @@ export function useAIChatController() {
     } else {
       el.style.height = `${next}px`;
     }
-    el.style.overflowY = raw > max ? 'auto' : 'hidden';
+    el.style.overflowY = 'auto';
   }, []);
 
   const onComposerPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {

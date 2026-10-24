@@ -37,6 +37,11 @@ export function ProjectsView() {
   const { recent, addRecent, renameRecent, removeRecent } = useRecentProjects();
 
   const openProjectInChat = (opts: { projectId: string; name?: string; diskPath?: string }) => {
+    const label = String(opts.name || 'this project').trim() || 'this project';
+    const ok = window.confirm(
+      `Open “${label}” in a chat?\n\nNOVA will load this project into the chat so you can keep building on it.`,
+    );
+    if (!ok) return;
     navigate({ name: 'chat' });
     requestOpenChatCode({
       projectId: opts.projectId,
@@ -179,15 +184,28 @@ export function ProjectsView() {
     setNovaFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath && f.path !== targetPath));
 
     void (async () => {
+      // Stop Live / Vite locks before rmdir so Windows EBUSY is rare.
+      try {
+        await window.novaDesktop?.previewCloseLive?.({});
+      } catch { /* ignore */ }
+      try {
+        if (item.id) await window.novaDesktop?.previewStop?.(item.id);
+      } catch { /* ignore */ }
       let diskErr: string | null = null;
       if (targetPath && window.novaDesktop?.workspaceDeleteFolder) {
-        try {
-          const del = await window.novaDesktop.workspaceDeleteFolder({ targetPath });
-          if (del && del.ok === false) {
-            diskErr = String(del.error || 'Could not delete folder on disk');
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 450 * attempt));
+            const del = await window.novaDesktop.workspaceDeleteFolder({ targetPath });
+            if (del && del.ok === false) {
+              diskErr = String(del.error || 'Could not delete folder on disk');
+              continue;
+            }
+            diskErr = null;
+            break;
+          } catch (err) {
+            diskErr = err instanceof Error ? err.message : 'Could not delete folder on disk';
           }
-        } catch (err) {
-          diskErr = err instanceof Error ? err.message : 'Could not delete folder on disk';
         }
       }
       try {
@@ -196,9 +214,9 @@ export function ProjectsView() {
       } catch {
         /* keep local filter */
       }
+      // No top banner toast — list already updated. Log only for stubborn locks.
       if (diskErr) {
-        setNotice(`Removed from list, but folder delete failed: ${diskErr}`);
-        window.setTimeout(() => setNotice(null), 6000);
+        console.warn('[NOVA] project folder delete deferred:', diskErr);
       }
     })();
   };
@@ -312,8 +330,7 @@ export function ProjectsView() {
     }
     clearSelection();
     setMenuId(null);
-    setNotice(`Removed ${n} project${n === 1 ? '' : 's'}.`);
-    window.setTimeout(() => setNotice(null), 3000);
+    // Silent success — row already left the list (no amber top banner).
   };
 
   return (

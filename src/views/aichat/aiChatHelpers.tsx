@@ -3,6 +3,7 @@
  */
 import { useEffect } from 'react';
 import { MessageSquare, AudioLines } from 'lucide-react';
+import { useIdleGhostChrome } from '@/hooks/useIdleGhostChrome';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { getLocalPrefs, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
@@ -76,13 +77,13 @@ export const COMPOSER_MODE_LABEL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'm
   multitask: 'Multi-agent',
 };
 
+/** Flat colored labels (no pill chrome) — trial look for composer mode chips. */
 export const COMPOSER_MODE_PILL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
-  plan: 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-200',
-  ask: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
-  agent: 'border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-200',
-  // Clinic mode — rose, distinct from the amber folder bind pill.
-  debug: 'border-rose-500/55 bg-rose-500/20 text-rose-100 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]',
-  multitask: 'border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-200',
+  plan: 'text-sky-600 dark:text-sky-300',
+  ask: 'text-emerald-600 dark:text-emerald-300',
+  agent: 'text-violet-600 dark:text-violet-300',
+  debug: 'text-rose-500 dark:text-rose-300',
+  multitask: 'text-fuchsia-600 dark:text-fuchsia-300',
 };
 
 const LEGACY_DEBUG_PREFIX = 'Debug this. find the issue and propose a fix:';
@@ -121,6 +122,8 @@ export function ChatModeTabs() {
     ? (route.mode === 'voice' ? 'voice' : 'general')
     : 'general';
   const voiceFocus = current === 'voice';
+  // Idle ghost (chat) + stronger dim in voice — hover restores.
+  const idleGhost = useIdleGhostChrome({ idleMs: 5000, ghostOpacity: voiceFocus ? 0.22 : 0.32 });
 
   const emitVoiceVisual = (mode: 'voice' | 'chat') => {
     window.dispatchEvent(new CustomEvent('NOVA:voice-visual', { detail: { mode } }));
@@ -151,9 +154,9 @@ export function ChatModeTabs() {
 
   return (
     <div
-      className={`fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-500 ${
-        voiceFocus ? 'opacity-[0.38] hover:opacity-70' : 'opacity-100'
-      }`}
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-none"
+      style={idleGhost.style}
+      {...idleGhost.bind}
     >
       <div className="nova-glass-tabs pointer-events-auto inline-flex items-center justify-center gap-0.5 rounded-full p-1 min-w-[6.5rem]">
         {tabs.map(t => {
@@ -666,6 +669,9 @@ function flushPersistModeThread(key: string) {
     const json = JSON.stringify(slim);
     if (opts?.chatId) {
       localStorage.setItem(chatThreadKey(opts.chatId), json);
+      try {
+        sessionStorage.setItem(`NOVA:last-thread:${opts.chatId}`, json);
+      } catch { /* ignore quota */ }
     }
     if (mode !== 'general') {
       localStorage.setItem(`NOVA:chat-thread:${mode}`, json);

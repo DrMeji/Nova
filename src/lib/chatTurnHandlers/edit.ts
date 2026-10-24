@@ -4,7 +4,7 @@
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { finalizeCodingChatBubble } from '@/lib/chatCodeReply';
-import { getCreateJobForChat, getCreateJobForPath } from '@/lib/createJobStore';
+import { getCreateJobForChat, getCreateJobForPath, getLatestReusableCreateJob } from '@/lib/createJobStore';
 import { editMiss } from '@/lib/productContract';
 
 export function shouldSkipWeakModelCodingHop(opts: {
@@ -29,10 +29,11 @@ export function isWeakCoderModel(modelId?: string | null, modelName?: string | n
 /** Honest failure when apply wrote App.jsx that still won't compile for Live. */
 function syntaxFailAnswer(reasons?: string[]): string {
   const why = (reasons || []).filter(Boolean).slice(0, 3).join('; ');
+  // Inline paragraph so callers stay sync (handback module is also sync).
   return [
-    'I updated files, but App.jsx still won’t compile for Live — so I’m not marking this Done.',
+    'I updated files, but App.jsx still will not compile for Live, so I am not marking this done.',
     why ? `Issue: ${why}.` : '',
-    'Say “fix Live” or try a shorter one-line change.',
+    'Say “fix Live” or try a shorter one-line change and I will keep going.',
   ].filter(Boolean).join(' ');
 }
 
@@ -74,6 +75,9 @@ export type SurgicalEditHost = {
     fileChanges?: { path: string; added: number; removed: number }[];
     projectName: string;
   }) => string;
+  /** Fidelity spine: micro place/rename/bg asks — agent must invent nothing. */
+  fidelityBrief?: string;
+  fidelityMicroOnly?: boolean;
 };
 
 export type SurgicalEditResult =
@@ -87,7 +91,298 @@ export type SurgicalEditResult =
 export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<SurgicalEditResult> {
   const { finalizeWebEdits, isStructuralUiPieceAsk, verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
   const { verifyAsk } = await import('@/lib/verifyAsk');
+  const {
+    planUiAsk,
+    verifyUiAskPlan,
+    canonicalAskForOp,
+    isMicroFidelityPlan,
+    fidelityAgentBrief,
+  } = await import('@/lib/uiAskPlan');
   const structuralPiece = isStructuralUiPieceAsk(host.editUserMessage);
+
+  // Ladder end shells (landing / SaaS / Twitter / polish) — apply surgical App.jsx
+  // immediately. Never hop to invent or Openverse hero-image search.
+  {
+    const ask0 = String(host.editUserMessage || '');
+    const ladderEnd = /\bfull\s+landing\s+page\b/i.test(ask0)
+      || (/\blanding\b/i.test(ask0) && /\b(?:hero|features|pricing|FAQ|footer|testimonials)\b/i.test(ask0))
+      || /\bSaaS\s+app\s+shell\b/i.test(ask0)
+      || (/\bauth\s+screen\b/i.test(ask0) && /\bbilling\b/i.test(ask0))
+      || /\bfeel\s+polished\b/i.test(ask0)
+      || (/\bconsistent\s+spacing\b/i.test(ask0) && /\bhover\b/i.test(ask0))
+      || /\bcompletely\s+different\s+visual\s+style\b/i.test(ask0)
+      || (/\brebuild\b/i.test(ask0) && /\bdifferent\s+visual\b/i.test(ask0))
+      || /\bTwitter\s+clone\b/i.test(ask0)
+      || (/\bcompose\b/i.test(ask0) && /\bfeed\b/i.test(ask0) && /\blikes?\b/i.test(ask0));
+    if (ladderEnd) {
+      const shellEdits = finalizeWebEdits(host.files, ask0, [], { projectName: host.projectLabel });
+      if (shellEdits.length) {
+        host.pushStatus('Updating project files…');
+        const resolvedDisk = (() => {
+          const bound = String(host.diskRoot || '').trim();
+          if (bound) return bound;
+          try {
+            const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+            if (byChat?.path) return String(byChat.path);
+            const latest = getLatestReusableCreateJob();
+            if (latest?.path) return String(latest.path);
+          } catch { /* best-effort */ }
+          return null;
+        })();
+        const resolvedProjectId = host.projectId || (() => {
+          try {
+            const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+            if (byChat?.projectId) return byChat.projectId;
+            return getLatestReusableCreateJob()?.projectId || null;
+          } catch {
+            return null;
+          }
+        })();
+        const applied = await applyChatReplyEdits({
+          reply: '',
+          projectId: resolvedProjectId,
+          projectName: host.projectLabel,
+          files: host.files,
+          userMessage: ask0,
+          diskRoot: resolvedDisk,
+        });
+        if (applied.ok && applied.updated.length) {
+          const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+          const { formatEditHandback } = await import('@/lib/taskHandbackReply');
+          const answer = formatEditHandback({
+            ask: ask0,
+            outcome: 'edit-ok',
+            productName: host.projectLabel,
+            surface: 'chat',
+          });
+          host.onApplied({
+            files: applied.files,
+            updated: applied.updated,
+            reply: host.buildStudioTraceMessage({
+              startedAt: host.replyStartedAt,
+              elapsedMs,
+              userMessage: host.content,
+              answer,
+              wrotePaths: applied.updated,
+              projectName: host.projectLabel,
+            }),
+            provider: 'NOVA · ask fidelity',
+            elapsedMs,
+          });
+          return { status: 'applied' };
+        }
+      }
+    }
+  }
+
+  // ── Ask fidelity spine ──────────────────────────────────────────────────
+  // Parse ALL intents, apply each as its own surgical ask, verify every op.
+  // Micro plans never fall through to an inventing agent.
+  const fidelityPlan = planUiAsk(host.editUserMessage);
+  host.fidelityMicroOnly = isMicroFidelityPlan(fidelityPlan);
+  if (host.fidelityMicroOnly) {
+    host.fidelityBrief = fidelityAgentBrief(fidelityPlan, []);
+    host.pushStatus('Following your ask…');
+
+    const createBriefEarly = (() => {
+      try {
+        const job = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        return String(job?.originalBrief || job?.generationBrief || '').trim();
+      } catch {
+        return '';
+      }
+    })();
+    const resolvedDiskEarly = (() => {
+      const bound = String(host.diskRoot || '').trim();
+      if (bound) return bound;
+      try {
+        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        if (byChat?.path) return String(byChat.path);
+        const latest = getLatestReusableCreateJob();
+        if (latest?.path) return String(latest.path);
+      } catch { /* best-effort */ }
+      return null;
+    })();
+    const resolvedProjectIdEarly = host.projectId || (() => {
+      try {
+        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        if (byChat?.projectId) return byChat.projectId;
+        return getLatestReusableCreateJob()?.projectId || null;
+      } catch {
+        return null;
+      }
+    })();
+
+    let working = { ...host.files };
+    const allUpdated: string[] = [];
+    const snapshotFidelity = { ...host.files };
+
+    for (const op of fidelityPlan.ops) {
+      const ask = canonicalAskForOp(op);
+      if (!ask.trim()) continue;
+      // Always compute surgical in memory first — never trust apply alone (disk hydrate can miss).
+      const edits = finalizeWebEdits(working, ask, [], { projectName: host.projectLabel });
+      for (const e of edits) {
+        const p = String(e.path || '').replace(/\\/g, '/');
+        if (!p || working[p] === e.content) continue;
+        working[p] = e.content;
+        if (!allUpdated.includes(p)) allUpdated.push(p);
+      }
+      const appliedOp = await applyChatReplyEdits({
+        reply: '',
+        projectId: resolvedProjectIdEarly,
+        projectName: host.projectLabel,
+        files: working,
+        userMessage: ask,
+        diskRoot: resolvedDiskEarly,
+        originalBrief: createBriefEarly || undefined,
+      });
+      if (appliedOp.ok && appliedOp.updated.length) {
+        // Keep labels that verify; merge applied on top only when it still satisfies the op.
+        const merged = { ...working, ...appliedOp.files };
+        const afterApply = verifyUiAskPlan({ ...fidelityPlan, ops: [op] }, merged);
+        if (afterApply.ok) {
+          working = merged;
+          for (const p of appliedOp.updated) {
+            if (!allUpdated.includes(p)) allUpdated.push(p);
+          }
+        }
+      }
+    }
+
+    // Whole-ask fallback when per-op still missed (compound / dual).
+    let planCheck = verifyUiAskPlan(fidelityPlan, working);
+    if (!planCheck.ok) {
+      const whole = finalizeWebEdits(working, host.editUserMessage, [], { projectName: host.projectLabel });
+      for (const e of whole) {
+        const p = String(e.path || '').replace(/\\/g, '/');
+        if (!p || working[p] === e.content) continue;
+        working[p] = e.content;
+        if (!allUpdated.includes(p)) allUpdated.push(p);
+      }
+      planCheck = verifyUiAskPlan(fidelityPlan, working);
+    }
+
+    // Already satisfied on disk — finish cleanly.
+    if (planCheck.ok && !allUpdated.length) {
+      const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+      const answer = 'Already on the page — I checked the project files and that change is already applied. Want a different tweak next?';
+      host.onApplied({
+        files: working,
+        updated: [],
+        reply: host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs,
+          userMessage: host.content,
+          answer,
+          wrotePaths: [],
+          projectName: host.projectLabel,
+        }),
+        provider: 'NOVA · already applied',
+        elapsedMs,
+      });
+      return { status: 'applied' };
+    }
+
+    // Persist any in-memory merges that didn't go through disk yet.
+    // Inert userMessage so finalizeWebEdits keeps @@@FILE contents (no surgical re-fire).
+    // Never let a disk hydrate wipe a paint that already verified in memory (teal/orange first-try).
+    if (planCheck.ok && allUpdated.length) {
+      const prePersist = { ...working };
+      const replyBlocks = allUpdated
+        .filter((p) => working[p] != null && working[p] !== snapshotFidelity[p])
+        .map((p) => `@@@FILE ${p}\n${working[p]}`)
+        .join('\n');
+      if (replyBlocks) {
+        const persisted = await applyChatReplyEdits({
+          reply: replyBlocks,
+          projectId: resolvedProjectIdEarly,
+          projectName: host.projectLabel,
+          files: snapshotFidelity,
+          userMessage: 'Persist planned UI edits.',
+          diskRoot: resolvedDiskEarly,
+          originalBrief: createBriefEarly || undefined,
+        });
+        if (persisted.ok) {
+          const mergedPersist = { ...prePersist, ...persisted.files };
+          const afterPersist = verifyUiAskPlan(fidelityPlan, mergedPersist);
+          if (afterPersist.ok) {
+            working = mergedPersist;
+            for (const p of persisted.updated) {
+              if (!allUpdated.includes(p)) allUpdated.push(p);
+            }
+          } else {
+            working = prePersist;
+          }
+        }
+      }
+      planCheck = verifyUiAskPlan(fidelityPlan, working);
+    }
+
+    if (planCheck.ok && allUpdated.length) {
+      Object.assign(host.files, working);
+      const answer = finalizeCodingChatBubble({
+        userMessage: host.content,
+        rawReply: '',
+        changedPaths: allUpdated,
+        applied: true,
+      });
+      const patchFileChanges = allUpdated.map((path) => {
+        const diff = host.countLineDiff(
+          String(snapshotFidelity[path] || ''),
+          String(working[path] || ''),
+        );
+        return { path, added: diff.added, removed: diff.removed };
+      });
+      {
+        const { minEditPaceMs, paceUntil } = await import('@/lib/editPace');
+        await paceUntil(host.replyStartedAt, minEditPaceMs(host.editUserMessage));
+      }
+      const pacedElapsed = Math.max(1, Date.now() - host.replyStartedAt);
+      host.onApplied({
+        files: working,
+        updated: allUpdated,
+        reply: host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs: pacedElapsed,
+          userMessage: host.content,
+          answer,
+          wrotePaths: allUpdated,
+          fileChanges: patchFileChanges,
+          projectName: host.projectLabel,
+        }),
+        provider: 'NOVA · ask fidelity',
+        elapsedMs: pacedElapsed,
+      });
+      return { status: 'applied' };
+    }
+
+    // Micro ask incomplete — honest fail. Never invent About/Features/landing chrome.
+    host.fidelityBrief = fidelityAgentBrief(fidelityPlan, planCheck.missing);
+    const miss = editMiss(
+      'verify_failed',
+      [
+        'I followed your ask as written and could not land every piece, so I left the inventing agent out of it.',
+        planCheck.missing.length
+          ? `Still missing: ${planCheck.missing.join(', ')}.`
+          : 'That edit didn’t fully match what you asked for.',
+        'Try the missing piece as its own one-line ask.',
+      ].filter(Boolean).join(' '),
+    );
+    const elapsedFail = Math.max(1, Date.now() - host.replyStartedAt);
+    host.onFailed({
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs: elapsedFail,
+        userMessage: host.content,
+        answer: miss.message,
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      }),
+      elapsedMs: elapsedFail,
+    });
+    return { status: 'failed' };
+  }
 
   // Prefer surgical edits when they would change files — never "already applied" if there is work.
   const micro = finalizeWebEdits(host.files, host.editUserMessage, [], { projectName: host.projectLabel });
@@ -112,15 +407,29 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
     /\b(?:heading|headline|h1|title|description|saying|something\s+like)\b/i.test(host.editUserMessage)
     && /\b(?:drop|add|put|give|say|saying)\b/i.test(host.editUserMessage)
   );
-  if (
-    already.ok
-    && already.checked > 0
+  // Click / toggle / tab asks must never "already apply" from a bare icon img.
+  const wantsInteractive = /\b(?:clickable|toggle|alert\s+clicked|open\s+a\s+(?:different\s+)?tab|\btabs?\b)\b/i.test(
+    host.editUserMessage,
+  );
+  // "Delete the Contact link" when Contact is already gone — finish without inventing (hang risk).
+  const navLinkAlreadyGone = (
+    /\b(?:delete|remove|drop)\b/i.test(host.editUserMessage)
+    && /\b(?:link|nav|navigation)\b/i.test(host.editUserMessage)
     && microAlready.ok
-    && !structuralPiece
+    && micro.length === 0
+  );
+  if (
+    (
+      (already.ok && already.checked > 0 && microAlready.ok)
+      || navLinkAlreadyGone
+    )
     && micro.length === 0
     && !forceRewrite
     && !multiPieceLanding
     && !wantsNewCopy
+    && !wantsInteractive
+    // Structural Discord pieces may already be complete from a prior ladder step
+    // (e.g. chat pane surgical also wired the composer) — finish cleanly, don't hang.
   ) {
     const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
     const answer = 'Already on the page — I checked the project files and that change is already applied. Want a different tweak next?';
@@ -145,14 +454,15 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
   // Full replace/rewrite / multi-piece landings must use the model/coder path.
   if (forceRewrite || multiPieceLanding) return { status: 'miss' };
 
-  if (
-    structuralPiece
-    || !(
-      micro.length
-      || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(host.editUserMessage)
-    )
-  ) {
-    return { status: 'miss' };
+  // Structural Discord/chat pieces used to always miss surgical and hang on the model.
+  // When finalizeWebEdits already produced Relay/sidebar/channel patches, apply them.
+  if (!micro.length) {
+    if (
+      structuralPiece
+      || !/\b(?:change|rename|set|make|update|add|remove|fix|delete|drop|put|place|stack|show|move|center|centre)\b/i.test(host.editUserMessage)
+    ) {
+      return { status: 'miss' };
+    }
   }
 
   const snapshot = { ...host.files };
@@ -174,13 +484,34 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
       return '';
     }
   })();
+  // Step-ladder: surgical must write the live create folder even when this chat lost its bind.
+  const resolvedDisk = (() => {
+    const bound = String(host.diskRoot || '').trim();
+    if (bound) return bound;
+    try {
+      const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      if (byChat?.path) return String(byChat.path);
+      const latest = getLatestReusableCreateJob();
+      if (latest?.path) return String(latest.path);
+    } catch { /* best-effort */ }
+    return null;
+  })();
+  const resolvedProjectId = host.projectId || (() => {
+    try {
+      const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+      if (byChat?.projectId) return byChat.projectId;
+      return getLatestReusableCreateJob()?.projectId || null;
+    } catch {
+      return null;
+    }
+  })();
   const applied = await applyChatReplyEdits({
     reply: '',
-    projectId: host.projectId,
+    projectId: resolvedProjectId,
     projectName: host.projectLabel,
     files: host.files,
     userMessage: host.editUserMessage,
-    diskRoot: host.diskRoot,
+    diskRoot: resolvedDisk,
     originalBrief: createBrief || undefined,
   });
   const elapsedMs = Date.now() - host.replyStartedAt;
@@ -211,8 +542,15 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
         const wantLogo = /\b(?:add|put|place|insert)\b[\s\S]{0,48}\b(?:logo|wordmark|brand\s*mark)\b/i.test(host.editUserMessage)
           || /\b(?:apple|google|github|discord|twitch|netflix|spotify|youtube|simple\s*icons?)\b/i.test(host.editUserMessage)
           || /\b(?:instagram|linkedin|slack|amazon|microsoft|meta|reddit|tiktok)\b/i.test(host.editUserMessage);
-        const wantHero = looksLikeHeavyImageAsk(host.editUserMessage)
-          || /\b(?:hero|background\s+image|cinematic|atmospheric)\b/i.test(host.editUserMessage);
+        // Generated glyphs / “no outside images” must never trigger remote hero search.
+        const banRemoteHero = /\b(?:no\s+outside\s+images?|generated\s+(?:glyph|product|mic)|product\s+glyphs?|inline\s+svg)\b/i.test(host.editUserMessage);
+        // "landing page: hero, features…" is a Hero section, not a photo fetch.
+        const ladderSectionHero = /\blanding\b/i.test(host.editUserMessage)
+          && /\b(?:features|testimonials|pricing|FAQ|footer|logos?)\b/i.test(host.editUserMessage);
+        const wantHero = !banRemoteHero && !ladderSectionHero && (
+          looksLikeHeavyImageAsk(host.editUserMessage)
+          || /\b(?:hero\s+(?:image|photo)|background\s+image|cinematic|atmospheric)\b/i.test(host.editUserMessage)
+        );
         const assetPlan = {
           ...plan,
           slots: plan.slots.filter((s) => {
@@ -391,10 +729,31 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
   }
 
   if (micro.length) {
+    if ((applied as { syntaxFailed?: boolean }).syntaxFailed) {
+      const elapsedSyn = Math.max(1, Date.now() - host.replyStartedAt);
+      host.onFailed({
+        reply: host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs: elapsedSyn,
+          userMessage: host.content,
+          answer: syntaxFailAnswer((applied as { syntaxReasons?: string[] }).syntaxReasons),
+          wrotePaths: [],
+          projectName: host.projectLabel,
+        }),
+        elapsedMs: elapsedSyn,
+      });
+      return { status: 'failed' };
+    }
+    const detail = [
+      applied.error || 'write_failed',
+      resolvedDisk ? `disk:${resolvedDisk}` : 'disk:none',
+      resolvedProjectId ? `proj:${resolvedProjectId}` : 'proj:none',
+      applied.reply ? String(applied.reply).slice(0, 120) : '',
+    ].filter(Boolean).join(' · ');
     const failAnswer = finalizeCodingChatBubble({
       userMessage: host.content,
       rawReply: '',
-      applyError: applied.error || 'write_failed',
+      applyError: detail,
       editMode: true,
     });
     const failReply = host.buildStudioTraceMessage({
@@ -443,6 +802,253 @@ export type RunEditTurnResult =
  * Surgical first; on miss, skip weak coder or one generate→apply (budget from ask).
  */
 export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnResult> {
+  // Click-to-source — attach Live selection to this edit ask when present.
+  let editAsk = String(host.editUserMessage || host.content || '');
+  try {
+    const { consumeClickToSource, formatClickToSourceAsk } = await import('@/lib/inventClickToSource');
+    const key = String(host.diskRoot || host.projectLabel || 'default');
+    const sel = consumeClickToSource(key);
+    if (sel) {
+      editAsk = formatClickToSourceAsk(sel, editAsk);
+      host.pushStatus(`Click-to-source · ${sel.selector.slice(0, 64)}`);
+      // Direct visual props — color/size/radius phrases apply without full agent rewrite.
+      const color = editAsk.match(/\b(?:color|text)\s*(?:to|=|:)?\s*(#[0-9a-fA-F]{3,8}|\b(?:red|blue|black|white|green)\b)/i);
+      const bg = editAsk.match(/\b(?:bg|background)\s*(?:to|=|:)?\s*(#[0-9a-fA-F]{3,8}|\b(?:red|blue|black|white|cream)\b)/i);
+      const radius = editAsk.match(/\b(?:radius|rounded)\s*(?:to|=|:)?\s*([\d.]+(?:px|rem)?)/i);
+      if (color || bg || radius) {
+        const { applyDirectVisualProps } = await import('@/lib/inventWave4Pack');
+        const patched = applyDirectVisualProps(host.files || {}, {
+          selector: sel.selector,
+          props: {
+            ...(color ? { color: color[1] } : {}),
+            ...(bg ? { background: bg[1] } : {}),
+            ...(radius ? { borderRadius: /px|rem/.test(radius[1]) ? radius[1] : `${radius[1]}px` } : {}),
+          },
+        });
+        if (patched.applied) {
+          Object.assign(host, { files: patched.files });
+          host.pushStatus(`Direct visual · ${patched.note}`);
+          try {
+            const {
+              nextEditSuggestion,
+              stashNextEditSuggestion,
+            } = await import('@/lib/inventWave4Pack');
+            const patchProps = {
+              selector: sel.selector,
+              props: {
+                ...(color ? { color: color[1] } : {}),
+                ...(bg ? { background: bg[1] } : {}),
+                ...(radius ? { borderRadius: radius[1] } : {}),
+              },
+            };
+            stashNextEditSuggestion(key, patchProps);
+            host.pushStatus(nextEditSuggestion(patchProps));
+          } catch { /* optional */ }
+        }
+      }
+      // NES accept — "next edit" / "accept suggestion"
+      if (/\b(?:next\s+edit|accept\s+(?:nes|suggestion))\b/i.test(editAsk)) {
+        const {
+          consumeNextEditSuggestion,
+          buildNesFollowUpPatch,
+          applyDirectVisualProps,
+          nextEditSuggestion,
+          stashNextEditSuggestion,
+        } = await import('@/lib/inventWave4Pack');
+        const prev = consumeNextEditSuggestion(key);
+        if (prev) {
+          const follow = buildNesFollowUpPatch(prev);
+          const nes = applyDirectVisualProps(host.files || {}, follow);
+          if (nes.applied) {
+            Object.assign(host, { files: nes.files });
+            stashNextEditSuggestion(key, follow);
+            host.pushStatus(`NES · ${nes.note}`);
+            host.pushStatus(nextEditSuggestion(follow));
+          }
+        }
+      }
+      // Invent direction — "use direction 2" / "layout salt 3"
+      {
+        const dirHit = editAsk.match(/\b(?:use\s+)?direction\s*(\d)\b/i)
+          || editAsk.match(/\blayout\s+salt\s*(\d)\b/i);
+        if (dirHit) {
+          const { applyInventDirection } = await import('@/lib/inventWave4Pack');
+          const dir = applyInventDirection(host.files || {}, Number(dirHit[1]));
+          if (dir.applied) {
+            Object.assign(host, { files: dir.files });
+            host.pushStatus(`Invent direction · ${dir.note}`);
+          }
+        }
+      }
+      // Batch flush phrase — "apply visual batch" / "flush visual edits"
+      if (/\b(?:apply|flush)\s+visual\s+batch\b/i.test(editAsk)
+        || /\bflush\s+visual\s+edits\b/i.test(editAsk)) {
+        const { flushVisualEditBatch } = await import('@/lib/inventWave4Pack');
+        const flushed = flushVisualEditBatch(key, host.files || {});
+        if (flushed.count) {
+          Object.assign(host, { files: flushed.files });
+          host.pushStatus(`Visual batch · ${flushed.note}`);
+        }
+      }
+    }
+    const { consumeLiveAnnotations, formatAnnotationsAsk } = await import('@/lib/inventWave4Pack');
+    const anns = consumeLiveAnnotations(key);
+    if (anns.length) {
+      editAsk = formatAnnotationsAsk(anns, editAsk);
+      host.pushStatus(`Live annotations · ${anns.length}`);
+    }
+  } catch { /* optional */ }
+  // Mid-turn STEER / mode ACL / repo map peek / wave5 correction memory / dual-live.
+  try {
+    const {
+      detectInventAgentMode,
+      inventModeAcl,
+      rankedRepoMapPeek,
+      formatMidTurnSteer,
+    } = await import('@/lib/inventHarnessPack');
+    const mode = detectInventAgentMode(editAsk);
+    const acl = inventModeAcl(mode);
+    host.pushStatus(`Edit · mode ${mode}`);
+    if (/^\s*STEER\b/i.test(editAsk) || /\b(?:steer|nudge|instead)\b/i.test(editAsk.slice(0, 80))) {
+      host.pushStatus(formatMidTurnSteer(editAsk));
+    }
+    const peek = rankedRepoMapPeek(host.files || {}, editAsk, 8);
+    if (peek.length) {
+      host.pushStatus(`Edit · repo map: ${peek.slice(0, 5).join(', ')}`);
+    }
+    try {
+      const { snapshotForDiff, diffSinceSnapshot } = await import('@/lib/inventWave5Pack');
+      const dkey = String(host.diskRoot || host.projectLabel || 'default');
+      if (/^\/diff\b|\bshow\s+diff\b/i.test(editAsk)) {
+        host.pushStatus(diffSinceSnapshot(dkey, host.files || {}).slice(0, 240));
+      } else {
+        snapshotForDiff(dkey, host.files || {});
+      }
+    } catch { /* optional */ }
+    if (!acl.allowWriteLogo) {
+      (host as { __novaBlockLogo?: boolean }).__novaBlockLogo = true;
+    }
+    const { correctionToMemoryLine } = await import('@/lib/inventWave5Pack');
+    const { appendAutoMemory } = await import('@/lib/inventCraftPack');
+    const memLine = correctionToMemoryLine(editAsk);
+    if (memLine && host.files) {
+      const nextFiles = { ...host.files };
+      nextFiles['.nova/memory.md'] = appendAutoMemory(
+        String(nextFiles['.nova/memory.md'] || ''),
+        memLine,
+      );
+      Object.assign(host, { files: nextFiles });
+      host.pushStatus('Auto-memory · correction saved');
+    }
+    // Dual Live — show live A/B by swapping App from dual-live snapshot.
+    const livePane = editAsk.match(/\b(?:show\s+)?live\s*([ab])\b/i);
+    if (livePane && host.files) {
+      const pane = livePane[1].toUpperCase();
+      const snap = host.files[`.nova/dual-live/${pane}/App.jsx`];
+      if (snap) {
+        const nextFiles: Record<string, string> = { ...host.files, 'src/App.jsx': snap };
+        delete nextFiles['src/App.tsx'];
+        Object.assign(host, { files: nextFiles });
+        host.pushStatus(`Dual Live · pane ${pane} mounted into App.jsx`);
+      }
+    }
+  } catch { /* optional */ }
+  if (editAsk && editAsk !== String(host.editUserMessage || host.content || '')) {
+    Object.assign(host, { content: editAsk, editUserMessage: editAsk });
+  }
+  // Full luggage redesign — first owner, before surgical / glyphs / invent chat.
+  {
+    const askNow = String(host.editUserMessage || host.content || '');
+    const redesignLuggage = /\b(?:redesign|rewrite|completely\s+new|new\s+layout|new\s+background)\b/i.test(askNow)
+      && /\b(?:suitcases?|luggage|carry[- ]?ons?|travel\s+bags?|duffels?|weekenders?)\b/i.test(askNow);
+    if (redesignLuggage) {
+      try {
+        host.pushStatus('Premium luggage redesign…');
+        const { applyLuggagePremiumRedesign } = await import('@/lib/createInventDemo');
+        let lastDisk: { path?: string; name?: string } = {};
+        try {
+          lastDisk = JSON.parse(localStorage.getItem('NOVA:last-disk-target') || '{}') || {};
+        } catch { /* ignore */ }
+        const diskRoot = String(host.diskRoot || lastDisk.path || '').trim() || null;
+        const brand = String(
+          host.projectLabel && host.projectLabel !== 'App' ? host.projectLabel : '',
+        ).trim()
+          || String(lastDisk.name || '').trim()
+          || 'Ridgeline Carry';
+        let baseFiles = host.files || {};
+        if (diskRoot && Object.keys(baseFiles).length < 3) {
+          try {
+            const { loadPreviewFilesFromDisk } = await import('@/lib/projectPreview');
+            const fresh = await loadPreviewFilesFromDisk(diskRoot);
+            if (fresh && Object.keys(fresh).length) baseFiles = fresh;
+          } catch { /* keep studio files */ }
+        }
+        const salvaged = applyLuggagePremiumRedesign(baseFiles, brand, askNow);
+        if (salvaged.applied) {
+          const wrote = ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => salvaged.files[p]);
+          // Write bytes directly — applyChatReplyEdits→finalizeWebEdits treats “contact form”
+          // in the ask as a micro form ladder and guts the premium App.
+          let diskWrote = 0;
+          if (diskRoot && window.novaDesktop?.workspaceWriteFile) {
+            const sep = diskRoot.includes('\\') ? '\\' : '/';
+            const root = diskRoot.replace(/[\\/]+$/, '');
+            for (const rel of wrote) {
+              try {
+                const w = await window.novaDesktop.workspaceWriteFile({
+                  targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                  content: salvaged.files[rel],
+                });
+                if (w?.ok !== false) diskWrote += 1;
+              } catch { /* best-effort */ }
+            }
+          }
+          if (!diskWrote) {
+            const blocks = wrote
+              .map((p) => `@@@FILE ${p}\n${salvaged.files[p]}`)
+              .join('\n');
+            await applyChatReplyEdits({
+              reply: blocks,
+              projectId: host.projectId,
+              projectName: brand,
+              files: baseFiles,
+              // Neutral ask so form/ladder heuristics cannot replace the dump.
+              userMessage: 'Full rewrite App.jsx App.css premium luggage layout redesign',
+              diskRoot,
+            });
+          }
+          const filesOut = salvaged.files;
+          const updated = wrote;
+          const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+          const { formatEditHandback: handbackRedesign } = await import('@/lib/taskHandbackReply');
+          const answer = handbackRedesign({
+            ask: host.content,
+            outcome: 'edit-ok',
+            productName: brand,
+            summary: `I've finished the redesign for **${brand}** — a completely new premium editorial layout is on disk, not the old bag-layers list.`,
+            surface: 'chat',
+          });
+          const reply = host.buildStudioTraceMessage({
+            startedAt: host.replyStartedAt,
+            elapsedMs,
+            userMessage: host.content,
+            answer,
+            wrotePaths: updated,
+            projectName: brand,
+          });
+          host.onSnapshot?.({ files: filesOut, updatedPaths: updated });
+          host.onApplied({
+            files: filesOut,
+            updated,
+            reply,
+            provider: 'NOVA · luggage premium redesign',
+            elapsedMs,
+          });
+          return { status: 'applied' };
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
   // Checkpoint rollback — restore last scaffold/craft snapshot to disk.
   try {
     const {
@@ -588,8 +1194,157 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     }
   } catch { /* fall through */ }
 
+  // Product visual asks: local image gen → public/glyphs + App wire (SVG only if no model).
+  try {
+    const { wantsProductVisualAsk, applyProductVisualToProject } = await import('@/lib/productVisual');
+    const visualDisk = (() => {
+      const bound = String(host.diskRoot || '').trim();
+      if (bound) return bound;
+      try {
+        const byChat = getCreateJobForChat(String((host as { chatId?: string }).chatId || ''));
+        if (byChat?.path) return String(byChat.path);
+        const latest = getLatestReusableCreateJob();
+        if (latest?.path) return String(latest.path);
+      } catch { /* best-effort */ }
+      return '';
+    })();
+    if (wantsProductVisualAsk(host.editUserMessage) && visualDisk) {
+      // Bound rich catalogs must never take the glyph wipe path — fall through to surgical edit.
+      const { projectLooksLikeRichCatalogShell } = await import('@/lib/productVisual');
+      if (projectLooksLikeRichCatalogShell(host.files)) {
+        /* skip product-visual wipe */
+      } else {
+      host.pushStatus('Generating product shot (may take 1–3 min)…');
+      const visual = await applyProductVisualToProject({
+        diskRoot: visualDisk,
+        files: host.files,
+        message: host.editUserMessage,
+      });
+      if (visual.ok && visual.updated.length) {
+        const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+        const sourceNote = visual.source === 'local-image'
+          ? 'from your local image model'
+          : visual.source === 'image-core'
+            ? 'from Image Core (HF / Horde)'
+            : 'with a catalog SVG fallback — install **SDXL Turbo Local** or add a Hugging Face key for photo shots';
+        const answer = [
+          `Added a **${visual.kind}** product image ${sourceNote}.`,
+          visual.href ? `Saved to \`${visual.href}\`.` : '',
+          visual.error && visual.source === 'svg-fallback'
+            ? `(Generation note: ${String(visual.error).slice(0, 160)})`
+            : '',
+          'Open **Live** to check it.',
+        ].filter(Boolean).join(' ');
+        const reply = host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs,
+          userMessage: host.content,
+          answer,
+          wrotePaths: visual.updated,
+          projectName: host.projectLabel,
+        });
+        host.onSnapshot?.({ files: visual.files, updatedPaths: visual.updated });
+        host.onApplied({
+          files: visual.files,
+          updated: visual.updated,
+          reply,
+          provider: visual.source === 'svg-fallback' ? 'NOVA · glyph SVG' : 'NOVA · product visual',
+          elapsedMs,
+        });
+        return { status: 'applied' };
+      }
+      } // end else (!richCatalog)
+    }
+  } catch { /* fall through to surgical */ }
+
+  // Graphic composition: materialize glyph files first so the shell can use /glyphs/* imgs.
+  try {
+    const {
+      wantsProductVisualAsk: isSingleGlyph,
+      materializeProductGlyph,
+      detectProductVisualKind,
+    } = await import('@/lib/productVisual');
+    const graphicAsk = /\b(?:graphic|high[- ]?quality\s+design|product\s+(?:photos?|glyphs?|visuals?)|hero\s+(?:image|photo|glyph)|split\s+layout|look\s+different|brand\s+new\s+layout|rebuild\s+(?:the\s+)?(?:layout|design|page)|photo\s+on\s+the\s+left|visual\s+design|generated\s+(?:product|mic|glyph)|no\s+outside\s+images)\b/i.test(host.editUserMessage)
+      || (
+        /\bdesign\b/i.test(host.editUserMessage)
+        && /\b(?:more|real|actual|better|new|fresh|different)\b/i.test(host.editUserMessage)
+        && !/\bkeep\s+the\s+design\s+simple\b/i.test(host.editUserMessage)
+      );
+    // Only materialize mic glyphs for actual microphone asks — redesign / "look different"
+    // / luggage briefs used to hardcode mic-travel and hang on Horde for minutes.
+    const glyphKind = detectProductVisualKind(host.editUserMessage);
+    const luggageAsk = /\b(?:suitcase|carry[- ]?on|luggage|duffel|weekender|travel\s+bag|roller\s+bag|cabin\s+bag)\b/i
+      .test(host.editUserMessage);
+    if (
+      graphicAsk
+      && host.diskRoot
+      && !isSingleGlyph(host.editUserMessage)
+      && glyphKind === 'microphone'
+      && !luggageAsk
+    ) {
+      host.pushStatus('Preparing product glyphs…');
+      const { listReadyLocalImageModels } = await import('@/lib/siteHeroImages');
+      let readyLocal = false;
+      try {
+        readyLocal = (await listReadyLocalImageModels()).length > 0;
+      } catch { /* offline */ }
+      let files = { ...host.files };
+      const slots: Array<{ kind: 'microphone'; slug: string; variant?: string }> = [
+        { kind: 'microphone', slug: 'microphone' },
+        { kind: 'microphone', slug: 'mic-room', variant: 'condenser room' },
+        { kind: 'microphone', slug: 'mic-desk', variant: 'desk dynamic' },
+        { kind: 'microphone', slug: 'mic-travel', variant: 'travel clip lavalier' },
+      ];
+      for (const slot of slots) {
+        const mat = await materializeProductGlyph({
+          diskRoot: host.diskRoot,
+          kind: slot.kind,
+          slug: slot.slug,
+          variant: slot.variant,
+          files,
+          // Hero tries the model when local weights are ready; thumbs stay SVG unless ready.
+          preferFallback: !readyLocal || slot.slug !== 'microphone',
+        });
+        files = mat.files;
+      }
+      Object.assign(host.files, files);
+      host.onSnapshot?.({ files, updatedPaths: Object.keys(files).filter((k) => /glyphs\//i.test(k)) });
+    }
+  } catch { /* still try surgical shell */ }
+
   const surgical = await runSurgicalEditTurn(host);
   if (surgical.status === 'applied' || surgical.status === 'failed') return surgical;
+
+  // UI shells: never invent-timeout after surgical miss — fail fast with a short miss.
+  // Undo/redo are snapshot-owned in the send path; don't trap them here.
+  {
+    const { isUiShellAsk } = await import('@/lib/webProjectCanon');
+    const ask = String(host.editUserMessage || '');
+    const undoRedo = /\b(?:undo|redo)\b/i.test(ask)
+      && /\b(?:last|previous|undone|change|edit)\b/i.test(ask);
+    if (isUiShellAsk(ask) && !undoRedo) {
+      const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+      const miss = editMiss(
+        'verify_failed',
+        [
+          'I followed your ask as written and could not land a surgical change, so I left the inventing agent out of it.',
+          'Try the same ask as one clear one-line change, or split it into smaller pieces.',
+        ].join(' '),
+      );
+      host.onFailed({
+        reply: host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs,
+          userMessage: host.content,
+          answer: miss.message,
+          wrotePaths: [],
+          projectName: host.projectLabel,
+        }),
+        elapsedMs,
+      });
+      return { status: 'failed' };
+    }
+  }
 
   const weakHop = shouldSkipWeakModelCodingHop({
     userMessage: host.editUserMessage,
@@ -649,33 +1404,37 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     (host as { preferredModelName?: string | null }).preferredModelName = resolved.name;
   }
 
-  // Nova edit tool loop (substantial asks) — free, no paywall; surgical already missed.
+  // Coding foundation: after surgical miss, tool loop owns all project coding asks.
+  // Invent answerStudio remains fallback only when the loop returns no updates.
   try {
     const { shouldUseNovaEditBuildLoop } = await import('@/lib/novaBuildLoop');
     const { packNovaBuildContext } = await import('@/lib/novaBuildContext');
     const { runNovaAgentLoop } = await import('@/lib/novaAgentLoop');
     const { modeStatusLabel } = await import('@/lib/novaStudioModes');
+    const { getLocalPrefs } = await import('@/lib/localPrefs');
     const ask = String(host.editUserMessage || host.content || '');
-    const substantial = ask.length >= 40
-      && /\b(fix|implement|refactor|rebuild|redesign|add\s+section|wire|layout|page|component|flow)\b/i.test(ask);
-    if (shouldUseNovaEditBuildLoop() && substantial && host.projectId) {
+    if (shouldUseNovaEditBuildLoop() && host.projectId && ask.trim()) {
       host.pushStatus(modeStatusLabel('fix', 'Nova tool loop'));
       const { answerStudio } = await import('@/lib/studioAnswerEngine');
       const coderId = String(host.stickyModelId || host.preferredModelId || host.modelId || '');
       const coderName = String(host.stickyModelName || host.preferredModelName || host.modelName || 'coder');
+      const prefsMax = Number(getLocalPrefs().agentLoopMaxSteps) || 32;
+      const maxSteps = Math.max(12, Math.min(prefsMax, 24));
       const loop = await runNovaAgentLoop({
         brief: [
-          ask.slice(0, 2500),
+          host.fidelityBrief || ask.slice(0, 2500),
           '',
-          'Prefer TOOL: patch. Never add paywalls or upgrade CTAs. Call TOOL: ready when the UI change is done.',
+          host.fidelityMicroOnly
+            ? 'Do ONLY the required ops. Invent nothing — no About, Features, footer, nav, or sample sections.'
+            : 'Prefer TOOL: patch / write / read / grep / run. Never add paywalls or upgrade CTAs.',
+          'Call TOOL: ready when the change is done; TOOL: done when finished.',
         ].join('\n'),
         files: packNovaBuildContext(host.files),
         projectId: host.projectId,
         projectName: host.projectLabel,
         diskRoot: host.diskRoot,
-        maxSteps: 12,
+        maxSteps,
         autoRunAllowlisted: true,
-        // Full-page rewrite / screenshot match needs the longer create craft step wall.
         createCraftMode: /\b(?:rebuild|redesign|rewrite|screenshot|match\s+(?:this|the)\s+image|full\s+(?:page|ui)|landing)\b/i.test(ask),
         callModel: async ({ prompt }) => {
           const result = await answerStudio({
@@ -718,6 +1477,79 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         });
         return { status: 'applied' };
       }
+      // Redesign luggage asks: tool loop often returns prose — mount premium layout on disk.
+      const redesignLuggage = /\b(?:redesign|rewrite|completely\s+new|new\s+layout|new\s+background)\b/i.test(ask)
+        && /\b(?:suitcases?|luggage|carry[- ]?ons?|travel\s+bags?|duffels?|weekenders?)\b/i.test(ask);
+      if (redesignLuggage) {
+        host.pushStatus(modeStatusLabel('fix', 'Premium luggage redesign…'));
+        const { applyLuggagePremiumRedesign } = await import('@/lib/createInventDemo');
+        let lastDisk: { path?: string; name?: string } = {};
+        try {
+          lastDisk = JSON.parse(localStorage.getItem('NOVA:last-disk-target') || '{}') || {};
+        } catch { /* ignore */ }
+        const diskRoot = String(host.diskRoot || lastDisk.path || '').trim() || null;
+        const brand = String(
+          host.projectLabel && host.projectLabel !== 'App' ? host.projectLabel : '',
+        ).trim()
+          || String(lastDisk.name || '').trim()
+          || 'Ridgeline Carry';
+        const salvaged = applyLuggagePremiumRedesign(loop.files || host.files, brand, ask);
+        if (salvaged.applied) {
+          const wrote = ['src/App.jsx', 'src/App.css', 'public/logo.svg'].filter((p) => salvaged.files[p]);
+          const blocks = wrote
+            .map((p) => `@@@FILE ${p}\n${salvaged.files[p]}`)
+            .join('\n');
+          const persisted = await applyChatReplyEdits({
+            reply: blocks,
+            projectId: host.projectId,
+            projectName: brand,
+            files: loop.files || host.files,
+            userMessage: ask,
+            diskRoot,
+          });
+          if ((!persisted.ok || !persisted.updated?.length) && diskRoot && window.novaDesktop?.workspaceWriteFile) {
+            const sep = diskRoot.includes('\\') ? '\\' : '/';
+            const root = diskRoot.replace(/[\\/]+$/, '');
+            for (const rel of wrote) {
+              try {
+                await window.novaDesktop.workspaceWriteFile({
+                  targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                  content: salvaged.files[rel],
+                });
+              } catch { /* best-effort */ }
+            }
+          }
+          const filesOut = persisted.ok ? persisted.files : salvaged.files;
+          const updated = persisted.ok && persisted.updated?.length ? persisted.updated : wrote;
+          const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+          const { formatEditHandback: handbackRedesign2 } = await import('@/lib/taskHandbackReply');
+          const answer = handbackRedesign2({
+            ask: host.content,
+            outcome: 'edit-ok',
+            productName: brand,
+            summary: `I've finished the redesign for **${brand}** — a completely new premium editorial layout is on disk, not the old bag-layers list.`,
+            surface: 'chat',
+          });
+          const reply = host.buildStudioTraceMessage({
+            startedAt: host.replyStartedAt,
+            elapsedMs,
+            userMessage: host.content,
+            answer,
+            wrotePaths: updated,
+            projectName: host.projectLabel,
+          });
+          host.onSnapshot?.({ files: filesOut, updatedPaths: updated });
+          host.onApplied({
+            files: filesOut,
+            updated,
+            reply,
+            provider: 'NOVA · luggage premium redesign',
+            elapsedMs,
+          });
+          return { status: 'applied' };
+        }
+      }
+      host.pushStatus(modeStatusLabel('fix', 'Tool loop empty — invent fallback'));
     }
   } catch {
     /* fall through to generate path */
@@ -1075,7 +1907,7 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       || askCheck.missing.some((m) => /^kept brand/i.test(m));
     const keepIntact = askRetried && !filesBroken && applied.ok && applied.updated.length > 0;
     if (keepIntact) {
-      partialAskNote = `Applied what I could, but still missing: ${askCheck.missing.join(', ') || 'part of that ask'}. Say that piece on its own and I'll add it.`;
+      partialAskNote = `I've applied what I could, but still missing: ${askCheck.missing.join(', ') || 'part of that ask'}. Say that piece on its own and I will add it.`;
     } else {
     await revertToSnapshot();
     const miss = editMiss(
@@ -1235,7 +2067,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     changedPaths: applied.updated,
     applied: true,
   });
-  const answer = partialAskNote ? `${answerBase}\n\n${partialAskNote}` : answerBase;
+  const answer = partialAskNote
+    ? `${answerBase.replace(/\s+$/, '')} ${partialAskNote}`.replace(/\s+/g, ' ').trim()
+    : answerBase;
   const reply = host.buildStudioTraceMessage({
     startedAt: host.replyStartedAt,
     elapsedMs: modelElapsed,

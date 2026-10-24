@@ -5,6 +5,20 @@
 
 export const NOVA_CHANGELOG = [
   {
+    version: '0.1.339',
+    channel: 'stable' as const,
+    date: 'Oct 24, 2026',
+    title: 'Contain glyph wipe · marketplace chrome · idle ghost · projects honesty',
+    notes: [
+      'Product-visual path can never wipe a rich catalog (“do not add…” / improve cards / filters) into a cream single-glyph stage',
+      'Storefront invent floor gains marketplace nav (Products/Applications/Partners/Support) + signup/social/legal footer',
+      'Removed Website/Game/Utility/Dashboard labels under the composer',
+      'Chat/Voice pill + left rail idle-ghost after 5s; hover restores',
+      'Projects: confirm before open-as-chat; delete retries after closing Live; no amber “Removed N projects” banner',
+      'History/thread load keeps a sessionStorage mirror so Recent switches recognize prior talk',
+    ],
+  },
+  {
     version: '0.1.338',
     channel: 'stable' as const,
     date: 'Oct 10, 2026',
@@ -1149,8 +1163,8 @@ export const NOVA_CHANGELOG = [
       'Live pill stays off while Code · writing — only appears when the turn is idle',
       'Edit apply strips trailing assistant prose from App.jsx / App.css and repairs the Vite shell',
       'verifyAsk rejects brand-name misses, path/to and example.com image fakes, and named nav labels',
-      'Surgical brand/title patches recognize className=\"App\" shells and \"brand should say …\" asks',
-      'Brand-name capture stays case-sensitive so \"centered\" is not swallowed into the title',
+      'Surgical brand/title patches recognize className="App" shells and "brand should say …" asks',
+      'Brand-name capture stays case-sensitive so "centered" is not swallowed into the title',
       'Markdown explanation dumps into App.css are stripped / restored to the Vite shell',
       'App.jsx / App.tsx twin cleanup follows the richer UI and deletes the losing twin from disk',
       'Brand surgical patches land on the real App file (no silent App.tsx shadow)',

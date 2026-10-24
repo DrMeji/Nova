@@ -24,12 +24,30 @@ export type ProductVisualKind =
   | 'laptop'
   | 'generic';
 
+/** True when files already look like a real multi-SKU store / catalog (never glyph-wipe). */
+export function projectLooksLikeRichCatalogShell(files: Record<string, string> | null | undefined): boolean {
+  const app = String(files?.['src/App.jsx'] || files?.['src/App.tsx'] || '');
+  if (app.length < 800) return false;
+  const hits = [
+    /gpu-card|product-card|shop-grid|gpu-grid|catalog/i.test(app),
+    /formatUsd|toLocaleString\([^)]*currency|price/i.test(app),
+    /filter|FILTERS|maker-filter|All.*NVIDIA|map\(\s*\(/i.test(app),
+    (app.match(/\$\d|price:\s*\d/gi) || []).length >= 3,
+    /Add to cart|Shop GPUs|Browse \d+/i.test(app),
+  ].filter(Boolean).length;
+  return hits >= 2;
+}
+
 /** True when the user wants a product object drawn onto the bound page. */
 export function wantsProductVisualAsk(message: string): boolean {
   const t = normalizeMessyUiEditAsk(String(message || '')).trim();
   if (!t) return false;
   if (/\b(?:landing|homepage|full[- ]?bleed|shop\s+section|split\s+layout|graphic\s+design)\b/i.test(t)
     && /\b(?:tagline|headline|cart|add\s+to\s+cart)\b/i.test(t)) {
+    return false;
+  }
+  // Improve / keep / filter catalog language is surgical edit — never glyph stage wipe.
+  if (/\b(?:improve|keep\s+all|filters?\s+working|named\s+cards?|maker\s+accent|product\s+plate)\b/i.test(t)) {
     return false;
   }
   return looksLikeProductVisualObjectAsk(t);
@@ -532,6 +550,19 @@ export async function applyProductVisualToProject(opts: {
   files: Record<string, string>;
   message: string;
 }): Promise<ProductVisualApplyResult> {
+  // HARD CONTAIN: never replace a living catalog / store App with a cream glyph stage.
+  if (projectLooksLikeRichCatalogShell(opts.files) || !wantsProductVisualAsk(opts.message)) {
+    return {
+      ok: false,
+      files: opts.files,
+      updated: [],
+      href: '',
+      kind: detectProductVisualKind(opts.message),
+      source: 'svg-fallback',
+      error: 'skipped-rich-catalog-or-non-visual-ask',
+    };
+  }
+
   const kind = detectProductVisualKind(opts.message);
   const label = labelForKind(kind);
   const { brand, tagline } = extractBrandFromMessage(opts.message);

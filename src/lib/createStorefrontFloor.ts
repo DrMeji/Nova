@@ -1,6 +1,6 @@
 /**
  * High-quality storefront recovery floor — rich catalog + filters + cart + checkout.
- * Used when craft is thin; also the acceptance shape for storefront genre.
+ * LAST RESORT only after invent/tool-loop miss — never the create happy path / Ready proof.
  */
 import type { CreatePalette } from '@/lib/createIdentity';
 import type { StorefrontProduct } from '@/lib/createLayoutContract';
@@ -228,10 +228,10 @@ export default function App() {
       <header className="topnav" role="banner">
         <nav className="topnav-inner" aria-label="Primary">
           <a className="mark" href="#top" onClick={() => setDetailId(null)}>${title}</a>
-          <a href="#shop" onClick={() => setDetailId(null)}>Shop</a>
-          <a href="#about">About</a>
-          <a href="#careers">Careers</a>
-          <a href="#help">Help</a>
+          <a href="#shop" onClick={() => setDetailId(null)}>Products</a>
+          <a href="#applications">Applications</a>
+          <a href="#partners">Partners</a>
+          <a href="#help">Support</a>
           <button type="button" className="cart-btn" onClick={() => setOpen(true)} aria-label="Open cart">
             Cart ({count})
           </button>
@@ -308,17 +308,24 @@ export default function App() {
             </div>
           </section>
 
-          <section className="band story" id="careers">
+          <section className="band story" id="applications">
             <div className="band-copy">
-              <h2>Careers</h2>
-              <p>We hire retail, warehouse, and design teammates who care about craft. Email careers@${slug}.example with a short note.</p>
+              <h2>Applications</h2>
+              <p>Use ${title} products across creative, work, and everyday builds — clear specs so you pick with confidence.</p>
+            </div>
+          </section>
+
+          <section className="band story" id="partners">
+            <div className="band-copy">
+              <h2>Partners</h2>
+              <p>Retail, studio, and channel partners who stock ${title}. Want to carry the line? Email partners@${slug}.example.</p>
             </div>
           </section>
 
           <section className="band story" id="help">
             <div className="band-copy">
-              <h2>Help & support</h2>
-              <p>Shipping, returns, and lid swaps — write <a href="mailto:${supportEmail}">${supportEmail}</a> and we will get back within one business day.</p>
+              <h2>Support</h2>
+              <p>Shipping, returns, and product help — write <a href="mailto:${supportEmail}">${supportEmail}</a> and we will get back within one business day.</p>
             </div>
           </section>
         </>
@@ -395,14 +402,55 @@ export default function App() {
         </div>
       ) : null}
 
-      <footer className="foot">
-        <a href="#top">${title}</a>
-        <a href="#shop">Shop</a>
-        <a href="#about">About</a>
-        <a href="#careers">Careers</a>
-        <a href="#help">Help</a>
-        <a href="mailto:${supportEmail}">${supportEmail}</a>
-        <span>${liquor ? '21+ only · ' : ''}Demo store</span>
+      <footer className="foot marketplace-foot" role="contentinfo">
+        <div className="foot-cols">
+          <div>
+            <h3>Products</h3>
+            <a href="#shop">Shop</a>
+            <a href="#shop">Catalog</a>
+            <a href="#about">About</a>
+          </div>
+          <div>
+            <h3>Applications</h3>
+            <a href="#applications">Use cases</a>
+            <a href="#applications">Tools</a>
+          </div>
+          <div>
+            <h3>Partners</h3>
+            <a href="#partners">Partner network</a>
+            <a href="#partners">Retail</a>
+          </div>
+          <div>
+            <h3>Support</h3>
+            <a href="#help">Help center</a>
+            <a href="mailto:${supportEmail}">Contact</a>
+          </div>
+        </div>
+        <div className="foot-engage">
+          <div className="foot-news">
+            <span>Sign up for ${title} news</span>
+            <button type="button" className="subscribe">Subscribe</button>
+          </div>
+          <div className="foot-social" aria-label="Social">
+            <span>Follow ${title}</span>
+            <a href="https://facebook.com" rel="noreferrer" target="_blank">Facebook</a>
+            <a href="https://instagram.com" rel="noreferrer" target="_blank">Instagram</a>
+            <a href="https://linkedin.com" rel="noreferrer" target="_blank">LinkedIn</a>
+            <a href="https://x.com" rel="noreferrer" target="_blank">X</a>
+            <a href="https://youtube.com" rel="noreferrer" target="_blank">YouTube</a>
+          </div>
+        </div>
+        <div className="foot-legal">
+          <a href="#top">${title}</a>
+          <a href="#privacy">Privacy Policy</a>
+          <a href="#privacy">Your Privacy Choices</a>
+          <a href="#terms">Terms of Service</a>
+          <a href="#accessibility">Accessibility</a>
+          <a href="#policies">Corporate Policies</a>
+          <a href="#security">Product Security</a>
+          <a href="mailto:${supportEmail}">Contact</a>
+          <span>Copyright © {new Date().getFullYear()} ${title}</span>
+        </div>
       </footer>
     </div>
   );
@@ -505,8 +553,20 @@ h1, h2, h3, .mark { font-family: var(--display); letter-spacing: -0.02em; }
 .checkout label { display: flex; flex-direction: column; gap: 0.3rem; color: var(--mute); font-size: 0.9rem; }
 .checkout input { background: ${inputBg}; border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 0.65rem 0.8rem; }
 .confirm { color: var(--accent); font-weight: 600; }
-.foot { display: flex; flex-wrap: wrap; gap: 1.2rem; justify-content: center; padding: 2.5rem 1rem 3rem; color: var(--mute); font-size: 0.85rem; }
+.foot { padding: 2.5rem 1.25rem 1.5rem; color: var(--mute); font-size: 0.85rem; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 88%, #000); }
 .foot a { color: var(--mute); text-decoration: none; }
+.foot a:hover { color: var(--ink); }
+.foot-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; max-width: 1100px; margin: 0 auto 1.75rem; }
+.foot-cols h3 { margin: 0 0 0.55rem; color: var(--ink); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.foot-cols a { display: block; margin: 0.28rem 0; }
+.foot-engage { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; max-width: 1100px; margin: 0 auto 1.5rem; align-items: center; }
+.foot-news { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; }
+.subscribe { appearance: none; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; background: var(--accent); color: var(--btn-ink); font-weight: 700; cursor: pointer; }
+.foot-social { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.foot-legal { display: flex; flex-wrap: wrap; gap: 0.65rem 1rem; justify-content: center; max-width: 1100px; margin: 0 auto; padding-top: 1rem; border-top: 1px solid var(--line); font-size: 0.78rem; }
+@media (max-width: 800px) {
+  .foot-cols { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 800px) {
   .detail-card { grid-template-columns: 1fr; }
   .mark { margin-right: 0; }

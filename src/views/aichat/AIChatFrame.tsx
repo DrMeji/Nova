@@ -1,8 +1,13 @@
 /**
  * AIChat presentational shell — composer, message list, dialogs.
  */
-// @ts-nocheck — props bag is intentionally loose; logic stays in AIChat.tsx
 import { useEffect, useState } from 'react';
+import type { useAIChatController } from '@/views/aichat/useAIChatController';
+import type { ChatAttachMeta } from '@/lib/chatAttach';
+import type { LiveCapacity } from '@/lib/novaCapacity';
+import type { RecentCreation } from '@/lib/recentStore';
+import type { ArkEngineModel } from '@/lib/novaEngine';
+import type { ChatMessage } from '@/types';
 import { createPortal } from 'react-dom';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { AttachCard } from '@/components/AttachCard';
@@ -17,6 +22,7 @@ import { NovaErrorInline } from '@/components/NovaErrorInline';
 import { NovaMark } from '@/components/NovaMark';
 import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
 import { ChatCodeOverlay } from '@/components/ChatCodeOverlay';
+import { StudioControlsOverlay } from '@/components/StudioControlsOverlay';
 import { ChatPlanOverlay } from '@/components/ChatPlanOverlay';
 import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
 import { FIRST_RUN_KIND_CHIPS } from '@/lib/chatTurnHandlers';
@@ -25,6 +31,7 @@ import { isVoiceTabEnabled } from '@/lib/featurePark';
 import { formatReplyElapsed, shortReplyModelLabel } from '@/lib/speedTest';
 import { attachKey } from '@/lib/chatAttach';
 import { stripComposerPrefix } from '@/lib/chatAgentTurn';
+import { stripAgentTrace } from '@/lib/agentTrace';
 import { loadChatStudio, studioPathBasename } from '@/lib/chatStudioStore';
 import { getApplySnapshot, clearApplySnapshot, snapshotToRevertBlocks } from '@/lib/chatApplySnapshotStore';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
@@ -41,7 +48,7 @@ import {
   Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw, RefreshCw, Share2,
 } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
-import { canUnlockCreateLive } from '@/lib/createReady';
+import { boundFolderLiveReady, canUnlockCreateLive } from '@/lib/createReady';
 import { pushDownloadCompleteToast } from '@/lib/sidebarToast';
 import {
   ChatModeTabs,
@@ -59,9 +66,147 @@ import {
   type ChatModelOption,
 } from './aiChatHelpers';
 
-// Loose props bag — AIChat owns the logic; this file is presentational.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AIChatFrameProps = Record<string, any>;
+export type AIChatFrameProps = Pick<ReturnType<typeof useAIChatController>,
+  'activeModel' |
+  'addPendingImages' |
+  'attachBusy' |
+  'attachInputRef' |
+  'attachUploading' |
+  'autoModelLabel' |
+  'browseBindFolder' |
+  'capacity' |
+  'chatPlugins' |
+  'chatStudioDiskRoot' |
+  'chatStudioDiskRootRef' |
+  'chatStudioFiles' |
+  'chatStudioFilesRef' |
+  'chatStudioProjectIdRef' |
+  'chats' |
+  'clonePickedRepo' |
+  'codeOverlayOpen' |
+  'codePillSticky' |
+  'planOverlayOpen' |
+  'planPillSticky' |
+  'planLiveDrafting' |
+  'composerMode' |
+  'copiedMsgId' |
+  'createJobLive' |
+  'creations' |
+  'deleteFileBusy' |
+  'deleteFilePrompt' |
+  'deleteFolderClarifyPrompt' |
+  'deleteProjectBusy' |
+  'deleteProjectPrompt' |
+  'dictating' |
+  'dictationHint' |
+  'dragOverChat' |
+  'dropHint' |
+  'editingQueueId' |
+  'editingQueueIdRef' |
+  'editingQueueText' |
+  'engineInstallingModels' |
+  'engineLocalModels' |
+  'engineReadyIds' |
+  'failoverNote' |
+  'flushQueuedSend' |
+  'generating' |
+  'generatingRef' |
+  'githubOfferId' |
+  'githubPickerOpen' |
+  'greeting' |
+  'handleDeleteFileCancel' |
+  'handleDeleteFileConfirm' |
+  'handleDeleteProjectCancel' |
+  'handleDeleteProjectConfirm' |
+  'handleFolderClarifyCancel' |
+  'handleFolderClarifyConfirm' |
+  'handlePlusAction' |
+  'handleSend' |
+  'handleStop' |
+  'handleVoiceActivate' |
+  'ignoreEnterUntilRef' |
+  'imageInputRef' |
+  'input' |
+  'ipcFallbackDev' |
+  'jumpToBottom' |
+  'liveTurnMs' |
+  'loading' |
+  'menuPos' |
+  'messages' |
+  'messagesEndRef' |
+  'messagesScrollRef' |
+  'mode' |
+  'modelButtonRef' |
+  'modelMenuOpen' |
+  'modelMenuRef' |
+  'modelRatio' |
+  'navigate' |
+  'ollamaModels' |
+  'onComposerPaste' |
+  'onInput' |
+  'onMessagesScroll' |
+  'onMessagesWheel' |
+  'onPickCodeFiles' |
+  'openCodeWorkspace' |
+  'closeCodeOverlay' |
+  'openPlanWorkspace' |
+  'setPlanOverlayOpen' |
+  'openProjectFolder' |
+  'openProjectPreview' |
+  'pendingAttaches' |
+  'pendingImages' |
+  'pendingQueueRef' |
+  'persistChatIdRef' |
+  'persistStudioSnapshot' |
+  'pickPhotosIntoChat' |
+  'placeholder' |
+  'previewUrl' |
+  'queueLen' |
+  'queueTick' |
+  'removePendingAttach' |
+  'route' |
+  'routeChatIdRef' |
+  'sendMessage' |
+  'setActiveModel' |
+  'setCapacity' |
+  'setChatStudioFiles' |
+  'setChatStudioProjectId' |
+  'setCodeOverlayOpen' |
+  'setComposerMode' |
+  'setCopiedMsgId' |
+  'setDropHint' |
+  'setEditingQueueId' |
+  'setEditingQueueText' |
+  'setFailoverNote' |
+  'setGithubPickerOpen' |
+  'setInput' |
+  'setModelMenuOpen' |
+  'setPendingAttaches' |
+  'setPendingImages' |
+  'setQueueLen' |
+  'setQueueTick' |
+  'setSetupNote' |
+  'setVideoDurationSec' |
+  'setupNote' |
+  'showJumpToBottom' |
+  'showStudioPills' |
+  'textareaRef' |
+  'threadBrain' |
+  'threadKind' |
+  'threadSwitching' |
+  'toggleComposerDictation' |
+  'tokenRatio' |
+  'tryStartTurn' |
+  'regenerateReply' |
+  'unpickAutoSticky' |
+  'user' |
+  'videoDurationSec' |
+  'voicePhase' |
+  'workspaceBadgeLabel'
+>;
+
+type QueueItem = { id: string; text: string };
+type PendingImage = { id: string; name: string; dataUrl: string };
 
 export function AIChatFrame(props: AIChatFrameProps) {
   const activeModel = props.activeModel;
@@ -71,14 +216,14 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const attachUploading = props.attachUploading;
   const autoModelLabel = props.autoModelLabel;
   const browseBindFolder = props.browseBindFolder;
-  const capacity = props.capacity;
-  const chatPlugins = props.chatPlugins;
+  const capacity = props.capacity as LiveCapacity;
+  
   const chatStudioDiskRoot = props.chatStudioDiskRoot;
   const chatStudioDiskRootRef = props.chatStudioDiskRootRef;
   const chatStudioFiles = props.chatStudioFiles;
   const chatStudioFilesRef = props.chatStudioFilesRef;
   const chatStudioProjectIdRef = props.chatStudioProjectIdRef;
-  const chats = props.chats;
+  
   const clonePickedRepo = props.clonePickedRepo;
   const codeOverlayOpen = props.codeOverlayOpen;
   const planOverlayOpen = props.planOverlayOpen;
@@ -89,7 +234,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const liveTurnStatus = useChatTurnStatus();
   const liveWritingPath = liveTurnStatus?.writingPath || null;
   const codePillSticky = props.codePillSticky;
-  const composerMode = props.composerMode;
+  const composerMode = props.composerMode as keyof typeof COMPOSER_MODE_PILL | null;
   const copiedMsgId = props.copiedMsgId;
   const createJobLive = props.createJobLive;
   const createLiveUnlock = createJobLive
@@ -99,8 +244,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
       String(createJobLive.originalBrief || createJobLive.generationBrief || ''),
     )
     : { ok: true, reasons: [] };
-  const createLiveUnverified = Boolean(createJobLive?.craftBlocked) || !createLiveUnlock.ok;
-  const creations = props.creations;
+  const creations = props.creations as RecentCreation[];
   const deleteFileBusy = props.deleteFileBusy;
   const deleteFilePrompt = props.deleteFilePrompt;
   const deleteFolderClarifyPrompt = props.deleteFolderClarifyPrompt;
@@ -112,8 +256,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const dropHint = props.dropHint;
   const editingQueueId = props.editingQueueId;
   const editingQueueIdRef = props.editingQueueIdRef;
-  const editingQueueText = props.editingQueueText;
-  const engineInstallingModels = props.engineInstallingModels;
+  
+  const engineInstallingModels = props.engineInstallingModels as Pick<ArkEngineModel, 'id' | 'name' | 'detail'>[];
   const engineLocalModels = props.engineLocalModels;
   const engineReadyIds = props.engineReadyIds;
   const failoverNote = props.failoverNote;
@@ -153,7 +297,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const liveTurnMs = props.liveTurnMs;
   const loading = props.loading;
   const menuPos = props.menuPos;
-  const messages = props.messages;
+  const messages = props.messages as ChatMessage[];
   const messagesEndRef = props.messagesEndRef;
   const messagesScrollRef = props.messagesScrollRef;
   const mode = props.mode;
@@ -172,14 +316,26 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const closeCodeOverlay = props.closeCodeOverlay;
   const openProjectFolder = props.openProjectFolder;
   const openProjectPreview = props.openProjectPreview;
-  const pendingAttaches = props.pendingAttaches;
-  const pendingImages = props.pendingImages;
-  const pendingQueueRef = props.pendingQueueRef;
+  const pendingAttaches = props.pendingAttaches as ChatAttachMeta[];
+  const pendingImages = props.pendingImages as PendingImage[];
+  const pendingQueueRef = props.pendingQueueRef as { current: QueueItem[] };
   const persistChatIdRef = props.persistChatIdRef;
   const persistStudioSnapshot = props.persistStudioSnapshot;
   const pickPhotosIntoChat = props.pickPhotosIntoChat;
   const placeholder = props.placeholder;
   const previewUrl = props.previewUrl;
+  // Bound folder / new chat: show Live when the tree can paint — even if verify failed
+  // ("Click Live to try once more"). Compositional App shells are short; boundFolderLiveReady
+  // counts sections. Never hide Live solely because the create job status is failed.
+  const filesLiveReady = boundFolderLiveReady(chatStudioFiles);
+  const showBoundLive = Boolean(
+    chatStudioDiskRoot
+    && (
+      filesLiveReady
+      || (createLiveUnlock.ok && !createJobLive?.craftBlocked)
+      || (Boolean(previewUrl) && filesLiveReady)
+    ),
+  );
   const queueLen = props.queueLen;
   const queueTick = props.queueTick;
   const removePendingAttach = props.removePendingAttach;
@@ -187,12 +343,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const routeChatIdRef = props.routeChatIdRef;
   const sendMessage = props.sendMessage;
   const setActiveModel = props.setActiveModel;
-  const setCapacity = props.setCapacity;
+  
   const setChatStudioFiles = props.setChatStudioFiles;
   const setChatStudioProjectId = props.setChatStudioProjectId;
   const setCodeOverlayOpen = props.setCodeOverlayOpen;
   const setComposerMode = props.setComposerMode;
-  const setCopiedMsgId = props.setCopiedMsgId;
+  const setCopiedMsgId = props.setCopiedMsgId as (value: string | null | ((previous: string | null) => string | null)) => void;
   const setDropHint = props.setDropHint;
   // Undo toast: gray (via text-content-tertiary) and auto-dismiss once.
   useEffect(() => {
@@ -218,11 +374,11 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const setFailoverNote = props.setFailoverNote;
   const setGithubPickerOpen = props.setGithubPickerOpen;
   const setInput = props.setInput;
-  const setModelMenuOpen = props.setModelMenuOpen;
+  const setModelMenuOpen = props.setModelMenuOpen as (value: boolean | ((previous: boolean) => boolean)) => void;
   const setPendingAttaches = props.setPendingAttaches;
-  const setPendingImages = props.setPendingImages;
+  const setPendingImages = props.setPendingImages as (updater: PendingImage[] | ((previous: PendingImage[]) => PendingImage[])) => void;
   const setQueueLen = props.setQueueLen;
-  const setQueueTick = props.setQueueTick;
+  const setQueueTick = props.setQueueTick as (updater: (previous: number) => number) => void;
   const setSetupNote = props.setSetupNote;
   const setVideoDurationSec = props.setVideoDurationSec;
   const setupNote = props.setupNote;
@@ -236,12 +392,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const tokenRatio = props.tokenRatio;
   const tryStartTurn = props.tryStartTurn;
   const unpickAutoSticky = props.unpickAutoSticky;
-  const user = props.user;
+  
   const videoDurationSec = props.videoDurationSec;
   const voicePhase = props.voicePhase;
   const workspaceBadgeLabel = props.workspaceBadgeLabel;
 
-  // Code overlay auto-opens when create/build starts (NOVA:open-code-overlay) so you can watch live.
+  // Code overlay opens only via the Code pill (manual). Create never auto-dispatches open-code-overlay.
 
   const applyIdea = (label: string) => {
     setInput(label);
@@ -249,6 +405,19 @@ export function AIChatFrame(props: AIChatFrameProps) {
   };
 
   const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
+  /** Tick while status-store is live but React generating is false — keeps rail timer moving. */
+  const [statusRailNow, setStatusRailNow] = useState(() => Date.now());
+  useEffect(() => {
+    const busy = Boolean(
+      liveTurnStatus
+      && viewingChatId
+      && liveTurnStatus.chatId === viewingChatId
+      && !/^done$/i.test(String(liveTurnStatus.label || '')),
+    );
+    if (!busy || generating) return;
+    const id = window.setInterval(() => setStatusRailNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [liveTurnStatus, viewingChatId, generating]);
   // Explore / idea grid only for brand-new chats. never when a Recent thread is open.
   const showEmpty = !loading && messages.length === 0 && !viewingChatId;
 
@@ -257,7 +426,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
     || voicePhase === 'thinking'
     || voicePhase === 'speaking';
   const showOpenThread = !loading && Boolean(viewingChatId);
-  const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Laptop;
+  
   const kind = kindForMode(mode);
   const keyedCloud = CLOUD_CHAT_WHEN_KEYED.filter(
     m => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
@@ -505,12 +674,12 @@ export function AIChatFrame(props: AIChatFrameProps) {
 
   const failoverChip = failoverNote ? (
     <div className="mb-2 flex justify-center gap-2 flex-wrap">
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 pl-2.5 pr-1 py-0.5 text-[11px] text-sky-300/95">
+      <span className="inline-flex items-center gap-1.5 px-0.5 py-0.5 text-[11px] text-sky-300/95">
         {failoverNote}
         <button
           type="button"
           onClick={() => setFailoverNote(null)}
-          className="w-5 h-5 rounded-full flex items-center justify-center text-sky-400/80 hover:text-sky-200 hover:bg-sky-500/20 transition-colors"
+          className="w-5 h-5 flex items-center justify-center text-sky-400/80 hover:text-sky-200 transition-colors"
           aria-label="Dismiss"
           title="Dismiss"
         >
@@ -518,18 +687,20 @@ export function AIChatFrame(props: AIChatFrameProps) {
         </button>
       </span>
       {import.meta.env.DEV && ipcFallbackDev && (
-        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300/95">
+        <span className="inline-flex items-center px-0.5 py-0.5 text-[11px] text-amber-300/95">
           IPC fallback · brain HTTP
         </span>
       )}
     </div>
   ) : import.meta.env.DEV && ipcFallbackDev ? (
     <div className="mb-2 flex justify-center">
-      <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300/95">
+      <span className="inline-flex items-center px-0.5 py-0.5 text-[11px] text-amber-300/95">
         IPC fallback · brain HTTP
       </span>
     </div>
   ) : null;
+
+  const [studioControlsOpen, setStudioControlsOpen] = useState(false);
 
   const composer = (
     <div className="w-full mx-auto min-w-0 nova-composer-column">
@@ -669,7 +840,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 if (!ta) return;
                 ta.focus();
                 ta.style.height = 'auto';
-                ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                ta.style.height = `${Math.min(ta.scrollHeight, Math.round(6.2 * 16))}px`;
+                ta.style.overflowY = 'auto';
               });
             };
             const deleteCue = (id: string) => {
@@ -751,7 +923,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           })()}
           <div
             data-ark-composer="1"
-            className={`relative z-10 w-full min-w-0 flex flex-col border border-surface-border nova-glass-composer overflow-hidden ${
+            className={`relative z-10 w-full min-w-0 flex flex-col border border-surface-border nova-glass-composer overflow-visible ${
               mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
             onMouseDown={(e) => {
@@ -867,8 +1039,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 ? 'Edit queued message. Enter to save, Escape to cancel'
                 : 'Message. Enter to send with any attached photos or files. Shift+Enter for a new line'
             }
-            className="w-full bg-transparent border-none resize-none text-[0.9375rem] text-content-primary placeholder:text-content-tertiary focus:outline-none leading-[1.55] min-h-[2.5rem] px-3 pt-2 pb-1"
-            style={{ overflowY: 'hidden' }}
+            className="nova-composer-textarea w-full bg-transparent border-none resize-none text-[0.9375rem] text-content-primary placeholder:text-content-tertiary focus:outline-none leading-[1.55] min-h-[2.5rem] px-3 pt-2 pb-1"
           />
 
           <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0 border-t border-transparent min-w-0">
@@ -888,12 +1059,32 @@ export function AIChatFrame(props: AIChatFrameProps) {
             <ComposerPlusMenu
               scope={mode === 'image' ? 'image' : 'chat'}
               busy={attachBusy || Boolean(attachUploading)}
-              onAction={handlePlusAction}
+              onAction={(action) => {
+                if (action === 'studio') {
+                  setStudioControlsOpen(true);
+                  return;
+                }
+                if (action === 'plan') {
+                  setComposerMode('plan');
+                  openPlanWorkspace?.();
+                  return;
+                }
+                if (action === 'ask') {
+                  setComposerMode('ask');
+                  return;
+                }
+                if (action === 'agent') {
+                  setComposerMode('agent');
+                  try { setLocalPrefs({ composerMode: 'agent' } as never); } catch { /* */ }
+                  return;
+                }
+                handlePlusAction(action);
+              }}
               buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
             />
             {composerMode ? (
               <span
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold shrink-0 ${COMPOSER_MODE_PILL[composerMode]}`}
+                className={`inline-flex items-center gap-1 px-0.5 py-1 text-xs font-semibold shrink-0 ${COMPOSER_MODE_PILL[composerMode]}`}
                 title={
                   composerMode === 'debug'
                     ? 'Debug clinic — audit the bound folder'
@@ -920,7 +1111,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                     }
                     setComposerMode(null);
                   }}
-                  className="opacity-60 hover:opacity-100 -mr-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                  className="opacity-60 hover:opacity-100 -mr-0.5 p-0.5"
                   aria-label="Clear mode"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -931,14 +1122,11 @@ export function AIChatFrame(props: AIChatFrameProps) {
               <button
                 type="button"
                 onClick={() => void openProjectFolder()}
-                className="inline-flex items-center gap-1 max-w-[8.5rem] rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/25 transition-colors shrink min-w-0"
+                className="inline-flex items-center justify-center w-7 h-7 px-0 py-0 text-amber-300 hover:text-amber-200 transition-colors shrink-0 rounded-full hover:bg-amber-300/10"
                 title={`Bound project folder:\n${chatStudioDiskRoot}`}
                 aria-label={`Bound folder ${workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}`}
               >
                 <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300" />
-                <span className="truncate">
-                  {workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}
-                </span>
               </button>
             ) : composerMode === 'debug' || composerMode === 'agent' || composerMode === 'multitask' ? (
               <button
@@ -953,7 +1141,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   );
                   void browseBindFolder();
                 }}
-                className="inline-flex items-center gap-1 max-w-[8.5rem] rounded-full border border-dashed border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200/90 hover:bg-amber-500/20 transition-colors shrink-0"
+                className="inline-flex items-center gap-1 max-w-[8.5rem] px-0.5 py-1 text-xs font-medium text-amber-300/90 hover:text-amber-200 transition-colors shrink-0"
                 title={
                   composerMode === 'debug'
                     ? 'Bind a project folder to audit'
@@ -969,10 +1157,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 type="button"
                 onClick={() => openCodeWorkspace()}
                 disabled={!chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0}
-                className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
+                className={`inline-flex items-center gap-1 px-0.5 py-1 text-xs font-medium transition-colors shrink-0 ${
                   !chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0
-                    ? 'border-violet-500/20 bg-violet-500/10 text-violet-100/40 cursor-not-allowed'
-                    : 'border-violet-500/45 bg-violet-500/20 text-violet-100 hover:bg-violet-500/30'
+                    ? 'text-violet-300/40 cursor-not-allowed'
+                    : 'text-violet-300 hover:text-violet-200'
                 }`}
                 title={
                   generating
@@ -981,24 +1169,18 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 }
                 aria-label={generating ? 'Code — writing in progress' : 'Open Code'}
               >
-                {generating && (codePillSticky || chatStudioDiskRoot || Object.keys(chatStudioFiles).length > 0) ? (
-                  <span
-                    className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-violet-300/40 animate-pulse"
-                    aria-hidden
-                  />
-                ) : null}
-                <Code2 className="w-3.5 h-3.5 text-violet-300 relative" />
-                <span className="relative">Code</span>
+                <Code2 className={`w-3.5 h-3.5 text-violet-300 ${generating ? 'animate-pulse' : ''}`} />
+                <span className={generating ? 'animate-pulse' : undefined}>Code</span>
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code') && (planPillSticky || planOverlayOpen || planLiveDrafting) ? (
               <button
                 type="button"
                 onClick={() => openPlanWorkspace?.()}
-                className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
+                className={`inline-flex items-center gap-1 px-0.5 py-1 text-xs font-medium transition-colors shrink-0 ${
                   planLiveDrafting
-                    ? 'border-sky-500/50 bg-sky-500/20 text-sky-100'
-                    : 'border-sky-500/40 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25'
+                    ? 'text-sky-300'
+                    : 'text-sky-300 hover:text-sky-200'
                 }`}
                 title={
                   planLiveDrafting
@@ -1007,14 +1189,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 }
                 aria-label={planLiveDrafting ? 'Plan — drafting in progress' : 'Open Plan'}
               >
-                {planLiveDrafting ? (
-                  <span
-                    className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-sky-300/40 animate-pulse"
-                    aria-hidden
-                  />
-                ) : null}
-                <Map className="w-3.5 h-3.5 text-sky-300 relative" />
-                <span className="relative">Plan</span>
+                <Map className={`w-3.5 h-3.5 text-sky-300 ${planLiveDrafting ? 'animate-pulse' : ''}`} />
+                <span className={planLiveDrafting ? 'animate-pulse' : undefined}>Plan</span>
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code')
@@ -1022,7 +1198,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
               && createJobLive?.status === 'npm'
               ? (
               <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-1 text-xs font-medium text-amber-100 shrink-0"
+                className="inline-flex items-center gap-1.5 px-0.5 py-1 text-xs font-medium text-amber-300 shrink-0"
                 title="Installing npm dependencies for this project"
               >
                 <span className="relative flex h-2 w-2" aria-hidden>
@@ -1038,7 +1214,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
               && createJobLive?.status === 'verifying'
               ? (
               <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-1 text-xs font-medium text-sky-100 shrink-0 max-w-[7.5rem]"
+                className="inline-flex items-center gap-1.5 px-0.5 py-1 text-xs font-medium text-sky-300 shrink-0 max-w-[7.5rem]"
                 title={createJobLive.lastObservation || createJobLive.stage || 'Verifying Live evidence'}
               >
                 <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
@@ -1051,117 +1227,125 @@ export function AIChatFrame(props: AIChatFrameProps) {
               </span>
             ) : null}
             {(mode === 'general' || mode === 'code')
-              && chatStudioDiskRoot
-              && !generating
+              && showBoundLive
               && createJobLive?.status !== 'npm'
               && createJobLive?.status !== 'verifying'
-              && (
-                // Readiness only — never light Live just because App.jsx exists after craft fail.
-                createJobLive?.status === 'ready'
-                || createJobLive?.status === 'failed'
-              )
               ? (
               <button
                 type="button"
                 onClick={() => void openProjectPreview()}
-                className={
-                  createLiveUnverified
-                    ? 'inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0'
-                    : 'inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0'
-                }
+                className="inline-flex items-center gap-1 px-0.5 py-1 text-xs font-medium text-sky-300 hover:text-sky-200 transition-colors shrink-0"
                 title={
-                  createLiveUnverified
-                    ? `Preview (unverified) — ${createLiveUnlock.reasons[0] || createJobLive.error || 'depth/syntax open'}`
-                    : createJobLive?.status === 'failed' && createJobLive.error
-                      ? `Open Live — last check: ${createJobLive.error}`
-                      : createJobLive?.previewUrl
-                        ? `Open Live (${createJobLive.previewUrl})`
-                        : previewUrl
-                          ? `Open Live (${previewUrl})`
-                          : 'Open Live window'
+                  createJobLive?.previewUrl
+                    ? `Open Live (${createJobLive.previewUrl})`
+                    : previewUrl
+                      ? `Open Live (${previewUrl})`
+                      : 'Open Live window'
                 }
+                aria-label="Open Live"
               >
-                <Globe className={`w-3.5 h-3.5 ${createLiveUnverified ? 'text-amber-300' : 'text-sky-300'}`} />
-                {createLiveUnverified ? 'Preview' : 'Live'}
+                <Globe className="w-3.5 h-3.5 text-sky-300" />
+                Live
               </button>
             ) : null}
             </div>
-            {/* Mic + model + Stop — always fully visible; never clipped by Verifying/Code chips. */}
-            <div className="flex items-center gap-1.5 shrink-0 pl-1">
-              <button
-                type="button"
-                onClick={() => toggleComposerDictation()}
-                disabled={generating && !dictating}
-                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
-                  dictating
-                    ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50 animate-pulse'
-                    : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                } disabled:opacity-40`}
-                  title={dictating ? 'Stop listening' : 'Speak — fills this box with text, then press Enter'}
-                  aria-label={dictating ? 'Stop listening' : 'Start voice to text'}
-                aria-pressed={dictating}
-              >
-                {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-              {/* Model picker — chat, image, and video. Chat defaults to Auto; cloud rows appear when keys are saved. */}
-              <button
-                ref={modelButtonRef}
-                type="button"
-                onClick={() => setModelMenuOpen(o => !o)}
-                className="inline-flex items-center gap-1 px-1 py-1 text-xs text-content-secondary hover:text-content-primary transition-colors max-w-[9.5rem] bg-transparent border-0 rounded-none shrink-0"
-                title={
-                  /^(Craft|Style|Verify|Done)\s·/i.test(String(autoModelLabel || ''))
-                    ? `Create · ${autoModelLabel}`
-                    : activeModel.source === 'auto'
-                      ? (threadBrain
-                        ? `Using ${autoEquippedCaption(threadBrain) || autoModelLabel}`
-                        : 'Picks one model and stays on it for this chat')
-                      : `Active model · ${activeModel.name}`
-                }
-                aria-label="Select model"
-                aria-expanded={modelMenuOpen}
-              >
-                {mode === 'image' ? (
-                  <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                ) : mode === 'video' ? (
-                  <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                ) : activeModel.source === 'cloud' ? (
-                  <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                ) : activeModel.source === 'local' ? (
-                  <Laptop className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
-                ) : null}
-                <span className="font-medium truncate">
-                  {/^(Craft|Style|Verify|Done)\s·/i.test(String(autoModelLabel || ''))
-                    || activeModel.source === 'auto'
-                    ? (autoModelLabel === 'Multimodal' || autoModelLabel === 'Auto' || autoModelLabel === 'Ready'
-                      ? (autoEquippedCaption(threadBrain) || autoModelLabel || 'Ready')
-                      : autoModelLabel)
-                    : activeModel.name}
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {modelMenu}
-
-              {generating && (
-                <button
-                  type="button"
-                  onClick={handleStop}
-                  className="flex items-center justify-center shrink-0 p-0.5 text-rose-500 hover:text-rose-400 transition-colors"
-                  title="Stop generating"
-                  aria-label="Stop generating"
-                >
-                  <Square className="w-4 h-4 fill-current" />
-                </button>
-              )}
+            {/* Mic · model · Stop — Stop at the end (after local/cloud icon). Timer/% live outside the glass. */}
+            <div className="flex items-center gap-1 shrink-0 pl-1" data-nova-composer-controls="1">
+              {(() => {
+                // Keep Stop + rail timer visible while status store is still live, even if
+                // React `generating` briefly desyncs (glyph prep / chat switch races).
+                const statusBusy = Boolean(
+                  liveTurnStatus
+                  && viewingChatId
+                  && liveTurnStatus.chatId === viewingChatId
+                  && !/^done$/i.test(String(liveTurnStatus.label || '')),
+                );
+                const turnBusy = generating || statusBusy;
+                const seatCloud = activeModel.source === 'cloud'
+                  || (activeModel.source === 'auto' && threadBrain?.pinnedSource === 'cloud');
+                const modelTitle = /^(Craft|Style|Verify|Done|Building)\s·/i.test(String(autoModelLabel || ''))
+                  ? String(autoModelLabel)
+                  : activeModel.source === 'auto'
+                    ? (threadBrain
+                      ? `Using ${autoEquippedCaption(threadBrain) || autoModelLabel}`
+                      : 'Picks one model and stays on it for this chat')
+                    : `Active model · ${activeModel.name}`;
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggleComposerDictation()}
+                      disabled={turnBusy && !dictating}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                        dictating
+                          ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50 animate-pulse'
+                          : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                      } disabled:opacity-40`}
+                      title={dictating ? 'Stop listening' : 'Speak — fills this box with text, then press Enter'}
+                      aria-label={dictating ? 'Stop listening' : 'Start voice to text'}
+                      aria-pressed={dictating}
+                    >
+                      {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </button>
+                    <button
+                      ref={modelButtonRef}
+                      type="button"
+                      onClick={() => setModelMenuOpen(o => !o)}
+                      className="inline-flex items-center justify-center w-8 h-8 text-content-secondary hover:text-content-primary hover:bg-surface-hover rounded-full transition-colors shrink-0 bg-transparent border-0"
+                      title={modelTitle}
+                      aria-label={modelTitle}
+                      aria-expanded={modelMenuOpen}
+                      data-nova-model-seat={seatCloud ? 'cloud' : 'local'}
+                    >
+                      {mode === 'image' ? (
+                        <ImageIcon className="w-4 h-4 text-sky-400 shrink-0" />
+                      ) : mode === 'video' ? (
+                        <Video className="w-4 h-4 text-sky-400 shrink-0" />
+                      ) : seatCloud ? (
+                        <Cloud className="w-4 h-4 text-sky-400 shrink-0" />
+                      ) : (
+                        <Laptop className="w-4 h-4 text-content-tertiary shrink-0" />
+                      )}
+                    </button>
+                    {modelMenu}
+                    {turnBusy ? (
+                      <button
+                        type="button"
+                        onClick={handleStop}
+                        className="flex items-center justify-center shrink-0 w-8 h-8 text-rose-500 hover:text-rose-400 transition-colors"
+                        title="Stop generating"
+                        aria-label="Stop generating"
+                        data-nova-stop="1"
+                      >
+                        <Square className="w-4 h-4 fill-current" />
+                      </button>
+                    ) : null}
+                  </>
+                );
+              })()}
             </div>
           </div>
           </div>
           </div>
 
+          {/* Timer (top) · % (bottom) — outside the glass, beside the composer (original rail). */}
           {(() => {
-            const parts = generating ? stackedLiveTurnParts(liveTurnMs) : null;
+            const statusBusy = Boolean(
+              liveTurnStatus
+              && viewingChatId
+              && liveTurnStatus.chatId === viewingChatId
+              && !/^done$/i.test(String(liveTurnStatus.label || '')),
+            );
+            const turnBusy = generating || statusBusy;
+            const statusMs = statusBusy && liveTurnStatus?.history?.[0]?.at
+              ? Math.max(0, statusRailNow - liveTurnStatus.history[0].at)
+              : 0;
+            const parts = turnBusy ? stackedLiveTurnParts(generating ? liveTurnMs : statusMs) : null;
             return (
-              <div className="flex flex-col items-center justify-end shrink-0 self-end gap-1.5 w-[2rem] select-none pb-0.5">
+              <div
+                className="flex flex-col items-center justify-end shrink-0 self-end gap-1.5 w-[2rem] select-none pb-0.5"
+                data-nova-composer-rail="1"
+              >
                 <div
                   className="min-h-[1.55rem] w-full flex flex-col items-center justify-end tabular-nums leading-none pointer-events-none"
                   title={parts ? `Working · ${parts.label}` : undefined}
@@ -1179,7 +1363,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 <TokenUsageRing
                   contextRatio={tokenRatio}
                   modelRatio={modelRatio}
-                  working={generating}
+                  working={turnBusy}
                   className="shrink-0"
                   modelName={
                     activeModel.source === 'auto'
@@ -1348,7 +1532,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
       ) : null}
       {(mode === 'general' || mode === 'voice') ? (
         <>
-          <div className="h-11 shrink-0" aria-hidden />
+          {/* Tight spacer — keep Chat/Voice above the stream without a tall gray band */}
+          <div className="h-8 shrink-0" aria-hidden />
           <ChatModeTabs />
         </>
       ) : null}
@@ -1448,7 +1633,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
               ref={messagesScrollRef}
               onScroll={onMessagesScroll}
               onWheel={onMessagesWheel}
-              className="flex-1 min-h-0 overflow-auto px-3 sm:px-5 lg:px-8 py-6 NOVA-scroll-quiet"
+              className="flex-1 min-h-0 overflow-auto px-3 sm:px-5 lg:px-8 pt-6 pb-6 NOVA-scroll-quiet nova-chat-scroll-mask"
             >
             <div className="nova-chat-stream nova-chat-surface w-full space-y-4">
               {messages.length === 0 && showOpenThread && (
@@ -1461,7 +1646,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                       <button
                         key={chip.label}
                         type="button"
-                        className="text-[11px] rounded-full border border-sky-500/35 bg-sky-500/10 text-sky-200 px-3 py-1.5 hover:bg-sky-500/20 transition-colors"
+                        className="text-[11px] text-sky-300 px-1 py-1 hover:text-sky-100 transition-colors"
                         onClick={() => tryStartTurn(chip.prompt)}
                       >
                         {chip.label}
@@ -1507,6 +1692,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         const promptText = stripComposerPrefix(raw)
                           .replace(/!\[[^\]]*]\([^)]+\)/g, '')
                           .replace(/<!--[\s\S]*?-->/g, '')
+                          // Ladder/CDP test markers must never show in the bubble.
+                          .replace(/\s*\[(?:CL|TW|RL|GL|NW|MK)[a-z0-9]+\]/gi, '')
                           .trim();
                         const mediaMatch = raw.match(/!\[[^\]]*]\(([^)]+)\)/);
                         const mediaSrc = mediaMatch?.[1] || '';
@@ -1680,27 +1867,29 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         );
                       }
                       return (
-                        <MessageContent
-                          content={msg.content}
-                          live={Boolean(generating && isLast && isAssistant)}
-                          messageId={msg.id}
-                          onPromptChipPick={(prompt) => {
-                            if (prompt === '__NOVA_ARM_PLAN__' || prompt === '<!--nova-arm-plan-->') {
-                              handlePlusAction('plan');
-                              return;
-                            }
-                            const p = String(prompt || '').trim();
-                            if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
-                              setComposerMode(null);
-                              setDropHint(null);
-                            }
-                            // Repair / “fix DBG-015” — soft-arm Agent so the work queue applies.
-                            if (/\bfix\s+(?:dbg[- ]?\d+|\d+)/i.test(p) || /\bfix\s+\d+(?:\s*,|\s+and\b)/i.test(p)) {
-                              try { setComposerMode('agent'); } catch { /* ignore */ }
-                            }
-                            tryStartTurn(prompt);
-                          }}
-                        />
+                        <div className="nova-msg-body-cap">
+                          <MessageContent
+                            content={msg.content}
+                            live={Boolean(generating && isLast && isAssistant)}
+                            messageId={msg.id}
+                            onPromptChipPick={(prompt) => {
+                              if (prompt === '__NOVA_ARM_PLAN__' || prompt === '<!--nova-arm-plan-->') {
+                                handlePlusAction('plan');
+                                return;
+                              }
+                              const p = String(prompt || '').trim();
+                              if (/^let['’]?s build this$/i.test(p) || /^lets build this$/i.test(p)) {
+                                setComposerMode(null);
+                                setDropHint(null);
+                              }
+                              // Repair / “fix DBG-015” — soft-arm Agent so the work queue applies.
+                              if (/\bfix\s+(?:dbg[- ]?\d+|\d+)/i.test(p) || /\bfix\s+\d+(?:\s*,|\s+and\b)/i.test(p)) {
+                                try { setComposerMode('agent'); } catch { /* ignore */ }
+                              }
+                              tryStartTurn(prompt);
+                            }}
+                          />
+                        </div>
                       );
                     })()}
                     {(() => {
@@ -1775,6 +1964,13 @@ export function AIChatFrame(props: AIChatFrameProps) {
                       };
                       const iconBtn =
                         'inline-flex items-center justify-center rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-white/[0.04] transition-colors disabled:opacity-40';
+                      // Copy the spoken reply only — never the nova-trace / Files Changed payload.
+                      const copyText = stripAgentTrace(raw)
+                        .replace(/<!--[\s\S]*?-->/g, '')
+                        .replace(/^\s*\{[\s\S]*?"(?:path|added|removed)"[\s\S]*\}\s*/m, '')
+                        .trim();
+                      const mutedBtn =
+                        'inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/35 cursor-not-allowed';
                       return (
                         <div className="mt-2.5 flex items-center gap-0.5 text-[11px] text-content-tertiary tabular-nums">
                           {showUndo ? (
@@ -1794,7 +1990,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
                             aria-label={copied ? 'Copied' : 'Copy response'}
                             className={iconBtn}
                             onClick={() => {
-                              void navigator.clipboard.writeText(raw).then(() => {
+                              const text = copyText.trim();
+                              if (!text) return;
+                              void navigator.clipboard.writeText(text).then(() => {
                                 setCopiedMsgId(msg.id);
                                 window.setTimeout(() => {
                                   setCopiedMsgId(prev => (prev === msg.id ? null : prev));
@@ -1806,39 +2004,21 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           </button>
                           <button
                             type="button"
-                            title="Try again"
-                            aria-label="Try again"
-                            className={iconBtn}
-                            disabled={generating}
-                            onClick={() => {
-                              if (generating) return;
-                              regenerateReply?.(msg.id);
-                            }}
+                            title="Try again (coming soon)"
+                            aria-label="Try again unavailable"
+                            className={mutedBtn}
+                            disabled
+                            aria-disabled="true"
                           >
                             <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
                           </button>
                           <button
                             type="button"
-                            title="Share"
-                            aria-label="Share response"
-                            className={iconBtn}
-                            onClick={() => {
-                              void (async () => {
-                                try {
-                                  if (typeof navigator.share === 'function') {
-                                    await navigator.share({ text: raw });
-                                    return;
-                                  }
-                                } catch { /* fall through to clipboard */ }
-                                try {
-                                  await navigator.clipboard.writeText(raw);
-                                  setCopiedMsgId(msg.id);
-                                  window.setTimeout(() => {
-                                    setCopiedMsgId(prev => (prev === msg.id ? null : prev));
-                                  }, 1600);
-                                } catch { /* ignore */ }
-                              })();
-                            }}
+                            title="Share (coming soon)"
+                            aria-label="Share unavailable"
+                            className={mutedBtn}
+                            disabled
+                            aria-disabled="true"
                           >
                             <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
                           </button>
@@ -1868,7 +2048,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                     {msg.role === 'assistant' && /Retry with cloud/i.test(msg.content) ? (
                       <button
                         type="button"
-                        className="mt-2 text-[10px] rounded-full border border-sky-500/40 text-sky-300 px-2.5 py-1"
+                        className="mt-2 text-[10px] text-sky-300 hover:text-sky-100 px-0.5 py-1"
                         onClick={() => {
                           setLocalPrefs({ autoFailover: true, askBeforeCloudFailover: false });
                           const lastUser = [...messages].reverse().find(m => m.role === 'user');
@@ -1881,7 +2061,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                     {msg.role === 'assistant' && /folder access|Allow Documents/i.test(msg.content) ? (
                       <button
                         type="button"
-                        className="mt-2 text-[10px] rounded-full border border-emerald-500/40 text-emerald-200 px-2.5 py-1"
+                        className="mt-2 text-[10px] text-emerald-200 hover:text-emerald-100 px-0.5 py-1"
                         onClick={() => {
                           setLocalPrefs({ allowDocumentsFolderAccess: true });
                           void syncWorkspaceGrantsFromPrefs();
@@ -2024,6 +2204,10 @@ export function AIChatFrame(props: AIChatFrameProps) {
         chatId={route.name === 'chat' ? (route.chatId || routeChatIdRef.current || null) : (routeChatIdRef.current || null)}
         live={Boolean(planLiveDrafting)}
         liveLabel={dropHint && /planning/i.test(String(dropHint)) ? String(dropHint) : null}
+      />
+      <StudioControlsOverlay
+        open={studioControlsOpen}
+        onClose={() => setStudioControlsOpen(false)}
       />
       <DeleteProjectFolderModal
         prompt={deleteProjectPrompt}
